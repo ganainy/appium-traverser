@@ -1,22 +1,12 @@
 # This sample code supports Appium Python client >=2.3.0
-# pip install Appium-Python-Client
-# Then you can paste this into a file and simply run with Python
+
 import logging
 import time
+
 from appium import webdriver
 from appium.options.common.base import AppiumOptions
-from appium.webdriver.common.appiumby import AppiumBy
 from selenium.webdriver.common.by import By
-
-# For W3C actions
-from selenium.webdriver.common.action_chains import ActionChains
-from selenium.webdriver.common.actions import interaction
-from selenium.webdriver.common.actions.action_builder import ActionBuilder
-from selenium.webdriver.common.actions.pointer_input import PointerInput
 from selenium.webdriver.remote.webelement import WebElement
-from selenium.common.exceptions import StaleElementReferenceException
-from selenium.common.exceptions import NoSuchElementException
-
 from elementlocator import ElementLocator
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -24,6 +14,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 driver = None
 locatorsStack = []
 popedStackLocators = []
+screenshots = []
 
 
 def main():
@@ -60,6 +51,8 @@ def loop_screen():
         while len(locatorsStack) > 0:
             locator = locatorsStack.pop()
             popedStackLocators.append(locator)
+            logging.info(" element removed from stack:")
+            locator.printLocator()
 
             if locator.classification == "input":
                 fillInputElement(locator)
@@ -85,15 +78,9 @@ def addUniqueElementsToStack(screenLocators):
     global popedStackLocators
 
     for screenLocator in screenLocators:
-        # Flag to check if the screenLocator is already in the stack or popedStackLocators
-        is_in_stack = False
-        is_in_poped = False
 
         # Check if the screenLocator is already in the stack
-        for stackLocator in locatorsStack:
-            if screenLocator.isSameElementAs(stackLocator):
-                is_in_stack = True
-                break
+        is_in_stack = isInStack(screenLocator)
 
         # Check if the screenLocator is in the popedStackLocators
         is_in_poped = isPoped(screenLocator)
@@ -107,48 +94,66 @@ def addUniqueElementsToStack(screenLocators):
     logging.info(f"new Stack size: {len(locatorsStack)}")
     return locatorsStack
 
-   # Check if a screenLocator is in the popedStackLocators
+
+def isInStack(screenLocator):
+    global locatorsStack
+    is_in_stack=False
+    for stackLocator in locatorsStack:
+        if screenLocator.isSameElementAs(stackLocator):
+            is_in_stack = True
+            break
+    return is_in_stack
+
+
+# Check if a screenLocator is in the popedStackLocators
 def isPoped(screenLocator):
+    is_in_poped=False
     global popedStackLocators
     for popedLocator in popedStackLocators:
         if screenLocator.isSameElementAs(popedLocator):
-            return True
-    return False
+            is_in_poped=True
+            break
+    return is_in_poped
 
-#this function takes a field input and fills it based on its label
+
+# this function takes a field input and fills it based on its label
 def fillInputElement(locator):
     return 0
 
 
-#this function clicks an action element
+# this function clicks an action element
 def tapActionElement(locator):
     global locatorsStack
     global driver
-    #WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(10));
+    # WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(10));
     try:
-        # Attempt to find the element and click it
-        if locator.hasAttr(locator.id):
-            element = driver.find_element(By.ID, locator.id)
-            element.click()
-
-        elif  locator.hasAttr(locator.text):
-            element = driver.find_element(By.NAME, locator.text)
-            element.click()
-
-        elif  locator.hasAttr(locator.className):
-            elements = driver.find_elements(By.CLASS_NAME, locator.className)
-            for element in elements:
-                elementLocator=ElementLocator.createElementLocatorFromElement(element,"action")
-                if isPoped(elementLocator):
-                    pass
-                else:
-                    element.click()
-                    break
-
-        else:
-            logging.info(f"tapActionElement: cant find element by id, class or name ")
-            locatorsStack.pop()
-            popedStackLocators.append(locator)
+        # # Attempt to find the element and click it
+        # if locator.hasAttr(locator.id):
+        #     element = driver.find_element(By.ID, locator.id)
+        #     element.click()
+        #
+        # elif  locator.hasAttr(locator.text):
+        #     element = driver.find_element(By.NAME, locator.text)
+        #     element.click()
+        #
+        # # elif  locator.hasAttr(locator.className):
+        # #     elements = driver.find_elements(By.CLASS_NAME, locator.className)
+        # #     for element in elements:
+        # #         elementLocator=ElementLocator.createElementLocatorFromElement(element,"action")
+        # #         if isPoped(elementLocator):
+        # #             pass
+        # #         else:
+        # #             element.click()
+        # #             break
+        #
+        # else:
+        x = locator.element.location.get('x') + 1
+        y = locator.element.location.get('y') + 1
+        driver.tap([(x, y)])
+        time.sleep(2)
+        # logging.info(f"tapActionElement: cant find element by id, class or name ")
+        # locatorsStack.pop()
+        # popedStackLocators.append(locator)
 
 
     except Exception as e:
