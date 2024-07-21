@@ -20,7 +20,7 @@ class ElementLocator:
             if attr != 'element':  # Exclude 'element' attribute
                 attributes.append(f"{attr}: {value}")
         toPrint = ", ".join(attributes)
-        logging.info(toPrint)
+        return toPrint
 
     def createElementLocatorFromElement(element, classification):
         elementLocator = ElementLocator()
