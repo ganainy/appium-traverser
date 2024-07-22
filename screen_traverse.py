@@ -14,7 +14,7 @@ from elementlocator import ElementLocator
 from screen import Screen
 from tuple import Tuple
 import tkinter as tk
-from screen import getScreenWithElements,getScreenWithElement
+from screen import getScreenWithElements,get_screen_by_screen_id
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -26,6 +26,7 @@ current_app = None  # Global variable to keep track of the current GUIApp instan
 current_screen = None
 last_visited_screen = None
 last_executed_action = None
+element_locator = None
 
 
 #todo fix tuple not created,\
@@ -55,7 +56,10 @@ def identify_screen_through_locators():
                 element_locators.append(ElementLocator.createElementLocatorFromElement(element, "input"))
 
             elif is_clickable(element):
-                element_locators.append(ElementLocator.createElementLocatorFromElement(element, "action"))
+                element_locator= ElementLocator.createElementLocatorFromElement(element, "action")
+                # ignore locators which include 'back' text to speed up screen exploration
+                if not element_locator.contain_back_text():
+                    element_locators.append(element_locator)
 
             elif is_layout_element(element):
                 # a layout element will be ignored in the classification
@@ -173,6 +177,7 @@ def main():
         global current_screen
         global last_visited_screen
         global last_executed_action
+        global element_locator
 
         # Retry mechanism configuration
         max_retries = 5  # Maximum number of retries
@@ -204,6 +209,24 @@ def main():
 
                     """" This code will be executed in both cases unique screen or not """
 
+                    # the last visited screen is the one containing the locator element action that was executed
+                    if element_locator is not None:
+                        last_visited_screen = get_screen_by_screen_id(screen_list, element_locator.screenId)
+                        last_executed_action = element_locator
+
+                        is_unique_tuple_flag = is_unique_tuple(last_visited_screen, last_executed_action,
+                                                               current_screen, tuples_list)
+                        is_valid_tuple_flag = is_valid_tuple(last_visited_screen, last_executed_action,
+                                                             current_screen)
+                        if last_visited_screen and is_valid_tuple_flag and is_unique_tuple_flag:
+                            # Tuple not already in the tuple list, add it
+                            tuple = Tuple.createTuple(last_visited_screen, last_executed_action,
+                                                      current_screen)
+                            tuples_list.append(tuple)
+                            logging.info(f"tuple was added to tuples_list , new length is: {len(tuples_list)}")
+                        else:
+                            logging.info(f"tuple already in tuples_list , length is still: {len(tuples_list)}")
+
                     if not current_screen.elements_locators_list:
                         # No more locators are left in this particular screen, go back to the previous screen
                         press_device_back_button(driver)
@@ -221,19 +244,7 @@ def main():
                                 tapActionElement(element_locator)
 
 
-                    # the last visited screen is the one containing the locator element action that was executed
-                    is_unique_tuple_flag = is_unique_tuple(last_visited_screen, last_executed_action,
-                                                           current_screen, tuples_list)
-                    is_valid_tuple_flag = is_valid_tuple(last_visited_screen, last_executed_action,
-                                                           current_screen )
-                    if last_visited_screen and is_valid_tuple_flag and is_unique_tuple_flag:
-                        # Tuple not already in the tuple list, add it
-                        tuple = Tuple.createTuple(last_visited_screen, last_executed_action,
-                                                  current_screen)
-                        tuples_list.append(tuple)
-                        logging.info(f"tuple was added to tuples_list , new length is: {len(tuples_list)}")
-                    else:
-                        logging.info(f"tuple already in tuples_list , length is still: {len(tuples_list)}")
+
 
             except Exception as e:
                 logging.error(f"An error occurred: {e}")
@@ -337,9 +348,7 @@ def tapActionElement(element_locator):
             f"tapping Element: {element_locator.id} | {element_locator.location} | {element_locator.classification} | {element_locator.text} | {element_locator.contentDesc} ")
         x = element_locator.location.get('x') + 1
         y = element_locator.location.get('y') + 1
-        last_visited_screen=getScreenWithElement(screen_list,element_locator)
         driver.tap([(x, y)])
-        last_executed_action=element_locator
         time.sleep(2)
 
     except Exception as e:

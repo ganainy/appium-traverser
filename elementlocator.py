@@ -62,3 +62,19 @@ class ElementLocator:
 
     def hasAttr(self, attr):
         return attr is not None and attr != 'null' and attr != ''
+
+    def contain_back_text(self):
+        """
+            Checks if any attribute of the instance contains the words 'back' or 'return' (case insensitive).
+
+            :return: bool indicating if any attribute contains the forbidden words
+            """
+        forbidden_words = ['back', 'return']
+
+        for attr, value in self.__dict__.items():
+            if isinstance(value, str):  # Only check string attributes
+                for word in forbidden_words:
+                    if word.lower() in value.lower():
+                        return True
+
+        return False

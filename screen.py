@@ -104,7 +104,7 @@ def getScreenWithElements(screens, element_locators):
             return screen
     return None
 
-def getScreenWithElement(screens,element_locator):
+def get_screen_by_screen_id(screens, screenId):
     """
     This method identifies which screen from a element locator.
 
@@ -113,6 +113,6 @@ def getScreenWithElement(screens,element_locator):
     :return: Screen object that matches the given element locator
     """
     for screen in screens:
-        if screen.hasLocator(element_locator):
+        if screen.id==screenId:
             return screen
     return None
