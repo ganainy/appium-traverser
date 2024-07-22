@@ -2,6 +2,7 @@ import logging
 from selenium import webdriver
 from selenium.webdriver.remote.webelement import WebElement
 
+
 class ElementLocator:
     def __init__(self, ):
         self.id = None
@@ -12,7 +13,12 @@ class ElementLocator:
         self.contentDesc = None
         self.hint = None
         self.bounds = None
+        self.screenId = None
+        self.explored = False
         self.element = None
+
+    def mark_element_locator_as_explored(self):
+        self.explored = True
 
     def printLocator(self):
         attributes = []
@@ -34,26 +40,25 @@ class ElementLocator:
         elementLocator.contentDesc = element.get_attribute('content-desc')
         elementLocator.hint = element.get_attribute('hint')
         elementLocator.bounds = element.get_attribute('bounds')
+        elementLocator.explored = False
 
         if not element or not classification:
             raise ValueError("ElementLocator: Both 'element' and 'classification' must be provided in details.")
 
         return elementLocator
 
-
     def isSameElementAs(self, secondElement):
-
         firstElementAttributes = []
         for attr, value in self.__dict__.items():
-            if attr != 'element':  # Exclude 'element' attribute
+            if attr not in ['element', 'screenId','explored']:  # Exclude 'element' and 'screenId' attributes
                 firstElementAttributes.append(f"{attr}: {value}")
 
         secondElementAttributes = []
         for attr, value in secondElement.__dict__.items():
-            if attr != 'element':  # Exclude 'element' attribute
+            if attr not in ['element', 'screenId','explored']:  # Exclude 'element' and 'screenId' attributes
                 secondElementAttributes.append(f"{attr}: {value}")
 
         return firstElementAttributes == secondElementAttributes
 
-    def hasAttr(self,attr):
+    def hasAttr(self, attr):
         return attr is not None and attr != 'null' and attr != ''

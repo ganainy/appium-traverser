@@ -29,5 +29,5 @@ class Tuple:
         tuple.printTuple()
         return tuple
 
-    def isSameTupleAs(self,otherTuple):
-        return self.source == otherTuple.source and self.action == otherTuple.action and self.destination == otherTuple.destination
+    def isSameTupleAs(self,source,action,destination):
+        return self.source.id == source.id and self.action.isSameElementAs(action) and self.destination.id == destination.id
