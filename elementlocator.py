@@ -63,13 +63,24 @@ class ElementLocator:
     def hasAttr(self, attr):
         return attr is not None and attr != 'null' and attr != ''
 
-    def contain_back_text(self):
+    def ignore_forbidden_words(self):
         """
-            Checks if any attribute of the instance contains the words 'back' or 'return' (case insensitive).
+            Checks if any attribute of the instance contains the words 'back' or 'login' or their variants (case insensitive).
 
             :return: bool indicating if any attribute contains the forbidden words
             """
-        forbidden_words = ['back', 'return']
+        forbidden_words = [
+            # English words
+            'back', 'return', 'login', 'log in', 'sign in', 'signin', 'sign-on', 'sign on',
+            'authenticate', 'logon', 'log on', 'previous', 'home', 'exit', 'quit',
+            'signout', 'sign out', 'logout', 'log out', 'go back', 'back to',
+
+            # German words
+            'zurück', 'rückkehr', 'einloggen', 'anmelden', 'anmeldung',
+            'authentifizieren', 'abmelden', 'abmeldung', 'zurückkehren', 'vorherige',
+            'startseite', 'verlassen', 'beenden', 'ausloggen', 'ausloggen',
+            'gehe zurück', 'zurück zu'
+        ]
 
         for attr, value in self.__dict__.items():
             if isinstance(value, str):  # Only check string attributes

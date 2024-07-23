@@ -14,7 +14,7 @@ from elementlocator import ElementLocator
 from screen import Screen
 from tuple import Tuple
 import tkinter as tk
-from screen import getScreenWithElements,get_screen_by_screen_id
+from screen import getScreenWithElements, get_screen_by_screen_id
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -27,13 +27,17 @@ current_screen = None
 last_visited_screen = None
 last_executed_action = None
 element_locator = None
+result_text_list= [] # will include the text of every element in every screen to be used later for analyzing
 
+#todo fix Gui not updating with lists' update
+#todo draw the tuple list as node and edges
+#todo take screenshot of every unique screen
+#todo strip useful text out of result_text_list
+#todo  what if the text on screen is only given info and not actually info required from user
 
-#todo fix tuple not created,\
-# fix Gui not updating with lists' update , text boxes are identified as action , what if the text on screen is only \
-# given info and not actually info required from user
 def identify_screen_through_locators():
     global driver
+    global result_text_list
     # Find all elements on the screen
     logging.info("----------------------------------------------")
     logging.info("Classifying elements on the screen...")
@@ -42,36 +46,39 @@ def identify_screen_through_locators():
         WebDriverWait(driver, 30).until(
             EC.presence_of_element_located((By.XPATH, "//*"))
         )
-        logging.info("Page has finished loading.")
-        # todo use this instead elements = driver.find_elements(By.XPATH, "//*")
-        elements = driver.find_elements(By.XPATH,
-                                        "//*[contains(@class, 'EditText') or contains(@class, 'ImageView') or contains(@class, 'ImageImage') or contains(@class, 'TextField') or contains(@class, 'Button')  or contains(@class, 'ViewGroup')]")
 
+        # todo use this instead elements = driver.find_elements(By.XPATH, "//*")
+        # locator for testing edit text filling: elements = driver.find_elements(By.XPATH, "//*[contains(@class, 'EditText')]")
+        elements = driver.find_elements(By.XPATH,
+                                       "//*[contains(@class, 'EditText') or contains(@class, 'ImageView') or contains(@class, 'ImageImage') or contains(@class, 'TextField') or contains(@class, 'Button')  or contains(@class, 'ViewGroup')]")
         element_locators = []
 
         for element in elements:
 
             if is_input_type(element):
-
-                element_locators.append(ElementLocator.createElementLocatorFromElement(element, "input"))
+                input_element_locator= ElementLocator.createElementLocatorFromElement(element, "input")
+                element_locators.append(input_element_locator)
+                result_text_list.append(input_element_locator)
 
             elif is_clickable(element):
-                element_locator= ElementLocator.createElementLocatorFromElement(element, "action")
+                action_element_locator = ElementLocator.createElementLocatorFromElement(element, "action")
+                result_text_list.append(action_element_locator)
                 # ignore locators which include 'back' text to speed up screen exploration
-                if not element_locator.contain_back_text():
+                if not action_element_locator.ignore_forbidden_words():
                     element_locators.append(element_locator)
 
             elif is_layout_element(element):
                 # a layout element will be ignored in the classification
-                ElementLocator.createElementLocatorFromElement(element, "layout")
+                layout_element_locator=ElementLocator.createElementLocatorFromElement(element, "layout")
+                result_text_list.append(layout_element_locator)
 
             elif is_output_element(element):
-                # logging.info(f"output element : {element.get_attribute('class')} ")
-                # todo save label to logs
-                ElementLocator.createElementLocatorFromElement(element, "output")
+                output_element_locator=ElementLocator.createElementLocatorFromElement(element, "output")
+                result_text_list.append(output_element_locator)
 
 
             elif 'View' in element.get_attribute('class'):
+                #view of type View will be ignored to speed up the code, since this usually don't containt useful info
                 pass
             else:
                 raise ValueError(
@@ -82,8 +89,6 @@ def identify_screen_through_locators():
 
     except Exception as e:
         logging.info(f"Error waiting for page to load: {e}")
-
-
 
 
 # creates a new screen and returns it
@@ -112,7 +117,7 @@ def is_clickable(element: WebElement) -> bool:
     """Check if the element is an input type."""
     element_locator = ElementLocator.createElementLocatorFromElement(element, "action")
     element_class = element.get_attribute('class')
-    input_types = ['Button', 'ImageView', 'Image', 'ViewGroup']
+    input_types = ['Button', 'ImageView', 'Image', 'ViewGroup','CheckBox']
 
     for input_type in input_types:
         if input_type in element_class and \
@@ -162,9 +167,10 @@ def main():
     options.load_capabilities({
         "platformName": "Android",
         "appium:automationName": "uiautomator2",
-        "appium:deviceName": "R52N40JSZKM",  # todo change based on device to run script on -> my tablet: R52N40JSZKM  , emulator:Android
-        "appium:appPackage": "de.jameda", # todo change based on app to run script on
-        "appium:appActivity": "com.app.MainActivity", # todo change based on start activity of the app to run script on
+        "appium:deviceName": "279cb9b1",
+        # todo change based on device to run script on -> my tablet: R52N40JSZKM  , my phone: 279cb9b1 , emulator:Android
+        "appium:appPackage": "de.jameda",  # todo change based on app to run script on
+        "appium:appActivity": "com.app.MainActivity",  # todo change based on start activity of the app to run script on
         "appium:noReset": True,
         "appium:autoGrantPermissions": True,
         "appium:newCommandTimeout": 3600,
@@ -180,7 +186,7 @@ def main():
         global element_locator
 
         # Retry mechanism configuration
-        max_retries = 5  # Maximum number of retries
+        max_retries = 1  # Maximum number of retries
         retries = 0  # Current retry count
 
         while retries < max_retries:  # Retry loop
@@ -200,12 +206,14 @@ def main():
                         # the screen after doing the action is not the same screen before the action
                         current_screen = create_screen(elements_locators)
                         screen_list.append(current_screen)
-                        logging.info(f"screen {current_screen.id} with {current_screen.get_sum_unexplored_locators()} unexplored locators was added to screen_list , new length is: {len(screen_list)}")
+                        logging.info(
+                            f"screen {current_screen.id} with {current_screen.get_sum_unexplored_locators()} unexplored locators was added to screen_list , new length is: {len(screen_list)}")
 
                     else:
                         # The screen after the action is the same as before the action
-                        current_screen=getScreenWithElements(screen_list,elements_locators)
-                        logging.info(f"screen  {current_screen.id} with {current_screen.get_sum_unexplored_locators()} unexplored locators already in screen_list , length is still: {len(screen_list)}")
+                        current_screen = getScreenWithElements(screen_list, elements_locators)
+                        logging.info(
+                            f"screen  {current_screen.id} with {current_screen.get_sum_unexplored_locators()} unexplored locators already in screen_list , length is still: {len(screen_list)}")
 
                     """" This code will be executed in both cases unique screen or not """
 
@@ -262,23 +270,22 @@ def main():
         else:
             logging.info("Test succeeded after retrying.")
 
-    def is_unique_tuple(src_screen,element_locator,dest_screen,tuples_list):
+    def is_unique_tuple(src_screen, element_locator, dest_screen, tuples_list):
         is_unique = True
 
         if not tuples_list:
             return is_unique
 
         for tuple in tuples_list:
-            if tuple.isSameTupleAs(src_screen,element_locator,dest_screen):
+            if tuple.isSameTupleAs(src_screen, element_locator, dest_screen):
                 is_unique = False
                 break
 
         return is_unique
 
     # checks if a tuple is valid, tuple is invalid if action dosn't exist or src_screen is same as dest_screen
-    def is_valid_tuple(src_screen,action,dest_screen):
+    def is_valid_tuple(src_screen, action, dest_screen):
         return action is not None and not src_screen.isSameScreenAs(dest_screen)
-
 
     def is_unique_screen(elements_locators, screen_list):
         is_unique = True
@@ -326,15 +333,57 @@ def main():
     app_logic()
 
 
-# todo this function takes a field input and fills it based on its label/text
+# this function locates the input type element on the screen
 def fillInputElement(element_locator):
-    element=find_element(element_locator)
+    element = find_element(element_locator)
     if element:
-        print("fillInputElement: Element found!")
-        element.send_keys("test")
+        logging.info("fillInputElement: Element found!")
+        fill_edit_text(ElementLocator.createElementLocatorFromElement(element,"input"))
+
     else:
-        print("fillInputElement: Element not found.")
+        logging.info("fillInputElement: Element not found.")
     return 0
+
+
+#  this function takes a field input and fills it based on its label/text
+def fill_edit_text(element_locator: ElementLocator):
+    # Define dummy data for different classifications
+    signup_data = {
+        'email': 'afoda500@gmail.com',
+        'name': 'John Doe',
+        'password': 'Password123!',
+        'birthdate': '01/01/1990',
+        'username': 'testuser159753',
+        'address': '123 Test St, Test City, Test Country',
+        'phone': '123-456-7890'
+    }
+
+    keyword_variants = {
+        'email': ['email', 'e-mail', 'mail', 'Email', 'E-Mail', 'Mail', 'E-Mail-Adresse', 'eMail'],
+        'name': ['name', 'full name', 'full_name', 'fullname', 'Name', 'Vorname', 'Nachname', 'vollständiger Name'],
+        'password': ['password', 'pass', 'pwd', 'Password', 'Passwort', 'Kennwort'],
+        'birthdate': ['birthdate', 'birthday', 'dob', 'date of birth', 'Geburtsdatum', 'Geburtstag', 'Geb-Datum'],
+        'username': ['username', 'user name', 'user_name', 'Benutzername', 'Nutzername', 'Anmeldename'],
+        'address': ['address', 'Address', 'Adresse', 'Wohnadresse', 'Postanschrift', 'Anschrift'],
+        'phone': ['phone', 'phone number', 'telephone', 'Telefonnummer', 'Telefon', 'Handynummer', 'Mobilnummer']
+    }
+
+    input_value_for_field = None
+    for key, variants in keyword_variants.items():
+        for variant in variants:
+            variant_lower = variant.lower()
+            if (variant_lower in element_locator.contentDesc.lower() or
+                    variant_lower in element_locator.text.lower() or
+                    variant_lower in element_locator.hint.lower()):
+                input_value_for_field = signup_data[key]
+                break
+        if input_value_for_field is not None:
+            break
+
+    if input_value_for_field is not None:
+        element_locator.element.send_keys(input_value_for_field)
+    else:
+        logging.info("fill_edit_text: No matching variant found in element locator attributes.")
 
 
 # this function clicks an action element based on its location
@@ -368,25 +417,25 @@ def find_element(locator):
     """
     if locator.id:
         try:
-            return driver.find_element_by_id(locator.id)
+            return driver.find_element(By.ID, locator.id)
         except:
             pass
 
     if locator.text:
         try:
-            return driver.find_element_by_xpath(f"//*[contains(text(), '{locator.text}')]")
+            return driver.find_element(By.NAME, locator.text)
         except:
             pass
 
     if locator.contentDesc:
         try:
-            return driver.find_element_by_accessibility_id(locator.contentDesc)
+            return driver.find_element(By.NAME, locator.contentDesc)
         except:
             pass
 
     if locator.hint:
         try:
-            return driver.find_element_by_xpath(f"//*[@hint='{locator.hint}']")
+            return driver.find_element(By.NAME, locator.hint)
         except:
             pass
 
@@ -397,7 +446,7 @@ def find_element(locator):
             bounds = locator.bounds
             left, top = bounds.split('[')[1].split(']')[0].split(',')
             right, bottom = bounds.split('[')[2].split(']')[0].split(',')
-            elements = driver.find_elements_by_xpath("//*")
+            elements = driver.find_elements(By.XPATH, "//*")
             for elem in elements:
                 loc = elem.location
                 size = elem.size
@@ -411,8 +460,10 @@ def find_element(locator):
     if locator.location:
         # This is usually not used directly for finding elements
         try:
-            elements = driver.find_elements_by_xpath("//*")
+            elements = driver.find_elements(By.XPATH, "//*")
+            #logging.info(f"looking for element in this location: {locator.location}")
             for elem in elements:
+                #logging.info(f"element location: {elem.location}")
                 if elem.location == locator.location:
                     return elem
         except:
@@ -420,13 +471,11 @@ def find_element(locator):
 
     if locator.className:
         try:
-            return driver.find_element_by_class_name(locator.className)
+            return driver.find_element(By.CLASS_NAME, locator.className)
         except:
             pass
 
     return None
-
-
 
 
 if __name__ == "__main__":
