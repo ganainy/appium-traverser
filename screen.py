@@ -1,5 +1,7 @@
 import logging
 
+from tabulate import tabulate
+
 screen_id = 1  # initial id for the first screen
 
 class Screen:
@@ -9,23 +11,25 @@ class Screen:
         self.elements_locators_list = []
 
     def printScreen(self):
-        attributes = []
+        # List to store table rows
+        table_data = []
 
         # Add the ID attribute
-        attributes.append(f"id: {self.id}")
+        table_data.append(["id", self.id])
 
         # Collect other attributes
         for attr, value in self.__dict__.items():
             if attr != "id" and attr != "elements_locators_list":
-                attributes.append(f"{attr}: {value}")
+                table_data.append([attr, value])
 
         # Collect printLocator outputs from each element in elements
         for i, element in enumerate(self.elements_locators_list):
-            locator_info = element.printLocator()
-            attributes.append(f"element_{i}: {locator_info}")
+            locator_info = element.printLocator()  # Assuming printLocator returns a string
+            table_data.append([f"element_{i}", locator_info])
 
-        toPrint = ", ".join(attributes)
-        logging.info(toPrint)
+        # Print the table using tabulate
+        table_str = tabulate(table_data, headers=["Attribute", "Value"], tablefmt="grid")
+        logging.info("\n" + table_str)
 
     def createScreen(elements_locators_list):
         global screen_id

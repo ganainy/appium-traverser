@@ -27,7 +27,9 @@ current_screen = None
 last_visited_screen = None
 last_executed_action = None
 element_locator = None
-result_text_list= [] # will include the text of every element in every screen to be used later for analyzing
+result_text_list = []  # will include the text of every element in every screen to be used later for analyzing
+start_time=None
+
 
 #todo fix Gui not updating with lists' update
 #todo draw the tuple list as node and edges
@@ -50,13 +52,13 @@ def identify_screen_through_locators():
         # todo use this instead elements = driver.find_elements(By.XPATH, "//*")
         # locator for testing edit text filling: elements = driver.find_elements(By.XPATH, "//*[contains(@class, 'EditText')]")
         elements = driver.find_elements(By.XPATH,
-                                       "//*[contains(@class, 'EditText') or contains(@class, 'ImageView') or contains(@class, 'ImageImage') or contains(@class, 'TextField') or contains(@class, 'Button')  or contains(@class, 'ViewGroup')]")
+                                        "//*[contains(@class, 'EditText') or contains(@class, 'ImageView') or contains(@class, 'ImageImage') or contains(@class, 'TextField') or contains(@class, 'Button')  or contains(@class, 'ViewGroup')]")
         element_locators = []
 
         for element in elements:
 
             if is_input_type(element):
-                input_element_locator= ElementLocator.createElementLocatorFromElement(element, "input")
+                input_element_locator = ElementLocator.createElementLocatorFromElement(element, "input")
                 element_locators.append(input_element_locator)
                 result_text_list.append(input_element_locator)
 
@@ -65,15 +67,15 @@ def identify_screen_through_locators():
                 result_text_list.append(action_element_locator)
                 # ignore locators which include 'back' text to speed up screen exploration
                 if not action_element_locator.ignore_forbidden_words():
-                    element_locators.append(element_locator)
+                    element_locators.append(action_element_locator)
 
             elif is_layout_element(element):
                 # a layout element will be ignored in the classification
-                layout_element_locator=ElementLocator.createElementLocatorFromElement(element, "layout")
+                layout_element_locator = ElementLocator.createElementLocatorFromElement(element, "layout")
                 result_text_list.append(layout_element_locator)
 
             elif is_output_element(element):
-                output_element_locator=ElementLocator.createElementLocatorFromElement(element, "output")
+                output_element_locator = ElementLocator.createElementLocatorFromElement(element, "output")
                 result_text_list.append(output_element_locator)
 
 
@@ -117,7 +119,7 @@ def is_clickable(element: WebElement) -> bool:
     """Check if the element is an input type."""
     element_locator = ElementLocator.createElementLocatorFromElement(element, "action")
     element_class = element.get_attribute('class')
-    input_types = ['Button', 'ImageView', 'Image', 'ViewGroup','CheckBox']
+    input_types = ['Button', 'ImageView', 'Image', 'ViewGroup', 'CheckBox']
 
     for input_type in input_types:
         if input_type in element_class and \
@@ -167,7 +169,7 @@ def main():
     options.load_capabilities({
         "platformName": "Android",
         "appium:automationName": "uiautomator2",
-        "appium:deviceName": "279cb9b1",
+        "appium:deviceName": "Android",
         # todo change based on device to run script on -> my tablet: R52N40JSZKM  , my phone: 279cb9b1 , emulator:Android
         "appium:appPackage": "de.jameda",  # todo change based on app to run script on
         "appium:appActivity": "com.app.MainActivity",  # todo change based on start activity of the app to run script on
@@ -184,6 +186,7 @@ def main():
         global last_visited_screen
         global last_executed_action
         global element_locator
+        global start_time
 
         # Retry mechanism configuration
         max_retries = 1  # Maximum number of retries
@@ -192,6 +195,9 @@ def main():
         while retries < max_retries:  # Retry loop
             try:
                 driver = webdriver.Remote("http://127.0.0.1:4723", options=options)
+                # Record the start time
+                global start_time
+                start_time = time.time()
 
                 # Loop forever
                 while True:
@@ -261,9 +267,11 @@ def main():
                 retries += 1  # Increment the retry counter
                 time.sleep(1)  # Optional: wait before retrying
 
-            else:
-                # If the try block succeeds, break out of the retry loop
-                break
+            finally:
+                # Record the end time
+                end_time = time.time()
+                duration = end_time - start_time
+                logging.info(f"Total execution time: {duration:.2f} seconds")
 
         if retries == max_retries:
             logging.error("Max retries reached, exiting the test.")
@@ -310,26 +318,6 @@ def main():
         logging.info("pressed back button.")
         driver.press_keycode(4)
 
-    # GUI
-    def start_gui(screen_list, tuples_list):
-        global current_app
-
-        if current_app is not None:
-            current_app.close()  # Close the existing GUI app
-
-        root = tk.Tk()
-        current_app = GUIApp(root, screen_list, tuples_list)
-        root.mainloop()
-
-    # Build tables Gui if tables aren't empty
-    global screen_list
-    global tuples_list
-    if screen_list or tuples_list:
-        #start the GUI on different thread not to block the traverser
-        gui_thread = threading.Thread(target=start_gui)
-        gui_thread.daemon = True  # This allows the program to exit even if the thread is running
-        gui_thread.start()
-
     app_logic()
 
 
@@ -338,7 +326,7 @@ def fillInputElement(element_locator):
     element = find_element(element_locator)
     if element:
         logging.info("fillInputElement: Element found!")
-        fill_edit_text(ElementLocator.createElementLocatorFromElement(element,"input"))
+        fill_edit_text(ElementLocator.createElementLocatorFromElement(element, "input"))
 
     else:
         logging.info("fillInputElement: Element not found.")
