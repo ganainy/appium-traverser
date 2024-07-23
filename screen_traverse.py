@@ -1,6 +1,7 @@
 import logging
 import threading
 import time
+import os
 
 from appium import webdriver
 from appium.options.common.base import AppiumOptions
@@ -34,7 +35,6 @@ start_time=None
 
 #todo fix Gui not updating with lists' update
 #todo draw the tuple list as node and edges
-#todo take screenshot of every unique screen
 #todo strip useful text out of result_text_list
 #todo  what if the text on screen is only given info and not actually info required from user
 
@@ -56,7 +56,18 @@ def identify_screen_through_locators():
                                         "//*[contains(@class, 'EditText') or contains(@class, 'ImageView') or contains(@class, 'ImageImage') or contains(@class, 'TextField') or contains(@class, 'Button')  or contains(@class, 'ViewGroup')]")
         element_locators = []
 
+        # todo remove these 3 lines
+        # Initialize a counter variable
+        #iteration_count = 0
+        #max_iterations = 10
+
         for element in elements:
+
+            # todo remove these 4 lines
+            # Increment the counter
+            #iteration_count += 1
+            #if iteration_count > max_iterations:
+            #    break  # Exit the loop once the maximum number of iterations is reached
 
             if is_input_type(element):
                 input_element_locator = ElementLocator.createElementLocatorFromElement(element, "input")
@@ -215,6 +226,7 @@ def main():
                         # the screen after doing the action is not the same screen before the action
                         current_screen = create_screen(elements_locators)
                         screen_list.append(current_screen)
+                        take_screenshot(current_screen.id)
                         logging.info(
                             f"screen {current_screen.id} with {current_screen.get_sum_unexplored_locators()} unexplored locators was added to screen_list , new length is: {len(screen_list)}")
 
@@ -244,7 +256,7 @@ def main():
                         else:
                             logging.info(f"tuple already in tuples_list , length is still: {len(tuples_list)}")
 
-                    if not current_screen.elements_locators_list:
+                    if current_screen.get_sum_unexplored_locators() <= 0:
                         # No more locators are left in this particular screen, go back to the previous screen
                         press_device_back_button(driver)
                     else:
@@ -289,6 +301,13 @@ def main():
             logging.error("Max retries reached, exiting the test.")
         else:
             logging.info("Test succeeded after retrying.")
+
+    #this method takes a screenshot of the device
+    def take_screenshot(screen_id):
+        logging.info(f"taking a screenshot of screen {screen_id} ...")
+        global driver
+        screenshot_path = os.path.join(os.getcwd(), f'screen{screen_id}.png')
+        driver.save_screenshot(screenshot_path)
 
     def is_unique_tuple(src_screen, element_locator, dest_screen, tuples_list):
         is_unique = True
