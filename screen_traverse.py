@@ -275,9 +275,14 @@ def main():
                 end_time = time.time()
                 duration = end_time - start_time
                 logging.info(f"Total execution time: {duration:.2f} seconds")
+                # Store all found element locators to db
                 for element_locator in result_text_list:
                     obj_id = sql_db.insert_element_locator( element_locator)
-                    print(f"Custom object with id {obj_id} inserted.")
+                    print(f"element_locator with id {obj_id} inserted.")
+                # Store all found tuples locators to db
+                for tuple in tuples_list:
+                    tuple_id=sql_db.insert_tuple(tuple)
+                    print(f"tuple with id {tuple_id} inserted.")
 
 
         if retries == max_retries:
@@ -476,5 +481,6 @@ def find_element(locator):
 if __name__ == "__main__":
     conn = sql_db.create_connection(sql_db.database)
     if conn is not None:
-        sql_db.create_table('element_locators_v3')
+        sql_db.create_elements_locators_table('element_locators_v1')
+        sql_db.create_tuples_table('tuples_table_v1')
     main()
