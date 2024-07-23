@@ -14,6 +14,7 @@ from elementlocator import ElementLocator
 from screen import Screen
 from tuple import Tuple
 import tkinter as tk
+import sql_db
 from screen import getScreenWithElements, get_screen_by_screen_id
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -178,6 +179,8 @@ def main():
         "appium:newCommandTimeout": 3600,
     })
 
+
+
     def app_logic():
         global driver
         global screen_list
@@ -272,6 +275,10 @@ def main():
                 end_time = time.time()
                 duration = end_time - start_time
                 logging.info(f"Total execution time: {duration:.2f} seconds")
+                for element_locator in result_text_list:
+                    obj_id = sql_db.insert_element_locator( element_locator)
+                    print(f"Custom object with id {obj_id} inserted.")
+
 
         if retries == max_retries:
             logging.error("Max retries reached, exiting the test.")
@@ -467,4 +474,7 @@ def find_element(locator):
 
 
 if __name__ == "__main__":
+    conn = sql_db.create_connection(sql_db.database)
+    if conn is not None:
+        sql_db.create_table('element_locators_v3')
     main()
