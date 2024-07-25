@@ -74,6 +74,22 @@ class Screen:
         # Check if all elements in second_screen_elements_locators were matched
         return matching_elements_count == len(second_screen_elements_locators)
 
+    def get_sum_matching_locators(self, second_screen_elements_locators):
+        """
+        Checks if the screen has the same locators as the given list of element locators.
+        This version requires all elements to match.
+
+        :param second_screen_elements_locators: list of ElementLocator objects
+        :return: bool indicating if this screen has the same locators
+        """
+        matching_elements_count = 0
+        for first_screen_locator_element in self.elements_locators_list:
+            for second_screen_locator_element in second_screen_elements_locators:
+                if first_screen_locator_element.isSameElementAs(second_screen_locator_element):
+                    matching_elements_count += 1
+                    break  # Move to the next element in the first screen
+
+        return matching_elements_count
 
     def hasLocator(self, element_locator):
         # return a screen if it has a certain locator
@@ -95,17 +111,19 @@ class Screen:
                 sum +=1
         return sum
 
-def getScreenWithElements(screens, element_locators):
+def getScreenWithElements(screen_list, element_locators):
     """
     This method identifies which screen from a list of screens contains a given list of element locators.
 
-    :param screens: list of Screen objects
+    :param screen_list: list of Screen objects
     :param element_locators: list of ElementLocator objects
     :return: Screen object that matches the given element locators
     """
-    for screen in screens:
+    for screen in screen_list:
         if screen.hasSameLocatorsAs(element_locators):
             return screen
+
+    logging.error("getScreenWithElements: failed to find screen")
     return None
 
 def get_screen_by_screen_id(screens, screenId):

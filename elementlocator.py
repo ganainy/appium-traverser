@@ -1,6 +1,27 @@
 import logging
 from selenium import webdriver
 from selenium.webdriver.remote.webelement import WebElement
+import re
+
+
+
+def get_element_location_from_bounds(bounds):
+    pattern = r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]'
+    match = re.search(pattern, str(bounds))
+
+    if match:
+        start_x, start_y, end_x, end_y = map(int, match.groups())
+        center_x = (start_x + end_x) // 2
+        center_y = (start_y + end_y) // 2
+
+        return {
+            'start': (start_x, start_y),
+            'end': (end_x, end_y),
+            'center': (center_x, center_y)
+        }
+    else:
+        return None
+
 
 
 class ElementLocator:
@@ -9,13 +30,16 @@ class ElementLocator:
         self.classification = None
         self.className = None
         self.text = None
-        self.location = None
+        self.location = None # of type Dict, has start,end,center
         self.contentDesc = None
         self.hint = None
         self.bounds = None
         self.screenId = None
-        self.explored = False
-        self.element = None
+        self.explored = False # flag to determine if the locator was clicked before or not
+        self.clickable= None
+        self.enabled = None
+        self.displayed = None
+
 
     def mark_element_locator_as_explored(self):
         self.explored = True
@@ -28,34 +52,33 @@ class ElementLocator:
         toPrint = ", ".join(attributes)
         return toPrint
 
-    def createElementLocatorFromElement(element, classification):
+    def createElementLocatorFromElement(element ):
         elementLocator = ElementLocator()
 
-        elementLocator.id = element.get_attribute('resourceId')  #resourceId
-        elementLocator.className = element.get_attribute('class')
-        elementLocator.classification = classification
-        elementLocator.text = element.text
-        elementLocator.location = element.location
-        elementLocator.element = element
-        elementLocator.contentDesc = element.get_attribute('content-desc')
-        elementLocator.hint = element.get_attribute('hint')
-        elementLocator.bounds = element.get_attribute('bounds')
+        elementLocator.id = element.attrib.get('resource-id')
+        elementLocator.className = element.attrib.get('class')
+        elementLocator.text = element.attrib.get('text')
+        elementLocator.contentDesc = element.attrib.get('content-desc')
+        elementLocator.hint = element.attrib.get('hint')
+        elementLocator.bounds = element.attrib.get('bounds')
+        elementLocator.clickable = element.attrib.get('clickable')
+        elementLocator.enabled = element.attrib.get('enabled')
+        elementLocator.displayed = element.attrib.get('displayed')
+        elementLocator.location = get_element_location_from_bounds(elementLocator.bounds)
+        
         elementLocator.explored = False
-
-        if not element or not classification:
-            raise ValueError("ElementLocator: Both 'element' and 'classification' must be provided in details.")
 
         return elementLocator
 
     def isSameElementAs(self, secondElement):
         firstElementAttributes = []
         for attr, value in self.__dict__.items():
-            if attr not in ['element', 'screenId','explored']:  # Exclude 'element' and 'screenId' attributes
+            if attr not in ['element', 'screenId', 'explored']:  # Exclude 'element' and 'screenId' attributes
                 firstElementAttributes.append(f"{attr}: {value}")
 
         secondElementAttributes = []
         for attr, value in secondElement.__dict__.items():
-            if attr not in ['element', 'screenId','explored']:  # Exclude 'element' and 'screenId' attributes
+            if attr not in ['element', 'screenId', 'explored']:  # Exclude 'element' and 'screenId' attributes
                 secondElementAttributes.append(f"{attr}: {value}")
 
         return firstElementAttributes == secondElementAttributes
@@ -63,9 +86,10 @@ class ElementLocator:
     def hasAttr(self, attr):
         return attr is not None and attr != 'null' and attr != ''
 
-    def ignore_forbidden_words(self):
+    def has_forbidden_words(self):
         """
-            Checks if any attribute of the instance contains the words 'back' or 'login' or their variants (case insensitive).
+        Checks if any attribute of the instance contains the words 'back' or 'login' or their variants (
+        case-insensitive).
 
             :return: bool indicating if any attribute contains the forbidden words
             """

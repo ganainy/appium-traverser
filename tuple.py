@@ -30,4 +30,7 @@ class Tuple:
         return tuple
 
     def isSameTupleAs(self,source,action,destination):
+        if source is None or action is None or destination is None:
+            return False  # or handle this case as appropriate for your application
+
         return self.source.id == source.id and self.action.isSameElementAs(action) and self.destination.id == destination.id
