@@ -52,7 +52,7 @@ class ElementLocator:
         toPrint = ", ".join(attributes)
         return toPrint
 
-    def createElementLocatorFromElement(element ):
+    def create_element_locator_from_xml_element(element):
         elementLocator = ElementLocator()
 
         elementLocator.id = element.attrib.get('resource-id')
@@ -66,6 +66,25 @@ class ElementLocator:
         elementLocator.displayed = element.attrib.get('displayed')
         elementLocator.location = get_element_location_from_bounds(elementLocator.bounds)
         
+        elementLocator.explored = False
+
+        return elementLocator
+
+    def create_element_locator_from_web_element(element:WebElement):
+        elementLocator = ElementLocator()
+
+        elementLocator.id = element.get_attribute('resource-id')
+        elementLocator.className = element.get_attribute('class')
+        elementLocator.text = element.text  # Use text property directly
+        elementLocator.contentDesc = element.get_attribute('content-desc')
+        elementLocator.hint = element.get_attribute('hint')
+        bounds = str(element.get_attribute('bounds'))
+        elementLocator.bounds = bounds
+        elementLocator.location = get_element_location_from_bounds(elementLocator.bounds)
+        elementLocator.enabled = element.is_enabled()
+        elementLocator.enabled = element.get_attribute('clickable')
+        elementLocator.displayed = element.is_displayed()
+
         elementLocator.explored = False
 
         return elementLocator

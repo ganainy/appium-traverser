@@ -1,0 +1,236 @@
+[
+    {
+        "action_contentDesc": "human-user",
+        "action_hint": "",
+        "action_id": "avatar-roundedview",
+        "action_screenId": "1",
+        "action_text": "",
+        "destination_screen_id": "2",
+        "source_screen_id": "1"
+    },
+    {
+        "action_contentDesc": "action-settings",
+        "action_hint": "",
+        "action_id": "",
+        "action_screenId": "2",
+        "action_text": "",
+        "destination_screen_id": "3",
+        "source_screen_id": "2"
+    },
+    {
+        "action_contentDesc": "symbols-wallet, Bezahlmethoden, ",
+        "action_hint": "",
+        "action_id": "",
+        "action_screenId": "4",
+        "action_text": "",
+        "destination_screen_id": "5",
+        "source_screen_id": "4"
+    },
+    {
+        "action_contentDesc": "",
+        "action_hint": "",
+        "action_id": "android:id/text1",
+        "action_screenId": "5",
+        "action_text": "Automatic Zoom",
+        "destination_screen_id": "4",
+        "source_screen_id": "5"
+    },
+    {
+        "action_contentDesc": ", Zahnarzt",
+        "action_hint": "",
+        "action_id": "",
+        "action_screenId": "4",
+        "action_text": "",
+        "destination_screen_id": "5",
+        "source_screen_id": "4"
+    },
+    {
+        "action_contentDesc": "",
+        "action_hint": "",
+        "action_id": "android:id/text1",
+        "action_screenId": "5",
+        "action_text": "Actual Size",
+        "destination_screen_id": "4",
+        "source_screen_id": "5"
+    },
+    {
+        "action_contentDesc": ", Bewerten Sie die App, ",
+        "action_hint": "",
+        "action_id": "",
+        "action_screenId": "3",
+        "action_text": "",
+        "destination_screen_id": "7",
+        "source_screen_id": "3"
+    },
+    {
+        "action_contentDesc": "",
+        "action_hint": "",
+        "action_id": "",
+        "action_screenId": "7",
+        "action_text": "",
+        "destination_screen_id": "3",
+        "source_screen_id": "7"
+    },
+    {
+        "action_contentDesc": ", Nachrichten",
+        "action_hint": "",
+        "action_id": "",
+        "action_screenId": "3",
+        "action_text": "",
+        "destination_screen_id": "2",
+        "source_screen_id": "3"
+    },
+    {
+        "action_contentDesc": "human-user",
+        "action_hint": "",
+        "action_id": "avatar-roundedview",
+        "action_screenId": "2",
+        "action_text": "",
+        "destination_screen_id": "3",
+        "source_screen_id": "2"
+    },
+    {
+        "action_contentDesc": ", Nachrichten",
+        "action_hint": "",
+        "action_id": "",
+        "action_screenId": "2",
+        "action_text": "",
+        "destination_screen_id": "1",
+        "source_screen_id": "2"
+    },
+    {
+        "action_contentDesc": "search-box",
+        "action_hint": "",
+        "action_id": "search-box",
+        "action_screenId": "1",
+        "action_text": "",
+        "destination_screen_id": "8",
+        "source_screen_id": "1"
+    },
+    {
+        "action_contentDesc": "",
+        "action_hint": "",
+        "action_id": "",
+        "action_screenId": "8",
+        "action_text": "",
+        "destination_screen_id": "1",
+        "source_screen_id": "8"
+    },
+    {
+        "action_contentDesc": ", Frauenarzt (Gynäkologe)",
+        "action_hint": "",
+        "action_id": "",
+        "action_screenId": "1",
+        "action_text": "",
+        "destination_screen_id": "9",
+        "source_screen_id": "1"
+    },
+    {
+        "action_contentDesc": ", Frauenarzt Gynäkologe · In meiner Nähe",
+        "action_hint": "",
+        "action_id": "",
+        "action_screenId": "9",
+        "action_text": "",
+        "destination_screen_id": "1",
+        "source_screen_id": "9"
+    },
+    {
+        "action_contentDesc": ", Augenarzt",
+        "action_hint": "",
+        "action_id": "",
+        "action_screenId": "1",
+        "action_text": "",
+        "destination_screen_id": "10",
+        "source_screen_id": "1"
+    },
+    {
+        "action_contentDesc": ", Augenarzt · In meiner Nähe",
+        "action_hint": "",
+        "action_id": "",
+        "action_screenId": "10",
+        "action_text": "",
+        "destination_screen_id": "1",
+        "source_screen_id": "10"
+    },
+    {
+        "action_contentDesc": ", Urologe",
+        "action_hint": "",
+        "action_id": "",
+        "action_screenId": "1",
+        "action_text": "",
+        "destination_screen_id": "9",
+        "source_screen_id": "1"
+    },
+    {
+        "action_contentDesc": ", Urologe · In meiner Nähe",
+        "action_hint": "",
+        "action_id": "",
+        "action_screenId": "11",
+        "action_text": "",
+        "destination_screen_id": "1",
+        "source_screen_id": "11"
+    },
+    {
+        "action_contentDesc": ", Hautarzt (Dermatologe)",
+        "action_hint": "",
+        "action_id": "",
+        "action_screenId": "1",
+        "action_text": "",
+        "destination_screen_id": "12",
+        "source_screen_id": "1"
+    },
+    {
+        "action_contentDesc": ", Hautarzt Dermatologe · In meiner Nähe",
+        "action_hint": "",
+        "action_id": "",
+        "action_screenId": "12",
+        "action_text": "",
+        "destination_screen_id": "1",
+        "source_screen_id": "12"
+    },
+    {
+        "action_contentDesc": ", Zahnarzt",
+        "action_hint": "",
+        "action_id": "",
+        "action_screenId": "1",
+        "action_text": "",
+        "destination_screen_id": "9",
+        "source_screen_id": "1"
+    },
+    {
+        "action_contentDesc": "Verfügbare Termine",
+        "action_hint": "",
+        "action_id": "",
+        "action_screenId": "9",
+        "action_text": "",
+        "destination_screen_id": "13",
+        "source_screen_id": "9"
+    },
+    {
+        "action_contentDesc": "",
+        "action_hint": "",
+        "action_id": "",
+        "action_screenId": "13",
+        "action_text": "",
+        "destination_screen_id": "14",
+        "source_screen_id": "13"
+    },
+    {
+        "action_contentDesc": ", Zahnarzt · In meiner Nähe",
+        "action_hint": "",
+        "action_id": "",
+        "action_screenId": "14",
+        "action_text": "",
+        "destination_screen_id": "1",
+        "source_screen_id": "14"
+    },
+    {
+        "action_contentDesc": ", Kardiologe",
+        "action_hint": "",
+        "action_id": "",
+        "action_screenId": "1",
+        "action_text": "",
+        "destination_screen_id": "9",
+        "source_screen_id": "1"
+    }
+]

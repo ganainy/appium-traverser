@@ -3,12 +3,10 @@ import sqlite3
 
 from elementlocator import ElementLocator
 from tuple import Tuple
-
-# Create a database connection and a table
-database = "jameda.db"
 conn = None
-element_locators_table_name=None
-tuple_table_name=None
+element_locators_table_name = None
+tuple_table_name = None
+
 
 def create_connection(db_file):
     """Create a database connection to the SQLite database specified by db_file."""
@@ -56,6 +54,7 @@ def create_elements_locators_table(given_table_name):
 
     except sqlite3.Error as e:
         logging.error(f"An error occurred: {e}")
+
 
 def create_tuples_table(given_table_name):
     global conn
@@ -114,7 +113,7 @@ def insert_element_locator(element_locator):
     return cur.lastrowid
 
 
-def insert_tuple(tuple:Tuple):
+def insert_tuple(tuple: Tuple):
     global tuple_table_name
     """Insert a tuple object into the tuples table."""
     global conn
@@ -151,9 +150,8 @@ def delete_table(table_name):
 
     except sqlite3.Error as e:
         print(f"An error occurred: {e}")
-    finally:
-        if conn:
-            conn.close()
+
+
 
 def print_attribute_types(element_locator: ElementLocator):
     """Print the class type of each attribute."""

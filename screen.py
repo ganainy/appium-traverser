@@ -1,8 +1,10 @@
 import logging
+import re
 
 from tabulate import tabulate
 
 screen_id = 1  # initial id for the first screen
+
 
 class Screen:
 
@@ -105,11 +107,91 @@ class Screen:
         return None
 
     def get_sum_unexplored_locators(self):
-        sum =0
+        sum = 0
         for locator in self.elements_locators_list:
             if locator.explored == False:
-                sum +=1
+                sum += 1
         return sum
+
+    def has_matching_element(self, locator):
+        for element in self.elements_locators_list:
+            if self._is_element_match(element, locator):
+                return True
+        return False
+
+    def _is_element_match(self, element, locator):
+        # Check for matching attributes
+        attributes_to_check = ['id', 'className', 'text', 'contentDesc']
+        match_score = 0
+        total_checks = 0
+
+        for attr in attributes_to_check:
+            if getattr(element, attr) and getattr(locator, attr):
+                total_checks += 1
+                if getattr(element, attr) == getattr(locator, attr):
+                    match_score += 1
+
+        # Check location (if available)
+        if element.location and locator.location:
+            total_checks += 1
+            if self._is_location_similar(element.location, locator.location):
+                match_score += 1
+
+        # Calculate similarity
+        if total_checks > 0:
+            similarity = match_score / total_checks
+            return similarity >= 0.8  # 80% similarity threshold
+        return False
+
+    def _is_location_similar(self, loc1, loc2, tolerance=50):
+        # Helper function to extract center from bounds string
+        def get_center_from_bounds(bounds):
+            pattern = r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]'
+            match = re.search(pattern, str(bounds))
+            if match:
+                start_x, start_y, end_x, end_y = map(int, match.groups())
+                return ((start_x + end_x) // 2, (start_y + end_y) // 2)
+            return None
+
+        # Extract centers based on the type of loc1 and loc2
+        center1 = loc1['center'] if isinstance(loc1, dict) else get_center_from_bounds(loc1)
+        center2 = loc2['center'] if isinstance(loc2, dict) else get_center_from_bounds(loc2)
+
+        # If we couldn't extract centers, return False
+        if center1 is None or center2 is None:
+            return False
+
+        # Check if the center points are within the tolerance
+        return (abs(center1[0] - center2[0]) <= tolerance and
+                abs(center1[1] - center2[1]) <= tolerance)
+
+
+    def compare_element_attributes(self, elements_locators):
+        if len(self.elements_locators_list) != len(elements_locators):
+            return False
+
+        for element, locator in zip(self.elements_locators_list, elements_locators):
+            if not self._compare_detailed_attributes(element, locator):
+                return False
+        return True
+
+    def _compare_detailed_attributes(self, element, locator):
+        attributes_to_compare = [
+            'id', 'className', 'text', 'contentDesc', 'hint',
+            'clickable', 'enabled', 'displayed'
+        ]
+
+        for attr in attributes_to_compare:
+            if getattr(element, attr) != getattr(locator, attr):
+                return False
+
+        # Compare location
+        if element.location and locator.location:
+            if not self._is_location_similar(element.location, locator.location, tolerance=10):
+                return False
+
+        return True
+
 
 def getScreenWithElements(screen_list, element_locators):
     """
@@ -126,15 +208,16 @@ def getScreenWithElements(screen_list, element_locators):
     logging.error("getScreenWithElements: failed to find screen")
     return None
 
+
 def get_screen_by_screen_id(screens, screenId):
     """
     This method identifies which screen from a element locator.
 
     :param screens: list of Screen objects
-    :param element_locator: ElementLocator object
+    :param screenId: id of screen
     :return: Screen object that matches the given element locator
     """
     for screen in screens:
-        if screen.id==screenId:
+        if screen.id == screenId:
             return screen
     return None

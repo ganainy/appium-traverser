@@ -1,4 +1,5 @@
 import logging
+import shutil
 import threading
 import time
 import os
@@ -19,6 +20,11 @@ from tuple import Tuple
 import tkinter as tk
 import sql_db
 from screen import getScreenWithElements, get_screen_by_screen_id
+from PIL import Image
+import numpy as np
+import pickle
+
+
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -33,20 +39,20 @@ last_executed_action = None
 element_locator = None
 result_text_list = []  # will include the text of every element in every screen to be used later for analyzing
 start_time = None
-similarity_factor= .9 # how much should 2 elements be similar to be identified as same item
+similarity_factor= .9 # how much should 2 items be similar to be identified as same item
+synthetic_delay_amount = .1 #amount of delay added to make space between actions
 
-max_retries = 10  # Maximum number of retries(after a crash) before the script ends itself
+max_retries = 5  # Maximum number of retries(after a crash) before the script ends itself
 
 """"app under test and target device setup"""
-expected_package = "de.jameda"  # the name of the package we want to traverse
-expected_start_activity = "com.app.MainActivity"  # the name of start activity of the app we want to traverse
-expected_target_device = "Android"  #change based on device to run script on -> my tablet: R52N40JSZKM  , my phone: 279cb9b1 , emulator:Android
+#Example apps to test the script
+    #fr.doctolib.www    fr.doctolib.www.MainActivity
+    #com.ada.app    com.ada.MainActivity
+    #de.jameda   com.app.MainActivity
+expected_package = "com.ada.app"  # the name of the package we want to traverse
+expected_start_activity = "com.ada.MainActivity"  # the name of start activity of the app we want to traverse
+expected_target_device = "279cb9b1"  #change based on device to run script on -> my tablet: R52N40JSZKM  , my phone: 279cb9b1 , emulator:Android
 
-
-#todo fix Gui not updating with lists' update
-#todo draw the tuple list as node and edges
-#todo strip useful text out of result_text_list
-#todo  what if the text on screen is only given info and not actually info required from user
 
 ''''
 param:unique_elements -> list of ElementLocator
@@ -124,7 +130,7 @@ def identify_screen_through_locators():
                 pass
 
             elif has_relevant_attributes(element):
-                element_locator_temp = ElementLocator.createElementLocatorFromElement(element)
+                element_locator_temp = ElementLocator.create_element_locator_from_xml_element(element)
                 element_locator = set_element_locator_classification(element_locator_temp)
                 unique_elements.append(element_locator)
             for child in element:
@@ -136,6 +142,11 @@ def identify_screen_through_locators():
         store_screen_elements(unique_elements)
         # only keep input and action elements to interact with later
         element_locators = get_only_input_action_elements(unique_elements)
+        # reduce the given locators list to only unique elements based on their content
+        element_locators=get_unique_elements(element_locators)
+        # sometimes xml of current page contains elements of previous pages, filter them out
+        #element_locators= filter_current_screen_elements(element_locators)
+        # remove locators with words we don't want to interact with
         element_locators = get_only_elements_without_forbidden_words(element_locators)
 
         return element_locators
@@ -144,6 +155,37 @@ def identify_screen_through_locators():
     except Exception as e:
         logging.info(f"Error waiting for page to load: {e}")
 
+def filter_current_screen_elements(current_elements):
+    global screen_list
+    def is_element_in_other_screen(element, screen_list):
+        for screen in screen_list:
+            for screen_element in screen.elements_locators_list:
+                if element.isSameElementAs(screen_element):
+                    return True
+        return False
+
+    filtered_elements = [
+        element for element in current_elements
+        if not is_element_in_other_screen(element, screen_list)
+    ]
+
+    return filtered_elements
+
+def get_unique_elements(elements):
+    unique_elements = {}
+    for element in elements:
+        # Create a tuple of all attributes except for 'location', 'bounds', 'screenId', and 'explored'
+        key = tuple(
+            (k, v) for k, v in element.__dict__.items()
+            if k not in ['location', 'bounds', 'screenId', 'explored']
+        )
+
+        # If this key is not in unique_elements, add it
+        if key not in unique_elements:
+            unique_elements[key] = element
+
+    # Return the list of unique ElementLocator objects
+    return list(unique_elements.values())
 
 def set_element_locator_classification(element:ElementLocator):
 
@@ -164,8 +206,8 @@ def set_element_locator_classification(element:ElementLocator):
         # view of type View will be ignored to speed up the code, since this usually don't containt useful info
         pass
     else:
-        raise ValueError(
-            f"Element type unknown:{element.className} - {element.id}")
+        element.classification = "unknown"
+        logging.warning(f"Element type unknown:{element.className} - {element.id}")
     return element
 
 
@@ -251,8 +293,6 @@ def main():
         "appium:newCommandTimeout": 3600,
     })
 
-    from PIL import Image
-    import numpy as np
 
     def is_same_screenshot(image1_path, image2_path, similarity_threshold=0.90):
         # Open the images
@@ -282,6 +322,26 @@ def main():
         # Check if similarity is above the threshold
         return similarity >= similarity_threshold
 
+    # File to store the checkpoint
+    CHECKPOINT_FILE = 'app_state_checkpoint.pkl'
+
+    def save_checkpoint():
+        state = {
+            'screen_list': screen_list,
+            'tuples_list': tuples_list,
+            'current_screen': current_screen,
+            'last_visited_screen': last_visited_screen,
+            'last_executed_action': last_executed_action,
+            'element_locator': element_locator
+        }
+        with open(CHECKPOINT_FILE, 'wb') as f:
+            pickle.dump(state, f)
+
+    def load_checkpoint():
+        if os.path.exists(CHECKPOINT_FILE):
+            with open(CHECKPOINT_FILE, 'rb') as f:
+                return pickle.load(f)
+        return None
 
     def app_logic():
         global driver
@@ -294,8 +354,24 @@ def main():
         global start_time
         global max_retries
 
+        # flag to check if app exited normally or crashed
+        exception_occurred_flag=False
         # Retry mechanism configuration
         retries = 0  # Current retry count
+
+        #load checkpoint if it exists (in case program crashed and ended unexpectedly)
+        checkpoint = load_checkpoint()
+
+        if checkpoint:
+            screen_list = checkpoint['screen_list']
+            tuples_list = checkpoint['tuples_list']
+            current_screen = checkpoint['current_screen']
+            last_visited_screen = checkpoint['last_visited_screen']
+            last_executed_action = checkpoint['last_executed_action']
+            element_locator = checkpoint['element_locator']
+            logging.info("Loaded checkpoint. Resuming from last saved state.")
+        else:
+            logging.info("No checkpoint found. Starting from the beginning.")
 
         while retries < max_retries:  # Retry loop
             try:
@@ -304,8 +380,14 @@ def main():
                 global start_time
                 start_time = time.time()
 
+                #  variable to track if all screens are explored to end the script
+                all_screens_explored = False
+
                 # Loop forever
-                while True:
+                while not all_screens_explored:
+
+                    # Save checkpoint periodically with each loop start to be used in case of program crash
+                    save_checkpoint()
 
                     # This method checks if we left the app under test and returns to it if this happens
                     ensure_in_app()
@@ -366,10 +448,17 @@ def main():
                             elif element_locator.classification == "action":
                                 tapActionElement(element_locator)
 
+                    # Check if all screens are explored
+                    all_screens_explored = all(
+                        screen.get_sum_unexplored_locators() == 0 for screen in screen_list)
 
+                    if all_screens_explored:
+                        logging.info("All screens and their elements have been explored. Ending the program.")
+                        break
 
 
             except Exception as e:
+                exception_occurred_flag = True
                 # Get the full traceback
                 tb = traceback.extract_tb(e.__traceback__)
 
@@ -385,13 +474,16 @@ def main():
                 # Press the back button
                 press_device_back_button(driver)
                 retries += 1  # Increment the retry counter
-                time.sleep(1)  # Optional: wait before retrying
+
 
             finally:
                 # Record the end time
                 end_time = time.time()
                 duration = end_time - start_time
                 logging.info(f"Total execution time: {duration:.2f} seconds")
+                # Clean up the checkpoint file after successful completion
+                if exception_occurred_flag and os.path.exists(CHECKPOINT_FILE):
+                    os.remove(CHECKPOINT_FILE)
                 # Store all found element locators to db
                 for element_locator in result_text_list:
                     obj_id = sql_db.insert_element_locator(element_locator)
@@ -399,6 +491,8 @@ def main():
                 for tuple in tuples_list:
                     tuple_id = sql_db.insert_tuple(tuple)
                     print(f"tuple with id {tuple_id} inserted.")
+                if driver:
+                    driver.quit()
 
         if retries == max_retries:
             logging.error("Max retries reached, exiting the test.")
@@ -431,18 +525,52 @@ def main():
 
     #this method takes a screenshot of the device
     def take_screenshot(screen_id):
-        logging.info(f"taking a screenshot of screen {screen_id} ...")
+        global expected_package
+        logging.info(f"Taking a screenshot of screen {screen_id} ...")
         global driver
-        screenshot_path = os.path.join(os.getcwd(), f'screen{screen_id}.png')
+
+        # Define the tmp-screenshots directory
+        screenshots_dir = os.path.join(os.getcwd(), 'tmp-screenshots')
+
+        # Create the tmp-screenshots directory if it doesn't exist
+        if not os.path.exists(screenshots_dir):
+            os.makedirs(screenshots_dir)
+            logging.info(f"Created tmp-screenshots directory: {screenshots_dir}")
+
+        # Define the full path for the screenshot, including the expected_package at the start
+        screenshot_path = os.path.join(screenshots_dir, f'{expected_package}_screen{screen_id}.png')
+
+        # Save the screenshot
         driver.save_screenshot(screenshot_path)
+        logging.info(f"Screenshot saved: {screenshot_path}")
 
     def is_unique_tuple(src_screen, element_locator, dest_screen, tuples_list):
+        # Check for None values
+        if src_screen is None:
+            logging.warning("src_screen is None in is_unique_tuple")
+            return False
+        if element_locator is None:
+            logging.warning("element_locator is None in is_unique_tuple")
+            return False
+        if dest_screen is None:
+            logging.warning("dest_screen is None in is_unique_tuple")
+            return False
+        if tuples_list is None:
+            logging.warning("tuples_list is None in is_unique_tuple")
+            return False
+
         is_unique = True
 
         if not tuples_list:
             return is_unique
 
         for tuple in tuples_list:
+            if tuple is None:
+                logging.warning("Encountered None tuple in tuples_list")
+                continue
+            if not hasattr(tuple, 'isSameTupleAs'):
+                logging.warning(f"Tuple {tuple} does not have isSameTupleAs method")
+                continue
             if tuple.isSameTupleAs(src_screen, element_locator, dest_screen):
                 is_unique = False
                 break
@@ -451,38 +579,90 @@ def main():
 
     # checks if a tuple is valid, tuple is invalid if action dosn't exist or src_screen is same as dest_screen
     def is_valid_tuple(src_screen, action, dest_screen):
+        if src_screen is None or dest_screen is None:
+            return False
         return action is not None and not src_screen.isSameScreenAs(dest_screen)
 
-
     def get_screen_by_locators(elements_locators, screen_list):
-        global similarity_factor
+        similarity_factor = .75
+
+        if not elements_locators:
+            logging.warning("get_screen_by_locators: elements_locators is empty")
+            return None
+
+        best_match_screen = None
+        best_match_count = 0
+        total_elements = len(elements_locators)
 
         for screen in screen_list:
-            # Check if {similarity factor} or more elements match
             matching_elements_count = screen.get_sum_matching_locators(elements_locators)
-            # print(f"matching_elements_count {matching_elements_count} out of {len(elements_locators)}")
-            if matching_elements_count >= similarity_factor * len(elements_locators):
+
+            # Check for 100% match
+            if matching_elements_count == total_elements:
+                logging.info(f"get_screen_by_locators: Found 100% match with {matching_elements_count} elements")
                 return screen
 
-        logging.error(f"get_screen_by_locators: failed to find screen, matching_elements_count {matching_elements_count}")
-        return None
-    def is_unique_screen(elements_locators, screen_list):
-        global similarity_factor
-        is_unique = True
+            # Update best match if this screen has more matching elements
+            if matching_elements_count > best_match_count:
+                best_match_count = matching_elements_count
+                best_match_screen = screen
 
+        # If no 100% match found, check if the best match meets the similarity threshold
+        if best_match_screen:
+            similarity_score = best_match_count / total_elements
+            if similarity_score >= similarity_factor:
+                logging.info(f"get_screen_by_locators: Found best match with similarity {similarity_score:.2f} "
+                             f"({best_match_count}/{total_elements} elements)")
+                return best_match_screen
+            else:
+                logging.warning(f"get_screen_by_locators: Best match similarity {similarity_score:.2f} "
+                                f"({best_match_count}/{total_elements} elements) below threshold {similarity_factor}")
+        else:
+            logging.error("get_screen_by_locators: No matching screen found")
+
+        return None
+
+    def is_unique_screen(elements_locators, screen_list, similarity_factor=0.9, context=None):
         if not screen_list:
-            return is_unique
+            return True
+
+        if not elements_locators:
+            logging.warning("elements_locators is empty in is_unique_screen")
+            return True  # Consider the screen unique if we have no elements to compare
+
+        total_elements = len(elements_locators)
+        if total_elements == 0:
+            logging.warning("Total elements is 0 in is_unique_screen")
+            return True  # Consider the screen unique if we have no elements to compare
 
         for screen in screen_list:
-            # Check if 90% or more elements match
-            matching_elements_count=screen.get_sum_matching_locators(elements_locators)
-            #print(f"matching_elements_count {matching_elements_count} out of {len(elements_locators)}")
-            if matching_elements_count >= similarity_factor * len(elements_locators) :
-                is_unique = False
-                break
+            matching_elements = 0
 
-        return is_unique
+            # Compare context first (if provided)
+            if context and screen.context != context:
+                continue
 
+            for locator in elements_locators:
+                if screen.has_matching_element(locator):
+                    matching_elements += 1
+
+            # Calculate similarity score
+            similarity_score = matching_elements / total_elements
+
+            logging.debug(f"Screen comparison - Matching elements: {matching_elements}, "
+                          f"Total elements: {total_elements}, Similarity score: {similarity_score}")
+
+            # Check if similarity exceeds threshold
+            if similarity_score >= similarity_factor:
+                # Additional checks for high-similarity screens
+                if similarity_score == 1.0:
+                    # If 100% match, compare element attributes or structure
+                    if screen.compare_element_attributes(elements_locators):
+                        return False
+                else:
+                    return False
+
+        return True
     def remove_explored_elements(current_screen, explored_locators):
         # Iterate over a copy of the list to avoid modifying the list while iterating
         for element in current_screen.elements_locators_list[:]:
@@ -501,7 +681,7 @@ def fillInputElement(element_locator):
     element = find_element(element_locator)
     if element:
         logging.info("fillInputElement: Element found!")
-        fill_edit_text(ElementLocator.createElementLocatorFromElement(element))
+        fill_edit_text(ElementLocator.create_element_locator_from_web_element(element),element)
 
     else:
         logging.info("fillInputElement: Element not found.")
@@ -509,7 +689,8 @@ def fillInputElement(element_locator):
 
 
 #  this function takes a field input and fills it based on its label/text
-def fill_edit_text(element_locator: ElementLocator, max_retries=3):
+def fill_edit_text(element_locator: ElementLocator,element:WebElement ):
+    max_retries = 3
     # Define dummy data for different classifications
     signup_data = {
         'email': 'afoda500@gmail.com',
@@ -549,14 +730,15 @@ def fill_edit_text(element_locator: ElementLocator, max_retries=3):
 
     for attempt in range(max_retries):
         try:
-            element_locator.element.send_keys(input_value_for_field)
+            element.send_keys(input_value_for_field)
+            time.sleep(synthetic_delay_amount)
             logging.info(f"Successfully filled edit text with value: {input_value_for_field}")
             return  # Exit the function if successful
         except WebDriverException as e:
             if "socket hang up" in str(e):
                 logging.warning(f"WebDriverException occurred (attempt {attempt + 1}/{max_retries}): {e}")
                 if attempt < max_retries - 1:
-                    time.sleep(2)  # Wait for 2 seconds before retrying
+                    time.sleep(synthetic_delay_amount*10)  # Wait before retrying
                 else:
                     logging.error(f"Failed to fill edit text after {max_retries} attempts: {e}")
             else:
@@ -574,13 +756,14 @@ def tapActionElement(element_locator):
     global driver
     global last_visited_screen
     global last_executed_action
+    global synthetic_delay_amount
 
     try:
         logging.info(
             f"tapping Element: {element_locator.id} | {element_locator.location} | {element_locator.classification} | {element_locator.text} | {element_locator.contentDesc} ")
         center_x, center_y = element_locator.location['center']
         driver.tap([(center_x, center_y)])
-        time.sleep(2)
+        time.sleep(synthetic_delay_amount)
 
     except Exception as e:
         logging.error(f"tapActionElement: error while tapping element {e}")
@@ -660,9 +843,29 @@ def find_element(locator):
     return None
 
 
+def delete_screenshots():
+    # Define the path to the tmp-screenshots folder
+    screenshots_path = os.path.join(os.getcwd(), 'tmp-screenshots')
+
+    # Check if the folder exists
+    if os.path.exists(screenshots_path):
+        try:
+            # Remove the entire folder and its contents
+            shutil.rmtree(screenshots_path)
+            print(f"Successfully deleted the folder: {screenshots_path}")
+        except Exception as e:
+            print(f"Error deleting the folder: {e}")
+    else:
+        print(f"The folder {screenshots_path} does not exist.")
+
+
+
 if __name__ == "__main__":
-    conn = sql_db.create_connection(sql_db.database)
+    conn = sql_db.create_connection(expected_package)
     if conn is not None:
+        delete_screenshots()
+        sql_db.delete_table('element_locators_v1')
+        sql_db.delete_table('tuples_table_v1')
         sql_db.create_elements_locators_table('element_locators_v1')
         sql_db.create_tuples_table('tuples_table_v1')
     main()
