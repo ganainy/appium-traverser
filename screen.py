@@ -1,3 +1,4 @@
+import difflib
 import logging
 import re
 
@@ -8,7 +9,12 @@ screen_id = 1  # initial id for the first screen
 
 class Screen:
 
-    def __init__(self, ):
+    def __init__(
+        self,
+    ):
+        self.screen_xml_to_string = (
+            None  # this is a string representation of the screen XML
+        )
         self.id = None
         self.elements_locators_list = []
 
@@ -21,22 +27,30 @@ class Screen:
 
         # Collect other attributes
         for attr, value in self.__dict__.items():
-            if attr != "id" and attr != "elements_locators_list":
+            if (
+                attr == "contentDesc"
+                or attr == "hint"
+                or attr == "text"
+                or attr == "screenId"
+                or attr == "className"
+            ):
                 table_data.append([attr, value])
 
         # Collect printLocator outputs from each element in elements
         for i, element in enumerate(self.elements_locators_list):
-            locator_info = element.printLocator()  # Assuming printLocator returns a string
+            locator_info = element.printLocator()
             table_data.append([f"element_{i}", locator_info])
 
         # Print the table using tabulate
-        table_str = tabulate(table_data, headers=["Attribute", "Value"], tablefmt="grid")
+        table_str = tabulate(
+            table_data, headers=["Attribute", "Value"], tablefmt="grid"
+        )
         logging.info("\n" + table_str)
 
-    def createScreen(elements_locators_list):
+    def createScreen(elements_locators_list, screen_xml_to_string):
         global screen_id
         screen = Screen()
-
+        screen.screen_xml_to_string = screen_xml_to_string
         screen.id = screen_id
         screen_id = screen_id + 1
 
@@ -49,13 +63,20 @@ class Screen:
 
     # compares two screens to check if they are the same
     def isSameScreenAs(self, secondScreen):
-        # if only one item is same in both screen then its the same screen, since each item is unique (with a screenId)
-        for first_screen_locator_element in self.elements_locators_list:
-            for second_screen_locator_element in secondScreen.elements_locators_list:
-                if first_screen_locator_element.isSameElementAs(second_screen_locator_element):
-                    return True
-        return False
-        # return any(element in self.elements_locators_list for element in secondScreen.elements_locators_list)
+        # Get the XML representation of both screens
+        first_screen_xml = self.screen_xml_to_string
+        second_screen_xml = secondScreen.screen_xml_to_string
+
+        # Calculate the similarity ratio between the two XML strings
+        similarity_ratio = difflib.SequenceMatcher(
+            None, first_screen_xml, second_screen_xml
+        ).ratio()
+
+        # Check if the similarity ratio is at least 90%
+        if similarity_ratio >= 0.9:
+            return True
+        else:
+            return False
 
     # similar to isSameScreenAs but compares through the second screen locators
     def hasSameLocatorsAs(self, second_screen_elements_locators):
@@ -69,7 +90,9 @@ class Screen:
         matching_elements_count = 0
         for first_screen_locator_element in self.elements_locators_list:
             for second_screen_locator_element in second_screen_elements_locators:
-                if first_screen_locator_element.isSameElementAs(second_screen_locator_element):
+                if first_screen_locator_element.isSameElementAs(
+                    second_screen_locator_element
+                ):
                     matching_elements_count += 1
                     break  # Move to the next element in the first screen
 
@@ -87,7 +110,9 @@ class Screen:
         matching_elements_count = 0
         for first_screen_locator_element in self.elements_locators_list:
             for second_screen_locator_element in second_screen_elements_locators:
-                if first_screen_locator_element.isSameElementAs(second_screen_locator_element):
+                if first_screen_locator_element.isSameElementAs(
+                    second_screen_locator_element
+                ):
                     matching_elements_count += 1
                     break  # Move to the next element in the first screen
 
@@ -109,7 +134,7 @@ class Screen:
     def get_sum_unexplored_locators(self):
         sum = 0
         for locator in self.elements_locators_list:
-            if locator.explored == False:
+            if not locator.explored:
                 sum += 1
         return sum
 
@@ -121,7 +146,7 @@ class Screen:
 
     def _is_element_match(self, element, locator):
         # Check for matching attributes
-        attributes_to_check = ['id', 'className', 'text', 'contentDesc']
+        attributes_to_check = ["id", "className", "text", "contentDesc"]
         match_score = 0
         total_checks = 0
 
@@ -146,25 +171,30 @@ class Screen:
     def _is_location_similar(self, loc1, loc2, tolerance=50):
         # Helper function to extract center from bounds string
         def get_center_from_bounds(bounds):
-            pattern = r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]'
+            pattern = r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]"
             match = re.search(pattern, str(bounds))
             if match:
                 start_x, start_y, end_x, end_y = map(int, match.groups())
-                return ((start_x + end_x) // 2, (start_y + end_y) // 2)
+                return (start_x + end_x) // 2, (start_y + end_y) // 2
             return None
 
         # Extract centers based on the type of loc1 and loc2
-        center1 = loc1['center'] if isinstance(loc1, dict) else get_center_from_bounds(loc1)
-        center2 = loc2['center'] if isinstance(loc2, dict) else get_center_from_bounds(loc2)
+        center1 = (
+            loc1["center"] if isinstance(loc1, dict) else get_center_from_bounds(loc1)
+        )
+        center2 = (
+            loc2["center"] if isinstance(loc2, dict) else get_center_from_bounds(loc2)
+        )
 
         # If we couldn't extract centers, return False
         if center1 is None or center2 is None:
             return False
 
         # Check if the center points are within the tolerance
-        return (abs(center1[0] - center2[0]) <= tolerance and
-                abs(center1[1] - center2[1]) <= tolerance)
-
+        return (
+            abs(center1[0] - center2[0]) <= tolerance
+            and abs(center1[1] - center2[1]) <= tolerance
+        )
 
     def compare_element_attributes(self, elements_locators):
         if len(self.elements_locators_list) != len(elements_locators):
@@ -177,8 +207,14 @@ class Screen:
 
     def _compare_detailed_attributes(self, element, locator):
         attributes_to_compare = [
-            'id', 'className', 'text', 'contentDesc', 'hint',
-            'clickable', 'enabled', 'displayed'
+            "id",
+            "className",
+            "text",
+            "contentDesc",
+            "hint",
+            "clickable",
+            "enabled",
+            "displayed",
         ]
 
         for attr in attributes_to_compare:
@@ -187,7 +223,9 @@ class Screen:
 
         # Compare location
         if element.location and locator.location:
-            if not self._is_location_similar(element.location, locator.location, tolerance=10):
+            if not self._is_location_similar(
+                element.location, locator.location, tolerance=10
+            ):
                 return False
 
         return True

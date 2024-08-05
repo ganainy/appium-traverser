@@ -1,0 +1,28 @@
+
+
+
+
+
+
+Devices:
+my tablet: R52N40JSZKM
+my phone: 279cb9b1
+emulator:Android
+
+
+
+
+1- get package name of an instaleld app
+ adb shell pm list packages | grep 'part_of_app_name'
+
+2- get start activity name of an app
+ adb shell dumpsys activity recents
+
+# Example apps to test the script
+
+ fr.doctolib.www                                   fr.doctolib.www.MainActivity
+ ------------------------------------------------------------------------------------------------
+ com.myfitnesspal.android                          com.myfitnesspal.android.splash.SplashActivity
+ ------------------------------------------------------------------------------------------------
+ de.jameda                                         com.app.MainActivity
+ ------------------------------------------------------------------------------------------------
