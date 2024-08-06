@@ -13,6 +13,9 @@ This project was developed as part of the Seminar 'Automated Analysis of Mobile 
 Check out this demo video of our framework in action:
 https://drive.google.com/file/d/1-LH7-Or6LGLt37rfbRH9rBmUG7nYN6Ji/view?usp=sharing
 
+## Results of running the script on different popular medical apps (from Germany)
+https://drive.google.com/drive/folders/1ZqGZRqJtk7fDf4vb4RHUFVF7VgNBRt8D?usp=sharing
+
 **Note:** The main code for this project is located on the `screen-approach` branch.
 
 ## Features
