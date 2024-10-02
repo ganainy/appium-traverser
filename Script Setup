@@ -20,9 +20,4 @@ emulator:Android
 
 # Example apps to test the script
 
- fr.doctolib.www                                   fr.doctolib.www.MainActivity
- ------------------------------------------------------------------------------------------------
- com.myfitnesspal.android                          com.myfitnesspal.android.splash.SplashActivity
- ------------------------------------------------------------------------------------------------
- de.jameda                                         com.app.MainActivity
- ------------------------------------------------------------------------------------------------
+

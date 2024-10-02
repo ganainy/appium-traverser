@@ -141,5 +141,7 @@ def on_scroll(event, ax):
 
 # Show the plot
 plt.tight_layout()
-plt.savefig(f"{current_package}/{current_package}_graph.pdf", dpi=300, bbox_inches="tight")
+plt.savefig(
+    f"{current_package}/{current_package}_graph.pdf", dpi=300, bbox_inches="tight"
+)
 # plt.show()

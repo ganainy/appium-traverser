@@ -48,9 +48,11 @@ max_retries = (
 )
 
 expected_package = (
-    "com.myfitnesspal.android"  # the name of the package we want to traverse
+    "eu.smartpatient.mytherapy"  # the name of the package we want to traverse
 )
-expected_start_activity = "com.myfitnesspal.android.splash.SplashActivity"
+expected_start_activity = (
+    "eu.smartpatient.mytherapy.feature.account.presentation.onboarding.WelcomeActivity"
+)
 expected_target_device = "279cb9b1"
 
 screenshots_path = os.path.join(os.getcwd(), f"{expected_package}_screenshots")
@@ -277,6 +279,7 @@ def is_action_element(element: ElementLocator) -> bool:
         "android.widget.RatingBar",
         "android.widget.NumberPicker",
         "android.widget.TextView",
+        "android.widget.ImageButton",
     ]
 
     for input_type in input_types:
@@ -592,6 +595,9 @@ def main():
                 [
                     "com.android.chrome",  # Chrome for WebView
                     "com.brave.browser",  # Brave Browser
+                    "com.miui.security",  # allow permission dialogs on xiaomi
+                    "com.miui.securitycenter",
+                    "com.android.permissioncontroller",  # allow permission dialogs
                 ]
             )
 
@@ -635,6 +641,7 @@ def main():
             intent = f"{expected_package}/{expected_start_activity}"
             # Use the execute_script method to start the activity
             driver.execute_script("mobile: startActivity", {"intent": intent})
+            time.sleep(2)
         else:
             logging.info(
                 f"Successfully navigated back to the app or an allowed external package."
@@ -700,7 +707,7 @@ def main():
         return action is not None and not src_screen.isSameScreenAs(dest_screen)
 
     def get_screen_by_locators(elements_locators, screen_list):
-        similarity_factor = 0.9
+        similarity_factor = 0.8
 
         if not elements_locators:
             logging.warning("get_screen_by_locators: elements_locators is empty")
@@ -790,7 +797,9 @@ def fillInputElement(element_locator):
 
 
 def fill_edit_text(element_locator: ElementLocator, element: WebElement):
-    max_retries = 3
+    return
+    # todo fix this method
+    max_retries = 1
     # Define dummy data for different classifications
     signup_data = {
         "email": "afoda500@gmail.com",
