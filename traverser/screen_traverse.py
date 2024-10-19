@@ -7,11 +7,19 @@ import traceback
 from typing import List
 from appium import webdriver
 from appium.options.common.base import AppiumOptions
+
+from traverser.data_classes.screen import Screen
 from traverser.utils import sql_db
 from data_classes.element import UiElement
 from data_classes.screen import get_screen_by_screen_id
 from data_classes.tuple import Tuple
-
+from inference_sdk import InferenceHTTPClient
+from dotenv import load_dotenv
+import os
+import cv2
+import numpy as np
+import supervision as sv
+#todo fix model detecting different elements on same screen because of animations
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
@@ -27,12 +35,9 @@ global_last_executed_action = None
 global_ui_element = None
 
 global_start_time = None
-
+global_analysis_screen_id=0 # used to give unique ids for the images with the bounding boxes to see how well model is detecting objects
 global_synthetic_delay_amount = 0.1  # amount of delay added to make space between actions
-
-max_retries = (
-    1  # Maximum number of retries(after a crash) before the script ends itself
-)
+max_retries = 1  # Maximum number of retries(after a crash) before the script ends itself
 
 expected_package = (
     "eu.smartpatient.mytherapy"  # the name of the package we want to traverse
@@ -42,38 +47,104 @@ expected_start_activity = (
 )
 expected_target_device = "279cb9b1"
 
+analysis_screenshots_path = os.path.join(os.getcwd(), f"{expected_package}_analysis_screenshots")
 screenshots_path = os.path.join(os.getcwd(), f"{expected_package}_screenshots")
 
-"""'
-param:unique_elements -> list of ElementLocator
-"""
+# params related to the used object detection model
+global_project_name="vins-dataset-no-wire-modified"
+global_project_version=2
 
 
-def get_only_input_action_elements(unique_elements):
-    # This list contains only action,input locators
-    filtered_unique_elements = []
-    for element in unique_elements:
-        if element.classification == "input" or element.classification == "action":
-            filtered_unique_elements.append(element)
-    return filtered_unique_elements
+def get_secret_api_key():
+    # Load environment variables from .env file
+    load_dotenv()
+    # Access the API key
+    return os.getenv('API_KEY')
+
+"get different ui-elements using the deep learning model"
+
+
+def save_image_with_bound_boxes(result, analysis_screenshot_path, global_analysis_screen_id):
+
+    # Manually create Detections object
+    boxes = []
+    confidences = []
+    class_ids = []
+
+    for pred in result['predictions']:
+        x, y, w, h = pred['x'], pred['y'], pred['width'], pred['height']
+        boxes.append([x - w / 2, y - h / 2, x + w / 2, y + h / 2])  # Convert to [x1, y1, x2, y2] format
+        confidences.append(pred['confidence'])
+        class_ids.append(pred['class_id'])
+
+    detections = sv.Detections(
+        xyxy=np.array(boxes),
+        confidence=np.array(confidences),
+        class_id=np.array(class_ids)
+    )
+
+    labels = [pred['class'] for pred in result['predictions']]
+
+    label_annotator = sv.LabelAnnotator()
+    box_annotator = sv.BoxAnnotator()
+
+    image = cv2.imread(analysis_screenshot_path)
+
+    annotated_image = box_annotator.annotate(scene=image, detections=detections)
+    annotated_image = label_annotator.annotate(scene=annotated_image, detections=detections, labels=labels)
+
+    # Create a folder to save the annotated images if it doesn't exist
+    os.makedirs(analysis_screenshots_path, exist_ok=True)
+
+    # Generate a unique filename using global_analysis_screen_id
+    output_filename = f"analysis_screen_annotated_{global_analysis_screen_id}.png"
+    output_path = os.path.join(analysis_screenshots_path, output_filename)
+
+    # Save the annotated image
+    cv2.imwrite(output_path, annotated_image)
+
+    print(f"Annotated image saved to: {output_path}")
 
 
 
-def identify_screen_through_locators():
+def get_ui_elements():
     global global_driver
+    global analysis_screenshots_path
+    global global_analysis_screen_id
+
+    global_analysis_screen_id += 1
+
     # Find all elements on the screen
     logging.info("----------------------------------------------")
-    logging.info("Classifying elements on the screen...")
+    logging.info(f"Analyzing screenshot ...")
+
+    # Create the tmp-screenshots directory if it doesn't exist
+    if not os.path.exists(analysis_screenshots_path):
+        os.makedirs(analysis_screenshots_path)
+
+    # Define the full path for the screenshot
+    analysis_screenshot_path = os.path.join(analysis_screenshots_path, f"analysis_screen{global_analysis_screen_id}.png")
+
+    # Save the screenshot
+    global_driver.save_screenshot(analysis_screenshot_path)
+
+    CLIENT = InferenceHTTPClient(
+        api_url="https://detect.roboflow.com",
+        api_key=get_secret_api_key()
+    )
+
+    #use the object detection model to get the object on the current screen
+    result = CLIENT.infer(analysis_screenshot_path, model_id="vins-dataset-no-wire-modified/2")
+
+    #save image with the bounding boxes (to assess the quality of the used model)
+    save_image_with_bound_boxes(result,analysis_screenshot_path,global_analysis_screen_id)
 
     # This list includes all types on locators (action,input,layout, etc...)
-    unique_elements = []
-    #todo
-    unique_elements.append(global_ui_element)
+    ui_elements = []
+    for ui_element in result['predictions']:
+        ui_elements.append(UiElement(ui_element))
 
-    # only keep input and action elements to interact with later
-    element_locators = get_only_input_action_elements(unique_elements)
-
-    return element_locators
+    return ui_elements
 
 
 
@@ -92,23 +163,24 @@ def set_element_locator_classification(element: UiElement):
 
 # creates a new screen and returns it
 def create_screen(elements:List[UiElement]):
+    created_screen = Screen(elements)
     # add screen id to each locator for logging purposes
-    created_screen = create_screen(elements)
-    for element in created_screen.elements_locators_list:
+    for element in created_screen.elements_list:
         element.screen_id = created_screen.id
     return created_screen
 
-
+"""Check if the element is an input type."""
 def is_input_type(element: UiElement) -> bool:
-    """Check if the element is an input type."""
+    if element.class_name in ['EditText']:
+        return True
     return False
 
 
-# Takes an element and returns true if clickable
+"""Check if the element is an action type."""
 def is_action_element(element: UiElement) -> bool:
-    """Check if the element is an action type."""
+    if element.class_name in ['Icon','CheckedTextView','Image','Other','PageIndicator','Switch','Text','TextButton']:
+        return True
     return False
-
 
 
 def main():
@@ -168,7 +240,8 @@ def main():
 
         # load checkpoint if it exists (in case program crashed and ended unexpectedly)
 
-        checkpoint = load_checkpoint()
+        #todo fix checkpoint system
+        checkpoint = None#load_checkpoint()
 
         if checkpoint:
             global_screen_list = checkpoint['screen_list']
@@ -201,23 +274,24 @@ def main():
                     ensure_in_app()
 
                     # Check if the screen after doing the action is the same screen before the action
-                    # Get the page source in XML format and turn it into a string
-                    ui_elements= (
-                        identify_screen_through_locators()
+
+                    ui_elements:List[UiElement]= (
+                        get_ui_elements()
                     )
 
-                    # Add screen to screen list if it wasn't there
+                    # check if screen is unique or not
                     is_unique_screen_flag = is_unique_screen(
-                    global_screen_list
+                    ui_elements
                     )
 
                     global_current_screen = get_screen_by_elements(
-                        ui_elements, global_screen_list
-                    )
+                         ui_elements, global_screen_list
+                     )
+
                     if global_current_screen is not None:
                         # The screen after the action is the same as before the action
                         logging.info(
-                            f"old screen  {global_current_screen.id} with {global_current_screen.get_sum_unexplored_locators()}/{len(global_current_screen.elements_locators_list)} unexplored locators already in screen_list , length is still: {len(global_screen_list)}"
+                            f"old screen  {global_current_screen.id} with {global_current_screen.get_sum_unexplored_elements()}/{len(global_current_screen.elements_locators_list)} unexplored locators already in screen_list , length is still: {len(global_screen_list)}"
                         )
                     else:
                         # the screen after doing the action is not the same screen before the action
@@ -226,9 +300,9 @@ def main():
                             ui_elements
                         )
                         global_screen_list.append(global_current_screen)
-                        take_screenshot(global_current_screen.id)
+                        take_unique_screen_screenshot(global_current_screen.id)
                         logging.info(
-                            f"new screen {global_current_screen.id} with {global_current_screen.get_sum_unexplored_locators()} "
+                            f"new screen {global_current_screen.id} with {global_current_screen.get_sum_unexplored_elements()} "
                             f"unexplored elements was added to screen_list , new length is: {len(global_screen_list)}")
 
 
@@ -256,7 +330,7 @@ def main():
                             and is_unique_tuple_flag
                         ):
                             # Tuple not already in the tuple list, add it
-                            tuple = Tuple.create_tuple(
+                            tuple:Tuple = Tuple(
                                 global_last_visited_screen,
                                 global_last_executed_action,
                                 global_current_screen,
@@ -270,13 +344,13 @@ def main():
                                 f"tuple already in tuples_list , length is still: {len(global_tuples_list)}"
                             )
 
-                    if global_current_screen.get_sum_unexplored_locators() <= 0:
+                    if global_current_screen.get_sum_unexplored_elements() <= 0:
                         # No more locators are left in this particular screen, go back to the previous screen
                         press_device_back_button(global_driver)
                     else:
                         # Go to the next locator and execute based on its classification + set as explored to \
                         # not execute it again
-                        global_ui_element = global_current_screen.get_first_unexplored_locator()
+                        global_ui_element = global_current_screen.get_first_unexplored_element()
 
                         if global_ui_element is not None:
                             global_ui_element.mark_element_as_explored()
@@ -416,7 +490,7 @@ def main():
         driver.press_keycode(4)  # 4 is the Android keycode for the back button
 
     # this method takes a screenshot of the device
-    def take_screenshot(screen_id):
+    def take_unique_screen_screenshot(screen_id):
         global screenshots_path
         logging.info(f"Taking a screenshot of screen {screen_id} ...")
         global global_driver
@@ -466,27 +540,30 @@ def main():
         return is_unique
 
     # checks if a tuple is valid, tuple is invalid if action dosn't exist or src_screen is same as dest_screen
-    def is_valid_tuple(src_screen, action, dest_screen):
+    def is_valid_tuple(src_screen:Screen, action, dest_screen:Screen):
         if src_screen is None or dest_screen is None:
             return False
-        return action is not None and not src_screen.isSameScreenAs(dest_screen)
+        return action is not None and not src_screen.is_same_screen_as(dest_screen)
 
-    #todo
-    def get_screen_by_elements(elements_locators, screen_list):
+
+    def get_screen_by_elements(ui_elements, screen_list):
+        for screen in screen_list:
+            if screen.elements_list == ui_elements:
+                return screen
         return None
 
-    # todo
-    def is_unique_screen(screen_list):
-        return True  # Screen is unique
+    def is_unique_screen(ui_elements:List[UiElement]):
+        global global_screen_list
+        for screen in global_screen_list:
+            if screen.elements_list == ui_elements:
+                return False
+        return True
 
-    def press_device_back_button(driver):
-        logging.info("pressed back button.")
-        driver.press_keycode(4)
 
     app_logic()
 
 
-# TODO
+# TODO if the object detection detect edittext upload screenshot to ai model and ask him to give mock data to fill the fields
 #  this function takes a field input and fills it based on its label/text
 def fillInputElement(element_locator):
     # Define dummy data for different classifications

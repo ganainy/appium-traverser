@@ -1,21 +1,22 @@
 import difflib
 import logging
 import re
+from typing import List
 
 from tabulate import tabulate
 
-screen_id = 1  # initial id for the first screen
+from traverser.data_classes.element import UiElement
+
 
 
 
 class Screen:
+    screen_id = 1  # Class variable for the screen ID, shared across all instances
 
-    def __init__(
-        self,
-    ):
-
-        self.id = None
-        self.elements_list = []
+    def __init__(self, elements_list: List[UiElement]):
+        self.id = Screen.screen_id  # Assign the current class-level screen_id to the instance
+        self.elements_list: List[UiElement] = elements_list
+        Screen.screen_id += 1  # Increment the class-level screen_id for the next instance
 
     def print_screen(self):
         # List to store table rows
@@ -23,7 +24,6 @@ class Screen:
 
         # Add the ID attribute
         table_data.append(["id", self.id])
-
 
         # Collect printLocator outputs from each element in elements
         for i, element in enumerate(self.elements_list):
@@ -37,10 +37,9 @@ class Screen:
         logging.info("\n" + table_str)
 
 
-    # todo
     # compares two screens to check if they are the same
     def is_same_screen_as(self, second_screen):
-        return True
+        return self.elements_list== second_screen.elements_list
 
 
 
@@ -58,24 +57,6 @@ class Screen:
         return sum
 
 
-
-
-def get_screen_with_elements(screen_list, element_locators):
-    """
-    This method identifies which screen from a list of screens contains a given list of element locators.
-
-    :param screen_list: list of Screen objects
-    :param element_locators: list of ElementLocator objects
-    :return: Screen object that matches the given element locators
-    """
-    for screen in screen_list:
-        if screen.has_same_locators_as(element_locators):
-            return screen
-
-    logging.error("getScreenWithElements: failed to find screen")
-    return None
-
-
 def get_screen_by_screen_id(screens, screen_id):
     """
     This method identifies which screen from a element locator.
@@ -89,9 +70,3 @@ def get_screen_by_screen_id(screens, screen_id):
             return screen
     return None
 
-    #todo
-def create_screen():
-    global screen_id
-    screen = Screen()
-
-    return screen

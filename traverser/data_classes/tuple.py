@@ -1,36 +1,32 @@
 import logging
 
-tuple_id = 1  # initial id for the first tuple
-
-
 class Tuple:
+    tuple_id = 1  # Class-level variable for generating unique tuple IDs
 
-    def __init__(self, ):
-        self.id = None
-        self.source = None  # of type screen
-        self.action = None  # of type element locator
-        self.destination = None  # of type screen
+    def __init__(self, source, action, destination):
+        """
+        Initialize a Tuple instance and automatically assign a unique ID.
+        """
+        self.id = Tuple.tuple_id
+        Tuple.tuple_id += 1  # Increment for the next tuple
+
+        self.source = source  # Screen object
+        self.action = action  # UiElement object (or locator)
+        self.destination = destination  # Screen object
+
+        logging.info("Created new tuple:")
+        self.print_tuple()
 
     def print_tuple(self):
         logging.info(f"Tuple id {self.id}: Screen[{self.source.id}] -> Action[{self.action}] -> Screen[{self.destination.id}]")
 
-    def create_tuple(self,source, action, destination):
-        global tuple_id
-        tuple = Tuple()
-
-        tuple.id = tuple_id
-        tuple_id = tuple_id + 1
-
-        tuple.source=source
-        tuple.action = action
-        tuple.destination = destination
-
-        logging.info("created new tuple:")
-        tuple.print_tuple()
-        return tuple
-
     def is_same_tuple_as(self, source, action, destination):
+        """
+        Compare the current tuple with another tuple's source, action, and destination.
+        """
         if source is None or action is None or destination is None:
-            return False  # or handle this case as appropriate for your application
+            return False  # Handle None case as needed
 
-        return self.source.id == source.id and self.action.is_same_element_as(action) and self.destination.id == destination.id
+        return (self.source.id == source.id and
+                self.action.is_same_element_as(action) and
+                self.destination.id == destination.id)

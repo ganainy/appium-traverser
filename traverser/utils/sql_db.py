@@ -1,8 +1,8 @@
 import logging
 import sqlite3
 
-from elementlocator import ElementLocator
-from tuple import Tuple
+from traverser.data_classes.element import UiElement
+from traverser.data_classes.tuple import Tuple
 
 conn = None
 element_locators_table_name = None
@@ -112,11 +112,6 @@ def insert_element_locator(element_locator):
             no_null_element_locator.id,
             no_null_element_locator.classification,
             no_null_element_locator.class_name,
-            no_null_element_locator.text,
-            no_null_element_locator.location,
-            no_null_element_locator.contentDesc,
-            no_null_element_locator.hint,
-            no_null_element_locator.bounds,
             no_null_element_locator.screen_id,
             no_null_element_locator.explored,
         ),
@@ -138,9 +133,6 @@ def insert_tuple(tuple: Tuple):
         (
             str(tuple.source.id),
             no_null_action_element_locator.id,
-            no_null_action_element_locator.text,
-            no_null_action_element_locator.hint,
-            no_null_action_element_locator.contentDesc,
             no_null_action_element_locator.screen_id,
             str(tuple.destination.id),
         ),
@@ -149,13 +141,13 @@ def insert_tuple(tuple: Tuple):
     return cur.lastrowid
 
 
-def print_attribute_types(element_locator: ElementLocator):
+def print_attribute_types(element_locator: UiElement):
     """Print the class type of each attribute."""
     for attr, value in element_locator.__dict__.items():
         print(f"{attr}: {type(value)}")
 
 
-def replace_none_with_empty_string(element_locator: ElementLocator) -> ElementLocator:
+def replace_none_with_empty_string(element_locator: UiElement) -> UiElement:
     """Replace None values with empty strings for all attributes and convert all values to strings."""
     for attr, value in element_locator.__dict__.items():
         if value is None:
