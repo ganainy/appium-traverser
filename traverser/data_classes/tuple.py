@@ -11,10 +11,10 @@ class Tuple:
         self.action = None  # of type element locator
         self.destination = None  # of type screen
 
-    def printTuple(self):
+    def print_tuple(self):
         logging.info(f"Tuple id {self.id}: Screen[{self.source.id}] -> Action[{self.action}] -> Screen[{self.destination.id}]")
 
-    def createTuple(source,action,destination):
+    def create_tuple(self,source, action, destination):
         global tuple_id
         tuple = Tuple()
 
@@ -26,11 +26,11 @@ class Tuple:
         tuple.destination = destination
 
         logging.info("created new tuple:")
-        tuple.printTuple()
+        tuple.print_tuple()
         return tuple
 
-    def isSameTupleAs(self,source,action,destination):
+    def is_same_tuple_as(self, source, action, destination):
         if source is None or action is None or destination is None:
             return False  # or handle this case as appropriate for your application
 
-        return self.source.id == source.id and self.action.isSameElementAs(action) and self.destination.id == destination.id
+        return self.source.id == source.id and self.action.is_same_element_as(action) and self.destination.id == destination.id

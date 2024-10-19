@@ -101,6 +101,6 @@ class GUIApp:
             # Insert the new rows
             for element in screen.elements_locators_list:
                 self.element_locator_tree.insert('', tk.END, values=(
-                    element.screenId, element.id, element.classification, element.className, element.text,
+                    element.screen_id, element.id, element.classification, element.class_name, element.text,
                     element.location, element.contentDesc, element.hint, element.bounds
                 ))

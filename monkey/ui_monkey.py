@@ -28,7 +28,7 @@ logging.info(f"Screen size: width={width}, height={height}")
 actions = ['click', 'swipe', 'long_click', 'back']
 
 # Record the start time
-start_time = time.time()
+global_start_time = time.time()
 logging.info("Starting random actions...")
 
 
@@ -39,7 +39,7 @@ def is_in_app():
 
 
 # Perform actions until the time limit is reached
-while time.time() - start_time < test_duration:
+while time.time() - global_start_time < test_duration:
     action = random.choice(actions)
 
     if action == 'click':

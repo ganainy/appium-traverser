@@ -111,13 +111,13 @@ def insert_element_locator(element_locator):
         (
             no_null_element_locator.id,
             no_null_element_locator.classification,
-            no_null_element_locator.className,
+            no_null_element_locator.class_name,
             no_null_element_locator.text,
             no_null_element_locator.location,
             no_null_element_locator.contentDesc,
             no_null_element_locator.hint,
             no_null_element_locator.bounds,
-            no_null_element_locator.screenId,
+            no_null_element_locator.screen_id,
             no_null_element_locator.explored,
         ),
     )
@@ -141,7 +141,7 @@ def insert_tuple(tuple: Tuple):
             no_null_action_element_locator.text,
             no_null_action_element_locator.hint,
             no_null_action_element_locator.contentDesc,
-            no_null_action_element_locator.screenId,
+            no_null_action_element_locator.screen_id,
             str(tuple.destination.id),
         ),
     )
