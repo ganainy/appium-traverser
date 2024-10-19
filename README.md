@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Mobile Application Automated Traversal Script
 
 ## Project Overview
@@ -86,3 +87,6 @@ These limitations present opportunities for future work and contributions from t
 ## Flowchart of the process of app traversal
 ![Alt text](flowchart.drawio.png)
 
+=======
+# appium-traverser
+>>>>>>> origin/main
