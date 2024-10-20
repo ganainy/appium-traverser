@@ -1,1 +1,6 @@
 /.env
+*.db
+*.pkl
+*.png
+*.jpg
+

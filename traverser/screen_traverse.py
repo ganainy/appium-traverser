@@ -8,6 +8,7 @@ from typing import List, Optional
 from appium import webdriver
 from appium.options.common.base import AppiumOptions
 
+from traverser.data_classes.gui_params import GuiParams
 from traverser.data_classes.screen import Screen
 from traverser.utils import sql_db
 from data_classes.element import UiElement
@@ -23,6 +24,9 @@ from PIL import Image
 from skimage.metrics import structural_similarity as ssim
 
 
+
+
+
 #todo fix model detecting different elements on same screen because of animations,maybe using tessarex OCR to get all page text + unique element properties and similarity factor
 #to determine if unique screen or not
 
@@ -33,32 +37,20 @@ logging.basicConfig(
 global_driver = None
 global_screen_list = []
 global_tuples_list = []
-#TODO all these variables to be controlled using an interface
-global_current_app = None  # Global variable to keep track of the current GUIApp instance
 global_current_screen = None
 global_last_visited_screen = None
 global_last_executed_action = None
 global_ui_element = None
-
+global_max_retries =None
 global_start_time = None
 global_analysis_screen_id=0 # used to give unique ids for the images with the bounding boxes to see how well model is detecting objects
-global_synthetic_delay_amount = 0.1  # amount of delay added to make space between actions
-max_retries = 1  # Maximum number of retries(after a crash) before the script ends itself
+global_expected_package = None
+global_expected_start_activity = None
+global_analysis_screenshots_path = None
+global_screenshots_path = None
+global_synthetic_delay_amount = None
+global_similarity_threshold = None
 
-expected_package = (
-    "eu.smartpatient.mytherapy"  # the name of the package we want to traverse
-)
-expected_start_activity = (
-    "eu.smartpatient.mytherapy.feature.account.presentation.onboarding.WelcomeActivity"
-)
-expected_target_device = "279cb9b1"
-
-analysis_screenshots_path = os.path.join(os.getcwd(), f"{expected_package}_analysis_screenshots")
-screenshots_path = os.path.join(os.getcwd(), f"{expected_package}_screenshots")
-
-# params related to the used object detection model
-global_project_name="vins-dataset-no-wire-modified"
-global_project_version=2
 
 
 def get_secret_api_key():
@@ -70,7 +62,8 @@ def get_secret_api_key():
 "get different ui-elements using the deep learning model"
 
 
-def save_image_with_bound_boxes(result, analysis_screenshot_path, global_analysis_screen_id):
+def save_image_with_bound_boxes(result, global_analysis_screen_id):
+    global global_analysis_screenshots_path
 
     # Manually create Detections object
     boxes = []
@@ -94,31 +87,38 @@ def save_image_with_bound_boxes(result, analysis_screenshot_path, global_analysi
     label_annotator = sv.LabelAnnotator()
     box_annotator = sv.BoxAnnotator()
 
+    analysis_screenshot_path = os.path.join(global_analysis_screenshots_path,
+                                            f"analysis_screen{global_analysis_screen_id}.png")
+
+
     image = cv2.imread(analysis_screenshot_path)
 
     annotated_image = box_annotator.annotate(scene=image, detections=detections)
     annotated_image = label_annotator.annotate(scene=annotated_image, detections=detections, labels=labels)
 
     # Create a folder to save the annotated images if it doesn't exist
-    os.makedirs(analysis_screenshots_path, exist_ok=True)
+    os.makedirs(global_analysis_screenshots_path, exist_ok=True)
 
     # Generate a unique filename using global_analysis_screen_id
     output_filename = f"analysis_screen_annotated_{global_analysis_screen_id}.png"
-    output_path = os.path.join(analysis_screenshots_path, output_filename)
+    output_path = os.path.join(global_analysis_screenshots_path, output_filename)
 
     # Save the annotated image
     cv2.imwrite(output_path, annotated_image)
 
 
 def get_screenshot_path():
-    global global_analysis_screen_id
+    global global_analysis_screen_id,global_analysis_screenshots_path
     global_analysis_screen_id += 1
     # Define the full path for the screenshot
-    analysis_screenshot_path = os.path.join(analysis_screenshots_path,
+    analysis_screenshot_path = os.path.join(global_analysis_screenshots_path,
                                             f"analysis_screen{global_analysis_screen_id}.png")
     # Create the tmp-screenshots directory if it doesn't exist
-    if not os.path.exists(analysis_screenshots_path):
-        os.makedirs(analysis_screenshots_path)
+    if not os.path.exists(global_analysis_screenshots_path):
+        os.makedirs(global_analysis_screenshots_path)
+    # Save the screenshot
+    global_driver.save_screenshot(analysis_screenshot_path)
+
     return analysis_screenshot_path
 
 def get_ui_elements(analysis_screenshot_path:str):
@@ -142,7 +142,7 @@ def get_ui_elements(analysis_screenshot_path:str):
     result = CLIENT.infer(analysis_screenshot_path, model_id="vins-dataset-no-wire-modified/2")
 
     #save image with the bounding boxes (to assess the quality of the used model)
-    save_image_with_bound_boxes(result,analysis_screenshot_path,global_analysis_screen_id)
+    save_image_with_bound_boxes(result,global_analysis_screen_id)
 
     # This list includes all types on locators (action,input,layout, etc...)
     ui_elements = []
@@ -189,18 +189,26 @@ def is_action_element(element: UiElement) -> bool:
     return False
 
 
-def main():
-    global expected_package
-    global expected_start_activity
-    global expected_target_device
+def main(gui_params:GuiParams):
+    global global_max_retries,global_expected_package,global_expected_start_activity,global_analysis_screenshots_path,global_screenshots_path,global_synthetic_delay_amount,global_similarity_threshold
+
+    global_expected_package = gui_params.expected_package
+    global_expected_start_activity = gui_params.expected_start_activity
+
+    global_analysis_screenshots_path = os.path.join(os.getcwd(), f"{gui_params.expected_package}_analysis_screenshots")
+    global_screenshots_path = os.path.join(os.getcwd(), f"{gui_params.expected_package}_screenshots")
+    global_max_retries=gui_params.max_retries
+    global_synthetic_delay_amount=gui_params.synthetic_delay_amount
+    global_similarity_threshold=gui_params.similarity_threshold
+
     options = AppiumOptions()
     options.load_capabilities(
         {
             "platformName": "Android",
             "appium:automationName": "uiautomator2",
-            "appium:deviceName": expected_target_device,
-            "appium:appPackage": expected_package,
-            "appium:appActivity": expected_start_activity,
+            "appium:deviceName": gui_params.expected_target_device,
+            "appium:appPackage": gui_params.expected_package,
+            "appium:appActivity": gui_params.expected_start_activity,
             "appium:noReset": True,
             "appium:autoGrantPermissions": True,
             "appium:newCommandTimeout": 3600,
@@ -251,7 +259,7 @@ def main():
         global global_last_executed_action
         global global_ui_element
         global global_start_time
-        global max_retries
+        global global_max_retries
 
         # flag to check if app exited normally or crashed
         exception_occurred_flag = False
@@ -274,7 +282,7 @@ def main():
         else:
             logging.info("No checkpoint found. Starting from the beginning.")
 
-        while retries < max_retries:  # Retry loop
+        while retries < global_max_retries:  # Retry loop
             try:
                 global_driver = webdriver.Remote("http://127.0.0.1:4723", options=options)
                 # Record the start time
@@ -295,7 +303,7 @@ def main():
 
                     # Check if the screen after doing the action is the same screen before the action
                     screenshot_path=get_screenshot_path()
-                    most_similar_screen = find_most_similar_screen(screenshot_path, global_screen_list, 0.8)
+                    most_similar_screen = find_most_similar_screen(screenshot_path, global_screen_list)
 
                     if most_similar_screen is not None:
                         global_current_screen = most_similar_screen
@@ -368,7 +376,7 @@ def main():
                             global_ui_element.mark_element_as_explored()
 
                             if global_ui_element.classification == "input":
-                                fillInputElement(global_ui_element)
+                                fill_input_element(global_ui_element)
                             elif global_ui_element.classification != "input":
                                 tap_action_element(global_ui_element)
 
@@ -419,7 +427,7 @@ def main():
                 if global_driver:
                     global_driver.quit()
 
-        if retries == max_retries:
+        if retries == global_max_retries:
             logging.error("Max retries reached, exiting the test.")
             return
         else:
@@ -428,8 +436,8 @@ def main():
     # Function to check if the current screen belongs to the specified app
     def ensure_in_app(allow_external_webviews=False):
         global global_driver
-        global expected_package
-        global expected_start_activity
+        global global_expected_package
+        global global_expected_start_activity
 
         current_package = global_driver.current_package
         current_activity = global_driver.current_activity
@@ -453,13 +461,13 @@ def main():
             )
 
         if (
-            current_package != expected_package
+            current_package != global_expected_package
             and current_package not in allowed_external_packages
         ):
             return_to_app(allowed_external_packages)
         else:
 
-            if current_package == expected_package:
+            if current_package == global_expected_package:
                 pass
             else:
                 if allow_external_webviews:
@@ -469,7 +477,7 @@ def main():
                         f"In an external package ({current_package}), but WebViews are not allowed. Returning to main app."
                     )
                     # Construct the intent string
-                    intent = f"{expected_package}/{expected_start_activity}"
+                    intent = f"{global_expected_package}/{global_expected_start_activity}"
                     # Use the execute_script method to start the activity
                     global_driver.execute_script("mobile: startActivity", {"intent": intent})
 
@@ -480,11 +488,11 @@ def main():
 
         current_package = global_driver.current_package
         if (
-            current_package != expected_package
+            current_package != global_expected_package
             and current_package not in allowed_external_packages
         ):
             # Construct the intent string
-            intent = f"{expected_package}/{expected_start_activity}"
+            intent = f"{global_expected_package}/{global_expected_start_activity}"
             # Use the execute_script method to start the activity
             global_driver.execute_script("mobile: startActivity", {"intent": intent})
             time.sleep(2)
@@ -496,20 +504,20 @@ def main():
 
     # this method takes a screenshot of the device
     def take_unique_screen_screenshot(screen_id):
-        global screenshots_path
+        global global_screenshots_path
         logging.info(f"Taking a screenshot of screen {screen_id} ...")
         global global_driver
 
         # Create the tmp-screenshots directory if it doesn't exist
-        if not os.path.exists(screenshots_path):
-            os.makedirs(screenshots_path)
+        if not os.path.exists(global_screenshots_path):
+            os.makedirs(global_screenshots_path)
 
         # Define the full path for the screenshot, including the expected_package at the start
-        screenshot_path = os.path.join(screenshots_path, f"screen{screen_id}.png")
+        screenshot_path = os.path.join(global_screenshots_path, f"screen{screen_id}.png")
 
         # Save the screenshot
         global_driver.save_screenshot(screenshot_path)
-        logging.info(f"Screenshot saved: {screenshot_path}")
+        logging.info(f"Screenshot saved: {global_screenshots_path}")
 
     def is_unique_tuple(src_screen, element, dest_screen, tuples_list):
         # Check for None values
@@ -559,7 +567,7 @@ def main():
 
 # TODO if the object detection detect edittext upload screenshot to ai model and ask him to give mock data to fill the fields
 #  this function takes a field input and fills it based on its label/text
-def fillInputElement(element_locator):
+def fill_input_element(element):
     # Define dummy data for different classifications
     signup_data = {
         "email": "afoda500@gmail.com",
@@ -673,7 +681,12 @@ def delete_screenshots():
 
 
 
-def find_most_similar_screen(image1_path: str, screens: List[Screen], similarity_threshold: float = 0.9) -> Optional[Screen]:
+def find_most_similar_screen(image1_path: str, screens: List[Screen]) -> Optional[Screen]:
+    global global_similarity_threshold
+
+    if len(screens) == 0:
+        return None
+
     # Open and convert the first image to grayscale
     img1 = Image.open(image1_path).convert('L')
     arr1 = np.array(img1)
@@ -700,15 +713,15 @@ def find_most_similar_screen(image1_path: str, screens: List[Screen], similarity
             highest_similarity = similarity
 
         # Count screens with high similarity
-        if similarity >= similarity_threshold:
+        if similarity >= global_similarity_threshold:
             high_similarity_count += 1
 
     # Notify if multiple images have high similarity
     if high_similarity_count > 1:
-        print(f"Note: {high_similarity_count} images have similarity of {similarity_threshold:.0%} or higher.")
+        print(f"Note: {high_similarity_count} images have similarity of {global_similarity_threshold:.0%} or higher.")
 
     # Return the most similar screen if it meets the threshold, otherwise None
-    if most_similar_screen and highest_similarity >= similarity_threshold:
+    if most_similar_screen and highest_similarity >= global_similarity_threshold:
         print(f"Highest similarity: {highest_similarity:.2%}")
         return most_similar_screen
     else:
@@ -718,16 +731,17 @@ def find_most_similar_screen(image1_path: str, screens: List[Screen], similarity
 
 
 
-if __name__ == "__main__":
-    conn = sql_db.create_connection(f"{expected_package}.db")
-    if conn is not None:
-        # Drop existing tables if they exist
-        cursor = conn.cursor()
-        cursor.execute("DROP TABLE IF EXISTS element_table")
-        cursor.execute("DROP TABLE IF EXISTS tuples_table")
-        conn.commit()
-
-        delete_screenshots()
-        sql_db.create_ui_elements_table("element_table")
-        sql_db.create_tuples_table("tuples_table")
-    main()
+# if __name__ == "__main__":
+#     conn = sql_db.create_connection(f"{expected_package}.db")
+#     if conn is not None:
+#         # Drop existing tables if they exist
+#         cursor = conn.cursor()
+#         cursor.execute("DROP TABLE IF EXISTS element_table")
+#         cursor.execute("DROP TABLE IF EXISTS tuples_table")
+#         conn.commit()
+#
+#         delete_screenshots()
+#         sql_db.create_ui_elements_table("element_table")
+#         sql_db.create_tuples_table("tuples_table")
+#     main(GuiParams(max_retries, expected_package, expected_start_activity, expected_target_device, global_project_name,
+#                    global_project_version))
