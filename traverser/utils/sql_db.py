@@ -5,7 +5,7 @@ from traverser.data_classes.element import UiElement
 from traverser.data_classes.tuple import Tuple
 
 conn = None
-element_locators_table_name = None
+elements_table_name = None
 tuple_table_name = None
 
 
@@ -14,50 +14,42 @@ def create_connection(db_file):
     global conn
     try:
         conn = sqlite3.connect(db_file)
-        logging.info(f"Connected to database: {db_file}")
     except sqlite3.Error as e:
         print(e)
     return conn
 
 
-def create_elements_locators_table(given_table_name):
+def create_ui_elements_table(given_table_name):
     global conn
-    global element_locators_table_name
-    element_locators_table_name = given_table_name
+    global elements_table_name
+    elements_table_name = given_table_name
 
     try:
         # Check if the table already exists
         cur = conn.cursor()
         cur.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
-            (element_locators_table_name,),
+            (elements_table_name,),
         )
         table_exists = cur.fetchone()
 
         if table_exists:
-            logging.info(
-                f"Table {element_locators_table_name} already exists. No action needed."
-            )
             return
 
         # Create table if it does not exist
         create_table_command = f"""
-              CREATE TABLE IF NOT EXISTS {element_locators_table_name} (
-                  id TEXT,
-                  classification TEXT,
-                  className TEXT,
-                  text TEXT,
-                  location TEXT,
-                  contentDesc TEXT,
-                  hint TEXT,
-                  bounds TEXT,
-                  screenId TEXT,
-                  explored TEXT
-              );
-          """
+                 CREATE TABLE IF NOT EXISTS {elements_table_name} (
+                     id TEXT,
+                     x TEXT,
+                     y TEXT,
+                     width TEXT,
+                     height TEXT,
+                     confidence TEXT,
+                     class_name TEXT,
+                     detection_id TEXT
+                 );
+             """
         conn.execute(create_table_command)
-        logging.info(f"Table {element_locators_table_name} created successfully")
-
     except sqlite3.Error as e:
         logging.error(f"An error occurred: {e}")
 
@@ -77,7 +69,6 @@ def create_tuples_table(given_table_name):
         table_exists = cur.fetchone()
 
         if table_exists:
-            logging.info(f"Table {given_table_name} already exists. No action needed.")
             return
 
         # Create table if it does not exist
@@ -85,26 +76,23 @@ def create_tuples_table(given_table_name):
               CREATE TABLE IF NOT EXISTS {given_table_name} (
                   source_screen_id TEXT,
                   action_id TEXT,
-                  action_text TEXT,
-                  action_hint TEXT,
-                  action_contentDesc TEXT,
-                  action_screenId TEXT,
+                  action_screen_id TEXT,
                   destination_screen_id TEXT
               );
           """
         conn.execute(create_table_command)
-        logging.info(f"Table {given_table_name} created successfully")
 
     except sqlite3.Error as e:
         logging.error(f"An error occurred: {e}")
 
 
-def insert_element_locator(element_locator):
-    """Insert a element_locator object into the elements_locators table."""
+
+def insert_element(element_locator):
+    """Insert a element object into the ui_elements table."""
     global conn
     no_null_element_locator = replace_none_with_empty_string(element_locator)
-    sql = f""" INSERT INTO {element_locators_table_name}(id, classification, className, text, location, contentDesc, hint, bounds, screenId, explored)
-              VALUES(?,?,?,?,?,?,?,?,?,?) """
+    sql = f""" INSERT INTO {elements_table_name}(id, x, y, width, height, confidence, class_name, detection_id)
+              VALUES(?,?,?,?,?,?,?,?) """
     cur = conn.cursor()
     cur.execute(
         sql,
@@ -125,8 +113,8 @@ def insert_tuple(tuple: Tuple):
     """Insert a tuple object into the tuples table."""
     global conn
     no_null_action_element_locator = replace_none_with_empty_string(tuple.action)
-    sql = f""" INSERT INTO {tuple_table_name}(source_screen_id, action_id, action_text, action_hint, action_contentDesc, action_screenId, destination_screen_id)
-              VALUES(?,?,?,?,?,?,?) """
+    sql = f""" INSERT INTO {tuple_table_name}(source_screen_id, action_id,action_screen_id, destination_screen_id)
+              VALUES(?,?,?,?) """
     cur = conn.cursor()
     cur.execute(
         sql,

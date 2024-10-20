@@ -1,106 +1,93 @@
-import logging
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk  # Import ttk for dropdown menus
+import logging
 
-class GUIApp:
-    def __init__(self, root, screen_list, tuples_list):
-        self.root = root
-        self.root.title("Real-Time Data Display")
-        self.screen_list = screen_list
-        self.tuples_list = tuples_list
+from traverser import screen_traverse  # Assuming this is your main traversal logic
+#todo add time and fix stop button and make the selected settings reflect to global variables and maybe add the logs from console to gui with screenshots
+# Initialize logging
+logging.basicConfig(level=logging.INFO)
 
-        # Tuple Table Label
-        self.tuple_label = tk.Label(root, text="Tuple Table")
-        self.tuple_label.pack()
+# Define global variables
+max_retries = 1
+expected_package = "eu.smartpatient.mytherapy"
+expected_start_activity = "eu.smartpatient.mytherapy.feature.account.presentation.onboarding.WelcomeActivity"
+expected_target_device = "279cb9b1"
+global_project_name = "vins-dataset-no-wire-modified"
+global_project_version = 2
 
-        # Tuple Table
-        self.tuple_tree = ttk.Treeview(root, columns=('ID', 'Source', 'Action', 'Destination'), show='headings')
-        self.tuple_tree.heading('ID', text='ID')
-        self.tuple_tree.heading('Source', text='Source')
-        self.tuple_tree.heading('Action', text='Action')
-        self.tuple_tree.heading('Destination', text='Destination')
+def start_execution():
+    global max_retries, expected_package, expected_start_activity, expected_target_device
+    global global_project_name, global_project_version
 
-        for col in self.tuple_tree['columns']:
-            self.tuple_tree.column(col, anchor='center', stretch=tk.NO)  # Center text and adjust width based on content
+    # Fetch values from the GUI inputs
+    max_retries = int(max_retries_entry.get())
+    expected_package = package_entry.get()
+    expected_start_activity = activity_entry.get()
+    expected_target_device = device_entry.get()
+    global_project_name = project_name_entry.get()
+    global_project_version = int(project_version_entry.get())
 
-        self.tuple_tree.pack(fill=tk.BOTH, expand=True)
+    # Log the parameters
+    logging.info("Starting execution with the following settings:")
+    logging.info(f"Max Retries: {max_retries}")
+    logging.info(f"Expected Package: {expected_package}")
+    logging.info(f"Expected Start Activity: {expected_start_activity}")
+    logging.info(f"Expected Target Device: {expected_target_device}")
+    logging.info(f"Global Project Name: {global_project_name}")
+    logging.info(f"Global Project Version: {global_project_version}")
 
-        # Screen Table Label
-        self.screen_label = tk.Label(root, text="Screen Table")
-        self.screen_label.pack()
+    # Call the main function with parameters
+    screen_traverse.main()
 
-        # Screen Table
-        self.screen_tree = ttk.Treeview(root, columns=('ID',), show='headings')
-        self.screen_tree.heading('ID', text='screen ID')
+def stop_execution():
+    # Placeholder function to stop execution
+    logging.info("Execution stopped (functionality to be implemented).")
 
-        for col in self.screen_tree['columns']:
-            self.screen_tree.column(col, anchor='center', stretch=tk.NO)  # Center text and adjust width based on content
+# Create the main window
+root = tk.Tk()
+root.title("Script Controller")
+root.geometry("1000x400")  # Set window size
 
-        self.screen_tree.pack(fill=tk.BOTH, expand=True)
+# Create and place labels and entry fields for each variable with larger space
+tk.Label(root, text="Max Retries:").grid(row=0, column=0, pady=10, padx=10)
+max_retries_entry = tk.Entry(root, width=100)  # Increased width
+max_retries_entry.insert(0, str(max_retries))  # Default value
+max_retries_entry.grid(row=0, column=1, pady=10, padx=10)
 
-        # ElementLocator Table Label
-        self.element_locator_label = tk.Label(root, text="Element Locator Table")
-        self.element_locator_label.pack()
+tk.Label(root, text="Expected Package:").grid(row=1, column=0, pady=10, padx=10)
+package_entry = ttk.Combobox(root, width=100)  # Increased width
+package_entry['values'] = ["eu.smartpatient.mytherapy", "another.package.name"]  # Example values
+package_entry.set(expected_package)  # Default value
+package_entry.grid(row=1, column=1, pady=10, padx=10)
 
-        # ElementLocator Table
-        self.element_locator_tree = ttk.Treeview(root, columns=(
-            'screenId', 'ID', 'Classification', 'ClassName', 'Text', 'Location', 'ContentDesc', 'Hint', 'Bounds'),
-                                                 show='headings')
-        self.element_locator_tree.heading('screenId', text='screenId')
-        self.element_locator_tree.heading('ID', text='ID')
-        self.element_locator_tree.heading('Classification', text='Classification')
-        self.element_locator_tree.heading('ClassName', text='ClassName')
-        self.element_locator_tree.heading('Text', text='Text')
-        self.element_locator_tree.heading('Location', text='Location')
-        self.element_locator_tree.heading('ContentDesc', text='ContentDesc')
-        self.element_locator_tree.heading('Hint', text='Hint')
-        self.element_locator_tree.heading('Bounds', text='Bounds')
+tk.Label(root, text="Expected Start Activity:").grid(row=2, column=0, pady=10, padx=10)
+activity_entry = ttk.Combobox(root, width=100)  # Increased width
+activity_entry['values'] = ["Activity1", "Activity2"]  # Example values
+activity_entry.set(expected_start_activity)  # Default value
+activity_entry.grid(row=2, column=1, pady=10, padx=10)
 
-        for col in self.element_locator_tree['columns']:
-            self.element_locator_tree.column(col, anchor='center', stretch=tk.NO)  # Center text and adjust width based on content
+tk.Label(root, text="Expected Target Device:").grid(row=3, column=0, pady=10, padx=10)
+device_entry = ttk.Combobox(root, width=100)  # Increased width
+device_entry['values'] = ["279cb9b1", "another_device_id"]  # Example values
+device_entry.set(expected_target_device)  # Default value
+device_entry.grid(row=3, column=1, pady=10, padx=10)
 
-        self.element_locator_tree.pack(fill=tk.BOTH, expand=True)
+tk.Label(root, text="Global Project Name:").grid(row=4, column=0, pady=10, padx=10)
+project_name_entry = tk.Entry(root, width=100)  # Increased width
+project_name_entry.insert(0, global_project_name)
+project_name_entry.grid(row=4, column=1, pady=10, padx=10)
 
-        # Start the update process
-        self.update_tables()
+tk.Label(root, text="Global Project Version:").grid(row=5, column=0, pady=10, padx=10)
+project_version_entry = tk.Entry(root, width=100)  # Increased width
+project_version_entry.insert(0, str(global_project_version))
+project_version_entry.grid(row=5, column=1, pady=10, padx=10)
 
-    def close(self):
-        self.root.destroy()
+# Create Start and Stop buttons
+start_button = tk.Button(root, text="Start", command=start_execution, width=15)
+start_button.grid(row=6, column=0, columnspan=2, pady=20)
 
-    def update_tables(self):
-        #logging.info(f"update_tables GUI is called, screen_list has {len(self.screen_list)} items, tuples_list has {len(self.tuples_list)} items")
-        self.update_tuple_table()
-        self.update_screen_table()
-        self.update_element_locator_table()
-        self.root.after(1000, self.update_tables)  # Update every second
+stop_button = tk.Button(root, text="Stop", command=stop_execution, width=15)
+stop_button.grid(row=7, column=0, columnspan=2, pady=10)
 
-    def update_tuple_table(self):
-        # Clear the existing rows
-        for row in self.tuple_tree.get_children():
-            self.tuple_tree.delete(row)
-
-        # Insert the new rows
-        for tup in self.tuples_list:
-            self.tuple_tree.insert('', tk.END, values=(tup.id, tup.source.id, tup.action, tup.destination.id))
-
-    def update_screen_table(self):
-        # Clear the existing rows
-        for row in self.screen_tree.get_children():
-            self.screen_tree.delete(row)
-
-        # Insert the new rows
-        for screen in self.screen_list:
-            self.screen_tree.insert('', tk.END, values=(screen.id,))
-
-    def update_element_locator_table(self):
-        # Clear the existing rows
-        for row in self.element_locator_tree.get_children():
-            self.element_locator_tree.delete(row)
-
-        for screen in self.screen_list:
-            # Insert the new rows
-            for element in screen.elements_locators_list:
-                self.element_locator_tree.insert('', tk.END, values=(
-                    element.screen_id, element.id, element.classification, element.class_name, element.text,
-                    element.location, element.contentDesc, element.hint, element.bounds
-                ))
+# Run the Tkinter event loop
+root.mainloop()

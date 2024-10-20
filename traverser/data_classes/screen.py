@@ -14,6 +14,7 @@ class Screen:
     screen_id = 1  # Class variable for the screen ID, shared across all instances
 
     def __init__(self, elements_list: List[UiElement]):
+        self.image_path = None
         self.id = Screen.screen_id  # Assign the current class-level screen_id to the instance
         self.elements_list: List[UiElement] = elements_list
         Screen.screen_id += 1  # Increment the class-level screen_id for the next instance

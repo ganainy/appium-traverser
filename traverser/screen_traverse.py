@@ -4,7 +4,7 @@ import pickle
 import shutil
 import time
 import traceback
-from typing import List
+from typing import List, Optional
 from appium import webdriver
 from appium.options.common.base import AppiumOptions
 
@@ -19,7 +19,13 @@ import os
 import cv2
 import numpy as np
 import supervision as sv
-#todo fix model detecting different elements on same screen because of animations
+from PIL import Image
+from skimage.metrics import structural_similarity as ssim
+
+
+#todo fix model detecting different elements on same screen because of animations,maybe using tessarex OCR to get all page text + unique element properties and similarity factor
+#to determine if unique screen or not
+
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
@@ -103,27 +109,26 @@ def save_image_with_bound_boxes(result, analysis_screenshot_path, global_analysi
     # Save the annotated image
     cv2.imwrite(output_path, annotated_image)
 
-    print(f"Annotated image saved to: {output_path}")
 
+def get_screenshot_path():
+    global global_analysis_screen_id
+    global_analysis_screen_id += 1
+    # Define the full path for the screenshot
+    analysis_screenshot_path = os.path.join(analysis_screenshots_path,
+                                            f"analysis_screen{global_analysis_screen_id}.png")
+    # Create the tmp-screenshots directory if it doesn't exist
+    if not os.path.exists(analysis_screenshots_path):
+        os.makedirs(analysis_screenshots_path)
+    return analysis_screenshot_path
 
-
-def get_ui_elements():
+def get_ui_elements(analysis_screenshot_path:str):
     global global_driver
     global analysis_screenshots_path
-    global global_analysis_screen_id
-
-    global_analysis_screen_id += 1
 
     # Find all elements on the screen
     logging.info("----------------------------------------------")
     logging.info(f"Analyzing screenshot ...")
 
-    # Create the tmp-screenshots directory if it doesn't exist
-    if not os.path.exists(analysis_screenshots_path):
-        os.makedirs(analysis_screenshots_path)
-
-    # Define the full path for the screenshot
-    analysis_screenshot_path = os.path.join(analysis_screenshots_path, f"analysis_screen{global_analysis_screen_id}.png")
 
     # Save the screenshot
     global_driver.save_screenshot(analysis_screenshot_path)
@@ -162,8 +167,9 @@ def set_element_locator_classification(element: UiElement):
 
 
 # creates a new screen and returns it
-def create_screen(elements:List[UiElement]):
+def create_screen(elements:List[UiElement],screenshot_path:str):
     created_screen = Screen(elements)
+    created_screen.image_path=screenshot_path
     # add screen id to each locator for logging purposes
     for element in created_screen.elements_list:
         element.screen_id = created_screen.id
@@ -205,6 +211,20 @@ def main():
     CHECKPOINT_FILE = "app_state_checkpoint.pkl"
 
     def save_checkpoint():
+        """
+
+        Saves the current state of the application to a checkpoint file.
+
+        The state includes:
+        - screen_list: List of all screens in the application.
+        - tuples_list: List of tuples representing certain state aspects.
+        - current_screen: The screen currently being displayed.
+        - last_visited_screen: The screen that was last visited before the current one.
+        - last_executed_action: The most recent action that has been executed.
+        - element_locator: The UI element locator details.
+
+        The state is saved to the file defined by CHECKPOINT_FILE in binary format using pickle.
+        """
         state = {
             "screen_list": global_screen_list,
             "tuples_list": global_tuples_list,
@@ -274,30 +294,22 @@ def main():
                     ensure_in_app()
 
                     # Check if the screen after doing the action is the same screen before the action
+                    screenshot_path=get_screenshot_path()
+                    most_similar_screen = find_most_similar_screen(screenshot_path, global_screen_list, 0.8)
 
-                    ui_elements:List[UiElement]= (
-                        get_ui_elements()
-                    )
-
-                    # check if screen is unique or not
-                    is_unique_screen_flag = is_unique_screen(
-                    ui_elements
-                    )
-
-                    global_current_screen = get_screen_by_elements(
-                         ui_elements, global_screen_list
-                     )
-
-                    if global_current_screen is not None:
-                        # The screen after the action is the same as before the action
+                    if most_similar_screen is not None:
+                        global_current_screen = most_similar_screen
                         logging.info(
-                            f"old screen  {global_current_screen.id} with {global_current_screen.get_sum_unexplored_elements()}/{len(global_current_screen.elements_locators_list)} unexplored locators already in screen_list , length is still: {len(global_screen_list)}"
-                        )
+                                f"old screen  {global_current_screen.id} with {global_current_screen.get_sum_unexplored_elements()}/{len(global_current_screen.elements_list)} unexplored locators already in screen_list , length is still: {len(global_screen_list)}"
+                            )
                     else:
                         # the screen after doing the action is not the same screen before the action
+                        ui_elements = (
+                            get_ui_elements(screenshot_path)
+                        )
 
                         global_current_screen = create_screen(
-                            ui_elements
+                            ui_elements,screenshot_path
                         )
                         global_screen_list.append(global_current_screen)
                         take_unique_screen_screenshot(global_current_screen.id)
@@ -446,14 +458,12 @@ def main():
         ):
             return_to_app(allowed_external_packages)
         else:
-            logging.info(
-                f"Current package: {current_package}, Current activity: {current_activity}"
-            )
+
             if current_package == expected_package:
-                logging.info(f"Already in the expected app ({expected_package}).")
+                pass
             else:
                 if allow_external_webviews:
-                    logging.info(f"In an allowed external package ({current_package}).")
+                    pass
                 else:
                     logging.warning(
                         f"In an external package ({current_package}), but WebViews are not allowed. Returning to main app."
@@ -473,18 +483,13 @@ def main():
             current_package != expected_package
             and current_package not in allowed_external_packages
         ):
-            logging.info(
-                f"Still not in the expected app or allowed external package. Relaunching the app. {current_package}"
-            )
             # Construct the intent string
             intent = f"{expected_package}/{expected_start_activity}"
             # Use the execute_script method to start the activity
             global_driver.execute_script("mobile: startActivity", {"intent": intent})
             time.sleep(2)
         else:
-            logging.info(
-                f"Successfully navigated back to the app or an allowed external package."
-            )
+            pass
 
     def press_device_back_button(driver):
         driver.press_keycode(4)  # 4 is the Android keycode for the back button
@@ -530,8 +535,8 @@ def main():
             if tuple is None:
                 logging.warning("Encountered None tuple in tuples_list")
                 continue
-            if not hasattr(tuple, "isSameTupleAs"):
-                logging.warning(f"Tuple {tuple} does not have isSameTupleAs method")
+            if not hasattr(tuple, "is_same_tuple_as"):
+                logging.warning(f"Tuple {tuple} does not have is_same_tuple_as method")
                 continue
             if tuple.is_same_tuple_as(src_screen, element, dest_screen):
                 is_unique = False
@@ -546,18 +551,7 @@ def main():
         return action is not None and not src_screen.is_same_screen_as(dest_screen)
 
 
-    def get_screen_by_elements(ui_elements, screen_list):
-        for screen in screen_list:
-            if screen.elements_list == ui_elements:
-                return screen
-        return None
 
-    def is_unique_screen(ui_elements:List[UiElement]):
-        global global_screen_list
-        for screen in global_screen_list:
-            if screen.elements_list == ui_elements:
-                return False
-        return True
 
 
     app_logic()
@@ -677,16 +671,63 @@ def delete_screenshots():
         print(f"The folder {screenshots_path} does not exist.")
 
 
+
+
+def find_most_similar_screen(image1_path: str, screens: List[Screen], similarity_threshold: float = 0.9) -> Optional[Screen]:
+    # Open and convert the first image to grayscale
+    img1 = Image.open(image1_path).convert('L')
+    arr1 = np.array(img1)
+
+    most_similar_screen = None
+    highest_similarity = 0
+    high_similarity_count = 0
+
+    for screen in screens:
+        # Open and convert each screen image to grayscale
+        img2 = Image.open(screen.image_path).convert('L')
+        arr2 = np.array(img2)
+
+        # Resize images to the same dimensions if needed (optional)
+        if arr1.shape != arr2.shape:
+            arr2 = np.resize(arr2, arr1.shape)
+
+        # Compute the SSIM between the two images
+        similarity, _ = ssim(arr1, arr2, full=True)
+
+        # Update most similar screen if the similarity is higher than the current highest
+        if similarity > highest_similarity:
+            most_similar_screen = screen
+            highest_similarity = similarity
+
+        # Count screens with high similarity
+        if similarity >= similarity_threshold:
+            high_similarity_count += 1
+
+    # Notify if multiple images have high similarity
+    if high_similarity_count > 1:
+        print(f"Note: {high_similarity_count} images have similarity of {similarity_threshold:.0%} or higher.")
+
+    # Return the most similar screen if it meets the threshold, otherwise None
+    if most_similar_screen and highest_similarity >= similarity_threshold:
+        print(f"Highest similarity: {highest_similarity:.2%}")
+        return most_similar_screen
+    else:
+        print(f"No match, highest similarity: {highest_similarity:.2%}")
+        return None
+
+
+
+
 if __name__ == "__main__":
     conn = sql_db.create_connection(f"{expected_package}.db")
     if conn is not None:
         # Drop existing tables if they exist
         cursor = conn.cursor()
-        cursor.execute("DROP TABLE IF EXISTS element_locators_v1")
-        cursor.execute("DROP TABLE IF EXISTS tuples_table_v1")
+        cursor.execute("DROP TABLE IF EXISTS element_table")
+        cursor.execute("DROP TABLE IF EXISTS tuples_table")
         conn.commit()
 
         delete_screenshots()
-        sql_db.create_elements_locators_table("element_locators_v1")
-        sql_db.create_tuples_table("tuples_table_v1")
+        sql_db.create_ui_elements_table("element_table")
+        sql_db.create_tuples_table("tuples_table")
     main()
