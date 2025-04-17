@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # Mobile Application Automated Traversal Script
 
 ## Project Overview
@@ -27,40 +26,18 @@ https://drive.google.com/drive/folders/1ZqGZRqJtk7fDf4vb4RHUFVF7VgNBRt8D?usp=sha
 - Crash recovery and retry mechanism
 - Logging result into SQL Database 
 
-## Prerequisites
 
-- Python 3.x
-- Appium
-- Android SDK
-- Required Python packages (install via `pip install -r requirements.txt`):
-
-
-## Setup
-
-1. Clone this repository
-2. Install the required packages: `pip install -r requirements.txt`
-3. Set up Appium server
-4. Configure your Android device or emulator
-
-## Configuration
-
-Modify the following variables in the script to match that of the application you want to test:
-
-- `expected_package`: The package name of the app you want to test
-- `expected_start_activity`: The main activity of the app
-- `expected_target_device`: The device ID of your Android device or emulator
-
-## Usage
-
-Run the script using Python:
-`python main_script.py`
-
+## Prerequisites, Setup, and Running the Script
+**Note:** The prerequisites, setup instructions, and how to run the script are detailed in the `SETUP_GUIDE.md` file.
+ 
+ 
+ 
+ 
 ## Key Components
 
 - `ElementLocator`: Class for identifying and classifying UI elements
 - `Screen`: Class for managing screen states
 - `Tuple`: Class for managing action sequences
-- `GUIApp`: Class for managing the GUI application state
 
 ## Limitations and Future Improvements
 
@@ -87,6 +64,3 @@ These limitations present opportunities for future work and contributions from t
 ## Flowchart of the process of app traversal
 ![Alt text](flowchart.drawio.png)
 
-=======
-# appium-traverser
->>>>>>> origin/main

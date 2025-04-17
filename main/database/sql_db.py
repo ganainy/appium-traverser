@@ -1,8 +1,8 @@
 import logging
 import sqlite3
 
-from elementlocator import ElementLocator
-from tuple import Tuple
+from main.models.element_locator import ElementLocator
+from main.models.tuple import Tuple
 
 conn = None
 element_locators_table_name = None

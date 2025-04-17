@@ -1,0 +1,7 @@
+Appium-Python-Client
+lxml
+selenium
+matplotlib
+networkx
+pandas
+tabulate

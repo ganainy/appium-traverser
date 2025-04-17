@@ -15,11 +15,11 @@ from selenium.webdriver.remote.webelement import WebElement
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
-import sql_db
-from elementlocator import ElementLocator
-from screen import Screen
-from screen import get_screen_by_screen_id
-from tuple import Tuple
+from main.database import sql_db
+from main.models.element_locator import ElementLocator
+from main.models.screen import Screen
+from main.models.screen import get_screen_by_screen_id
+from main.models.tuple import Tuple
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
@@ -340,7 +340,7 @@ def main():
     )
 
     # File to store the checkpoint
-    CHECKPOINT_FILE = "app_state_checkpoint.pkl"
+    CHECKPOINT_FILE = "../app_state_checkpoint.pkl"
 
     def save_checkpoint():
         state = {
