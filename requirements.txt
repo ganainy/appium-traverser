@@ -1,7 +1,5 @@
-Appium-Python-Client
+appium-python-client
+google-generativeai
+pillow
+imagehash
 lxml
-selenium
-matplotlib
-networkx
-pandas
-tabulate
