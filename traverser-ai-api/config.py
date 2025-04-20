@@ -41,7 +41,7 @@ WAIT_AFTER_ACTION = 2.5 # Seconds to wait for UI to potentially change after an 
 STABILITY_WAIT = 1.0 # Seconds to wait before getting state (screenshot/XML)
 VISUAL_SIMILARITY_THRESHOLD = 5 # Perceptual hash distance threshold (lower means more similar)
 ENABLE_XML_CONTEXT = True # Send XML snippet to AI?
-XML_SNIPPET_MAX_LEN = 2000 # Max characters of XML to send
+XML_SNIPPET_MAX_LEN = 20000 #Max characters of XML to send
 
 # --- Action Definitions (for AI prompt and mapping) ---
 AVAILABLE_ACTIONS = ["click", "input", "scroll_down", "scroll_up", "back"]

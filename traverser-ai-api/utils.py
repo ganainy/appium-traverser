@@ -6,6 +6,26 @@ from PIL import Image
 import io
 import logging
 from PIL import Image, ImageDraw
+from lxml import etree 
+import re
+
+# --- Constants for XML Simplification ---
+
+# Attributes considered essential for identification or interaction state
+# We keep 'class' as it helps identify the type of widget (Button, EditText, etc.)
+KEEP_ATTRS = {
+    'class', 'resource-id', 'text', 'content-desc', 'hint', # Identification
+    'clickable', 'focusable', 'enabled', 'checkable', 'checked', # Interaction state
+    'selected', 'editable', 'long-clickable', 'password' # Other important states
+}
+
+# Boolean attributes where we only care if they are "true"
+# We can remove them if they are "false" to save space
+BOOLEAN_ATTRS_TRUE_ONLY = {
+    'clickable', 'focusable', 'enabled', 'checkable', # Keep 'checked' always
+    'selected', 'editable', 'long-clickable', 'password'
+}
+
 
 def calculate_xml_hash(xml_string: str) -> str:
     """Calculates SHA256 hash of the XML string."""
@@ -46,17 +66,102 @@ def visual_hash_distance(hash1: str, hash2: str) -> int:
         return 1000 # Indicate invalid comparison
 
 def simplify_xml_for_ai(xml_string: str, max_len: int) -> str:
-    """ Simplifies XML, potentially removing less relevant nodes or attributes,
-        and truncates it for the AI prompt."""
+    """
+    Simplifies XML by removing non-essential attributes and potentially empty nodes,
+    aiming to stay under max_len without arbitrary truncation.
+
+    Args:
+        xml_string: The raw XML string from Appium.
+        max_len: The target maximum length for the simplified XML.
+
+    Returns:
+        A simplified XML string, hopefully under max_len. If processing fails
+        or it's still too long after simplification, it might perform
+        a final smart truncation.
+    """
     if not xml_string:
         return ""
 
-    # Basic truncation for now. More sophisticated simplification could involve
-    # removing layout nodes without interactive children, removing style attributes, etc.
-    # Using lxml for structured simplification would be more robust.
-    if len(xml_string) > max_len:
-        return xml_string[:max_len] + "\n... (truncated)"
-    return xml_string
+    try:
+        # Parse the XML string. Requires bytes. Handle potential encoding issues.
+        parser = etree.XMLParser(recover=True, remove_blank_text=True) # recover helps with slightly malformed XML
+        root = etree.fromstring(xml_string.encode('utf-8'), parser=parser)
+        if root is None: # Parsing failed completely despite recovery
+             raise ValueError("Failed to parse XML root.")
+
+        elements_processed = 0
+        # Iterate through all elements in the tree
+        for element in root.iter('*'): # '*' iterates over all tags
+            elements_processed += 1
+            current_attrs = list(element.attrib.keys()) # Get keys before modifying
+
+            for attr_name in current_attrs:
+                # 1. Remove attributes not in our essential list
+                if attr_name not in KEEP_ATTRS:
+                    del element.attrib[attr_name]
+                    continue # Go to next attribute
+
+                # 2. Remove boolean attributes that are "false" (unless always kept like 'checked')
+                if attr_name in BOOLEAN_ATTRS_TRUE_ONLY:
+                    attr_value = element.attrib[attr_name]
+                    if isinstance(attr_value, str) and attr_value.lower() == 'false':
+                         del element.attrib[attr_name]
+                         continue
+
+                # 3. Optional: Shorten potentially long 'resource-id' (keep only last part)
+                # if attr_name == 'resource-id':
+                #     parts = element.attrib[attr_name].split('/')
+                #     if len(parts) > 1:
+                #         element.attrib[attr_name] = parts[-1]
+
+            # 4. Optional: Remove elements that become completely empty *after* attribute pruning
+            # (Be careful with this - might remove structure. Let's skip for now unless necessary)
+            # if not element.attrib and not element.text and not len(element):
+            #    parent = element.getparent()
+            #    if parent is not None:
+            #        parent.remove(element)
+
+        # Convert the modified tree back to a string
+        # Use compact encoding, no pretty print to save space
+        simplified_xml = etree.tostring(root, encoding='unicode', method='xml', xml_declaration=False)
+
+        logging.debug(f"XML simplification processed {elements_processed} elements. Original len: {len(xml_string)}, Simplified len: {len(simplified_xml)}")
+
+        # Final Check: If still too long, perform a slightly smarter truncation
+        if len(simplified_xml) > max_len:
+            logging.warning(f"Simplified XML still exceeds max_len ({len(simplified_xml)} > {max_len}). Performing final smart truncation.")
+            # Try to truncate at the end of the last complete tag
+            trunc_point = simplified_xml.rfind('</', 0, max_len)
+            if trunc_point != -1:
+                # Find the closing '>' for that tag
+                end_tag_point = simplified_xml.find('>', trunc_point, max_len + 20) # Search a bit beyond max_len
+                if end_tag_point != -1:
+                     simplified_xml = simplified_xml[:end_tag_point+1] + "\n... (truncated)"
+                else: # Couldn't find closing '>', just truncate hard
+                     simplified_xml = simplified_xml[:max_len] + "... (truncated)"
+            else: # No closing tag found before max_len, hard truncate
+                 simplified_xml = simplified_xml[:max_len] + "... (truncated)"
+
+        # Optional: Final regex cleanup for extra whitespace if needed
+        simplified_xml = re.sub(r'>\s+<', '><', simplified_xml)
+        simplified_xml = simplified_xml.strip()
+
+        logging.debug(f"Final simplified XML : {simplified_xml}")
+        logging.debug(f"Final simplified XML length: {len(simplified_xml)}")
+
+        return simplified_xml
+
+    except (etree.XMLSyntaxError, ValueError, TypeError) as e:
+        logging.error(f"Failed to parse or simplify XML: {e}. Falling back to basic truncation.")
+        # Fallback to original basic truncation if parsing/simplification fails
+        if len(xml_string) > max_len:
+            return xml_string[:max_len] + "\n... (fallback truncation)"
+        return xml_string
+    except Exception as e:
+         logging.error(f"Unexpected error during XML simplification: {e}. Falling back to basic truncation.", exc_info=True)
+         if len(xml_string) > max_len:
+             return xml_string[:max_len] + "\n... (fallback truncation)"
+         return xml_string
 
 def draw_indicator_on_image(image_bytes: bytes, coordinates: Tuple[int, int], color="red", radius=15) -> Optional[bytes]:
     """Draws a circle indicator at the given coordinates on an image."""

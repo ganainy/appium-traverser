@@ -13,7 +13,6 @@ from database import DatabaseManager
 from selenium.webdriver.remote.webelement import WebElement
 
 
-
 class AppCrawler:
     """Orchestrates the AI-driven app crawling process."""
 
@@ -196,9 +195,11 @@ class AppCrawler:
                  logging.error("Could not retrieve any elements from the screen for description mapping.")
                  return None
 
+            logging.info(f"Using description matching for action '{action}' (Target: '{target_desc}')")
             element = self._find_element_by_description(target_desc, candidate_elements)
 
             if not element:
+                logging.error(f"Failed to find element using description: '{target_desc}'")
                 # No element found matching the description
                 return None # Mapping failed
 
@@ -209,9 +210,11 @@ class AppCrawler:
         # --- Return Mapped Action Tuples ---
         if action == "click":
             # If bbox failed, we mapped via description to an element
+            # 'element' will be non-None here if we didn't return earlier
             return ("click", element, None)
         elif action == "input":
             # Input always needs the element, found via description
+            # 'element' will be non-None here if we didn't return earlier
             final_input_text = input_text if input_text is not None else "default_text"
             # Storing coords already happened above when element was found
             return ("input", element, final_input_text)
@@ -292,22 +295,64 @@ class AppCrawler:
         return success
 
 
-    def _check_termination(self, step_count: int) -> bool:
-        """Checks if crawling should terminate."""
-        if step_count >= config.MAX_CRAWL_STEPS:
-            logging.info(f"Termination: Reached max step count ({config.MAX_CRAWL_STEPS}).")
-            return True
-        if self.consecutive_ai_failures >= config.MAX_CONSECUTIVE_AI_FAILURES:
-            logging.error(f"Termination: Exceeded max consecutive AI failures ({config.MAX_CONSECUTIVE_AI_FAILURES}).")
-            return True
-        if self.consecutive_map_failures >= config.MAX_CONSECUTIVE_MAP_FAILURES:
-            logging.error(f"Termination: Exceeded max consecutive mapping failures ({config.MAX_CONSECUTIVE_MAP_FAILURES}).")
-            return True
-        if self.consecutive_exec_failures >= config.MAX_CONSECUTIVE_EXEC_FAILURES:
-            logging.error(f"Termination: Exceeded max consecutive execution failures ({config.MAX_CONSECUTIVE_EXEC_FAILURES}).")
-            return True
-        # TODO: Add state repetition check using state_manager.visited_screen_hashes
-        return False
+    def _execute_action(self, mapped_action: Tuple[str, Optional[Any], Optional[str]]) -> bool:
+        """Executes the mapped Appium action."""
+        action_type, target, text = mapped_action
+        success = False
+
+        logging.info(f"Executing: {action_type.upper()} {'on '+str(target) if target else ''} {'with text \"'+str(text)+'\"' if text else ''}")
+
+        # *** ADDED HANDLING FOR tap_coords ***
+        if action_type == "tap_coords" and isinstance(target, tuple) and len(target) == 2:
+             # Target is the (x, y) tuple
+             success = self.driver.tap_coordinates(target[0], target[1])
+        elif action_type == "click" and isinstance(target, WebElement):
+            success = self.driver.click_element(target)
+        elif action_type == "input" and isinstance(target, WebElement):
+            success = self.driver.input_text_into_element(target, text or "", click_first=True)
+        elif action_type == "scroll":
+            success = self.driver.scroll(direction=target) # Target holds direction string
+        elif action_type == "back":
+            success = self.driver.press_back_button()
+        else:
+            logging.error(f"Cannot execute unknown/invalid mapped action type: {action_type} with target type: {type(target)}")
+
+        if success:
+             self.consecutive_exec_failures = 0
+             logging.info(f"Action {action_type.upper()} successful.")
+        else:
+             self.consecutive_exec_failures += 1
+             logging.warning(f"Action {action_type.upper()} execution failed ({self.consecutive_exec_failures} consecutive).")
+        return success
+
+    # *** MODIFIED FUNCTION ***
+    def _save_annotated_screenshot(self, original_screenshot_bytes: bytes, step: int, screen_id: int):
+        """Takes the original screenshot, draws indicator, and saves it."""
+        # *** Use the potentially updated self._last_action_target_coords ***
+        if not original_screenshot_bytes or self._last_action_target_coords is None:
+            logging.debug("Skipping annotated screenshot: No original image or target coordinates.")
+            return
+
+        annotated_bytes = utils.draw_indicator_on_image(
+            original_screenshot_bytes,
+            self._last_action_target_coords # Use the stored coords
+        )
+
+        if annotated_bytes:
+            try:
+                annotated_dir = config.ANNOTATED_SCREENSHOTS_DIR
+                os.makedirs(annotated_dir, exist_ok=True)
+                # Use step and screen ID for clearer naming
+                filename = f"annotated_step_{step}_screen_{screen_id}.png"
+                filepath = os.path.join(annotated_dir, filename)
+                with open(filepath, "wb") as f:
+                    f.write(annotated_bytes)
+                logging.info(f"Saved annotated screenshot: {filepath} (Target: {self._last_action_target_coords})")
+            except Exception as e:
+                logging.error(f"Failed to save annotated screenshot {filepath}: {e}")
+        else:
+            logging.warning("Failed to generate annotated screenshot bytes.")
+
 
     def _ensure_in_app(self) -> bool:
         """Checks if the driver is focused on the target app or allowed external apps."""
@@ -360,6 +405,24 @@ class AppCrawler:
                     logging.error(f"Recovery failed: Could not return to target/allowed application. Still in '{current_pkg_after_relaunch}'.")
                     return False # Indicate failure to recover
 
+
+    def _check_termination(self, step_count: int) -> bool:
+        """Checks if crawling should terminate."""
+        if step_count >= config.MAX_CRAWL_STEPS:
+            logging.info(f"Termination: Reached max step count ({config.MAX_CRAWL_STEPS}).")
+            return True
+        if self.consecutive_ai_failures >= config.MAX_CONSECUTIVE_AI_FAILURES:
+            logging.error(f"Termination: Exceeded max consecutive AI failures ({config.MAX_CONSECUTIVE_AI_FAILURES}).")
+            return True
+        if self.consecutive_map_failures >= config.MAX_CONSECUTIVE_MAP_FAILURES:
+            logging.error(f"Termination: Exceeded max consecutive mapping failures ({config.MAX_CONSECUTIVE_MAP_FAILURES}).")
+            return True
+        if self.consecutive_exec_failures >= config.MAX_CONSECUTIVE_EXEC_FAILURES:
+            logging.error(f"Termination: Exceeded max consecutive execution failures ({config.MAX_CONSECUTIVE_EXEC_FAILURES}).")
+            return True
+        # TODO: Add state repetition check using state_manager.visited_screen_hashes
+        return False
+
     def run(self):
         """Starts and manages the crawling loop."""
         logging.info("--- Starting AI App Crawler ---")
@@ -376,6 +439,8 @@ class AppCrawler:
 
         current_screen_repr: Optional[ScreenRepresentation] = None
         previous_composite_hash: Optional[str] = None # Track previous state for transitions
+
+        self._last_action_description: str = "START" # Initialize for potential first transition
 
         try:
             for step in range(config.MAX_CRAWL_STEPS):
@@ -434,7 +499,7 @@ class AppCrawler:
                 ai_suggestion = self.ai_assistant.get_next_action(
                     screenshot_bytes, xml_for_ai, action_history, config.AVAILABLE_ACTIONS
                 )
-
+                
                 if ai_suggestion is None:
                     logging.error("AI failed to provide a suggestion.")
                     self.consecutive_ai_failures += 1
@@ -468,6 +533,11 @@ class AppCrawler:
                     continue # Skip rest of this step
                 else:
                     self.consecutive_map_failures = 0
+                    mapped_action_type = mapped_action[0]
+                    if mapped_action_type == "click" and "tap_coords" not in self._last_action_description:
+                        self._last_action_description = f"{action_type_sugg}: {target_desc_sugg} (Desc Lookup)"
+                    elif mapped_action_type == "tap_coords":
+                        self._last_action_description = f"{action_type_sugg}: {target_desc_sugg} (BBox Tap)"
 
                 # 8. SAVE ANNOTATED SCREENSHOT (Before Execution)
                 # Pass the original screenshot bytes captured at the start of the step

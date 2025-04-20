@@ -5,6 +5,7 @@ from typing import Optional, Tuple, List, Dict
 from appium import webdriver
 from appium.options.common.base import AppiumOptions
 from selenium.common import WebDriverException, NoSuchElementException
+from selenium.common.exceptions import InvalidElementStateException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.remote.webelement import WebElement
 
@@ -101,44 +102,120 @@ class AppiumDriver:
             return None
 
     def click_element(self, element: WebElement) -> bool:
-        """Clicks a given WebElement."""
-        if not element: return False
-        try:
-            element.click()
-            return True
-        except WebDriverException as e:
-            logging.error(f"Error clicking element: {e}")
+        """Clicks a WebElement."""
+        if not self.driver or not element:
+            logging.warning("Driver not available or element is None, cannot click.")
             return False
-
-    def input_text_into_element(self, element: WebElement, text: str, click_first: bool = False) -> bool:
-        """Clears and inputs text into a given WebElement. Optionally clicks first."""
-        if not element: return False
         try:
-            if click_first:
-                logging.debug("Clicking input element first...")
-                element.click()
-                time.sleep(0.5) # Short pause after click
-
-            # Clear might be necessary sometimes, try it carefully
-            try:
-                element.clear()
-                time.sleep(0.2)
-            except Exception as clear_e:
-                logging.warning(f"Could not clear element before input: {clear_e}")
-                # Continue anyway, send_keys might overwrite
-
-            element.send_keys(text)
-            # Optional: Hide keyboard if it obstructs things (can be device/app specific)
-            # try:
-            #     self.driver.hide_keyboard()
-            # except WebDriverException:
-            #     pass # Ignore if hide_keyboard isn't supported or fails
+            element_id = element.id # For logging
+            logging.debug(f"Attempting to click element {element_id}")
+            element.click()
+            logging.debug(f"Successfully clicked element {element_id}")
             return True
+        except StaleElementReferenceException:
+             logging.warning(f"Attempted to click a stale element reference (ID was: {element.id if hasattr(element,'id') else 'N/A'}).")
+             return False
         except WebDriverException as e:
-            logging.error(f"Error inputting text '{text}' into element: {e}")
+            element_id_str = element.id if hasattr(element,'id') else 'Unknown ID'
+            logging.error(f"Error clicking element {element_id_str}: {e}")
             return False
         except Exception as e:
-            logging.error(f"Unexpected error during input_text: {e}", exc_info=True)
+            element_id_str = element.id if hasattr(element,'id') else 'Unknown ID'
+            logging.error(f"Unexpected error clicking element {element_id_str}: {e}", exc_info=True)
+            return False
+
+    def input_text_into_element(self, element: WebElement, text: str, click_first: bool = True) -> bool:
+        """Inputs text into a WebElement, optionally clicking it first."""
+        if not self.driver or not element:
+            logging.warning("Driver not available or element is None, cannot input text.")
+            return False
+
+        element_id_str = "Unknown ID" # Default if ID retrieval fails early
+        try:
+            # Try to get ID early for better logging, handle potential immediate staleness
+            try:
+                 element_id_str = element.id
+            except StaleElementReferenceException:
+                 logging.warning("Element was already stale before attempting input.")
+                 return False
+
+            logging.debug(f"Attempting to input '{text}' into element {element_id_str}")
+
+            # *** STEP 1: Click the element to ensure focus ***
+            if click_first:
+                try:
+                    logging.debug(f"Clicking element {element_id_str} before input.")
+                    # Use the robust click method
+                    if not self.click_element(element):
+                        logging.warning(f"Failed to click element {element_id_str} before input, but will still attempt input.")
+                        # Decide if you want to proceed or return False here. Proceeding might still work sometimes.
+                        # return False # Uncomment this line to be stricter: fail if click fails
+
+                    # Optional: Add a very small delay if clicking immediately followed by send_keys fails
+                    # time.sleep(0.2) # Start without this, add only if needed
+
+                except StaleElementReferenceException:
+                     # This case should theoretically be caught by self.click_element, but double-check
+                     logging.warning(f"Element {element_id_str} became stale during the pre-input click phase.")
+                     return False # Can't proceed if element is stale
+                except Exception as click_err:
+                    # Log warning but proceed, maybe click wasn't needed or possible,
+                    # but the element might still accept keys if already focused.
+                    logging.warning(f"Unexpected error clicking element {element_id_str} before input, attempting input anyway: {click_err}")
+
+            # *** STEP 2: Attempt to send keys ***
+            logging.debug(f"Sending keys '{text}' to element {element_id_str}")
+            # Consider using element.set_value(text) as an alternative if send_keys consistently fails
+            element.send_keys(text)
+            # element.set_value(text) # Alternative approach
+
+            logging.info(f"Successfully sent keys '{text}' to element {element_id_str}") # Changed to INFO for successful action
+
+            # Optional: Hide keyboard if it causes issues later (uncomment if necessary)
+            try:
+                if self.driver.is_keyboard_shown():
+                    logging.debug("Hiding keyboard after input.")
+                    self.driver.hide_keyboard()
+            except Exception as kb_err:
+                logging.warning(f"Could not hide keyboard after input: {kb_err}")
+
+            return True
+
+        except InvalidElementStateException as e:
+             # Specific logging for the error you encountered
+             logging.error(f"Error inputting text '{text}' into element {element_id_str}: {e}", exc_info=False) # Keep stack trace minimal for this specific error
+             # Log the element's state if possible to help diagnose
+             try:
+                 # Check important attributes at the time of failure
+                 is_enabled = element.is_enabled()
+                 is_displayed = element.is_displayed()
+                 # Use your existing get_element_attributes method if you have one, otherwise access directly
+                 attrs = {}
+                 try:
+                     attrs['class'] = element.get_attribute('class')
+                     attrs['text'] = element.get_attribute('text')
+                     attrs['content-desc'] = element.get_attribute('content-desc')
+                     attrs['resource-id'] = element.get_attribute('resource-id')
+                     attrs['bounds'] = element.get_attribute('bounds')
+                 except Exception as attr_err:
+                      logging.warning(f"Could not get all attributes for element {element_id_str} during error diagnosis: {attr_err}")
+
+                 logging.error(f"Element state at time of InvalidElementStateException: Enabled={is_enabled}, Displayed={is_displayed}, Attrs={attrs}")
+             except StaleElementReferenceException:
+                  logging.error(f"Element {element_id_str} became stale when trying to get state after input error.")
+             except Exception as state_err:
+                 logging.error(f"Could not retrieve element state for {element_id_str} after input error: {state_err}")
+             return False
+        except StaleElementReferenceException:
+             logging.warning(f"Element {element_id_str} became stale before or during sending keys.")
+             return False # Can't proceed if element is stale
+        except WebDriverException as e:
+            # General error logging for other WebDriver issues
+            logging.error(f"Generic WebDriverException inputting text '{text}' into element {element_id_str}: {e}", exc_info=True)
+            return False
+        except Exception as e:
+            # Catch any other unexpected errors
+            logging.error(f"Unexpected error inputting text '{text}' into element {element_id_str}: {e}", exc_info=True)
             return False
 
     def press_back_button(self) -> bool:
