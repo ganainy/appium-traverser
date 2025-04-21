@@ -1,17 +1,28 @@
 import logging
+import colorlog
 import os
 import sys
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(filename)s:%(lineno)d - %(message)s",
-    handlers=[
-        logging.StreamHandler(sys.stdout)
-        # Optional: Add FileHandler
-        # logging.FileHandler("crawler.log")
-    ]
-)
+# Configure colored logging
+handler = colorlog.StreamHandler(sys.stdout)
+handler.setFormatter(colorlog.ColoredFormatter(
+    '%(log_color)s%(asctime)s [%(levelname)s] %(filename)s:%(lineno)d - %(message)s',
+    log_colors={
+        'DEBUG': 'cyan',
+        'INFO': 'green',
+        'WARNING': 'yellow',
+        'ERROR': 'red',
+        'CRITICAL': 'red,bg_white',
+    }
+))
+
+logger = logging.getLogger()
+logger.addHandler(handler)
+logger.setLevel(logging.INFO)  # Set to DEBUG to see all logs
+
+# Remove any existing handlers to avoid duplicate logs
+for old_handler in logger.handlers[:-1]:
+    logger.removeHandler(old_handler)
 
 # Make sure environment variables are loaded (especially API key)
 try:

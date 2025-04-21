@@ -26,6 +26,9 @@ BOOLEAN_ATTRS_TRUE_ONLY = {
     'selected', 'editable', 'long-clickable', 'password'
 }
 
+# --- Loop Detection ---
+LOOP_DETECTION_VISIT_THRESHOLD = 1 #  Max visits before AI is told to prioritize breaking loops.
+
 
 def calculate_xml_hash(xml_string: str) -> str:
     """Calculates SHA256 hash of the XML string."""

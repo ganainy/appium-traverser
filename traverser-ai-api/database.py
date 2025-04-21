@@ -13,22 +13,47 @@ class DatabaseManager:
         self.db_path = db_path
         self.conn: Optional[sqlite3.Connection] = None
 
-    def connect(self):
-        """Connects to the SQLite database and creates tables if needed."""
+    def connect(self) -> bool: # Added return type hint -> bool
+        """Connects to the SQLite database and creates tables if needed.
+
+        Returns:
+            bool: True if connection and table creation were successful, False otherwise.
+        """
+        # Close existing connection if any, before trying to reconnect
+        if self.conn:
+            logging.warning("Closing existing database connection before reconnecting.")
+            self.close()
+
         try:
             # Create database directory if it doesn't exist
             db_dir = os.path.dirname(self.db_path)
             if db_dir and not os.path.exists(db_dir):
                 os.makedirs(db_dir, exist_ok=True)
                 logging.info(f"Created database directory: {db_dir}")
-                
-            self.conn = sqlite3.connect(self.db_path)
+
+            # Attempt connection
+            self.conn = sqlite3.connect(self.db_path, timeout=10) # Added timeout
             self.conn.execute("PRAGMA foreign_keys = ON;")
-            self._create_tables()
-            logging.info(f"Connected to database: {self.db_path}")
+            self.conn.execute("PRAGMA journal_mode=WAL;") # Optional: Improve concurrency
+            self.conn.execute("PRAGMA busy_timeout = 5000;") # Optional: Wait if DB is locked
+
+            # Create tables (check for success)
+            if not self._create_tables():
+                 logging.error("Failed to create necessary database tables.")
+                 self.close() # Close connection if table creation fails
+                 return False # Indicate failure
+
+            logging.info(f"Successfully connected to database and verified tables: {self.db_path}")
+            return True # Explicitly return True on success
+
         except sqlite3.Error as e:
-            logging.error(f"Error connecting to database {self.db_path}: {e}")
-            self.conn = None
+            logging.error(f"Error connecting to database {self.db_path}: {e}", exc_info=True) # Added exc_info
+            self.conn = None # Ensure connection is None on error
+            return False # Explicitly return False on failure
+        except Exception as e: # Catch other potential errors like permission issues
+             logging.error(f"An unexpected error occurred during database connection: {e}", exc_info=True)
+             self.conn = None
+             return False
 
     def close(self):
         """Closes the database connection."""
@@ -56,47 +81,63 @@ class DatabaseManager:
             self.conn.rollback()
             return None
 
-    def _create_tables(self):
-        """Creates the necessary database tables."""
-        sql_create_screens = f"""
-        CREATE TABLE IF NOT EXISTS {self.SCREENS_TABLE} (
-            screen_id INTEGER PRIMARY KEY,
-            xml_hash TEXT NOT NULL,
-            visual_hash TEXT NOT NULL UNIQUE, -- Visual hash should ideally be unique identifier for screen state
-            screenshot_path TEXT,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-            -- composite_hash TEXT UNIQUE -- Alternative: Use composite hash as unique key
-        );
-        """
-        # Using composite hash as primary key might simplify lookups
+    def _create_tables(self) -> bool: # Added return type hint -> bool
+        """Creates the necessary database tables. Returns True on success, False on failure."""
+        success = True
+        # Using V2 schema with composite hash PK
         sql_create_screens_v2 = f"""
         CREATE TABLE IF NOT EXISTS {self.SCREENS_TABLE} (
-            composite_hash TEXT PRIMARY KEY, -- xml_visual hash combo
-            screen_id INTEGER NOT NULL UNIQUE, -- Keep original numeric ID
+            composite_hash TEXT PRIMARY KEY,
+            screen_id INTEGER NOT NULL UNIQUE,
             xml_hash TEXT NOT NULL,
             visual_hash TEXT NOT NULL,
             screenshot_path TEXT,
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
         );
         """
-
-
         sql_create_transitions = f"""
         CREATE TABLE IF NOT EXISTS {self.TRANSITIONS_TABLE} (
             transition_id INTEGER PRIMARY KEY AUTOINCREMENT,
             source_composite_hash TEXT NOT NULL,
             action_description TEXT NOT NULL,
-            dest_composite_hash TEXT, -- Can be NULL if destination unknown
+            dest_composite_hash TEXT,
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-            -- FOREIGN KEY (source_composite_hash) REFERENCES {self.SCREENS_TABLE}(composite_hash), -- If using composite PK
-            -- FOREIGN KEY (dest_composite_hash) REFERENCES {self.SCREENS_TABLE}(composite_hash)
+            -- Optional FOREIGN KEY constraints if needed, ensure they match PKs
+            -- FOREIGN KEY (source_composite_hash) REFERENCES {self.SCREENS_TABLE}(composite_hash) ON DELETE CASCADE,
+            -- FOREIGN KEY (dest_composite_hash) REFERENCES {self.SCREENS_TABLE}(composite_hash) ON DELETE SET NULL
         );
         """
-        self._execute_sql(sql_create_screens_v2) # Using V2 with composite hash PK
-        self._execute_sql(sql_create_transitions)
-        # Add indexes for faster lookups
-        self._execute_sql(f"CREATE INDEX IF NOT EXISTS idx_screen_visual_hash ON {self.SCREENS_TABLE}(visual_hash);")
-        self._execute_sql(f"CREATE INDEX IF NOT EXISTS idx_transition_source ON {self.TRANSITIONS_TABLE}(source_composite_hash);")
+        # Execute creation statements and check results
+        # _execute_sql returns True on successful commit (CREATE TABLE is committed)
+        if self._execute_sql(sql_create_screens_v2) is None: success = False
+        if self._execute_sql(sql_create_transitions) is None: success = False
+
+        # Add indexes - check results too
+        if self._execute_sql(f"CREATE INDEX IF NOT EXISTS idx_screen_visual_hash ON {self.SCREENS_TABLE}(visual_hash);") is None: success = False
+        if self._execute_sql(f"CREATE INDEX IF NOT EXISTS idx_transition_source ON {self.TRANSITIONS_TABLE}(source_composite_hash);") is None: success = False
+
+        if success:
+            logging.debug("Database tables created or already exist.")
+        else:
+            logging.error("Failed to create one or more database tables or indexes.")
+
+        return success
+
+
+    # --- Other methods remain the same, but rely on _execute_sql handling ---
+    def insert_screen(self, screen_id: int, xml_hash: str, visual_hash: str, screenshot_path: str) -> Optional[str]:
+        """Inserts or updates screen information. Returns composite_hash on success/ignore, None on error."""
+        composite_hash = f"{xml_hash}_{visual_hash}"
+        sql = f"""
+        INSERT OR IGNORE INTO {self.SCREENS_TABLE}
+        (composite_hash, screen_id, xml_hash, visual_hash, screenshot_path)
+        VALUES (?, ?, ?, ?, ?)
+        """
+        params = (composite_hash, screen_id, xml_hash, visual_hash, screenshot_path)
+        # _execute_sql returns True on successful commit (which INSERT OR IGNORE does)
+        # or None on error.
+        result = self._execute_sql(sql, params)
+        return composite_hash if result is not None else None
 
 
     def insert_screen(self, screen_id: int, xml_hash: str, visual_hash: str, screenshot_path: str) -> Optional[str]:
