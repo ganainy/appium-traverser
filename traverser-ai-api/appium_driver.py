@@ -1,5 +1,7 @@
 import logging
 import time
+import shlex
+
 from typing import Optional, Tuple, List, Dict
 
 from appium import webdriver
@@ -366,3 +368,59 @@ class AppiumDriver:
         except Exception as e:
             logging.error(f"Unexpected error during coordinate tap: {e}", exc_info=True)
             return False
+
+
+    def type_text_by_adb(self, text: str) -> bool:
+        """
+        Simulates typing text using ADB 'input text' command.
+        Assumes the target text field is already focused and keyboard *may* be open.
+        """
+        if not self.driver:
+            logging.error("Driver not available, cannot type text via ADB.")
+            return False
+        if not isinstance(text, str):
+             logging.error(f"Invalid text provided for ADB input (must be string): {text}")
+             return False
+
+        try:
+            # Use shlex.quote to safely escape the text for the shell command
+            escaped_text = shlex.quote(text)
+            command = f"input text {escaped_text}"
+            logging.info(f"Executing ADB shell command: '{command}'")
+
+            # Execute the adb shell command via Appium
+            self.driver.execute_script("mobile: shell", {
+                'command': 'input',
+                'args': ['text', text] # Preferred way if 'args' is supported
+                # 'command': command # Fallback if 'args' not supported
+            })
+            # Note: execute_script might not return a useful success/failure value for shell commands.
+            # We assume success if no exception is raised.
+            logging.info(f"Successfully executed ADB input text command for: '{text}'")
+            return True
+        except WebDriverException as e:
+            # Specific check for common issues
+            if "process didn't end within the specified timeout" in str(e):
+                 logging.error(f"ADB command 'input text' timed out. Text: '{text}'. Error: {e}")
+            else:
+                 logging.error(f"WebDriverException executing ADB 'input text' for '{text}': {e}", exc_info=True)
+            return False
+        except Exception as e:
+            logging.error(f"Unexpected error executing ADB 'input text' for '{text}': {e}", exc_info=True)
+            return False
+
+    def is_keyboard_shown(self) -> bool:
+        if not self.driver: return False
+        try:
+            return self.driver.is_keyboard_shown()
+        except WebDriverException as e:
+            logging.warning(f"Could not determine keyboard state: {e}")
+            return False # Assume not shown on error
+
+    def hide_keyboard(self):
+        if not self.driver: return
+        try:
+            self.driver.hide_keyboard()
+        except WebDriverException as e:
+            # Often throws if keyboard wasn't shown, log as warning
+            logging.warning(f"Error hiding keyboard (might be expected if not shown): {e}")

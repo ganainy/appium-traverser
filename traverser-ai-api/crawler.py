@@ -59,7 +59,6 @@ class AppCrawler:
             return None
         return screenshot_bytes, page_source
 
-    def _find_element_by_description(self, description: str, candidate_elements: List[WebElement]) -> Optional[WebElement]:
         """Finds the best matching WebElement based on AI's text description."""
         if not description or not candidate_elements:
             return None
@@ -126,13 +125,13 @@ class AppCrawler:
     def _map_ai_to_action(self, ai_suggestion: dict) -> Optional[Tuple[str, Optional[Any], Optional[str]]]:
         """
         Maps the AI's JSON suggestion to an executable action tuple.
-        Prioritizes Bounding Box for clicks, falls back to description matching.
-        Stores target coordinates for annotation.
-        Returns: (action_type, target_object_or_info, input_text)
+        Uses Bounding Box ONLY for clicks and to identify input field location.
+        Stores target coordinates for annotation. NO LONGER USES DESCRIPTION MATCHING.
+        Returns: (action_type, target_object_or_info, input_text_or_none)
         """
         action = ai_suggestion.get("action")
-        target_desc = ai_suggestion.get("target_description")
-        bbox = ai_suggestion.get("target_bounding_box") # Get bbox data
+        target_desc = ai_suggestion.get("target_description") # Still useful for logging/history
+        bbox = ai_suggestion.get("target_bounding_box") # CRITICAL for this approach
         input_text = ai_suggestion.get("input_text")
         self._last_action_target_coords = None # Reset before mapping
 
@@ -140,8 +139,12 @@ class AppCrawler:
             logging.error("AI suggestion missing 'action'. Cannot map.")
             return None
 
-        # --- Prioritize Bounding Box for CLICK actions ---
-        if action == "click" and bbox:
+        # --- Actions requiring coordinates (Click, Input-Tap) ---
+        if action in ["click", "input"]:
+            if not bbox:
+                logging.error(f"AI suggestion for '{action}' requires 'target_bounding_box', but it's missing or null. Cannot map.")
+                return None # Mapping fails if no BBox
+
             try:
                 # Validate coordinates (basic check for being within 0-1)
                 tl_x, tl_y = bbox["top_left"]
@@ -151,10 +154,7 @@ class AppCrawler:
 
                 window_size = self.driver.get_window_size()
                 if not window_size:
-                    logging.error("Cannot map bounding box: Failed to get window size.")
-                    # Do not return None yet, fall through to description matching
-                    raise ValueError("Window size not available for BBox mapping")
-
+                    raise ValueError("Window size not available for BBox mapping") # Treat as mapping failure
 
                 width = window_size['width']
                 height = window_size['height']
@@ -165,72 +165,42 @@ class AppCrawler:
                 abs_center_x = int(center_x_norm * width)
                 abs_center_y = int(center_y_norm * height)
 
-                logging.info(f"Mapping action '{action}' using BBox to coordinates: ({abs_center_x}, {abs_center_y})")
-                # *** STORE COORDINATES ***
+                # Store coordinates for annotation
                 self._last_action_target_coords = (abs_center_x, abs_center_y)
-                # Return a new action type 'tap_coords' with the target being the coordinate tuple
-                return ("tap_coords", (abs_center_x, abs_center_y), None)
+
+                # Map to specific action types
+                if action == "click":
+                    logging.info(f"Mapping action '{action}' using BBox to coordinates: ({abs_center_x}, {abs_center_y})")
+                    # Return 'tap_coords' action type
+                    return ("tap_coords", (abs_center_x, abs_center_y), None)
+
+                elif action == "input":
+                    if input_text is None: # Should have text for input action
+                         logging.warning(f"AI suggestion for 'input' action is missing 'input_text'. Using default.")
+                         input_text = "default_text" # Or handle as error: return None
+
+                    logging.info(f"Mapping action '{action}' using BBox tap at ({abs_center_x}, {abs_center_y}) and ADB text input.")
+                    # Return a new action type 'input_by_keys'
+                    # Target contains dict with coords for initial tap and text for ADB
+                    target_info = {"coords": (abs_center_x, abs_center_y), "text": input_text}
+                    return ("input_by_keys", target_info, None) # Text is part of target_info now
 
             except (KeyError, IndexError, TypeError, ValueError) as e:
-                logging.warning(f"Error processing bounding box {bbox}: {e}. Falling back to description matching for '{action}'.")
-                # Fall through to description matching
+                logging.error(f"Error processing bounding box {bbox} for action '{action}': {e}. Cannot map.")
+                return None # Mapping fails
 
-        # --- Fallback/Default: Use Description Matching (especially for INPUT) ---
-        element: Optional[WebElement] = None # Ensure type hint
-        if action in ["click", "input"]:
-            # (If we reached here for 'click', it means bbox failed or wasn't provided/valid)
-            if not target_desc:
-                 # If click had no bbox AND no description, then error
-                if action == 'click':
-                     logging.error(f"AI suggestion for '{action}' missing 'target_description' and BBox failed/absent. Cannot map.")
-                     return None
-                # If input has no description, error
-                elif action == 'input':
-                     logging.error(f"AI suggestion for '{action}' missing 'target_description'. Cannot map.")
-                     return None
-
-
-            candidate_elements = self.driver.get_all_elements()
-            if not candidate_elements:
-                 logging.error("Could not retrieve any elements from the screen for description mapping.")
-                 return None
-
-            logging.info(f"Using description matching for action '{action}' (Target: '{target_desc}')")
-            element = self._find_element_by_description(target_desc, candidate_elements)
-
-            if not element:
-                logging.error(f"Failed to find element using description: '{target_desc}'")
-                # No element found matching the description
-                return None # Mapping failed
-
-            # *** STORE ELEMENT CENTER COORDINATES ***
-            # Store coords even if bbox mapping failed for click, use element center instead
-            self._last_action_target_coords = self._get_element_center(element)
-
-        # --- Return Mapped Action Tuples ---
-        if action == "click":
-            # If bbox failed, we mapped via description to an element
-            # 'element' will be non-None here if we didn't return earlier
-            return ("click", element, None)
-        elif action == "input":
-            # Input always needs the element, found via description
-            # 'element' will be non-None here if we didn't return earlier
-            final_input_text = input_text if input_text is not None else "default_text"
-            # Storing coords already happened above when element was found
-            return ("input", element, final_input_text)
+        # --- Actions NOT requiring coordinates/BBox ---
         elif action == "scroll_down":
-             # For scroll, indicate the center of the screen where scroll starts
              window_size = self.driver.get_window_size()
-             if window_size:
+             if window_size: # Set coords for annotation if possible
                  self._last_action_target_coords = (window_size['width'] // 2, window_size['height'] // 2)
              return ("scroll", "down", None)
         elif action == "scroll_up":
              window_size = self.driver.get_window_size()
-             if window_size:
+             if window_size: # Set coords for annotation if possible
                  self._last_action_target_coords = (window_size['width'] // 2, window_size['height'] // 2)
              return ("scroll", "up", None)
         elif action == "back":
-             # No specific coords for back button press
              self._last_action_target_coords = None
              return ("back", None, None)
         else:
@@ -266,57 +236,56 @@ class AppCrawler:
 
 
 
-    def _execute_action(self, mapped_action: Tuple[str, Optional[object], Optional[str]]) -> bool:
-        """Executes the mapped Appium action."""
-        action_type, target, text = mapped_action
-        success = False
-
-        logging.info(f"Executing: {action_type.upper()} {'on '+str(target) if target else ''} {'with text \"'+text+'\"' if text else ''}")
-
-        if action_type == "tap_coords" and isinstance(target, tuple) and len(target) == 2:
-             # Target is the (x, y) tuple
-             success = self.driver.tap_coordinates(target[0], target[1])
-        elif action_type == "click" and isinstance(target, WebElement):
-            success = self.driver.click_element(target)
-        elif action_type == "input" and isinstance(target, WebElement):
-            success = self.driver.input_text_into_element(target, text or "", click_first=True)
-        elif action_type == "scroll":
-            success = self.driver.scroll(direction=target) # Target holds direction string
-        elif action_type == "back":
-            success = self.driver.press_back_button()
-        else:
-            logging.error(f"Cannot execute unknown/invalid mapped action type: {action_type} with target type: {type(target)}")
-
-        if success:
-             self.consecutive_exec_failures = 0
-        else:
-             self.consecutive_exec_failures += 1
-             logging.warning(f"Action execution failed ({self.consecutive_exec_failures} consecutive).")
-        return success
-
-
     def _execute_action(self, mapped_action: Tuple[str, Optional[Any], Optional[str]]) -> bool:
         """Executes the mapped Appium action."""
-        action_type, target, text = mapped_action
+        action_type, target, _ = mapped_action # Third element (text) is often None now or part of target
         success = False
 
-        logging.info(f"Executing: {action_type.upper()} {'on '+str(target) if target else ''} {'with text \"'+str(text)+'\"' if text else ''}")
+        logging.info(f"Executing: {action_type.upper()} {'on/at '+str(target) if target else ''}")
 
-        # *** ADDED HANDLING FOR tap_coords ***
         if action_type == "tap_coords" and isinstance(target, tuple) and len(target) == 2:
-             # Target is the (x, y) tuple
+             # Target is the (x, y) tuple for simple taps (clicks)
              success = self.driver.tap_coordinates(target[0], target[1])
-        elif action_type == "click" and isinstance(target, WebElement):
-            success = self.driver.click_element(target)
-        elif action_type == "input" and isinstance(target, WebElement):
-            success = self.driver.input_text_into_element(target, text or "", click_first=True)
-        elif action_type == "scroll":
-            success = self.driver.scroll(direction=target) # Target holds direction string
+
+        # *** ADDED HANDLING for input_by_keys ***
+        elif action_type == "input_by_keys" and isinstance(target, dict) and "coords" in target and "text" in target:
+            coords = target["coords"]
+            text_to_type = target["text"]
+            logging.debug(f"Executing input_by_keys: Tap at {coords}, then type '{text_to_type}' via ADB.")
+
+            # 1. Tap the coordinates first to focus the field
+            tap_success = self.driver.tap_coordinates(coords[0], coords[1])
+            if not tap_success:
+                logging.error(f"Failed to tap coordinates {coords} before text input. Aborting input.")
+                return False # Don't proceed if tap fails
+
+            # 2. Wait briefly for keyboard to potentially appear/focus to settle
+            time.sleep(0.7) # Small delay - adjust if needed
+
+            # 3. Use the new driver method to type text via ADB
+            type_success = self.driver.type_text_by_adb(text_to_type)
+            success = type_success
+            # Optional: Hide keyboard afterwards if needed
+            if success:
+                try:
+                    if self.driver.is_keyboard_shown():
+                        logging.debug("Hiding keyboard after input.")
+                        self.driver.hide_keyboard()
+                except Exception as kb_err:
+                    logging.warning(f"Could not hide keyboard after input: {kb_err}")
+
+        elif action_type == "scroll" and isinstance(target, str):
+            # Target holds direction string "up" or "down"
+            success = self.driver.scroll(direction=target)
         elif action_type == "back":
             success = self.driver.press_back_button()
+        # Removed 'click' and 'input' cases that relied on WebElement target
+        # elif action_type == "click" and isinstance(target, WebElement): ...
+        # elif action_type == "input" and isinstance(target, WebElement): ...
         else:
-            logging.error(f"Cannot execute unknown/invalid mapped action type: {action_type} with target type: {type(target)}")
+            logging.error(f"Cannot execute unknown/invalid mapped action type: {action_type} with target: {target} (Type: {type(target)})")
 
+        # Update failure counter based on overall success
         if success:
              self.consecutive_exec_failures = 0
              logging.info(f"Action {action_type.upper()} successful.")
@@ -325,7 +294,7 @@ class AppCrawler:
              logging.warning(f"Action {action_type.upper()} execution failed ({self.consecutive_exec_failures} consecutive).")
         return success
 
-    # *** MODIFIED FUNCTION ***
+
     def _save_annotated_screenshot(self, original_screenshot_bytes: bytes, step: int, screen_id: int):
         """Takes the original screenshot, draws indicator, and saves it."""
         # *** Use the potentially updated self._last_action_target_coords ***
@@ -499,7 +468,7 @@ class AppCrawler:
                 ai_suggestion = self.ai_assistant.get_next_action(
                     screenshot_bytes, xml_for_ai, action_history, config.AVAILABLE_ACTIONS
                 )
-                
+
                 if ai_suggestion is None:
                     logging.error("AI failed to provide a suggestion.")
                     self.consecutive_ai_failures += 1

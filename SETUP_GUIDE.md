@@ -57,8 +57,9 @@ Before you begin, ensure you have the following installed and configured:
     pip install -r requirements.txt
     ```
 5.  **Appium Server Setup:**
-    *   Start the Appium server in a separate terminal window by simply running: `appium`
+    *   Start the Appium server in a separate terminal window by simply running: `appium --allow-insecure adb_shell`
     *   Keep this server running while you execute the Python script.
+    > Note: The `--allow-insecure adb_shell` flag is required to enable direct ADB shell commands execution. This is necessary for certain Android automation tasks and device interactions that require shell access. Without this flag, some automation commands (e.g. sending keyboard keys to fill input fields) will fail with permission errors.
 6.  **Android Device/Emulator Setup:**
     *   Ensure you have an Android device connected via USB with **Developer Options** and **USB Debugging** enabled, or have an Android Virtual Device (Emulator) running.
     *   Verify your device is recognized by ADB: `adb devices` (You might need to run this from the Android SDK's `platform-tools` directory if it's not in your PATH).
