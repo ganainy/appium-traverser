@@ -28,11 +28,11 @@ class AIAssistant:
             logging.error(f"Failed to load image for AI: {e}")
             return None
 
-    # Function to build the prompt for the AI model
+        # Function to build the prompt for the AI model
     def _build_prompt(self, xml_context: str, previous_actions: List[str], available_actions: List[str]) -> str:
-            """Builds the detailed prompt for the AI model, REQUIRING bounding boxes for interactions."""
+            """Builds the detailed prompt for the AI model, REQUIRING bounding boxes and considering prerequisites."""
             action_descriptions = {
-                "click": "Visually identify and click an interactive element (button, link, item). YOU MUST PROVIDE ITS BOUNDING BOX.",
+                "click": "Visually identify and click an interactive element (button, link, radio button, checkbox, item). YOU MUST PROVIDE ITS BOUNDING BOX.",
                 "input": "Visually identify a text input field, specify text, and PROVIDE ITS BOUNDING BOX.",
                 "scroll_down": "Scroll the view downwards.",
                 "scroll_up": "Scroll the view upwards.",
@@ -41,21 +41,36 @@ class AIAssistant:
             action_list_str = "\n".join([f"- {a}: {action_descriptions.get(a, '')}" for a in available_actions])
             history_str = "\n".join([f"- {pa}" for pa in previous_actions]) if previous_actions else "None"
 
-            # ***  Prompt REQUIRING Bounding Box ***
+            # *** Updated Prompt REQUIRING Bounding Box and Emphasizing Prerequisites ***
             prompt = f"""
             You are an expert Android application tester exploring an app using screen analysis.
-            Your goal is to discover new screens and interactions systematically.
+            Your goal is to discover new screens and interactions systematically by performing ONE logical action at a time.
             You will be given the current screen's screenshot and its XML layout structure.
             **IMPORTANT: All 'click' and 'input' actions rely *solely* on precise bounding box coordinates.**
 
             CONTEXT:
-            1. Screenshot: Provided as image input. Visually analyze this for interactive elements.
-            2. XML Layout: Provided below. Use this primarily to understand structure, text, content-descriptions, and element types (e.g., EditText, Button) to aid visual identification.
+            1. Screenshot: Provided as image input. Visually analyze this for interactive elements and their states (e.g., enabled/disabled buttons, selected/unselected options).
+            2. XML Layout: Provided below. Use this to understand structure, text, content-descriptions, element types (e.g., EditText, Button, RadioButton), and state attributes (like `enabled`, `checked`).
             3. Previous Actions on this Screen State: The following actions (identified by their description) have already been attempted:
             {history_str}
 
             TASK:
-            Analyze the screenshot and XML. Identify the BEST SINGLE action to perform next to explore the app further. Prioritize actions that lead to new screens or reveal new information, and interact with elements NOT previously attempted.
+            Analyze the screenshot and XML. Identify the BEST SINGLE action to perform next to logically progress or explore the app.
+
+            **CRUCIAL RULE for Progression Buttons (Next, Continue, Save, etc.):**
+            - **CHECK PREREQUISITES:** Before choosing to click a progression button (like 'Next', 'Continue', 'Save'), **visually check if it appears enabled** (e.g., not greyed out) AND **check the XML for `enabled="true"`** if available.
+            - **IF DISABLED:** If the progression button appears disabled OR has `enabled="false"`, DO NOT try to click it. Instead, identify and perform the **required prerequisite action** first. This usually involves:
+                - Clicking an unselected radio button or checkbox.
+                - Inputting text into a required field.
+            - **PRIORITIZE PREREQUISITES:** Fulfilling necessary selections or inputs takes priority over clicking a disabled progression button. Choose the prerequisite action instead.
+
+            General Priorities:
+            1. Fulfill required prerequisites (select options, fill fields) if progression buttons are disabled.
+            2. Click enabled progression buttons ('Next', 'Save', 'Continue', etc.) if prerequisites are met.
+            3. Click other interactive elements (links, list items, icons) to explore new areas, avoiding previously attempted ones.
+            4. Input text into optional fields if relevant for exploration.
+            5. Scroll if more content seems available and other actions are less promising or exhausted.
+            6. Use 'back' if exploration seems stuck or to return from a detail view.
 
             Choose ONE action from the available types:
             {action_list_str}
@@ -63,19 +78,29 @@ class AIAssistant:
             RESPONSE FORMAT:
             Respond ONLY with a valid JSON object containing these keys:
             - "action": (string) The chosen action type (e.g., "click", "input", "scroll_down", "back"). Required.
-            - "target_description": (string) Brief text description of the visually identified target (e.g., "button with text 'Login'", "username input field"). Required for 'click' and 'input' for clarity, null otherwise.
-            - "target_bounding_box": (object) **REQUIRED and MUST NOT be null if action is 'click' or 'input'.** Provide the precise **normalized** bounding box of the visually identified target element. Use the format {{"top_left": [x, y], "bottom_right": [x, y]}}, where x and y are floats between 0.0 and 1.0. If you choose 'click' or 'input', you MUST identify the element visually and provide its box. Set to null ONLY for 'scroll_down', 'scroll_up', or 'back'.
+            - "target_description": (string) Brief text description of the visually identified target (e.g., "'Next' button", "'Always' radio button", "username input"). Required for 'click' and 'input', null otherwise.
+            - "target_bounding_box": (object) **REQUIRED and MUST NOT be null if action is 'click' or 'input'.** Provide the precise **normalized** bounding box {{"top_left": [x, y], "bottom_right": [x, y]}}. Set to null ONLY for scroll/back.
             - "input_text": (string | null) Text to input. Required ONLY if action is "input". Null otherwise.
-            - "reasoning": (string) Briefly explain your choice and how you identified the target visually.
+            - "reasoning": (string) Briefly explain your choice, **mentioning prerequisite checks if relevant**, and how you identified the target visually.
 
-            EXAMPLE (Click Login Button - BBox REQUIRED):
+            EXAMPLE (Click Enabled Next Button):
             ```json
             {{
             "action": "click",
-            "target_description": "The 'Login' button near the bottom",
-            "target_bounding_box": {{"top_left": [0.4, 0.8], "bottom_right": [0.6, 0.88]}},
+            "target_description": "The enabled 'Next' button",
+            "target_bounding_box": {{"top_left": [0.7, 0.85], "bottom_right": [0.9, 0.92]}},
             "input_text": null,
-            "reasoning": "Visually identified the primary login button. Proceeding requires clicking it."
+            "reasoning": "The 'Next' button is visually enabled, and previous prerequisites (like selection) seem met. Clicking to proceed."
+            }}
+            ```
+            EXAMPLE (Select Radio Button Before Disabled Next):
+            ```json
+            {{
+            "action": "click",
+            "target_description": "Radio button next to 'Sometimes'",
+            "target_bounding_box": {{"top_left": [0.8, 0.4], "bottom_right": [0.95, 0.48]}},
+            "input_text": null,
+            "reasoning": "The 'Next' button appears disabled. A selection is required first. Selecting the 'Sometimes' option as a prerequisite."
             }}
             ```
             EXAMPLE (Input Email - BBox REQUIRED):
@@ -85,21 +110,11 @@ class AIAssistant:
             "target_description": "Rectangular email address input field",
             "target_bounding_box": {{"top_left": [0.1, 0.3], "bottom_right": [0.9, 0.38]}},
             "input_text": "test@example.com",
-            "reasoning": "Visually identified the input field for the email address. Need to input email before logging in."
-            }}
-            ```
-            EXAMPLE (Scroll):
-            ```json
-            {{
-            "action": "scroll_down",
-            "target_description": null,
-            "target_bounding_box": null,
-            "input_text": null,
-            "reasoning": "The current view seems scrollable and more content might be below."
+            "reasoning": "Visually identified the input field. Inputting text is required to proceed."
             }}
             ```
 
-            XML CONTEXT FOR CURRENT SCREEN (Use for context, but interaction relies on visual BBox):
+            XML CONTEXT FOR CURRENT SCREEN (Use for context, especially `enabled` and `checked` states):
             ```xml
             {xml_context}
             ```

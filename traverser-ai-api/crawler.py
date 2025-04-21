@@ -132,6 +132,7 @@ class AppCrawler:
         action = ai_suggestion.get("action")
         target_desc = ai_suggestion.get("target_description") # Still useful for logging/history
         bbox = ai_suggestion.get("target_bounding_box") # CRITICAL for this approach
+        logging.info(f"Raw BBox from AI: {bbox}")
         input_text = ai_suggestion.get("input_text")
         self._last_action_target_coords = None # Reset before mapping
 
@@ -208,32 +209,151 @@ class AppCrawler:
             return None
 
 
-    def _save_annotated_screenshot(self, original_screenshot_bytes: bytes, step: int, screen_id: int):
-        """Takes the original screenshot, draws indicator, and saves it."""
-        if not original_screenshot_bytes or self._last_action_target_coords is None:
-            logging.debug("Skipping annotated screenshot: No original image or target coordinates.")
+    def _save_annotated_screenshot(self,
+                                   original_screenshot_bytes: bytes,
+                                   step: int,
+                                   screen_id: int,
+                                   ai_suggestion: Optional[Dict[str, Any]]):
+        """
+        Takes the original screenshot, draws indicator based on AI's bbox center,
+        and saves it WITH absolute bbox coordinates in the filename.
+
+        Args:
+            original_screenshot_bytes: The raw PNG bytes of the screen.
+            step: The current crawl step number.
+            screen_id: The database ID of the current screen state.
+            ai_suggestion: The dictionary returned by the AI assistant, which
+                           may contain 'target_bounding_box'.
+        """
+        if not original_screenshot_bytes:
+            logging.debug("Skipping annotated screenshot: No original image provided.")
+            return
+        if not ai_suggestion:
+            logging.debug("Skipping annotated screenshot: No AI suggestion provided.")
             return
 
-        annotated_bytes = utils.draw_indicator_on_image(
-            original_screenshot_bytes,
-            self._last_action_target_coords
-        )
+        # --- Get Normalized BBOX from AI Suggestion ---
+        bbox_data = ai_suggestion.get("target_bounding_box")
+        action_type = ai_suggestion.get("action", "unknown") # Get action type for context
 
+        if not bbox_data:
+            logging.debug(f"Skipping annotated screenshot: AI suggestion for action '{action_type}' has no 'target_bounding_box'.")
+            return # Nothing to annotate if no target bbox specified by AI
+
+        logging.debug(f"Attempting annotation using AI bbox: {bbox_data}")
+
+        try:
+            # --- Extract Normalized Coords ---
+            tl_x_norm, tl_y_norm = bbox_data["top_left"]
+            br_x_norm, br_y_norm = bbox_data["bottom_right"]
+
+            # --- Validate Normalized Coords ---
+            if not all(isinstance(coord, (int, float)) and 0.0 <= coord <= 1.0 for coord in [tl_x_norm, tl_y_norm, br_x_norm, br_y_norm]):
+                 raise ValueError(f"Normalized coordinates invalid or out of range [0.0, 1.0]: {bbox_data}")
+
+            # --- Get Image Dimensions to Convert Coords ---
+            # Option 1: Use Appium window size (faster if available and reliable)
+            window_size = self.driver.get_window_size()
+            if window_size and window_size.get('width') > 0 and window_size.get('height') > 0:
+                 img_width = window_size['width']
+                 img_height = window_size['height']
+                 logging.debug(f"Using Appium window size for coord conversion: {img_width}x{img_height}")
+            else:
+                 # Option 2: Load image from bytes to get dimensions (fallback)
+                 logging.debug("Appium window size unavailable or invalid, loading image from bytes to get dimensions.")
+                 try:
+                     with Image.open(BytesIO(original_screenshot_bytes)) as img:
+                         img_width, img_height = img.size
+                     if img_width <= 0 or img_height <= 0:
+                          raise ValueError("Image dimensions from bytes are invalid.")
+                     logging.debug(f"Using image dimensions from bytes: {img_width}x{img_height}")
+                 except Exception as img_err:
+                     logging.error(f"Failed to get image dimensions from bytes: {img_err}. Cannot proceed with annotation.")
+                     return # Cannot convert coords without dimensions
+
+            # --- Convert to Absolute Pixel Coords ---
+            x1 = int(tl_x_norm * img_width)
+            y1 = int(tl_y_norm * img_height)
+            x2 = int(br_x_norm * img_width)
+            y2 = int(br_y_norm * img_height)
+
+            # Ensure correct order (x1<=x2, y1<=y2)
+            if x1 > x2: x1, x2 = x2, x1
+            if y1 > y2: y1, y2 = y2, y1
+
+            # Clip coordinates to be strictly within image bounds
+            x1 = max(0, min(x1, img_width - 1))
+            y1 = max(0, min(y1, img_height - 1))
+            x2 = max(0, min(x2, img_width - 1))
+            y2 = max(0, min(y2, img_height - 1))
+
+            # Basic check: if coords collapsed, maybe skip?
+            if x1 >= x2 or y1 >= y2:
+                logging.warning(f"Bounding box collapsed after conversion/clipping ({x1},{y1},{x2},{y2}). Skipping annotation.")
+                return
+
+            # --- Prepare Filename and Log Info ---
+            filename_suffix = f"_bbox_{x1}_{y1}_{x2}_{y2}.png"
+            target_log_info = f"bbox=({x1},{y1},{x2},{y2})" # Absolute coords
+
+            # --- Calculate Center Point for Drawing ---
+            center_x = int((x1 + x2) / 2)
+            center_y = int((y1 + y2) / 2)
+            draw_coords = (center_x, center_y) # Absolute coords
+
+        except (KeyError, IndexError, TypeError, ValueError) as e:
+            logging.error(f"Error processing AI bounding box {bbox_data}: {e}. Skipping annotation saving.")
+            return
+        except Exception as e: # Catch unexpected errors during coord processing
+             logging.error(f"Unexpected error processing coordinates/dimensions: {e}", exc_info=True)
+             return
+
+        # --- Draw the Indicator (using the calculated absolute center point) ---
+        annotated_bytes = None # Initialize
+        try:
+            logging.debug(f"Drawing indicator at center: {draw_coords}")
+            # Assume utils.draw_indicator_on_image takes absolute coords
+            annotated_bytes = utils.draw_indicator_on_image(
+                original_screenshot_bytes,
+                draw_coords # Pass calculated absolute center coordinates
+            )
+            if not annotated_bytes:
+                 raise ValueError("draw_indicator_on_image returned None")
+
+        except Exception as draw_err:
+             logging.error(f"Error drawing indicator on image: {draw_err}", exc_info=True)
+             # annotated_bytes remains None if drawing fails
+
+        # --- Save the File ---
         if annotated_bytes:
             try:
+                # Ensure config has the directory defined
+                if not hasattr(config, 'ANNOTATED_SCREENSHOTS_DIR') or not config.ANNOTATED_SCREENSHOTS_DIR:
+                    logging.error("Configuration error: 'ANNOTATED_SCREENSHOTS_DIR' not defined or empty in config.")
+                    return # Cannot save without a directory path
+
                 annotated_dir = config.ANNOTATED_SCREENSHOTS_DIR
-                os.makedirs(annotated_dir, exist_ok=True)
-                # Use step and screen ID for clearer naming
-                filename = f"annotated_step_{step}_screen_{screen_id}.png"
+                os.makedirs(annotated_dir, exist_ok=True) # Ensure directory exists
+
+                # Construct filename with absolute bbox coordinates
+                filename = f"annotated_step_{step}_screen_{screen_id}{filename_suffix}"
                 filepath = os.path.join(annotated_dir, filename)
+
+                # Write the annotated image bytes
                 with open(filepath, "wb") as f:
                     f.write(annotated_bytes)
-                logging.info(f"Saved annotated screenshot: {filepath} (Target: {self._last_action_target_coords})")
-            except Exception as e:
-                logging.error(f"Failed to save annotated screenshot {filepath}: {e}")
-        else:
-            logging.warning("Failed to generate annotated screenshot bytes.")
 
+                logging.info(f"Saved annotated screenshot: {filepath} ({target_log_info})")
+
+            except IOError as io_err:
+                 logging.error(f"Failed to save annotated screenshot to {filepath}: {io_err}", exc_info=True)
+            except Exception as e:
+                 # Catch any other saving errors
+                 filepath_str = filepath if 'filepath' in locals() else f"in {annotated_dir}"
+                 logging.error(f"Unexpected error saving annotated screenshot {filepath_str}: {e}", exc_info=True)
+        else:
+            # This case occurs if drawing failed
+            logging.warning("Skipping saving annotated screenshot because indicator drawing failed.")
 
 
     def _execute_action(self, mapped_action: Tuple[str, Optional[Any], Optional[str]]) -> bool:
@@ -295,32 +415,7 @@ class AppCrawler:
         return success
 
 
-    def _save_annotated_screenshot(self, original_screenshot_bytes: bytes, step: int, screen_id: int):
-        """Takes the original screenshot, draws indicator, and saves it."""
-        # *** Use the potentially updated self._last_action_target_coords ***
-        if not original_screenshot_bytes or self._last_action_target_coords is None:
-            logging.debug("Skipping annotated screenshot: No original image or target coordinates.")
-            return
 
-        annotated_bytes = utils.draw_indicator_on_image(
-            original_screenshot_bytes,
-            self._last_action_target_coords # Use the stored coords
-        )
-
-        if annotated_bytes:
-            try:
-                annotated_dir = config.ANNOTATED_SCREENSHOTS_DIR
-                os.makedirs(annotated_dir, exist_ok=True)
-                # Use step and screen ID for clearer naming
-                filename = f"annotated_step_{step}_screen_{screen_id}.png"
-                filepath = os.path.join(annotated_dir, filename)
-                with open(filepath, "wb") as f:
-                    f.write(annotated_bytes)
-                logging.info(f"Saved annotated screenshot: {filepath} (Target: {self._last_action_target_coords})")
-            except Exception as e:
-                logging.error(f"Failed to save annotated screenshot {filepath}: {e}")
-        else:
-            logging.warning("Failed to generate annotated screenshot bytes.")
 
 
     def _ensure_in_app(self) -> bool:
@@ -513,7 +608,8 @@ class AppCrawler:
                 self._save_annotated_screenshot(
                     original_screenshot_bytes=screenshot_bytes,
                     step=step + 1,
-                    screen_id=current_screen_repr.id
+                    screen_id=current_screen_repr.id,
+                    ai_suggestion=ai_suggestion
                 )
 
                 # 9. Execute Action

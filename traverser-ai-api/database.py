@@ -1,3 +1,4 @@
+import os
 import sqlite3
 import logging
 from typing import List, Tuple, Optional
@@ -15,8 +16,14 @@ class DatabaseManager:
     def connect(self):
         """Connects to the SQLite database and creates tables if needed."""
         try:
+            # Create database directory if it doesn't exist
+            db_dir = os.path.dirname(self.db_path)
+            if db_dir and not os.path.exists(db_dir):
+                os.makedirs(db_dir, exist_ok=True)
+                logging.info(f"Created database directory: {db_dir}")
+                
             self.conn = sqlite3.connect(self.db_path)
-            self.conn.execute("PRAGMA foreign_keys = ON;") # Enforce foreign keys if used
+            self.conn.execute("PRAGMA foreign_keys = ON;")
             self._create_tables()
             logging.info(f"Connected to database: {self.db_path}")
         except sqlite3.Error as e:

@@ -1,0 +1,13 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Run Appium Traverser",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/traverser-ai-api/main.py",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        }
+    ]
+}

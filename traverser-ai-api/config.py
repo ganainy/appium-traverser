@@ -13,7 +13,7 @@ NEW_COMMAND_TIMEOUT = 300 # Seconds Appium waits for a new command before quitti
 
 # --- AI Settings ---
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") # Get API key from environment variable
-AI_MODEL_NAME = "gemini-1.5-flash" # Or "gemini-pro-vision", "gemini-1.5-pro", check availability
+AI_MODEL_NAME = "gemini-2.5-flash-preview-04-17" # Or "gemini-pro-vision", "gemini-1.5-pro", check availability
 # Safety settings for Gemini - adjust as needed
 # Reference: https://ai.google.dev/docs/safety_setting_gemini
 AI_SAFETY_SETTINGS = {
@@ -34,9 +34,10 @@ ALLOWED_EXTERNAL_PACKAGES = [
 
 # --- Crawler Settings ---
 MAX_CRAWL_STEPS = 50 # Limit the number of interactions
-SCREENSHOTS_DIR = f"crawl_screenshots_{APP_PACKAGE}"
-ANNOTATED_SCREENSHOTS_DIR = f"annotated_crawl_screenshots_{APP_PACKAGE}"
-DB_NAME = f"{APP_PACKAGE}_crawl_data.db"
+SCREENSHOTS_DIR = f"traverser-ai-api/screenshots/crawl_screenshots_{APP_PACKAGE}"
+ANNOTATED_SCREENSHOTS_DIR = f"traverser-ai-api/screenshots/annotated_crawl_screenshots_{APP_PACKAGE}"
+# Database settings
+DB_NAME = f"traverser-ai-api/database_output/{APP_PACKAGE}_crawl_data.db"
 WAIT_AFTER_ACTION = 2.5 # Seconds to wait for UI to potentially change after an action
 STABILITY_WAIT = 1.0 # Seconds to wait before getting state (screenshot/XML)
 VISUAL_SIMILARITY_THRESHOLD = 5 # Perceptual hash distance threshold (lower means more similar)
