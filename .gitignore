@@ -1,7 +1,8 @@
 .env
-traverser-ai-api/.env
-traverser-ai-api/screenshots/
-comparison-grid/output/
-traverser-ai-api/database_output/
+traverser_ai_api/.env
+traverser_ai_api/screenshots/
+comparison_grid/output/
+traverser_ai_api/database_output/
 find_app_info/output
 capture_app_traffic/output
+script_setup_manual_config
