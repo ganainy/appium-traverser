@@ -550,11 +550,9 @@ class AppCrawler:
                     return False # Indicate failure to recover
 
 
-    def _check_termination(self, step_count: int) -> bool:
-        """Checks if crawling should terminate."""
-        if step_count >= config.MAX_CRAWL_STEPS:
-            logging.info(f"Termination: Reached max step count ({config.MAX_CRAWL_STEPS}).")
-            return True
+    def _check_termination(self) -> bool:
+        """Checks if crawling should terminate based on failure conditions."""
+        # Removed step count check - handled in run() loop based on CRAWL_MODE
         if self.consecutive_ai_failures >= config.MAX_CONSECUTIVE_AI_FAILURES:
             logging.error(f"Termination: Exceeded max consecutive AI failures ({config.MAX_CONSECUTIVE_AI_FAILURES}).")
             return True
@@ -569,10 +567,23 @@ class AppCrawler:
 
     
     def run(self):
-        """Starts and manages the crawling loop."""
+        """Starts and manages the crawling loop based on configured mode (steps or time)."""
         logging.info("--- Starting AI App Crawler ---")
-        start_time = time.time()
+        crawl_start_time = time.time() # Record start time for time-based crawling
         run_successful = False # Flag to track if the main loop starts
+
+        # --- Get Crawl Mode Configuration ---
+        crawl_mode = getattr(config, 'CRAWL_MODE', 'steps').lower()
+        max_steps = getattr(config, 'MAX_CRAWL_STEPS', 100)
+        max_duration_seconds = getattr(config, 'MAX_CRAWL_DURATION_SECONDS', 600)
+
+        if crawl_mode == 'steps':
+            logging.info(f"Running in 'steps' mode. Max steps: {max_steps}")
+        elif crawl_mode == 'time':
+            logging.info(f"Running in 'time' mode. Max duration: {max_duration_seconds} seconds")
+        else:
+            logging.warning(f"Unknown CRAWL_MODE '{crawl_mode}'. Defaulting to 'steps' mode with max steps: {max_steps}")
+            crawl_mode = 'steps'
 
         # --- Setup ---
         try:
@@ -606,12 +617,29 @@ class AppCrawler:
             run_successful = True
             self.previous_composite_hash = None
             self._last_action_description = "START"
+            step_count = 0 # Initialize step counter
 
-            # --- Main Crawling Loop ---
-            max_steps = getattr(config, 'MAX_CRAWL_STEPS', 100)
-            for step in range(max_steps):
-                current_step_number = step + 1
-                logging.info(f"\n--- Step {current_step_number}/{max_steps} ---")
+            # --- Main Crawling Loop (modified for time/step modes) ---
+            while True: # Loop indefinitely until a break condition is met
+                step_count += 1
+                current_time = time.time()
+                elapsed_time = current_time - crawl_start_time
+
+                # --- Check Termination Conditions (Mode Dependent) ---
+                if crawl_mode == 'steps':
+                    if step_count > max_steps:
+                        logging.info(f"Termination: Reached max step count ({max_steps}).")
+                        break
+                    logging.info(f"\n--- Step {step_count}/{max_steps} ---")
+                elif crawl_mode == 'time':
+                    if elapsed_time > max_duration_seconds:
+                        logging.info(f"Termination: Reached max duration ({elapsed_time:.1f}s / {max_duration_seconds}s). Total steps: {step_count-1}")
+                        break
+                    logging.info(f"\n--- Step {step_count} (Time: {elapsed_time:.1f}s / {max_duration_seconds}s) ---")
+
+                # Check failure-based termination (common to both modes)
+                if self._check_termination(): # Call the updated method (checks failures only)
+                    break
 
                 # 0. Ensure Correct App Context
                 if not self._ensure_in_app():

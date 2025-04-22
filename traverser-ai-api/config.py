@@ -41,7 +41,11 @@ ALLOWED_EXTERNAL_PACKAGES = [
 
 # --- Crawler Settings ---
 CONTINUE_EXISTING_RUN = False  # Set to True to use existing DB and screenshots, False to start fresh
-MAX_CRAWL_STEPS = 50  # Limit the number of interactions
+# Crawling control
+CRAWL_MODE = 'steps'  # Options: 'steps' or 'time'
+MAX_CRAWL_STEPS = 100  # Max steps if CRAWL_MODE is 'steps'
+MAX_CRAWL_DURATION_SECONDS = 600  # Max duration in seconds (e.g., 600 for 10 mins) if CRAWL_MODE is 'time'
+# Screenshot directories
 SCREENSHOTS_DIR = f"traverser-ai-api/screenshots/crawl_screenshots_{APP_PACKAGE}"
 ANNOTATED_SCREENSHOTS_DIR = f"traverser-ai-api/screenshots/annotated_crawl_screenshots_{APP_PACKAGE}"
 # Database settings

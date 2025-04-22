@@ -3,3 +3,5 @@ traverser-ai-api/.env
 traverser-ai-api/screenshots/
 comparison-grid/output/
 traverser-ai-api/database_output/
+find_app_info/output
+capture_app_traffic/output

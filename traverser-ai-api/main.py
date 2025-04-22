@@ -34,19 +34,25 @@ try:
     # Handle existing data based on CONTINUE_EXISTING_RUN flag
     if not config.CONTINUE_EXISTING_RUN:
         logging.info("Starting fresh run - clearing existing data...")
+        import shutil # Import shutil here to keep it scoped
         # Remove existing screenshots
-        if os.path.exists(config.SCREENSHOTS_DIR):
-            import shutil
+        if hasattr(config, 'SCREENSHOTS_DIR') and os.path.exists(config.SCREENSHOTS_DIR):
             shutil.rmtree(config.SCREENSHOTS_DIR)
+        # Remove existing annotated screenshots
+        if hasattr(config, 'ANNOTATED_SCREENSHOTS_DIR') and os.path.exists(config.ANNOTATED_SCREENSHOTS_DIR):
+            shutil.rmtree(config.ANNOTATED_SCREENSHOTS_DIR)
         # Remove existing database
-        if os.path.exists(config.DB_NAME):
+        if hasattr(config, 'DB_NAME') and os.path.exists(config.DB_NAME):
             os.remove(config.DB_NAME)
         logging.info("Existing data cleared successfully.")
     else:
         logging.info("Continuing from existing data - keeping database and screenshots.")
 
-    # Create screenshots directory if it doesn't exist
-    os.makedirs(config.SCREENSHOTS_DIR, exist_ok=True)
+    # Create necessary directories if they don't exist
+    if hasattr(config, 'SCREENSHOTS_DIR'):
+        os.makedirs(config.SCREENSHOTS_DIR, exist_ok=True)
+    if hasattr(config, 'ANNOTATED_SCREENSHOTS_DIR'):
+        os.makedirs(config.ANNOTATED_SCREENSHOTS_DIR, exist_ok=True)
 
 except ImportError:
     logging.critical("Could not import configuration. Make sure config.py exists.")
