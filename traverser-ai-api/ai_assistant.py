@@ -35,7 +35,9 @@ class AIAssistant:
         """Builds the detailed prompt for the AI model, including visit count awareness."""
         action_descriptions = {
             "click": "Visually identify and select an interactive element. Provide its best identifier (resource-id, content-desc, or text).",
-            "input": "Visually identify a text input field. Provide its best identifier and the text to input.",
+            # --- Edit: Added clarification for input action ---
+            "input": "Visually identify a text input field (e.g., class='android.widget.EditText'). Provide its best identifier AND the text to input. **CRITICAL: ONLY suggest 'input' for elements designed for text entry.**",
+            # --- End Edit ---
             "scroll_down": "Scroll the view downwards.",
             "scroll_up": "Scroll the view upwards.",
             "back": "Navigate back using the system back button."
@@ -74,7 +76,7 @@ class AIAssistant:
 
         CONTEXT:
         1. Screenshot: Provided as image input.
-        2. XML Layout: Provided below. Use this to find identifiers and check element states.
+        2. XML Layout: Provided below. Use this to find identifiers and check element states (like `class`, `enabled`, `clickable`).
         3. Previous Actions Taken *From This Screen*:
         {history_str}
 
@@ -87,6 +89,12 @@ class AIAssistant:
         - CHECK PREREQUISITES: Check XML for identifier and `enabled="true"`. Check visually.
         - IF DISABLED: Perform the prerequisite action first (provide its identifier).
         - PRIORITIZE PREREQUISITES.
+
+        # --- Edit: Added explicit rule for INPUT action ---
+        **CRUCIAL RULE for 'input' Action:**
+        - VERIFY ELEMENT TYPE: Before suggesting 'input', check the XML context for the target element. Ensure its `class` attribute indicates it is an editable field (e.g., `android.widget.EditText`, `android.widget.AutoCompleteTextView`, etc.).
+        - DO NOT suggest 'input' for non-editable elements like `android.widget.TextView`, `android.widget.Button`, etc.
+        # --- End Edit ---
 
         General Priorities:
         1. Fulfill required prerequisites if progression buttons are disabled.
@@ -178,6 +186,28 @@ class AIAssistant:
             # Calculate and log total elapsed time
             elapsed_time = time.time() - start_time
             logging.info(f"Total AI Processing Time: {elapsed_time:.2f} seconds")
+
+            # --- Streamline Response Processing ---
+            if not response.parts:
+                logging.warning("AI response has no parts (potentially blocked or empty).")
+                return None
+
+            raw_response_text = response.text.strip()
+            if not raw_response_text:
+                logging.error("AI returned empty response.")
+                return None
+
+            # Quick finish reason check
+            if response.candidates and response.candidates[0].finish_reason != 1:  # 1 = STOP
+                logging.warning(f"AI generation finished abnormally: {response.candidates[0].finish_reason}")
+                return None
+
+            # Simplified JSON extraction
+            json_str = raw_response_text
+            if json_str.startswith("```"): 
+                json_str = json_str.split("```")[1]
+                if json_str.startswith("json"): json_str = json_str[4:]
+            json_str = json_str.strip()
 
             # --- Logging for Raw Response ---
             logging.info("--- Received Raw Response from AI ---")

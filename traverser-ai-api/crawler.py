@@ -23,7 +23,6 @@ class AppCrawler:
         self.ai_assistant = AIAssistant(config.GEMINI_API_KEY, config.AI_MODEL_NAME, config.AI_SAFETY_SETTINGS)
         self.db_manager = DatabaseManager(config.DB_NAME)
         self.state_manager: Optional[CrawlingState] = None
-        self._last_action_target_coords: Optional[Tuple[int, int]] = None # Store coords for annotation
 
         # Failure counters
         self.consecutive_ai_failures = 0
@@ -33,6 +32,16 @@ class AppCrawler:
         # State tracking variables used within run()
         self._last_action_description: str = "START"
         self.previous_composite_hash: Optional[str] = None
+
+        # ---Initialize element finding strategy order ---
+        # Each tuple: (key, appium_by_strategy_or_None, log_name)
+        self.element_finding_strategies = [
+            ('id', AppiumBy.ID, "ID"),
+            ('acc_id', AppiumBy.ACCESSIBILITY_ID, "Accessibility ID"),
+            ('xpath_exact', None, "XPath Exact Text"),
+            ('xpath_contains', None, "XPath Contains")
+        ]
+        logging.info(f"Initial element finding strategy order: {[s[2] for s in self.element_finding_strategies]}")
 
 
     def _get_element_center(self, element: WebElement) -> Optional[Tuple[int, int]]:
@@ -55,139 +64,104 @@ class AppCrawler:
     def _find_element_by_ai_identifier(self, identifier: str) -> Optional[WebElement]:
         """
         Attempts to find a WebElement using the identifier provided by the AI,
-        trying different strategies in a prioritized order and handling quotes in XPath.
+        trying different strategies in a dynamically prioritized order.
+        Promotes successful strategies and returns immediately upon finding a suitable element.
         """
         if not identifier or not self.driver or not self.driver.driver:
             logging.warning("Cannot find element: Invalid identifier or driver not available.")
             return None
 
         logging.info(f"Attempting to find element using identifier: '{identifier}'")
-        element: Optional[WebElement] = None
+        total_start_time = time.perf_counter() # Start total timer
 
-        # --- Priority 1 & 2: ID and Accessibility ID (No change needed for quotes) ---
-        strategies = [
-            (AppiumBy.ID, "ID"),
-            (AppiumBy.ACCESSIBILITY_ID, "Accessibility ID")
-        ]
-        for strategy, name in strategies:
+        # --- Iterate through strategies in current priority order ---
+        for index, (strategy_key, appium_by, log_name) in enumerate(self.element_finding_strategies):
+            element: Optional[WebElement] = None
+            start_time = time.perf_counter() # Start timer for this strategy
+            strategy_succeeded = False
+            xpath_generated = "" # For logging invalid selectors
+
             try:
-                logging.debug(f"Trying {name}: '{identifier}'")
-                element = self.driver.find_element(strategy, identifier)
-                # Check if element is suitable (e.g., displayed)
-                if element and element.is_displayed():
-                    logging.info(f"Found element by {name}: {identifier}")
-                    return element
-                else:
-                    # Found but not suitable (e.g., not displayed)
-                    logging.debug(f"Element found by {name} but not displayed or invalid.")
-                    element = None # Reset to try next strategy
-            except NoSuchElementException:
-                logging.debug(f"Not found by {name}.")
-            except InvalidSelectorException as e: # Catch specific selector errors too
-                 logging.warning(f"Invalid Selector Exception finding by {name} '{identifier}': {e}")
-                 # Don't retry with this strategy if selector is fundamentally bad
-                 element = None
-            except Exception as e:
-                # Catch other potential errors (stale element, timeout, etc.)
-                logging.warning(f"Error finding by {name} '{identifier}': {e}")
-                element = None # Reset on error
+                # --- Execute find logic based on strategy_key ---
+                if strategy_key in ['id', 'acc_id']:
+                    logging.debug(f"Trying {log_name}: '{identifier}'")
+                    element = self.driver.find_element(appium_by, identifier)
 
-        # --- Priority 3: Exact Text Match (XPath - Handling Quotes) ---
-        if not element:
-            xpath_exact = "" # Initialize
-            try:
-                # --- XPath Quote Handling Logic ---
-                if "'" in identifier and '"' in identifier:
-                    # Contains both single and double quotes - Use complex concat
-                    parts = []
-                    # Split by single quote, handle parts containing double quotes
-                    for i, part in enumerate(identifier.split("'")):
-                        if '"' in part: # Part contains double quotes, enclose in single quotes
-                             parts.append(f"'{part}'")
-                        elif part: # Part has no double quotes, enclose in double quotes
-                             parts.append(f'"{part}"')
-                        # Add the single quote back using concat, except for the last part
-                        if i < len(identifier.split("'")) - 1:
-                             parts.append("\"'\"") # Concat the single quote character
+                elif strategy_key == 'xpath_exact':
+                    # --- XPath Exact Text Logic (with quote handling) ---
+                    if "'" in identifier and '"' in identifier:
+                        parts = []
+                        for i, part in enumerate(identifier.split("'")):
+                            if '"' in part: parts.append(f"'{part}'")
+                            elif part: parts.append(f'"{part}"')
+                            if i < len(identifier.split("'")) - 1: parts.append("\"'\"")
+                        xpath_text_expression = f"concat({','.join(filter(None, parts))})"
+                    elif "'" in identifier: xpath_text_expression = f'"{identifier}"'
+                    elif '"' in identifier: xpath_text_expression = f"'{identifier}'"
+                    else: xpath_text_expression = f"'{identifier}'"
+                    xpath_generated = f"//*[@text={xpath_text_expression}]"
+                    # ----------------------------------------------------
+                    logging.debug(f"Trying {log_name} (Quote Safe): {xpath_generated}")
+                    element = self.driver.find_element(AppiumBy.XPATH, xpath_generated)
 
-                    xpath_text_expression = f"concat({','.join(filter(None, parts))})" # Filter empty strings from split
-                elif "'" in identifier:
-                    # Only single quotes, use double quotes for outer literal
-                    xpath_text_expression = f'"{identifier}"'
-                elif '"' in identifier:
-                     # Only double quotes, use single quotes for outer literal
-                     xpath_text_expression = f"'{identifier}'"
-                else:
-                    # No quotes, use single quotes (or double)
-                    xpath_text_expression = f"'{identifier}'"
+                elif strategy_key == 'xpath_contains':
+                    # --- XPath Contains Logic (basic quote handling) ---
+                    if "'" in identifier: xpath_safe_identifier = f'"{identifier}"'
+                    else: xpath_safe_identifier = f"'{identifier}'"
+                    xpath_generated = (f"//*[contains(@text, {xpath_safe_identifier}) or "
+                                       f"contains(@content-desc, {xpath_safe_identifier}) or "
+                                       f"contains(@resource-id, {xpath_safe_identifier})]")
+                    # ---------------------------------------------------
+                    logging.debug(f"Trying {log_name} (Basic Quote Handling): {xpath_generated}")
+                    possible_elements = self.driver.driver.find_elements(AppiumBy.XPATH, xpath_generated)
+                    found_count = len(possible_elements)
+                    logging.debug(f"Found {found_count} potential elements via '{log_name}' XPath.")
+                    # Filter results
+                    for el in possible_elements:
+                        try:
+                            if el.is_displayed() and el.is_enabled():
+                                element = el # Found a suitable one
+                                break # Use the first suitable one
+                        except Exception: continue # Ignore stale elements during check
+                    if not element:
+                         logging.debug(f"No suitable element found by '{log_name}' XPath after filtering.")
+                # --- End of strategy-specific logic ---
 
-                xpath_exact = f"//*[@text={xpath_text_expression}]"
-                # ---------------------------------
+                duration = time.perf_counter() - start_time # Calculate duration here after find attempt
 
-                logging.debug(f"Trying XPath (Exact Text - Quote Safe): {xpath_exact}")
-                element = self.driver.find_element(AppiumBy.XPATH, xpath_exact)
+                # --- Check if element is suitable and handle success ---
                 if element and element.is_displayed() and element.is_enabled():
-                    logging.info(f"Found element by exact text (XPath - Quote Safe): {identifier}")
+                    logging.info(f"Found element by {log_name}: '{identifier}' (took {duration:.4f}s)")
+                    strategy_succeeded = True
+                    # --- Promote the successful strategy ---
+                    if index > 0: # No need to move if already first
+                        promoted_strategy = self.element_finding_strategies.pop(index)
+                        self.element_finding_strategies.insert(0, promoted_strategy)
+                        logging.info(f"Promoted strategy '{log_name}' to the front. New order: {[s[2] for s in self.element_finding_strategies]}")
+                    # --- Return immediately on success ---
                     return element
-                else:
-                    logging.debug("Element found by exact text XPath but not displayed/enabled.")
-                    element = None
+                elif element:
+                    # Found but not suitable (e.g., not displayed/enabled)
+                    logging.debug(f"Element found by {log_name} but not displayed/enabled (took {duration:.4f}s).")
+                    # Do not promote, continue to next strategy
+
             except NoSuchElementException:
-                logging.debug("Not found by exact text XPath.")
-            except InvalidSelectorException as e: # Catch specifically for XPath
-                 logging.error(f"Invalid XPath Selector for exact text '{identifier}': {xpath_exact}. Error: {e}")
-                 element = None # Don't proceed if XPath is invalid
+                duration = time.perf_counter() - start_time # Calculate duration
+                logging.debug(f"Not found by {log_name} (took {duration:.4f}s).")
+            except InvalidSelectorException as e:
+                 duration = time.perf_counter() - start_time # Calculate duration
+                 logging.warning(f"Invalid Selector Exception finding by {log_name} '{identifier}' (XPath: {xpath_generated}). Error: {e} (took {duration:.4f}s)")
             except Exception as e:
-                logging.warning(f"Error finding by exact text XPath '{identifier}': {e}")
-                element = None
+                duration = time.perf_counter() - start_time # Calculate duration
+                logging.warning(f"Error finding by {log_name} '{identifier}' (took {duration:.4f}s): {e}")
 
-        # --- Priority 4: Contains Text/Content-Desc/Resource-ID (XPath - Simplified Quote Handling) ---
-        if not element:
-             xpath_contains = "" # Initialize
-             try:
-                 # For contains, simple escaping is often problematic.
-                 # Try using double quotes as the outer literal if identifier has single quotes.
-                 # This is NOT fully robust if identifier has both or only double quotes.
-                 # A truly robust 'contains' with arbitrary quotes is much harder.
-                 if "'" in identifier:
-                      xpath_safe_identifier = f'"{identifier}"' # Try double quotes
-                 else:
-                      xpath_safe_identifier = f"'{identifier}'" # Default to single
+            # If we reach here, the current strategy failed or found an unsuitable element.
+            # Loop continues to the next strategy.
 
-                 # Build contains() checks - Note: contains() itself doesn't use concat easily
-                 xpath_contains = (f"//*[contains(@text, {xpath_safe_identifier}) or "
-                                   f"contains(@content-desc, {xpath_safe_identifier}) or "
-                                   f"contains(@resource-id, {xpath_safe_identifier})]")
-
-                 logging.debug(f"Trying XPath (Contains - Basic Quote Handling): {xpath_contains}")
-                 possible_elements = self.driver.driver.find_elements(AppiumBy.XPATH, xpath_contains)
-                 found_count = len(possible_elements)
-                 logging.debug(f"Found {found_count} potential elements via 'contains' XPath.")
-
-                 for el in possible_elements:
-                     try:
-                         if el.is_displayed() and el.is_enabled():
-                             logging.info(f"Found first suitable element by 'contains' (XPath): '{identifier}'")
-                             return el # Return the first good one
-                     except Exception: continue # Ignore stale elements during check
-
-                 logging.debug("No suitable element found by 'contains' XPath after filtering.")
-                 element = None # Explicitly set if loop finishes
-
-             except InvalidSelectorException as e:
-                  logging.error(f"Invalid XPath Selector for contains '{identifier}': {xpath_contains}. Error: {e}")
-                  element = None
-             except Exception as e:
-                 logging.warning(f"Error finding by 'contains' XPath '{identifier}': {e}")
-                 element = None
-
-        # --- Final Result ---
-        if not element:
-             logging.warning(f"Could not find suitable element using identifier '{identifier}' with any strategy.")
-
-        return element # Return element (which is None if not found)
-
-       
+        # --- Final Result if loop completes without success ---
+        total_duration = time.perf_counter() - total_start_time # Calculate total duration
+        logging.warning(f"Could not find suitable element using identifier '{identifier}' with any strategy (total search time {total_duration:.4f}s). Current strategy order: {[s[2] for s in self.element_finding_strategies]}")
+        return None # Return None if no strategy worked
 
     def _get_current_state(self) -> Optional[Tuple[bytes, str]]:
         """Gets the current screenshot bytes and page source."""
@@ -205,69 +179,6 @@ class AppCrawler:
             logging.error(f"Exception getting current state: {e}", exc_info=True)
             return None
 
-        """Finds the best matching WebElement based on AI's text description."""
-        if not description or not candidate_elements:
-            return None
-
-        logging.debug(f"Attempting to find element matching description: '{description}' among {len(candidate_elements)} candidates.")
-        best_match_element = None
-        highest_score = 0
-        description_lower = description.lower()
-
-        # Attributes to check for matching keywords
-        attrs_to_check = ['text', 'content-desc', 'resource-id', 'hint']
-
-        for element in candidate_elements:
-            try:
-                # Optimization: Skip elements clearly not visible/interactive?
-                # if not element.is_displayed(): continue
-
-                attrs = self.driver.get_element_attributes(element, attrs_to_check)
-                current_score = 0
-
-                # Score based on matches in key attributes
-                text = attrs.get('text', '')
-                desc = attrs.get('content-desc', '')
-                rid = attrs.get('resource-id', '')
-                hint = attrs.get('hint', '')
-
-                # Prioritize exact/substring matches in primary text/desc
-                if text and text.lower() in description_lower: current_score += 5
-                elif desc and desc.lower() in description_lower: current_score += 5
-                elif text and description_lower in text.lower(): current_score += 3 # Reverse match
-                elif desc and description_lower in desc.lower(): current_score += 3
-
-                # Check hints and resource IDs
-                if hint and hint.lower() in description_lower: current_score += 2
-                if rid and rid.split('/')[-1].lower() in description_lower: current_score += 1 # Match last part of RID
-
-                # Boost score if keywords match (e.g., "button" description and Button class)
-                # This requires getting the 'class' attribute as well
-                # class_name = self.driver.get_element_attributes(element, ['class']).get('class', '')
-                # if "button" in description_lower and "button" in class_name.lower(): current_score += 1
-                # if "input" in description_lower and ("edittext" in class_name.lower() or "textfield" in class_name.lower()): current_score += 1
-
-                # Check if this is the best match so far
-                if current_score > highest_score:
-                    highest_score = current_score
-                    best_match_element = element
-                    logging.debug(f"New best match found (Score: {highest_score}): Element attrs: {attrs}")
-
-            except Exception as e:
-                logging.warning(f"Error processing candidate element during mapping: {e}", exc_info=False)
-                continue # Skip problematic element
-
-
-        if best_match_element:
-            logging.info(f"Mapped description '{description}' to element (Best Score: {highest_score}).")
-            # You might want to log the attributes of the chosen element here for confirmation
-        else:
-            logging.warning(f"Could not find a suitable element matching description: '{description}'.")
-
-        return best_match_element
-
-
-
     def _map_ai_to_action(self, ai_suggestion: dict) -> Optional[Tuple[str, Optional[Any], Optional[str]]]:
         """
         Maps the AI's JSON suggestion (using 'target_identifier') to an executable action tuple.
@@ -275,13 +186,10 @@ class AppCrawler:
                  where target_object_or_info is WebElement for click/input, or string for scroll.
         """
         action = ai_suggestion.get("action")
-        target_identifier = ai_suggestion.get("target_identifier") # REQUIRED for click/input
-        input_text = ai_suggestion.get("input_text")
-        # target_bbox = ai_suggestion.get("target_bounding_box") # Still available for annotation, but not used here
+        target_identifier = ai_suggestion.get("target_identifier")
+        input_text = ai_suggestion.get("input_text") # Needed for input action
 
-        if not action:
-            logging.error("AI suggestion missing 'action'. Cannot map.")
-            return None
+        logging.info(f"Attempting to map AI suggestion: Action='{action}', Identifier='{target_identifier}', Input='{input_text}'")
 
         # --- Actions requiring element finding ---
         if action in ["click", "input"]:
@@ -293,11 +201,72 @@ class AppCrawler:
             target_element = self._find_element_by_ai_identifier(target_identifier)
 
             if target_element:
-                 logging.info(f"Successfully mapped AI identifier '{target_identifier}' to a WebElement.")
-                 # Return tuple: (action_type, WebElement, input_text_or_None)
+                 logging.info(f"Successfully mapped AI identifier '{target_identifier}' to initial WebElement.")
+
+                 # --- Refactored validation for INPUT actions ---
+                 if action == "input":
+                     original_element = target_element # Keep track of the originally found element
+                     is_editable = False
+                     element_class = None # Initialize element_class
+                     try:
+                         # Check if the initially found element is editable
+                         element_class = original_element.get_attribute('class')
+                         editable_classes = ['edittext', 'textfield', 'input', 'autocomplete']
+                         if element_class and any(editable_tag in element_class.lower() for editable_tag in editable_classes):
+                             is_editable = True
+                             logging.debug(f"Initial element (Class: {element_class}) is directly editable.")
+                         else:
+                             logging.debug(f"Initial element (Class: {element_class}) is not directly editable. Checking parent...")
+                             # --- Attempt to find editable parent ---
+                             try:
+                                 # Use XPath to select the parent node
+                                 parent_element = original_element.find_element(AppiumBy.XPATH, "..")
+                                 if parent_element:
+                                     # --- Add more detailed logging ---
+                                     logging.debug(f"Found parent element. Attempting to get class attribute...")
+                                     parent_class = parent_element.get_attribute('class')
+                                     if parent_class:
+                                         logging.debug(f"Parent class found: '{parent_class}'. Checking if editable...")
+                                         parent_class_lower = parent_class.lower()
+                                         is_parent_editable = any(editable_tag in parent_class_lower for editable_tag in editable_classes)
+                                         logging.debug(f"Editable tags check result for parent: {is_parent_editable}")
+                                         # --- End detailed logging ---
+                                         if is_parent_editable: # Use the result of the check
+                                             logging.info(f"Using editable parent element (Class: {parent_class}) for INPUT action.")
+                                             target_element = parent_element # Use the parent as the target
+                                             is_editable = True
+                                         else:
+                                             logging.debug(f"Parent element class '{parent_class}' is not in editable list: {editable_classes}.")
+                                     else:
+                                         logging.debug("Could not retrieve class attribute from parent element.")
+                                         # Parent found, but couldn't get class. Treat as not editable for safety.
+                                 else:
+                                     # This case should not happen if find_element succeeded without error, but good to have.
+                                     logging.debug("Parent element found via XPath '..' but is None/False.")
+                             except NoSuchElementException:
+                                 logging.warning("No parent element found via XPath '..'.")
+                             except Exception as parent_err:
+                                 # Log the specific error encountered during parent processing
+                                 logging.warning(f"Error finding or checking parent element: {parent_err}", exc_info=True) # Add exc_info
+                             # --- End parent check ---
+
+                         # If neither original nor parent is suitable, fail the mapping
+                         if not is_editable:
+                             # Ensure element_class has a value for the log message
+                             log_element_class = element_class if element_class else "Unknown/Error"
+                             logging.warning(f"AI suggested INPUT, but neither element (Class: {log_element_class}) nor its parent is editable for identifier '{target_identifier}'. Skipping action mapping.")
+                             self.consecutive_map_failures += 1
+                             return None # Mapping fails
+
+                     except Exception as e:
+                         logging.warning(f"Error during element class validation for INPUT: {e}. Proceeding cautiously.")
+                 # --- End refactored validation ---
+
+                 # Return tuple: (action_type, final_target_element, input_text_or_None)
                  return (action, target_element, input_text if action == "input" else None)
             else:
                  logging.error(f"Failed to find element using AI identifier: '{target_identifier}'. Cannot map action '{action}'.")
+                 self.consecutive_map_failures += 1 # Count as a mapping failure
                  return None # Mapping fails
 
         # --- Actions NOT requiring element finding ---
@@ -310,133 +279,6 @@ class AppCrawler:
         else:
             logging.error(f"Unknown action type from AI: {action}")
             return None
-
-    # --- _save_annotated_screenshot (Keep as is - relies on optional bbox) ---
-    def _save_annotated_screenshot(self,
-                                   original_screenshot_bytes: bytes,
-                                   step: int,
-                                   screen_id: int,
-                                   ai_suggestion: Optional[Dict[str, Any]]):
-        # ... (Keep existing implementation - it should handle bbox being None) ...
-        # It will log debug message and skip annotation if bbox is None.
-        if not original_screenshot_bytes:
-            logging.debug("Skipping annotated screenshot: No original image provided.")
-            return
-        if not ai_suggestion:
-            logging.debug("Skipping annotated screenshot: No AI suggestion provided.")
-            return
-
-        bbox_data = ai_suggestion.get("target_bounding_box")
-        action_type = ai_suggestion.get("action", "unknown") # Get action type for context
-
-        if not bbox_data:
-            logging.debug(f"Skipping annotated screenshot: AI suggestion for action '{action_type}' has no 'target_bounding_box'.")
-            return # Nothing to annotate if no target bbox specified by AI
-
-        logging.debug(f"Attempting annotation using AI bbox: {bbox_data}")
-        # ... rest of the function remains the same ...
-        # It correctly handles calculating coords from the *optional* bbox if present.
-        try:
-            # --- Extract Normalized Coords ---
-            tl_x_norm, tl_y_norm = bbox_data["top_left"]
-            br_x_norm, br_y_norm = bbox_data["bottom_right"]
-
-            # --- Validate Normalized Coords ---
-            if not all(isinstance(coord, (int, float)) and 0.0 <= coord <= 1.0 for coord in [tl_x_norm, tl_y_norm, br_x_norm, br_y_norm]):
-                 raise ValueError(f"Normalized coordinates invalid or out of range [0.0, 1.0]: {bbox_data}")
-
-            # --- Get Image Dimensions to Convert Coords ---
-            window_size = self.driver.get_window_size()
-            if window_size and window_size.get('width') > 0 and window_size.get('height') > 0:
-                 img_width = window_size['width']
-                 img_height = window_size['height']
-                 logging.debug(f"Using Appium window size for coord conversion: {img_width}x{img_height}")
-            else:
-                 logging.debug("Appium window size unavailable or invalid, loading image from bytes to get dimensions.")
-                 try:
-                     # Need PIL's Image and io.BytesIO for this fallback
-                     from PIL import Image
-                     import io
-                     with Image.open(io.BytesIO(original_screenshot_bytes)) as img:
-                         img_width, img_height = img.size
-                     if img_width <= 0 or img_height <= 0:
-                          raise ValueError("Image dimensions from bytes are invalid.")
-                     logging.debug(f"Using image dimensions from bytes: {img_width}x{img_height}")
-                 except Exception as img_err:
-                     logging.error(f"Failed to get image dimensions from bytes: {img_err}. Cannot proceed with annotation.")
-                     return
-
-            # --- Convert to Absolute Pixel Coords ---
-            x1 = int(tl_x_norm * img_width)
-            y1 = int(tl_y_norm * img_height)
-            x2 = int(br_x_norm * img_width)
-            y2 = int(br_y_norm * img_height)
-
-            # Ensure correct order
-            if x1 > x2: x1, x2 = x2, x1
-            if y1 > y2: y1, y2 = y2, y1
-
-            # Clip coordinates
-            x1 = max(0, min(x1, img_width - 1))
-            y1 = max(0, min(y1, img_height - 1))
-            x2 = max(0, min(x2, img_width - 1))
-            y2 = max(0, min(y2, img_height - 1))
-
-            if x1 >= x2 or y1 >= y2:
-                logging.warning(f"Bounding box collapsed after conversion/clipping ({x1},{y1},{x2},{y2}). Skipping annotation.")
-                return
-
-            filename_suffix = f"_bbox_{x1}_{y1}_{x2}_{y2}.png"
-            target_log_info = f"bbox=({x1},{y1},{x2},{y2})" # Absolute coords
-
-            center_x = int((x1 + x2) / 2)
-            center_y = int((y1 + y2) / 2)
-            draw_coords = (center_x, center_y) # Absolute coords
-
-        except (KeyError, IndexError, TypeError, ValueError) as e:
-            logging.error(f"Error processing AI bounding box {bbox_data}: {e}. Skipping annotation saving.")
-            return
-        except Exception as e:
-             logging.error(f"Unexpected error processing coordinates/dimensions: {e}", exc_info=True)
-             return
-
-        annotated_bytes = None
-        try:
-            logging.debug(f"Drawing indicator at center: {draw_coords}")
-            annotated_bytes = utils.draw_indicator_on_image(
-                original_screenshot_bytes,
-                draw_coords
-            )
-            if not annotated_bytes:
-                 raise ValueError("draw_indicator_on_image returned None")
-
-        except Exception as draw_err:
-             logging.error(f"Error drawing indicator on image: {draw_err}", exc_info=True)
-
-        if annotated_bytes:
-            try:
-                if not hasattr(config, 'ANNOTATED_SCREENSHOTS_DIR') or not config.ANNOTATED_SCREENSHOTS_DIR:
-                    logging.error("Configuration error: 'ANNOTATED_SCREENSHOTS_DIR' not defined or empty in config.")
-                    return
-
-                annotated_dir = config.ANNOTATED_SCREENSHOTS_DIR
-                os.makedirs(annotated_dir, exist_ok=True)
-
-                filename = f"annotated_step_{step}_screen_{screen_id}{filename_suffix}"
-                filepath = os.path.join(annotated_dir, filename)
-
-                with open(filepath, "wb") as f:
-                    f.write(annotated_bytes)
-
-                logging.info(f"Saved annotated screenshot: {filepath} ({target_log_info})")
-
-            except IOError as io_err:
-                 logging.error(f"Failed to save annotated screenshot to {filepath}: {io_err}", exc_info=True)
-            except Exception as e:
-                 filepath_str = filepath if 'filepath' in locals() else f"in {annotated_dir}"
-                 logging.error(f"Unexpected error saving annotated screenshot {filepath_str}: {e}", exc_info=True)
-        else:
-            logging.warning("Skipping saving annotated screenshot because indicator drawing failed.")
 
 
     def _save_annotated_screenshot(self,
@@ -836,7 +678,7 @@ class AppCrawler:
                     self._last_action_description = f"AI_FAIL_BACK (Step {current_step_number})"
                     if not fallback_ok: self.consecutive_exec_failures += 1
                     time.sleep(config.WAIT_AFTER_ACTION);
-                    self.previous_composite_hash = definitive_composite_hash # Use definitive hash here too
+                    self.previous_composite_hash = definitive_composite_hash # Use definitive hash
                     continue
                 else:
                     self.consecutive_ai_failures = 0
@@ -850,17 +692,35 @@ class AppCrawler:
 
                 # 10. Handle Mapping Failure
                 if mapped_action is None:
+                    # Increment counter if not already done by an exception in _map_ai_to_action
+                    # (This check prevents double counting if _map_ai_to_action returned None explicitly)
+                    if not ai_suggestion or ai_suggestion.get("action") in ["click", "input"]: # Only increment if it was a mapping attempt that failed
+                         # Check if the counter wasn't already incremented by _map_ai_to_action itself
+                         # This logic might need refinement depending on exactly how failures are counted internally
+                         pass # Assuming _map_ai_to_action handles its own failure count increment
+
                     logging.error(f"Map fail step {current_step_number}. Fallback: BACK.")
-                    self.consecutive_map_failures += 1; fallback_ok = self.driver.press_back_button();
-                    # Update description to reflect the actual fallback taken
-                    self._last_action_description += " -> MAP_FAIL_BACK"
-                    if not fallback_ok: self.consecutive_exec_failures += 1
-                    time.sleep(config.WAIT_AFTER_ACTION);
-                    self.previous_composite_hash = definitive_composite_hash # Use definitive hash
-                    continue
-                else:
-                    self.consecutive_map_failures = 0
-                    logging.debug(f"Mapped: {mapped_action[0]} on type {type(mapped_action[1])}")
+                    # --- Add keyboard check for double back ---
+                    keyboard_shown = False
+                    try:
+                        keyboard_shown = self.driver.is_keyboard_shown()
+                        logging.debug(f"Keyboard shown before fallback BACK: {keyboard_shown}")
+                    except Exception as key_err:
+                        logging.warning(f"Could not check keyboard status: {key_err}")
+
+                    self.driver.press_back_button() # Press back once regardless
+                    self._last_action_description = f"MAP_FAIL_BACK (Step {current_step_number})"
+                    if keyboard_shown:
+                        logging.info("Keyboard was shown, pressing BACK a second time for navigation.")
+                        time.sleep(0.5) # Small delay before second back press
+                        self.driver.press_back_button()
+                        self._last_action_description = f"MAP_FAIL_KEYBOARD_DOUBLE_BACK (Step {current_step_number})"
+                    # --- End keyboard check ---
+
+                    time.sleep(config.WAIT_AFTER_ACTION)
+                    self.previous_composite_hash = None # Reset hash to force re-evaluation after fallback
+                    if self._check_termination(current_step_number): break # Check termination after failure
+                    continue # Skip to next step after fallback
 
                 # 11. SAVE ANNOTATED SCREENSHOT (Optional)
                 self._save_annotated_screenshot(screenshot_bytes, current_step_number, current_screen_repr.id, ai_suggestion)

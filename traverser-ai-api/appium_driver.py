@@ -1,6 +1,7 @@
 import logging
 import time
 import shlex
+import config
 
 from typing import Optional, Tuple, List, Dict
 
@@ -42,18 +43,23 @@ class AppiumDriver:
         try:
             logging.info(f"Connecting to Appium server at {self.server_url}...")
             self.driver = webdriver.Remote(self.server_url, options=options)
-            self.driver.implicitly_wait(5) # Small implicit wait
+
+            # --- Set Implicit Wait ---
+            implicit_wait_time = getattr(config, 'APPIUM_IMPLICIT_WAIT', 5) # Default to 5 if not in config
+            logging.info(f"Setting Appium implicit wait to {implicit_wait_time} seconds.")
+            self.driver.implicitly_wait(implicit_wait_time)
+
             logging.info("Appium session established successfully.")
-            time.sleep(2) # Allow app to fully load
+
             return True
         except WebDriverException as e:
-            logging.error(f"Failed to connect to Appium server: {e}", exc_info=True)
+            logging.error(f"Failed to connect to Appium server or start session: {e}")
             self.driver = None
             return False
-        except Exception as e:
-             logging.error(f"An unexpected error occurred during Appium connection: {e}", exc_info=True)
-             self.driver = None
-             return False
+        except Exception as e: # Catch other potential errors like config issues
+            logging.error(f"An unexpected error occurred during Appium connection: {e}", exc_info=True)
+            self.driver = None
+            return False
 
     def disconnect(self):
         """Quits the Appium driver session."""

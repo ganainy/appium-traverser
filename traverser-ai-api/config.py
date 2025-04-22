@@ -10,6 +10,7 @@ APP_PACKAGE = "eu.smartpatient.mytherapy" # CHANGE TO YOUR TARGET APP
 APP_ACTIVITY = "eu.smartpatient.mytherapy.feature.account.presentation.onboarding.WelcomeActivity" # CHANGE TO YOUR TARGET APP's LAUNCH ACTIVITY
 # Find these using `adb shell dumpsys window | grep -E 'mCurrentFocus|mFocusedApp'` while app is open
 NEW_COMMAND_TIMEOUT = 300 # Seconds Appium waits for a new command before quitting session
+APPIUM_IMPLICIT_WAIT = 1 # Seconds Appium driver waits when trying to find elements before failing a strategy
 
 # --- AI Settings ---
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") # Get API key from environment variable
@@ -24,11 +25,18 @@ AI_SAFETY_SETTINGS = {
 }
 
 # --- Crawler Settings ---
-# ...
+# List of package names that the crawler is allowed to interact with outside the main target app
+# Useful for handling logins via Google, webviews, or permission dialogs.
 ALLOWED_EXTERNAL_PACKAGES = [
-    "com.google.android.gms",  # Google Sign-In
-     "com.android.chrome", # for webviews during login
-    "com.google.android.permissioncontroller",  # Remove if you dont want the crawler to give permissions to apps
+    "com.google.android.gms",                   # Google Play Services (for Sign-In, etc.)
+    "com.android.chrome",                       # Google Chrome (already present)
+    "com.google.android.permissioncontroller",  # System Permission Controller
+    "org.mozilla.firefox",                      # Mozilla Firefox
+    "com.sec.android.app.sbrowser",             # Samsung Internet Browser
+    "com.microsoft.emmx",                       # Microsoft Edge
+    "com.brave.browser",                        # Brave Browser
+    "com.duckduckgo.mobile.android",            # DuckDuckGo Privacy Browser
+    # Add any other specific package names needed for your app's flows (e.g., Facebook login)
 ]
 
 
@@ -38,11 +46,11 @@ SCREENSHOTS_DIR = f"traverser-ai-api/screenshots/crawl_screenshots_{APP_PACKAGE}
 ANNOTATED_SCREENSHOTS_DIR = f"traverser-ai-api/screenshots/annotated_crawl_screenshots_{APP_PACKAGE}"
 # Database settings
 DB_NAME = f"traverser-ai-api/database_output/{APP_PACKAGE}_crawl_data.db"
-WAIT_AFTER_ACTION = 2.5 # Seconds to wait for UI to potentially change after an action
+WAIT_AFTER_ACTION = 2.0 # Seconds to wait for UI to potentially change after an action
 STABILITY_WAIT = 1.0 # Seconds to wait before getting state (screenshot/XML)
 VISUAL_SIMILARITY_THRESHOLD = 5 # Perceptual hash distance threshold (lower means more similar)
 ENABLE_XML_CONTEXT = True # Send XML snippet to AI?
-XML_SNIPPET_MAX_LEN = 20000 #Max characters of XML to send
+XML_SNIPPET_MAX_LEN = 30000 #Max characters of XML to send
 
 # --- Action Definitions (for AI prompt and mapping) ---
 AVAILABLE_ACTIONS = ["click", "input", "scroll_down", "scroll_up", "back"]
