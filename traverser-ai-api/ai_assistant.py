@@ -65,7 +65,10 @@ class AIAssistant:
         You are an expert Android application tester exploring an app using screen analysis.
         Your goal is to discover new screens and interactions systematically by performing ONE logical action at a time, with a focus on PROGRESSION.
         You will be given the current screen's screenshot and its XML layout structure.
-        **IMPORTANT: 'click' and 'input' actions rely on you providing a good identifier (resource-id, content-desc, or text) for Appium to locate the element.**
+        **IMPORTANT: 'click' and 'input' actions rely on you providing a good identifier (resource-id, content-desc, or text).
+        Provide ONLY the value without the attribute name. For example:
+        - CORRECT: "Back"
+        - INCORRECT: 'content-desc="Back"' or 'text="Back"'**
 
         {visit_context}  # Insert visit count context here
 
@@ -88,10 +91,20 @@ class AIAssistant:
         General Priorities:
         1. Fulfill required prerequisites if progression buttons are disabled.
         2. Click enabled progression buttons ('Next', 'Save', 'Continue', etc.) to move forward.
-        3. Explore other interactive elements likely to lead to NEW areas (especially if visit count is high).
-        4. Input text into fields if required or relevant for exploration.
-        5. Scroll if more content seems available OR if other actions seem unproductive/looping.
-        6. Use 'back' if exploration seems stuck or to return from a detail view (but avoid if it just completes a loop).
+        3. Look for and prioritize elements related to:
+           - Privacy Policy, Terms of Service, Data Protection
+           - Account settings, Personal Information, Profile
+           - Registration, Login, or Data Collection forms
+        4. Explore other interactive elements likely to lead to NEW areas (especially if visit count is high).
+        5. Input text into fields if required or relevant for exploration.
+        6. Scroll if more content seems available OR if other actions seem unproductive/looping.
+        7. Use 'back' if exploration seems stuck or to return from a detail view (but avoid if it just completes a loop).
+
+        Look for elements with keywords like:
+        - "Privacy", "Policy", "Terms", "GDPR", "Data Protection"
+        - "Account", "Profile", "Personal", "Settings"
+        - "Register", "Sign up", "Login", "Create Account"
+        - "Consent", "Permissions", "Allow"
 
         Choose ONE action from the available types:
         {action_list_str}
@@ -135,8 +148,9 @@ class AIAssistant:
             logging.error("Failed to prepare image for AI.")
             return None
 
+        start_time = time.time()  # Start timing at the beginning
+
         try:
-            # Assuming _build_prompt is defined elsewhere and takes these args
             prompt = self._build_prompt(
                 xml_context,
                 previous_actions,
@@ -160,8 +174,12 @@ class AIAssistant:
             logging.debug("Requesting AI generation...")
             # Make the API call
             response = self.model.generate_content(content_parts, safety_settings=self.safety_settings)
+            
+            # Calculate and log total elapsed time
+            elapsed_time = time.time() - start_time
+            logging.info(f"Total AI Processing Time: {elapsed_time:.2f} seconds")
 
-            # --- Log Raw Response ---
+            # --- Logging for Raw Response ---
             logging.info("--- Received Raw Response from AI ---")
             raw_response_text = "[Response Error]" # Default in case of issues
             try:

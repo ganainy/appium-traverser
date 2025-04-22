@@ -55,106 +55,139 @@ class AppCrawler:
     def _find_element_by_ai_identifier(self, identifier: str) -> Optional[WebElement]:
         """
         Attempts to find a WebElement using the identifier provided by the AI,
-        trying different strategies in a prioritized order.
+        trying different strategies in a prioritized order and handling quotes in XPath.
         """
-        if not identifier or not self.driver:
+        if not identifier or not self.driver or not self.driver.driver:
+            logging.warning("Cannot find element: Invalid identifier or driver not available.")
             return None
 
         logging.info(f"Attempting to find element using identifier: '{identifier}'")
-        element = None
+        element: Optional[WebElement] = None
 
-        # --- Priority 1: Resource ID ---
-        # Check if identifier looks like a potential full resource ID or just the name part
-        if ':' in identifier or not identifier.startswith("//") : # Basic check
+        # --- Priority 1 & 2: ID and Accessibility ID (No change needed for quotes) ---
+        strategies = [
+            (AppiumBy.ID, "ID"),
+            (AppiumBy.ACCESSIBILITY_ID, "Accessibility ID")
+        ]
+        for strategy, name in strategies:
             try:
-                logging.debug(f"Trying AppiumBy.ID: '{identifier}'")
-                element = self.driver.find_element(AppiumBy.ID, identifier)
-                # Optional: Add check for visibility/enabled here if needed
-                if element and element.is_displayed(): # Simple check
-                    logging.info(f"Found element by ID: {identifier}")
-                    return element
-                else:
-                    logging.debug("Element found by ID but not displayed or invalid.")
-                    element = None # Reset if not valid
-            except NoSuchElementException:
-                logging.debug("Element not found by ID.")
-            except Exception as e:
-                logging.warning(f"Error finding by ID '{identifier}': {e}")
-
-        # --- Priority 2: Accessibility ID (Content Description) ---
-        if not element:
-            try:
-                logging.debug(f"Trying AppiumBy.ACCESSIBILITY_ID: '{identifier}'")
-                element = self.driver.find_element(AppiumBy.ACCESSIBILITY_ID, identifier)
+                logging.debug(f"Trying {name}: '{identifier}'")
+                element = self.driver.find_element(strategy, identifier)
+                # Check if element is suitable (e.g., displayed)
                 if element and element.is_displayed():
-                    logging.info(f"Found element by Accessibility ID: {identifier}")
+                    logging.info(f"Found element by {name}: {identifier}")
                     return element
                 else:
-                     logging.debug("Element found by Accessibility ID but not displayed or invalid.")
-                     element = None
+                    # Found but not suitable (e.g., not displayed)
+                    logging.debug(f"Element found by {name} but not displayed or invalid.")
+                    element = None # Reset to try next strategy
             except NoSuchElementException:
-                logging.debug("Element not found by Accessibility ID.")
+                logging.debug(f"Not found by {name}.")
+            except InvalidSelectorException as e: # Catch specific selector errors too
+                 logging.warning(f"Invalid Selector Exception finding by {name} '{identifier}': {e}")
+                 # Don't retry with this strategy if selector is fundamentally bad
+                 element = None
             except Exception as e:
-                logging.warning(f"Error finding by Accessibility ID '{identifier}': {e}")
+                # Catch other potential errors (stale element, timeout, etc.)
+                logging.warning(f"Error finding by {name} '{identifier}': {e}")
+                element = None # Reset on error
 
-        # --- Priority 3: Exact Text Match (XPath) ---
+        # --- Priority 3: Exact Text Match (XPath - Handling Quotes) ---
         if not element:
+            xpath_exact = "" # Initialize
             try:
-                # Ensure quotes in identifier are handled correctly in XPath
-                safe_identifier = identifier.replace("'", "\\'").replace('"', '\\"')
-                xpath_exact = f"//*[@text='{safe_identifier}']"
-                logging.debug(f"Trying XPath (Exact Text): {xpath_exact}")
+                # --- XPath Quote Handling Logic ---
+                if "'" in identifier and '"' in identifier:
+                    # Contains both single and double quotes - Use complex concat
+                    parts = []
+                    # Split by single quote, handle parts containing double quotes
+                    for i, part in enumerate(identifier.split("'")):
+                        if '"' in part: # Part contains double quotes, enclose in single quotes
+                             parts.append(f"'{part}'")
+                        elif part: # Part has no double quotes, enclose in double quotes
+                             parts.append(f'"{part}"')
+                        # Add the single quote back using concat, except for the last part
+                        if i < len(identifier.split("'")) - 1:
+                             parts.append("\"'\"") # Concat the single quote character
+
+                    xpath_text_expression = f"concat({','.join(filter(None, parts))})" # Filter empty strings from split
+                elif "'" in identifier:
+                    # Only single quotes, use double quotes for outer literal
+                    xpath_text_expression = f'"{identifier}"'
+                elif '"' in identifier:
+                     # Only double quotes, use single quotes for outer literal
+                     xpath_text_expression = f"'{identifier}'"
+                else:
+                    # No quotes, use single quotes (or double)
+                    xpath_text_expression = f"'{identifier}'"
+
+                xpath_exact = f"//*[@text={xpath_text_expression}]"
+                # ---------------------------------
+
+                logging.debug(f"Trying XPath (Exact Text - Quote Safe): {xpath_exact}")
                 element = self.driver.find_element(AppiumBy.XPATH, xpath_exact)
-                # Add more checks? prioritize Button/TextView?
-                if element and element.is_displayed() and element.is_enabled(): # Check enabled too
-                    logging.info(f"Found element by exact text (XPath): {identifier}")
+                if element and element.is_displayed() and element.is_enabled():
+                    logging.info(f"Found element by exact text (XPath - Quote Safe): {identifier}")
                     return element
                 else:
-                     logging.debug("Element found by exact text but not displayed/enabled.")
-                     element = None
+                    logging.debug("Element found by exact text XPath but not displayed/enabled.")
+                    element = None
             except NoSuchElementException:
-                logging.debug("Element not found by exact text XPath.")
+                logging.debug("Not found by exact text XPath.")
+            except InvalidSelectorException as e: # Catch specifically for XPath
+                 logging.error(f"Invalid XPath Selector for exact text '{identifier}': {xpath_exact}. Error: {e}")
+                 element = None # Don't proceed if XPath is invalid
             except Exception as e:
                 logging.warning(f"Error finding by exact text XPath '{identifier}': {e}")
+                element = None
 
-        # --- Priority 4: Contains Text/Content-Desc/Resource-ID (XPath) ---
-        # This is broader and might return multiple matches - returns the first one Appium finds
+        # --- Priority 4: Contains Text/Content-Desc/Resource-ID (XPath - Simplified Quote Handling) ---
         if not element:
+             xpath_contains = "" # Initialize
              try:
-                safe_identifier = identifier.replace("'", "\\'").replace('"', '\\"')
-                # More robust contains checking multiple attributes
-                xpath_contains = (f"//*[contains(@text, '{safe_identifier}') or "
-                                  f"contains(@content-desc, '{safe_identifier}') or "
-                                  f"contains(@resource-id, '{safe_identifier}')]")
+                 # For contains, simple escaping is often problematic.
+                 # Try using double quotes as the outer literal if identifier has single quotes.
+                 # This is NOT fully robust if identifier has both or only double quotes.
+                 # A truly robust 'contains' with arbitrary quotes is much harder.
+                 if "'" in identifier:
+                      xpath_safe_identifier = f'"{identifier}"' # Try double quotes
+                 else:
+                      xpath_safe_identifier = f"'{identifier}'" # Default to single
 
-                logging.debug(f"Trying XPath (Contains): {xpath_contains}")
-                # Find elements (plural) first to potentially filter
-                possible_elements = self.driver.driver.find_elements(AppiumBy.XPATH, xpath_contains) # Use plural
+                 # Build contains() checks - Note: contains() itself doesn't use concat easily
+                 xpath_contains = (f"//*[contains(@text, {xpath_safe_identifier}) or "
+                                   f"contains(@content-desc, {xpath_safe_identifier}) or "
+                                   f"contains(@resource-id, {xpath_safe_identifier})]")
 
-                # Simple filter: return first displayed & enabled element
-                for el in possible_elements:
-                    try:
-                        if el.is_displayed() and el.is_enabled():
-                            logging.info(f"Found element by 'contains' (XPath): '{identifier}' (matched first suitable element)")
-                            return el # Return the first good one
-                    except Exception:
-                        continue # Ignore stale or problematic elements during check
+                 logging.debug(f"Trying XPath (Contains - Basic Quote Handling): {xpath_contains}")
+                 possible_elements = self.driver.driver.find_elements(AppiumBy.XPATH, xpath_contains)
+                 found_count = len(possible_elements)
+                 logging.debug(f"Found {found_count} potential elements via 'contains' XPath.")
 
-                logging.debug("No suitable element found by 'contains' XPath after filtering.")
-                element = None # Explicitly set to None if loop finishes
+                 for el in possible_elements:
+                     try:
+                         if el.is_displayed() and el.is_enabled():
+                             logging.info(f"Found first suitable element by 'contains' (XPath): '{identifier}'")
+                             return el # Return the first good one
+                     except Exception: continue # Ignore stale elements during check
 
-             except NoSuchElementException: # Should not happen with find_elements but good practice
-                 logging.debug("Element not found by 'contains' XPath.")
+                 logging.debug("No suitable element found by 'contains' XPath after filtering.")
+                 element = None # Explicitly set if loop finishes
+
+             except InvalidSelectorException as e:
+                  logging.error(f"Invalid XPath Selector for contains '{identifier}': {xpath_contains}. Error: {e}")
+                  element = None
              except Exception as e:
                  logging.warning(f"Error finding by 'contains' XPath '{identifier}': {e}")
+                 element = None
 
-        # --- If still not found ---
+        # --- Final Result ---
         if not element:
              logging.warning(f"Could not find suitable element using identifier '{identifier}' with any strategy.")
-             return None
 
-        # Should have returned element earlier if found
-        return element # Should technically be None here if we reach this point
+        return element # Return element (which is None if not found)
+
+       
 
     def _get_current_state(self) -> Optional[Tuple[bytes, str]]:
         """Gets the current screenshot bytes and page source."""
