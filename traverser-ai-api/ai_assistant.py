@@ -10,14 +10,40 @@ import time  # Add this import at the top
 class AIAssistant:
     """Handles interactions with the Generative AI model."""
 
-    def __init__(self, api_key: str, model_name: str, safety_settings: Dict):
+    def __init__(self, api_key: str, model_name: str = None, safety_settings: Dict = None):
         if not api_key:
             raise ValueError("Gemini API key is required.")
         try:
             genai.configure(api_key=api_key)
-            self.model = genai.GenerativeModel(model_name)
+            
+            # Get model configuration
+            model_type = model_name or getattr(config, 'DEFAULT_MODEL_TYPE', 'pro-vision')
+            model_config = getattr(config, 'GEMINI_MODELS', {}).get(model_type)
+            
+            if not model_config:
+                logging.warning(f"Model type '{model_type}' not found in config, using default pro-vision")
+                model_config = {'name': 'gemini-pro-vision'}
+            
+            # Initialize model with configuration
+            self.model = genai.GenerativeModel(
+                model_config['name'],
+                generation_config=model_config.get('generation_config')
+            )
+            
+            logging.info(f"AI Assistant initialized with model: {model_config['name']}")
+            logging.info(f"Model description: {model_config.get('description', 'Standard configuration')}")
+            
             self.safety_settings = safety_settings
-            logging.info(f"AI Assistant initialized with model: {model_name}")
+            
+            # Initialize chat if enabled
+            self.use_chat = getattr(config, 'USE_CHAT_MEMORY', False)
+            if self.use_chat:
+                self.chat = self.model.start_chat(history=[])
+                self.max_history = getattr(config, 'MAX_CHAT_HISTORY', 10)
+                logging.info(f"Chat memory enabled (max history: {self.max_history})")
+            else:
+                self.chat = None
+                
         except Exception as e:
             logging.error(f"Failed to initialize GenerativeModel: {e}")
             raise
@@ -31,7 +57,7 @@ class AIAssistant:
             return None
 
         # Function to build the prompt for the AI model
-    def _build_prompt(self, xml_context: str, previous_actions: List[str], available_actions: List[str], current_screen_visit_count: int, current_composite_hash: str) -> str: # Added visit count and hash
+    def _build_prompt(self, xml_context: str, previous_actions: List[str], available_actions: List[str], current_screen_visit_count: int, current_composite_hash: str) -> str:
         """Builds the detailed prompt for the AI model, including visit count awareness."""
         action_descriptions = {
             "click": "Visually identify and select an interactive element. Provide its best identifier (resource-id, content-desc, or text).",
@@ -62,6 +88,53 @@ class AIAssistant:
         AVOID actions (like clicking standard confirmation buttons or simple navigation elements) if you suspect they will just return you to the immediately preceding screen state, unless absolutely necessary to fulfill a prerequisite for *further* progression. Consider scrolling or interacting with less obvious elements if possible.
         """
         # ---------------------------------
+
+        # --- Define JSON examples as separate, standard strings ---
+        json_format_example = """
+        {
+            "action": "click" | "input" | "scroll_up" | "scroll_down" | "back",
+            "target_identifier": "element identifier (required for click/input)",
+            "target_bounding_box": {
+                "top_left": [0.1, 0.5],
+                "bottom_right": [0.3, 0.6]
+            },
+            "input_text": "text to input (required for input action)",
+            "reasoning": "Brief explanation of why this action was chosen"
+        }
+        """
+
+        json_example_click = """
+        {
+            "action": "click",
+            "target_identifier": "Continue",
+            "target_bounding_box": {
+                "top_left": [0.1, 0.5],
+                "bottom_right": [0.3, 0.6]
+            },
+            "reasoning": "Clicking 'Continue' button to progress through setup"
+        }
+        """
+
+        json_example_input = """
+        {
+            "action": "input",
+            "target_identifier": "email_input",
+            "target_bounding_box": {
+                "top_left": [0.2, 0.3],
+                "bottom_right": [0.8, 0.4]
+            },
+            "input_text": "test@example.com",
+            "reasoning": "Filling email field to complete registration form"
+        }
+        """
+
+        json_example_scroll = """
+        {
+            "action": "scroll_down",
+            "reasoning": "Content appears to continue below viewport"
+        }
+        """
+        # --- End JSON example definitions ---
 
         prompt = f"""
         You are an expert Android application tester exploring an app using screen analysis.
@@ -94,6 +167,16 @@ class AIAssistant:
         **CRUCIAL RULE for 'input' Action:**
         - VERIFY ELEMENT TYPE: Before suggesting 'input', check the XML context for the target element. Ensure its `class` attribute indicates it is an editable field (e.g., `android.widget.EditText`, `android.widget.AutoCompleteTextView`, etc.).
         - DO NOT suggest 'input' for non-editable elements like `android.widget.TextView`, `android.widget.Button`, etc.
+        - PARENT ELEMENT PRIORITY: If you see a non-editable text element (TextView) that appears to be part of an input field:
+          1. Look for its parent container that has an editable class
+          2. Use the parent's identifier instead of the child TextView
+          3. Verify the parent is actually editable (class='android.widget.EditText' or similar)
+          4. Only suggest 'input' if you find a proper editable parent
+        - EDITABLE CLASS EXAMPLES:
+          * android.widget.EditText
+          * android.widget.AutoCompleteTextView
+          * android.widget.TextInputEditText
+          * android.widget.SearchView
         # --- End Edit ---
 
         General Priorities:
@@ -117,8 +200,13 @@ class AIAssistant:
         Choose ONE action from the available types:
         {action_list_str}
 
-        RESPONSE FORMAT: (JSON with action, target_identifier, optional target_bounding_box, input_text, reasoning)
-        # ... (Keep JSON format examples as before) ...
+        RESPONSE FORMAT: Return a JSON object with the following structure:
+        {json_format_example}
+
+        Example responses:
+        {json_example_click}
+        {json_example_input}
+        {json_example_scroll}
 
         XML CONTEXT FOR CURRENT SCREEN:
         ```xml
@@ -180,9 +268,22 @@ class AIAssistant:
 
         try:
             logging.debug("Requesting AI generation...")
-            # Make the API call
-            response = self.model.generate_content(content_parts, safety_settings=self.safety_settings)
-            
+            content_parts = [prompt, image_part]
+
+            if self.use_chat and self.chat:
+                # Use chat with history
+                response = self.chat.send_message(content_parts, safety_settings=self.safety_settings)
+                
+                # Manage history size if needed
+                if len(self.chat.history) > self.max_history:
+                    # Remove older messages while keeping the initial system prompt
+                    excess = len(self.chat.history) - self.max_history
+                    self.chat.history = self.chat.history[:1] + self.chat.history[1+excess:]
+                    logging.debug(f"Trimmed chat history to {self.max_history} entries")
+            else:
+                # Use standard generation without history
+                response = self.model.generate_content(content_parts, safety_settings=self.safety_settings)
+
             # Calculate and log total elapsed time
             elapsed_time = time.time() - start_time
             logging.info(f"Total AI Processing Time: {elapsed_time:.2f} seconds")

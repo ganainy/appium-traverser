@@ -14,7 +14,6 @@ APPIUM_IMPLICIT_WAIT = 1 # Seconds Appium driver waits when trying to find eleme
 
 # --- AI Settings ---
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") # Get API key from environment variable
-AI_MODEL_NAME = "gemini-2.5-flash-preview-04-17" # Or "gemini-pro-vision", "gemini-1.5-pro", check availability
 # Safety settings for Gemini - adjust as needed
 # Reference: https://ai.google.dev/docs/safety_setting_gemini
 AI_SAFETY_SETTINGS = {
@@ -41,7 +40,8 @@ ALLOWED_EXTERNAL_PACKAGES = [
 
 
 # --- Crawler Settings ---
-MAX_CRAWL_STEPS = 50 # Limit the number of interactions
+CONTINUE_EXISTING_RUN = False  # Set to True to use existing DB and screenshots, False to start fresh
+MAX_CRAWL_STEPS = 50  # Limit the number of interactions
 SCREENSHOTS_DIR = f"traverser-ai-api/screenshots/crawl_screenshots_{APP_PACKAGE}"
 ANNOTATED_SCREENSHOTS_DIR = f"traverser-ai-api/screenshots/annotated_crawl_screenshots_{APP_PACKAGE}"
 # Database settings
@@ -64,3 +64,40 @@ ACTION_DESC_BACK = "Press the device's back button."
 MAX_CONSECUTIVE_AI_FAILURES = 5
 MAX_CONSECUTIVE_MAP_FAILURES = 5
 MAX_CONSECUTIVE_EXEC_FAILURES = 5
+
+# AI Settings
+USE_CHAT_MEMORY = True  # Enable/disable chat history for more context-aware responses
+MAX_CHAT_HISTORY = 10   # Maximum number of previous interactions to keep in memory
+
+
+# Gemini Model Configurations
+GEMINI_MODELS = {
+    'flash-latest': {  # Default: Fast, cost-effective, multimodal
+        'name': 'gemini-2.5-flash-preview-04-17',
+        'description': 'Latest Flash model: Optimized for speed, cost, and multimodal tasks.'
+    },
+    'flash-latest-fast': { # Optimized for speed using generation config
+        'name': 'gemini-2.5-flash-preview-04-17',
+        'description': 'Latest Flash model with settings optimized for faster responses.',
+        'generation_config': {
+            'temperature': 0.3,
+            'top_p': 0.8,
+            'top_k': 20,
+            'max_output_tokens': 1024, # Adjust if needed for Flash
+        }
+    },
+    'pro-latest-accurate': { # Optimized for accuracy using Pro model and generation config
+        'name': 'gemini-2.5-pro-exp-03-25',
+        'description': 'Latest Pro model with settings optimized for higher accuracy and complex reasoning.',
+        'generation_config': {
+            'temperature': 0.7,
+            'top_p': 0.95,
+            'top_k': 40,
+            'max_output_tokens': 2048, # Adjust if needed for Pro
+        }
+    }
+}
+
+# Default model configuration
+DEFAULT_MODEL_TYPE = 'flash-latest-fast' # Changed default to the latest flash model
+

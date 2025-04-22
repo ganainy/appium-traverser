@@ -20,7 +20,12 @@ class AppCrawler:
     def __init__(self):
         self.config_dict = {k: getattr(config, k) for k in dir(config) if not k.startswith('_')}
         self.driver = AppiumDriver(config.APPIUM_SERVER_URL, self.config_dict)
-        self.ai_assistant = AIAssistant(config.GEMINI_API_KEY, config.AI_MODEL_NAME, config.AI_SAFETY_SETTINGS)
+        # Update AI Assistant initialization to use default model type
+        self.ai_assistant = AIAssistant(
+            api_key=config.GEMINI_API_KEY,
+            model_name=getattr(config, 'DEFAULT_MODEL_TYPE', 'pro-vision'),
+            safety_settings=config.AI_SAFETY_SETTINGS
+        )
         self.db_manager = DatabaseManager(config.DB_NAME)
         self.state_manager: Optional[CrawlingState] = None
 
@@ -208,62 +213,76 @@ class AppCrawler:
                      original_element = target_element # Keep track of the originally found element
                      is_editable = False
                      element_class = None # Initialize element_class
+                     final_target_element = original_element # Start with the original element
+
                      try:
-                         # Check if the initially found element is editable
+                         # --- Get class of the initially found element ---
                          element_class = original_element.get_attribute('class')
-                         editable_classes = ['edittext', 'textfield', 'input', 'autocomplete']
+                         logging.debug(f"Initial element found for INPUT: ID='{original_element.id}', Class='{element_class}', Identifier='{target_identifier}'")
+
+                         # --- Check if the initially found element is directly editable ---
+                         editable_classes = ['edittext', 'textfield', 'input', 'autocomplete', 'searchview'] # Added searchview
                          if element_class and any(editable_tag in element_class.lower() for editable_tag in editable_classes):
                              is_editable = True
-                             logging.debug(f"Initial element (Class: {element_class}) is directly editable.")
+                             logging.info(f"Initial element (Class: {element_class}) is directly editable. Using it for INPUT.")
                          else:
-                             logging.debug(f"Initial element (Class: {element_class}) is not directly editable. Checking parent...")
-                             # --- Attempt to find editable parent ---
-                             try:
-                                 # Use XPath to select the parent node
-                                 parent_element = original_element.find_element(AppiumBy.XPATH, "..")
-                                 if parent_element:
-                                     # --- Add more detailed logging ---
-                                     logging.debug(f"Found parent element. Attempting to get class attribute...")
-                                     parent_class = parent_element.get_attribute('class')
-                                     if parent_class:
-                                         logging.debug(f"Parent class found: '{parent_class}'. Checking if editable...")
-                                         parent_class_lower = parent_class.lower()
-                                         is_parent_editable = any(editable_tag in parent_class_lower for editable_tag in editable_classes)
-                                         logging.debug(f"Editable tags check result for parent: {is_parent_editable}")
-                                         # --- End detailed logging ---
-                                         if is_parent_editable: # Use the result of the check
-                                             logging.info(f"Using editable parent element (Class: {parent_class}) for INPUT action.")
-                                             target_element = parent_element # Use the parent as the target
-                                             is_editable = True
-                                         else:
-                                             logging.debug(f"Parent element class '{parent_class}' is not in editable list: {editable_classes}.")
-                                     else:
-                                         logging.debug("Could not retrieve class attribute from parent element.")
-                                         # Parent found, but couldn't get class. Treat as not editable for safety.
-                                 else:
-                                     # This case should not happen if find_element succeeded without error, but good to have.
-                                     logging.debug("Parent element found via XPath '..' but is None/False.")
-                             except NoSuchElementException:
-                                 logging.warning("No parent element found via XPath '..'.")
-                             except Exception as parent_err:
-                                 # Log the specific error encountered during parent processing
-                                 logging.warning(f"Error finding or checking parent element: {parent_err}", exc_info=True) # Add exc_info
-                             # --- End parent check ---
+                             # --- If not directly editable, search upwards for an editable ancestor (up to 3 levels) ---
+                             logging.info(f"Initial element (Class: {element_class}) is NOT directly editable. Searching upwards for an editable ancestor...")
+                             current_ancestor = original_element
+                             max_levels_to_check = 3
+                             for level in range(1, max_levels_to_check + 1):
+                                 try:
+                                     # Use XPath to select the parent node
+                                     parent_element = current_ancestor.find_element(AppiumBy.XPATH, "..") # Or use "parent::*"
+                                     if parent_element:
+                                         parent_class = parent_element.get_attribute('class')
+                                         logging.debug(f"Checking ancestor level {level}: ID='{parent_element.id}', Class='{parent_class}'")
 
-                         # If neither original nor parent is suitable, fail the mapping
+                                         # --- Check if this ancestor is editable ---
+                                         if parent_class and any(editable_tag in parent_class.lower() for editable_tag in editable_classes):
+                                             logging.info(f"Found editable ancestor at level {level} (Class: {parent_class}). Switching target for INPUT action.")
+                                             final_target_element = parent_element # Use the editable ancestor
+                                             is_editable = True
+                                             break # Found a suitable ancestor, stop searching upwards
+                                         else:
+                                             # Ancestor not editable, move up to the next level
+                                             current_ancestor = parent_element
+                                     else:
+                                         # Could not get class attribute, stop searching this branch
+                                         logging.debug(f"Could not retrieve class attribute from ancestor at level {level}. Stopping upward search.")
+                                         break
+                                 except NoSuchElementException:
+                                     logging.debug(f"No more parent elements found at level {level}. Stopping upward search.")
+                                     break # Reached the top or an element without a parent in the hierarchy
+                                 except Exception as parent_err:
+                                     logging.error(f"Error finding or checking ancestor element at level {level}: {parent_err}", exc_info=True)
+                                     break # Stop searching on error
+                             # --- End ancestor search loop ---
+
+                             if not is_editable:
+                                 logging.warning(f"No editable ancestor found within {max_levels_to_check} levels for initial element (Class: {element_class}). Cannot perform INPUT.")
+
+                         # --- Final check: If no suitable element was found (neither original nor ancestor) ---
                          if not is_editable:
-                             # Ensure element_class has a value for the log message
-                             log_element_class = element_class if element_class else "Unknown/Error"
-                             logging.warning(f"AI suggested INPUT, but neither element (Class: {log_element_class}) nor its parent is editable for identifier '{target_identifier}'. Skipping action mapping.")
+                             logging.error(f"AI suggested INPUT for identifier '{target_identifier}', but neither the initially found element (Class: {element_class}) nor its ancestors (up to {max_levels_to_check} levels) were suitable/editable. Mapping failed.")
                              self.consecutive_map_failures += 1
                              return None # Mapping fails
 
                      except Exception as e:
-                         logging.warning(f"Error during element class validation for INPUT: {e}. Proceeding cautiously.")
+                         # Catch errors getting attributes or during the checks
+                         logging.error(f"Error during element class validation/ancestor check for INPUT action (Identifier: '{target_identifier}'): {e}", exc_info=True)
+                         self.consecutive_map_failures += 1
+                         return None # Mapping fails due to unexpected error
+
+                     # --- If we passed validation, return the action with the potentially updated target element ---
+                     logging.info(f"Mapping successful for INPUT. Using element ID: {final_target_element.id}")
+                     return (action, final_target_element, input_text)
                  # --- End refactored validation ---
 
-                 # Return tuple: (action_type, final_target_element, input_text_or_None)
-                 return (action, target_element, input_text if action == "input" else None)
+                 # --- If action was 'click', return the originally found element ---
+                 logging.info(f"Mapping successful for CLICK. Using element ID: {target_element.id}")
+                 return (action, target_element, None) # Input text is None for click
+
             else:
                  logging.error(f"Failed to find element using AI identifier: '{target_identifier}'. Cannot map action '{action}'.")
                  self.consecutive_map_failures += 1 # Count as a mapping failure
