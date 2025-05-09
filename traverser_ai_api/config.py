@@ -39,6 +39,17 @@ ALLOWED_EXTERNAL_PACKAGES = [
 ]
 
 
+# --- App Information Discovery ---
+# Directory for caching discovered app information (package name, activity, category)
+# Used by app_info_manager.py when integrated into main.py
+APP_INFO_OUTPUT_DIR = "output_data/app_info"
+# When discovering the TARGET_APP_PACKAGE_NAME, should we look for it
+# only among AI-filtered (e.g., health) apps?
+# False: Search for TARGET_APP_PACKAGE_NAME in all discovered apps.
+# True: Search for TARGET_APP_PACKAGE_NAME only in AI-filtered apps (less common for a specific target).
+USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY = False
+
+
 # --- Crawler Settings ---
 CONTINUE_EXISTING_RUN = False  # Set to True to use existing DB and screenshots, False to start fresh
 # Crawling control

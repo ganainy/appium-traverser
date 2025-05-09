@@ -65,7 +65,7 @@ AI_SAFETY_SETTINGS = {
     "HARM_CATEGORY_SEXUALLY_EXPLICIT": "BLOCK_MEDIUM_AND_ABOVE",
     "HARM_CATEGORY_DANGEROUS_CONTENT": "BLOCK_MEDIUM_AND_ABOVE",
 }
-OUTPUT_DIR = os.path.join(os.path.dirname(__file__) or '.', "output")
+OUTPUT_DIR = os.path.join(os.path.dirname(__file__) or '.', "output_data", "app_info") # Changed to match main.py's expectation
 MAX_APPS_TO_SEND_TO_AI = 200 # Adjust based on model limits and typical response sizes
 THIRD_PARTY_APPS_ONLY = True # Set to False to include system apps
 
@@ -492,112 +492,117 @@ Do not include any explanatory text, comments, markdown formatting like ```json 
     print(f"\n--- AI Filtering Finished. Total relevant apps identified: {len(filtered_results)} ---")
     return filtered_results
 
+def generate_app_info_cache(target_package_name_filter=None, target_app_label_filter=None, use_ai_filtering_for_this_cache: bool = False):
+    """
+    Discovers app information, optionally filters it based on the use_ai_filtering_for_this_cache flag, 
+    and saves it to a cache file.
+    Returns the path to the cache file and the list of discovered app_info.
+
+    Args:
+        target_package_name_filter (str, optional): Specific package name to look for (not currently used for filtering logic here).
+        target_app_label_filter (str, optional): Specific app label to look for (not currently used for filtering logic here).
+        use_ai_filtering_for_this_cache (bool): If True, attempts to apply AI filtering. Defaults to False.
+    """
+    print(f"--- (Re)generating App Info Cache (AI filter requested for this cache: {use_ai_filtering_for_this_cache}) ---")
+    # 1. Get Device ID
+    device_id = get_device_serial()
+    if not device_id or device_id == "unknown_device":
+        print("Critical Error: Could not obtain a valid device ID. Exiting.", file=sys.stderr)
+        return None, [] # Indicate failure
+
+    print(f"Device ID: {device_id}")
+
+    # 2. Get Installed Packages
+    print(f"\\n--- Discovering installed packages (Third-party only: {THIRD_PARTY_APPS_ONLY}) ---")
+    packages = get_installed_packages(third_party_only=THIRD_PARTY_APPS_ONLY)
+    if not packages:
+        print("No packages found. Ensure device is connected and has third-party apps if filter is on.", file=sys.stderr)
+        return None, [] # Indicate failure
+
+    print(f"Found {len(packages)} packages.")
+
+    # 3. Get App Info (Label and Main Activity) for each package
+    all_apps_info = []
+    print(f"\\n--- Retrieving App Info (Label & Main Activity) for {len(packages)} packages ---")
+    for i, package_name in enumerate(packages):
+        # print(f"Processing package {i+1}/{len(packages)}: {package_name}") # Verbose
+        app_label = get_app_label(package_name)
+        main_activity = find_main_activity(package_name)
+
+        app_info = {
+            "package_name": package_name,
+            "app_name": app_label, # Can be None
+            "activity_name": main_activity # Can be None
+        }
+        all_apps_info.append(app_info)
+        if (i + 1) % 20 == 0 or (i + 1) == len(packages):
+            print(f"  Processed {i+1}/{len(packages)} packages...")
+
+
+    print(f"\\n--- Retrieved info for {len(all_apps_info)} apps before any AI filtering ---")
+
+    # 4. AI Filtering (if requested for this specific cache generation)
+    apps_to_save = list(all_apps_info) # Start with a copy of all apps
+    ai_filter_was_applied_successfully = False
+
+    if use_ai_filtering_for_this_cache:
+        if not ENABLE_AI_FILTERING:
+            print("Warning: AI Filtering was requested for cache, but it is globally disabled in find_app_info.py. Skipping AI filtering.", file=sys.stderr)
+        elif not GENAI_AVAILABLE or not GEMINI_API_KEY:
+            print("Warning: AI Filtering was requested for cache, but AI prerequisites (library/API key) are not met. Skipping AI filtering.", file=sys.stderr)
+        else:
+            print("Attempting AI filtering for this cache generation...")
+            filtered_apps = filter_apps_with_ai(list(all_apps_info)) # Pass a copy to AI
+            if filtered_apps is not None: # filter_apps_with_ai returns original on some errors, or []
+                apps_to_save = filtered_apps
+                # Check if filtering actually changed the list compared to the original full list
+                if len(apps_to_save) != len(all_apps_info) or any(app not in all_apps_info for app in apps_to_save):
+                     ai_filter_was_applied_successfully = True # Mark that AI did something
+                print(f"AI filtering for cache resulted in {len(apps_to_save)} apps. Filter effectively applied: {ai_filter_was_applied_successfully}")
+            else:
+                # This case implies a more significant issue within filter_apps_with_ai if it returns None
+                print("AI filtering for cache returned None, indicating a problem. Using all apps for this cache.", file=sys.stderr)
+    else:
+        print("AI Filtering not requested for this cache generation. Using all discovered apps.")
+
+    # 5. Prepare Output
+    if not os.path.exists(OUTPUT_DIR):
+        os.makedirs(OUTPUT_DIR)
+        print(f"Created output directory: {OUTPUT_DIR}")
+
+    # Suffix depends on whether AI filtering was requested AND successfully changed the app list.
+    file_suffix = "health_filtered" if use_ai_filtering_for_this_cache and ai_filter_was_applied_successfully else "all"
+    output_filename = f"{device_id}_app_info_{file_suffix}.json"
+    output_path = os.path.join(OUTPUT_DIR, output_filename)
+
+    print(f"\\n--- Saving app info to: {output_path} (Suffix: {file_suffix}) ---")
+    try:
+        with open(output_path, 'w', encoding='utf-8') as f:
+            json.dump(apps_to_save, f, indent=4, ensure_ascii=False)
+        print(f"Successfully saved {len(apps_to_save)} app(s) to {output_path}")
+    except IOError as e:
+        print(f"Error writing to file {output_path}: {e}", file=sys.stderr)
+        traceback.print_exc()
+        return None, apps_to_save 
+
+    return output_path, apps_to_save
+
 #==============================================================================
 # Main Execution Logic
 #==============================================================================
 if __name__ == "__main__":
     start_time = time.time()
-    print("--- Starting App Info Finder ---")
-    # 1. Get Device ID
-    device_id = get_device_serial()
-    if not device_id or device_id == "unknown_device":
-        print("\nFatal Error: Could not determine device ID. Ensure device is connected and authorized.", file=sys.stderr)
-        sys.exit(1)
-    print(f"Target device ID: {device_id}")
+    print("--- Starting App Info Finder (Standalone Mode) ---")
+    
+    # When run standalone, use_ai_filtering_for_this_cache is determined by the script's own ENABLE_AI_FILTERING setting
+    output_file, discovered_apps = generate_app_info_cache(
+        use_ai_filtering_for_this_cache=ENABLE_AI_FILTERING 
+    )
 
-    # 2. Create Output Directory
-    try:
-        os.makedirs(OUTPUT_DIR, exist_ok=True)
-        print(f"Output directory: {os.path.abspath(OUTPUT_DIR)}")
-    except OSError as e:
-        print(f"\nFatal Error: Could not create output directory '{OUTPUT_DIR}': {e}", file=sys.stderr)
-        sys.exit(1)
-
-    # 3. Get Installed Packages
-    pkg_type = "third-party" if THIRD_PARTY_APPS_ONLY else "all"
-    print(f"Fetching installed {pkg_type} packages...")
-    packages = get_installed_packages(third_party_only=THIRD_PARTY_APPS_ONLY)
-    if not packages:
-        print(f"\nNo {pkg_type} packages found or error retrieving packages. Exiting.")
-        sys.exit(0) # Exit gracefully if no packages found
-    print(f"Found {len(packages)} {pkg_type} packages.")
-
-    # 4. Retrieve App Info (Label and Activity)
-    all_app_data = []
-    print("Retrieving app label and main activity for each package...")
-    total_packages = len(packages)
-    label_missing_count = 0 # Track apps where label couldn't be found
-
-    activity_missing_count = 0 # Track apps where activity couldn't be found
-
-    for i, pkg_name in enumerate(packages):
-        progress_percent = ((i + 1) / total_packages) * 100
-        # Display progress on the same line
-        print(f"\\rProcessing package {i+1}/{total_packages} ({progress_percent:.1f}%) [{pkg_name[:30].ljust(30)}]...", end="", flush=True)
-
-        app_label = get_app_label(pkg_name)
-        if not app_label:
-            label_missing_count += 1
-            # print(f"Warning: App label not found for {pkg_name}") # Optional detailed warning
-
-        main_activity = find_main_activity(pkg_name)
-        if not main_activity:
-            activity_missing_count += 1
-            # print(f"Warning: Main activity not found for {pkg_name}") # Optional detailed warning
-
-        current_app_info = {
-            "package_name": pkg_name,
-            "app_name": app_label,
-            "activity_name": main_activity
-        }
-        all_app_data.append(current_app_info)
-
-    # Print final status for info retrieval (clear the progress line first)
-    print(f"\\r{' ' * 80}\\r", end="") # Clear line
-    print(f"Finished retrieving info for {total_packages} packages.")
-    if label_missing_count > 0:
-        print(f"Warning: Could not determine app label for {label_missing_count} app(s).")
-    if activity_missing_count > 0:
-        print(f"Warning: Could not determine main activity for {activity_missing_count} app(s).")
-
-    # 5. Apply AI Filtering (if enabled and possible)
-    final_app_data = all_app_data
-    output_suffix = "all"
-    if ENABLE_AI_FILTERING: # Check if filtering was requested AND prerequisites were met
-        if not all_app_data:
-            print("\nSkipping AI filtering as no app data was collected.")
-        else:
-            final_app_data = filter_apps_with_ai(all_app_data)
-            # Only change suffix if filtering was actually performed AND returned a potentially different list
-            if final_app_data is not all_app_data:
-                # Further check: Did the AI actually filter anything?
-                if len(final_app_data) < len(all_app_data):
-                    output_suffix = "health_filtered"
-                else:
-                    # AI ran but returned all apps (or failed and returned original)
-                    print("\nAI filtering process completed, but all apps were returned or filtering failed (check logs).")
-            elif final_app_data is all_app_data: # Handle case where filter_apps_with_ai explicitly returned original due to errors
-                print("\nAI filtering process failed or was skipped (check logs). Outputting all apps.")
-    # Inform user if filtering was requested but skipped due to missing prerequisites earlier
-    elif os.getenv('FILTER_HEALTH_APPS', 'false').lower() == 'true':
-        print("\nAI Filtering was requested via environment variable but prerequisites were not met earlier. Outputting all apps.")
-
-    # 6. Determine Output File Path
-    output_filename = f"{device_id}_app_info_{output_suffix}.json"
-    output_filepath = os.path.join(OUTPUT_DIR, output_filename)
-
-    # 7. Write Results to JSON File
-    print(f"\nWriting {len(final_app_data)} app entries to: {output_filepath}")
-    try:
-        # Ensure None values are written as null in JSON
-        with open(output_filepath, 'w', encoding='utf-8') as f:
-            json.dump(final_app_data, f, indent=4, ensure_ascii=False)
-        print(f"--- App information saved successfully to {output_filepath} ---")
-    except IOError as e:
-        print(f"\nError writing output file '{output_filepath}': {e}", file=sys.stderr)
-    except Exception as e:
-        print(f"\nAn unexpected error occurred during file writing: {e}", file=sys.stderr)
-        traceback.print_exc()
+    if output_file:
+        print(f"\\nCache file generated at: {output_file}")
+    else:
+        print("\\nApp info cache generation failed or did not produce a file.")
 
     end_time = time.time()
-    print(f"--- Script finished in {end_time - start_time:.2f} seconds. ---")
+    print(f"\\n--- App Info Finder Finished in {end_time - start_time:.2f} seconds ---")
