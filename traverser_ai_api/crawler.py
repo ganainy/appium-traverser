@@ -1,7 +1,10 @@
 import logging
 import time
 import os
+import re # Added re
 from typing import Optional, Tuple, List, Dict, Any
+from io import BytesIO # Added BytesIO
+from PIL import Image # Added Image
 
 # Import local modules
 import config
@@ -12,7 +15,12 @@ from state_manager import CrawlingState, ScreenRepresentation
 from database import DatabaseManager
 from selenium.webdriver.remote.webelement import WebElement
 from appium.webdriver.common.appiumby import AppiumBy
-from selenium.common.exceptions import NoSuchElementException
+from selenium.common.exceptions import NoSuchElementException, InvalidSelectorException # Added InvalidSelectorException
+
+# --- Import for traffic capture ---
+import subprocess
+import sys
+# --- End import for traffic capture ---
 
 class AppCrawler:
     """Orchestrates the AI-driven app crawling process."""
@@ -48,6 +56,271 @@ class AppCrawler:
         ]
         logging.info(f"Initial element finding strategy order: {[s[2] for s in self.element_finding_strategies]}")
 
+        # --- Traffic Capture Members ---
+        self.traffic_capture_enabled = getattr(config, 'ENABLE_TRAFFIC_CAPTURE', False)
+        self.pcap_filename_on_device: Optional[str] = None
+        self.local_pcap_file_path: Optional[str] = None
+        # --- End Traffic Capture Members ---
+
+
+    def _run_adb_command_for_capture(self, command_list: List[str], suppress_stderr: bool = False) -> Tuple[str, int]:
+        """
+        Helper to run ADB commands specifically for traffic capture.
+        Simplified version of the one in capture_app_traffic.py.
+        """
+        try:
+            adb_command = ['adb'] + command_list
+            logging.info(f"--- Running ADB for Capture: {' '.join(adb_command)}")
+            result = subprocess.run(
+                adb_command,
+                capture_output=True,
+                text=True,
+                check=False, # Do not raise error, handle manually
+                encoding='utf-8',
+                errors='ignore',
+            )
+            if result.stdout:
+                logging.debug(f"--- ADB STDOUT (Capture):\n{result.stdout.strip()}")
+            if result.stderr and not suppress_stderr:
+                logging.error(f"--- ADB STDERR (Capture):\n{result.stderr.strip()}")
+            return result.stdout.strip(), result.returncode
+        except FileNotFoundError:
+            logging.error("ADB command not found. Ensure ADB is in PATH.")
+            return "ADB_NOT_FOUND", -1
+        except Exception as e:
+            logging.error(f"Exception in _run_adb_command_for_capture: {e}")
+            return str(e), -1
+
+    def _start_traffic_capture(self) -> bool:
+        """Starts PCAPdroid traffic capture for the target application."""
+        if not self.traffic_capture_enabled:
+            return False
+
+        target_app_package = self.config_dict.get('APP_PACKAGE')
+        if not target_app_package:
+            logging.error("TARGET_APP_PACKAGE not configured. Cannot start traffic capture.")
+            return False
+
+        # Sanitize package name for filename
+        sanitized_package = re.sub(r'[^\w\-.]+', '_', target_app_package)
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        self.pcap_filename_on_device = f"{sanitized_package}_{timestamp}.pcap"
+        
+        # Use config attributes for paths
+        device_pcap_dir = getattr(config, 'DEVICE_PCAP_DIR', '/sdcard/Download/PCAPdroid')
+        traffic_capture_output_dir = getattr(config, 'TRAFFIC_CAPTURE_OUTPUT_DIR', 'traffic_captures')
+
+        device_pcap_full_path = os.path.join(device_pcap_dir, self.pcap_filename_on_device).replace("\\", "/")
+
+        # Prepare local path
+        os.makedirs(traffic_capture_output_dir, exist_ok=True)
+        self.local_pcap_file_path = os.path.join(traffic_capture_output_dir, self.pcap_filename_on_device)
+
+        logging.info(f"Attempting to start traffic capture. PCAP file: {self.pcap_filename_on_device}")
+        logging.info(f"Expected device save path: {device_pcap_full_path}")
+        logging.info(f"Local save path: {self.local_pcap_file_path}")
+
+        pcapdroid_activity = getattr(config, 'PCAPDROID_ACTIVITY', 'com.emanuelef.remote_capture/.activities.CaptureCtrl')
+
+        start_command = [
+            'shell', 'am', 'start',
+            '-n', pcapdroid_activity,
+            '-e', 'action', 'start',
+            '-e', 'pcap_dump_mode', 'pcap_file',
+            '-e', 'app_filter', target_app_package,
+            '-e', 'pcap_name', self.pcap_filename_on_device,
+            '-e', 'tls_decryption', 'true' # Assuming CA cert is installed on device
+        ]
+        
+        logging.info("\n" + "="*50)
+        logging.info("PCAPDROID TRAFFIC CAPTURE:")
+        logging.info(f"Ensure PCAPdroid is installed and has been granted remote control & VPN permissions.")
+        logging.info(f"Targeting app: {target_app_package}")
+        logging.info("If this is the first time or permissions were reset, you MAY need to:")
+        logging.info("  1. Approve 'shell'/'remote control' permission for PCAPdroid on the device.")
+        logging.info("  2. Approve VPN connection request from PCAPdroid on the device.")
+        logging.info("Check PCAPdroid notifications on device if capture doesn't start.")
+        logging.info("="*50 + "\n")
+
+        stdout, retcode = self._run_adb_command_for_capture(start_command)
+
+        if retcode != 0:
+            logging.error(f"Failed to send PCAPdroid 'start' command. ADB retcode: {retcode}. Output: {stdout}")
+            return False
+        
+        logging.info(f"PCAPdroid 'start' command sent. Capture should be initializing for {target_app_package}.")
+        
+        # ---- Automate clicking PCAPdroid "ALLOW" button ----
+        time.sleep(2) # Wait a bit for the dialog to appear
+        try:
+            logging.info("Checking for PCAPdroid VPN confirmation dialog to click 'ALLOW'...")
+            allow_button = None
+            # Try finding by uppercase text "ALLOW"
+            try:
+                logging.debug("Attempting to find 'ALLOW' button by exact text (uppercase)...")
+                allow_button = self.driver.driver.find_element(AppiumBy.XPATH, "//*[@text='ALLOW']")
+            except NoSuchElementException:
+                logging.debug("'ALLOW' (uppercase) button not found. Trying 'Allow' (title case)...")
+                try:
+                    allow_button = self.driver.driver.find_element(AppiumBy.XPATH, "//*[@text='Allow']")
+                except NoSuchElementException:
+                    logging.debug("'Allow' (title case) button not found. Trying by common Android ID 'android:id/button1'...")
+                    try:
+                        # This is a common ID for the positive button in Android dialogs
+                        allow_button = self.driver.driver.find_element(AppiumBy.ID, "android:id/button1")
+                    except NoSuchElementException:
+                        logging.info("PCAPdroid 'ALLOW' button not found by text or common ID. Assuming already permitted or dialog not present.")
+
+            if allow_button and allow_button.is_displayed():
+                logging.info("PCAPdroid 'ALLOW' button found. Attempting to click...")
+                allow_button.click()
+                logging.info("Clicked PCAPdroid 'ALLOW' button successfully.")
+                time.sleep(1.5) # Brief pause after click for UI to respond
+            elif allow_button: # Found but not displayed
+                logging.info("PCAPdroid 'ALLOW' button was found but is not currently displayed. Proceeding...")
+            else: # Not found by any means
+                logging.info("PCAPdroid 'ALLOW' button was not found. Proceeding, assuming it's not needed or already handled.")
+
+        except Exception as e:
+            logging.warning(f"An error occurred while trying to find and click the PCAPdroid 'ALLOW' button: {e}. Capture might fail if permission is required and was not granted.")
+        # ---- End of PCAPdroid "ALLOW" button automation ----
+
+        # Wait for capture to fully initialize after potential dialog interaction
+        # The original wait was: time.sleep(getattr(config, 'WAIT_AFTER_ACTION', 2.0) * 2)
+        # We've already waited ~2s for dialog + 1.5s after click.
+        # Let's use the configured wait time here.
+        time.sleep(getattr(config, 'WAIT_AFTER_ACTION', 2.0)) 
+        return True
+
+    def _stop_traffic_capture(self) -> bool:
+        """Stops PCAPdroid traffic capture."""
+        if not self.traffic_capture_enabled or not self.pcap_filename_on_device:
+            logging.debug("Traffic capture was not enabled or not started by this crawler instance. Skipping stop.")
+            return False
+
+        logging.info("Attempting to stop PCAPdroid traffic capture...")
+        pcapdroid_activity = getattr(config, 'PCAPDROID_ACTIVITY', 'com.emanuelef.remote_capture/.activities.CaptureCtrl')
+        stop_command = [
+            'shell', 'am', 'start',
+            '-n', pcapdroid_activity,
+            '-e', 'action', 'stop'
+        ]
+        stdout, retcode = self._run_adb_command_for_capture(stop_command)
+
+        if retcode != 0:
+            logging.warning(f"Failed to send 'stop' command to PCAPdroid. ADB retcode: {retcode}. Output: {stdout}. Will attempt to pull file anyway.")
+            # Even if stop command fails via ADB, the VPN dialog might still appear if PCAPdroid tries to stop.
+            # So, we'll proceed to check for the dialog.
+            # return False # Original: return False here
+
+        logging.info("PCAPdroid 'stop' command sent. Checking for confirmation dialog...")
+
+        # ---- Automate clicking PCAPdroid VPN disconnect confirmation ----
+        # This dialog might say "OK", "Disconnect", "Allow" depending on Android version/PCAPdroid version
+        time.sleep(1.5) # Wait a bit for the dialog to appear
+        try:
+            logging.info("Checking for PCAPdroid VPN disconnect confirmation dialog...")
+            confirm_button = None
+            button_texts_to_try = ["OK", "DISCONNECT", "ALLOW", "Allow", "Ok"] # Common texts for such dialogs
+
+            for btn_text in button_texts_to_try:
+                try:
+                    logging.debug(f"Attempting to find disconnect confirmation button by text: '{btn_text}'")
+                    confirm_button = self.driver.driver.find_element(AppiumBy.XPATH, f"//*[@text='{btn_text}']")
+                    if confirm_button and confirm_button.is_displayed():
+                        logging.info(f"Found disconnect confirmation button with text: '{btn_text}'")
+                        break # Found a visible button
+                    else:
+                        confirm_button = None # Reset if found but not displayed
+                except NoSuchElementException:
+                    logging.debug(f"Disconnect confirmation button with text '{btn_text}' not found.")
+                    continue
+            
+            if not confirm_button:
+                logging.debug("Disconnect confirmation button not found by text. Trying by common Android ID 'android:id/button1'...")
+                try:
+                    confirm_button = self.driver.driver.find_element(AppiumBy.ID, "android:id/button1") # Positive button
+                    if not (confirm_button and confirm_button.is_displayed()):
+                        confirm_button = None # Reset if not displayed
+                except NoSuchElementException:
+                    logging.debug("Disconnect confirmation button not found by 'android:id/button1'.")
+            
+            if not confirm_button:
+                logging.debug("Trying by common Android ID 'android:id/button2' (sometimes used for 'Cancel' or 'OK')...")
+                try:
+                    confirm_button = self.driver.driver.find_element(AppiumBy.ID, "android:id/button2") # Negative/neutral button
+                    if not (confirm_button and confirm_button.is_displayed()):
+                        confirm_button = None # Reset if not displayed
+                except NoSuchElementException:
+                    logging.debug("Disconnect confirmation button not found by 'android:id/button2'.")
+
+
+            if confirm_button and confirm_button.is_displayed():
+                logging.info(f"Disconnect confirmation button found (text: '{confirm_button.text if hasattr(confirm_button, 'text') else 'N/A'}', id: '{confirm_button.id}'). Attempting to click...")
+                confirm_button.click()
+                logging.info("Clicked PCAPdroid disconnect confirmation button successfully.")
+                time.sleep(1.0) # Brief pause after click
+            elif confirm_button:
+                logging.info("Disconnect confirmation button was found but is not currently displayed. Proceeding...")
+            else:
+                logging.info("PCAPdroid disconnect confirmation button was not found. Proceeding, assuming it's not needed or already handled.")
+
+        except Exception as e:
+            logging.warning(f"An error occurred while trying to find and click the PCAPdroid disconnect confirmation button: {e}. Capture stop process might be affected if confirmation was required.")
+        # ---- End of PCAPdroid disconnect confirmation automation ----
+        
+        if retcode != 0: # Now, after attempting dialog click, we can return based on original ADB command result
+            logging.warning(f"Original ADB 'stop' command had failed (retcode: {retcode}). Traffic capture might not have stopped cleanly on device.")
+            return False
+
+        logging.info("PCAPdroid 'stop' sequence completed. Waiting for file finalization...")
+        time.sleep(getattr(config, 'WAIT_AFTER_ACTION', 2.0)) # Use configured wait, default 2s, was 3s
+        return True
+
+    def _pull_traffic_capture_file(self) -> bool:
+        """Pulls the PCAP file from the device."""
+        if not self.traffic_capture_enabled or not self.pcap_filename_on_device or not self.local_pcap_file_path:
+            logging.debug("Cannot pull PCAP file: capture not enabled, filename not set, or local path not set.")
+            return False
+
+        device_pcap_dir = getattr(config, 'DEVICE_PCAP_DIR', '/sdcard/Download/PCAPdroid')
+        device_pcap_full_path = os.path.join(device_pcap_dir, self.pcap_filename_on_device).replace("\\", "/")
+        logging.info(f"Attempting to pull PCAP file: {device_pcap_full_path} to {self.local_pcap_file_path}")
+
+        pull_command = ['pull', device_pcap_full_path, self.local_pcap_file_path]
+        stdout, retcode = self._run_adb_command_for_capture(pull_command)
+
+        if retcode != 0:
+            logging.error(f"Failed to pull PCAP file '{device_pcap_full_path}'. ADB retcode: {retcode}. Output: {stdout}")
+            logging.error("Possible reasons: Capture didn't start, no traffic, incorrect path, or storage issues.")
+            logging.info(f"  Manually check with: adb shell ls -l {device_pcap_dir}")
+            return False
+
+        if os.path.exists(self.local_pcap_file_path):
+            if os.path.getsize(self.local_pcap_file_path) > 0:
+                logging.info(f"PCAP file pulled successfully to: {os.path.abspath(self.local_pcap_file_path)}")
+                return True
+            else:
+                logging.warning(f"PCAP file pulled to '{self.local_pcap_file_path}' but it is EMPTY (0 bytes).")
+                return True 
+        else:
+            logging.error(f"ADB pull command seemed to succeed for '{device_pcap_full_path}', but local file '{self.local_pcap_file_path}' not found.")
+            return False
+            
+    def _cleanup_device_pcap_file(self):
+        """Deletes the PCAP file from the device if configured."""
+        if not self.traffic_capture_enabled or not self.pcap_filename_on_device or not getattr(config, 'CLEANUP_DEVICE_PCAP_FILE', False):
+            return
+
+        device_pcap_dir = getattr(config, 'DEVICE_PCAP_DIR', '/sdcard/Download/PCAPdroid')
+        device_pcap_full_path = os.path.join(device_pcap_dir, self.pcap_filename_on_device).replace("\\", "/")
+        logging.info(f"Cleaning up device PCAP file: {device_pcap_full_path}")
+        rm_command = ['shell', 'rm', device_pcap_full_path]
+        stdout, retcode = self._run_adb_command_for_capture(rm_command, suppress_stderr=True)
+        if retcode == 0:
+            logging.info(f"Device PCAP file '{device_pcap_full_path}' deleted successfully.")
+        else:
+            logging.warning(f"Failed to delete device PCAP file '{device_pcap_full_path}'. ADB retcode: {retcode}. Output: {stdout}")
 
     def _get_element_center(self, element: WebElement) -> Optional[Tuple[int, int]]:
         """Safely gets the center coordinates of a WebElement."""
@@ -571,6 +844,7 @@ class AppCrawler:
         logging.info("--- Starting AI App Crawler ---")
         crawl_start_time = time.time() # Record start time for time-based crawling
         run_successful = False # Flag to track if the main loop starts
+        capture_started_successfully = False # Flag for traffic capture
 
         # --- Get Crawl Mode Configuration ---
         crawl_mode = getattr(config, 'CRAWL_MODE', 'steps').lower()
@@ -610,8 +884,27 @@ class AppCrawler:
             if not self.driver.connect():
                 logging.critical("Failed to establish Appium connection. Aborting run.")
                 if self.db_manager: self.db_manager.close()
-                return
+                return ########## ADDED RETURN HERE
             logging.info("Appium driver connection successful.")
+
+            # --- Start Traffic Capture (if enabled) ---
+            if self.traffic_capture_enabled:
+                logging.info("Traffic capture is ENABLED in config.")
+                if self._start_traffic_capture():
+                    capture_started_successfully = True
+                    logging.info("Traffic capture initiated.")
+                else:
+                    logging.warning("Failed to start traffic capture. Crawling will continue without it.")
+                    # Optionally, decide if this is a critical failure:
+                    # if config.REQUIRE_TRAFFIC_CAPTURE_TO_RUN:
+                    #     logging.critical("Traffic capture failed and is required. Aborting run.")
+                    #     if self.db_manager: self.db_manager.close()
+                    #     if self.driver: self.driver.disconnect()
+                    #     return
+            else:
+                logging.info("Traffic capture is DISABLED in config.")
+            # --- End Traffic Capture Start ---
+
 
             # --- Initialization successful ---
             run_successful = True
@@ -630,12 +923,12 @@ class AppCrawler:
                     if step_count > max_steps:
                         logging.info(f"Termination: Reached max step count ({max_steps}).")
                         break
-                    logging.info(f"\n--- Step {step_count}/{max_steps} ---")
+                    logging.info(f"\\n--- Step {step_count}/{max_steps} ---")
                 elif crawl_mode == 'time':
                     if elapsed_time > max_duration_seconds:
                         logging.info(f"Termination: Reached max duration ({elapsed_time:.1f}s / {max_duration_seconds}s). Total steps: {step_count-1}")
                         break
-                    logging.info(f"\n--- Step {step_count} (Time: {elapsed_time:.1f}s / {max_duration_seconds}s) ---")
+                    logging.info(f"\\n--- Step {step_count} (Time: {elapsed_time:.1f}s / {max_duration_seconds}s) ---")
 
                 # Check failure-based termination (common to both modes)
                 if self._check_termination(): # Call the updated method (checks failures only)
@@ -649,9 +942,9 @@ class AppCrawler:
                 # 1. Get Current State
                 state_data = self._get_current_state()
                 if state_data is None:
-                    logging.warning(f"Failed get state step {current_step_number}, fallback: BACK.")
+                    logging.warning(f"Failed get state step {step_count}, fallback: BACK.")
                     self.driver.press_back_button(); time.sleep(config.WAIT_AFTER_ACTION);
-                    self._last_action_description = f"GET_STATE_FAIL_BACK (Step {current_step_number})"
+                    self._last_action_description = f"GET_STATE_FAIL_BACK (Step {step_count})"
                     self.previous_composite_hash = None; continue
 
                 screenshot_bytes, page_source = state_data
@@ -660,12 +953,12 @@ class AppCrawler:
                 if "error" in xml_hash or "error" in visual_hash:
                      logging.error(f"Hash error (XML:{xml_hash}, Vis:{visual_hash}). Fallback: BACK.")
                      self.driver.press_back_button(); time.sleep(config.WAIT_AFTER_ACTION);
-                     self._last_action_description = f"HASH_ERROR_BACK (Step {current_step_number})"
+                     self._last_action_description = f"HASH_ERROR_BACK (Step {step_count})"
                      self.previous_composite_hash = None; continue
 
                 # --- CHANGE 1: Calculate initial hash, but rely on state_manager's result ---
                 initial_composite_hash = f"{xml_hash}_{visual_hash}"
-                logging.debug(f"Calculated initial hash for step {current_step_number}: {initial_composite_hash}")
+                logging.debug(f"Calculated initial hash for step {step_count}: {initial_composite_hash}")
 
                 # 2. Add/Get Screen Representation (Handles similarity)
                 try:
@@ -686,7 +979,7 @@ class AppCrawler:
                 except Exception as screen_err:
                     logging.error(f"Error add/get screen: {screen_err}. Fallback: BACK.", exc_info=True)
                     self.driver.press_back_button(); time.sleep(config.WAIT_AFTER_ACTION);
-                    self._last_action_description = f"STATE_MGR_SCREEN_ERR_BACK (Step {current_step_number})"
+                    self._last_action_description = f"STATE_MGR_SCREEN_ERR_BACK (Step {step_count})"
                     self.previous_composite_hash = None; continue
 
                 # Logging the retrieved screen info
@@ -698,7 +991,7 @@ class AppCrawler:
                      except Exception as trans_err: logging.error(f"Error adding transition: {trans_err}", exc_info=True)
 
                 # 4. Check Termination
-                if self._check_termination(current_step_number): break
+                if self._check_termination(): break # Corrected: _check_termination no longer takes step_count
 
                 # --- CHANGE 3: Use definitive_composite_hash for history and visit count ---
                 # 5. Get Action History for Current Screen
@@ -720,9 +1013,9 @@ class AppCrawler:
 
                 # 8. Handle AI Failure
                 if ai_suggestion is None:
-                    logging.error(f"AI fail step {current_step_number}. Fallback: BACK.")
+                    logging.error(f"AI fail step {step_count}. Fallback: BACK.")
                     self.consecutive_ai_failures += 1; fallback_ok = self.driver.press_back_button();
-                    self._last_action_description = f"AI_FAIL_BACK (Step {current_step_number})"
+                    self._last_action_description = f"AI_FAIL_BACK (Step {step_count})"
                     if not fallback_ok: self.consecutive_exec_failures += 1
                     time.sleep(config.WAIT_AFTER_ACTION);
                     self.previous_composite_hash = definitive_composite_hash # Use definitive hash
@@ -731,7 +1024,7 @@ class AppCrawler:
                     self.consecutive_ai_failures = 0
                     action_type_sugg = ai_suggestion.get('action', '??'); target_id_sugg = ai_suggestion.get('target_identifier', 'N/A')
                     # Description of the action *to be taken* in this step
-                    self._last_action_description = f"{action_type_sugg}: '{target_id_sugg}' (Step {current_step_number})"
+                    self._last_action_description = f"{action_type_sugg}: '{target_id_sugg}' (Step {step_count})"
 
 
                 # 9. Map AI Suggestion
@@ -741,12 +1034,9 @@ class AppCrawler:
                 if mapped_action is None:
                     # Increment counter if not already done by an exception in _map_ai_to_action
                     # (This check prevents double counting if _map_ai_to_action returned None explicitly)
-                    if not ai_suggestion or ai_suggestion.get("action") in ["click", "input"]: # Only increment if it was a mapping attempt that failed
-                         # Check if the counter wasn't already incremented by _map_ai_to_action itself
-                         # This logic might need refinement depending on exactly how failures are counted internally
-                         pass # Assuming _map_ai_to_action handles its own failure count increment
+                    pass # Assuming _map_ai_to_action handles its own failure count increment
 
-                    logging.error(f"Map fail step {current_step_number}. Fallback: BACK.")
+                    logging.error(f"Map fail step {step_count}. Fallback: BACK.")
                     # --- Add keyboard check for double back ---
                     keyboard_shown = False
                     try:
@@ -756,21 +1046,21 @@ class AppCrawler:
                         logging.warning(f"Could not check keyboard status: {key_err}")
 
                     self.driver.press_back_button() # Press back once regardless
-                    self._last_action_description = f"MAP_FAIL_BACK (Step {current_step_number})"
+                    self._last_action_description = f"MAP_FAIL_BACK (Step {step_count})"
                     if keyboard_shown:
                         logging.info("Keyboard was shown, pressing BACK a second time for navigation.")
                         time.sleep(0.5) # Small delay before second back press
                         self.driver.press_back_button()
-                        self._last_action_description = f"MAP_FAIL_KEYBOARD_DOUBLE_BACK (Step {current_step_number})"
+                        self._last_action_description = f"MAP_FAIL_KEYBOARD_DOUBLE_BACK (Step {step_count})"
                     # --- End keyboard check ---
 
                     time.sleep(config.WAIT_AFTER_ACTION)
                     self.previous_composite_hash = None # Reset hash to force re-evaluation after fallback
-                    if self._check_termination(current_step_number): break # Check termination after failure
+                    if self._check_termination(): break # Check termination after failure
                     continue # Skip to next step after fallback
 
                 # 11. SAVE ANNOTATED SCREENSHOT (Optional)
-                self._save_annotated_screenshot(screenshot_bytes, current_step_number, current_screen_repr.id, ai_suggestion)
+                self._save_annotated_screenshot(screenshot_bytes, step_count, current_screen_repr.id, ai_suggestion)
 
                 # 12. Execute Action
                 execution_success = self._execute_action(mapped_action)
@@ -785,8 +1075,8 @@ class AppCrawler:
 
             # --- End of Loop ---
             # Check if loop finished due to max steps or early termination
-            if current_step_number < max_steps :
-                 logging.info(f"Crawling loop terminated at step {current_step_number} before reaching max steps ({max_steps}).")
+            if step_count < max_steps : # Corrected: current_step_number to step_count
+                 logging.info(f"Crawling loop terminated at step {step_count} before reaching max steps ({max_steps}).") # Corrected: current_step_number to step_count
             else:
                  logging.info(f"Crawling loop finished after reaching max steps ({max_steps}).")
 
@@ -798,9 +1088,22 @@ class AppCrawler:
             logging.critical(f"An uncaught exception occurred during crawling setup or loop: {e}", exc_info=True)
             run_successful = False
         finally:
-            # --- Cleanup ---
+            # --- Stop and Pull Traffic Capture (if started) ---
+            if capture_started_successfully: # Only if it was successfully started
+                logging.info("Stopping and processing traffic capture data...")
+                self._stop_traffic_capture() # Attempt to stop
+                if self._pull_traffic_capture_file(): # Attempt to pull
+                    if getattr(config, 'CLEANUP_DEVICE_PCAP_FILE', False):
+                        self._cleanup_device_pcap_file() # Cleanup if pull was successful and configured
+                else:
+                    logging.warning("Failed to pull the traffic capture file. It might still be on the device.")
+            elif self.traffic_capture_enabled and not capture_started_successfully:
+                logging.info("Traffic capture was enabled but did not start successfully, so no capture data to process.")
+            # --- End Traffic Capture Stop/Pull ---
+
+            # --- Original Cleanup ---
             logging.info("--- Crawling Finished / Cleaning Up ---")
-            duration = time.time() - start_time
+            duration = time.time() - crawl_start_time # Corrected: start_time to crawl_start_time
             logging.info(f"Total duration: {duration:.2f} seconds")
             if self.state_manager:
                 try:
@@ -818,3 +1121,10 @@ class AppCrawler:
             if self.driver: self.driver.disconnect()
             if self.db_manager: self.db_manager.close()
             logging.info("--- Cleanup Complete ---")
+
+if __name__ == "__main__":
+    # Basic logging setup
+    logging.basicConfig(level=logging.INFO, 
+                        format='%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s')
+    crawler = AppCrawler()
+    crawler.run()

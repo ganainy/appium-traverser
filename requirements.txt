@@ -3,3 +3,5 @@ google-generativeai
 pillow
 imagehash
 lxml
+colorlog
+python-dotenv

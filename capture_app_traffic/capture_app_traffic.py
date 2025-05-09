@@ -4,10 +4,11 @@ import os
 import re
 import time
 from datetime import datetime
+from traverser_ai_api.config import TARGET_APP_PACKAGE
 
 # --- Configuration ---
 # <<< CHANGE THIS VALUE TO YOUR TARGET APP'S PACKAGE NAME >>>
-TARGET_APP_PACKAGE = "eu.smartpatient.mytherapy" # Example: Replace with your target app
+# TARGET_APP_PACKAGE = "eu.smartpatient.mytherapy" # Example: Replace with your target app
 
 PCAPDROID_PACKAGE = "com.emanuelef.remote_capture"
 # Correct API entry point (Activity) as per documentation
@@ -243,15 +244,7 @@ def main():
 
             # Optional: Clean up the file on the device
             if CLEANUP_DEVICE_FILE:
-                print(f"\nCleaning up file on device: {device_pcap_full_path}...")
-                rm_command = ['shell', 'rm', device_pcap_full_path]
-                # Suppress stderr for rm, as failure isn't critical and might happen if pull failed earlier
-                _, retcode_rm = run_adb_command(rm_command, suppress_stderr=True)
-                if retcode_rm == 0:
-                    print("Device file deleted successfully.")
-                else:
-                    # Only warn if the pull succeeded but the delete failed
-                     print(f"Warning: Failed to delete file {device_pcap_full_path} from device (ADB error code {retcode_rm}). You may need to remove it manually.", file=sys.stderr)
+                cleanup_device_file(device_pcap_full_path)
         else:
             # File was pulled but is empty
             print(f"\n--- Warning! ---")
@@ -260,15 +253,22 @@ def main():
             print("Ensure the target app was used and generated network activity while capture was running.", file=sys.stderr)
             # Keep the empty file for inspection, but cleanup if requested
             if CLEANUP_DEVICE_FILE:
-                print(f"\nCleaning up empty file on device: {device_pcap_full_path}...")
-                rm_command = ['shell', 'rm', device_pcap_full_path]
-                _, _ = run_adb_command(rm_command, suppress_stderr=True) # Ignore result
-
+                cleanup_device_file(device_pcap_full_path)
     else:
         # Pull command reported success, but file doesn't exist locally (shouldn't happen often)
         print(f"\n--- Error! ---")
         print(f"ADB pull command seemed to succeed, but the local file '{local_pcap_path}' was not found.", file=sys.stderr)
         print("This indicates an unexpected issue with the adb pull process or file system.", file=sys.stderr)
+
+def cleanup_device_file(device_pcap_full_path):
+    """Helper function to clean up the file on the device."""
+    print(f"\nCleaning up file on device: {device_pcap_full_path}...")
+    rm_command = ['shell', 'rm', device_pcap_full_path]
+    _, retcode_rm = run_adb_command(rm_command, suppress_stderr=True)
+    if retcode_rm == 0:
+        print("Device file deleted successfully.")
+    else:
+        print(f"Warning: Failed to delete file {device_pcap_full_path} from device (ADB error code {retcode_rm}). You may need to remove it manually.", file=sys.stderr)
 
 if __name__ == "__main__":
     main()

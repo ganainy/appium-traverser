@@ -46,10 +46,10 @@ CRAWL_MODE = 'steps'  # Options: 'steps' or 'time'
 MAX_CRAWL_STEPS = 100  # Max steps if CRAWL_MODE is 'steps'
 MAX_CRAWL_DURATION_SECONDS = 600  # Max duration in seconds (e.g., 600 for 10 mins) if CRAWL_MODE is 'time'
 # Screenshot directories
-SCREENSHOTS_DIR = f"traverser-ai-api/screenshots/crawl_screenshots_{APP_PACKAGE}"
-ANNOTATED_SCREENSHOTS_DIR = f"traverser-ai-api/screenshots/annotated_crawl_screenshots_{APP_PACKAGE}"
+SCREENSHOTS_DIR = f"output_data/screenshots/crawl_screenshots_{APP_PACKAGE}"
+ANNOTATED_SCREENSHOTS_DIR = f"output_data/screenshots/annotated_crawl_screenshots_{APP_PACKAGE}"
 # Database settings
-DB_NAME = f"traverser-ai-api/database_output/{APP_PACKAGE}_crawl_data.db"
+DB_NAME = f"output_data/database_output/{APP_PACKAGE}_crawl_data.db"
 WAIT_AFTER_ACTION = 2.0 # Seconds to wait for UI to potentially change after an action
 STABILITY_WAIT = 1.0 # Seconds to wait before getting state (screenshot/XML)
 VISUAL_SIMILARITY_THRESHOLD = 5 # Perceptual hash distance threshold (lower means more similar)
@@ -104,4 +104,13 @@ GEMINI_MODELS = {
 
 # Default model configuration
 DEFAULT_MODEL_TYPE = 'flash-latest-fast' # Changed default to the latest flash model
+
+# --- Traffic Capture Settings (PCAPdroid) ---
+ENABLE_TRAFFIC_CAPTURE = True # Set to True to enable traffic capture during crawl
+PCAPDROID_PACKAGE = "com.emanuelef.remote_capture"
+PCAPDROID_ACTIVITY = f"{PCAPDROID_PACKAGE}/.activities.CaptureCtrl"
+DEVICE_PCAP_DIR = "/sdcard/Download/PCAPdroid" # Default PCAPdroid save directory
+# Output directory for PCAP files, relative to the main project or traverser-ai-api
+TRAFFIC_CAPTURE_OUTPUT_DIR = "output_data/traffic_captures"
+CLEANUP_DEVICE_PCAP_FILE = True # Delete PCAP file from device after successful pull
 

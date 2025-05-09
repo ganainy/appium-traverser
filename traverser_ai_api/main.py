@@ -53,6 +53,11 @@ try:
         os.makedirs(config.SCREENSHOTS_DIR, exist_ok=True)
     if hasattr(config, 'ANNOTATED_SCREENSHOTS_DIR'):
         os.makedirs(config.ANNOTATED_SCREENSHOTS_DIR, exist_ok=True)
+    if hasattr(config, 'DB_NAME'):
+        db_dir = os.path.dirname(config.DB_NAME)
+        if db_dir: # Ensure db_dir is not empty if DB_NAME is just a filename
+            os.makedirs(db_dir, exist_ok=True)
+    # The TRAFFIC_CAPTURE_OUTPUT_DIR is created in crawler.py if enabled
 
 except ImportError:
     logging.critical("Could not import configuration. Make sure config.py exists.")
