@@ -394,11 +394,15 @@ Your tasks are:
 
 1.  **Filter:** Identify ONLY the applications from the input list that are primarily related to **health, fitness, wellness, medical purposes, medication management, or mental health**. Exclude general utilities, system apps, games (unless specifically health/fitness focused), social media, etc. Focus on the app's *primary purpose*.
 
-2.  **Populate Missing Names:** For the applications you identified in step 1 (the health-related ones), you *must* ensure the `app_name` field in your output JSON is populated.
-    *   If the input `app_name` for a selected health app is **not** `null` and is a valid-looking name, **use that existing `app_name`** in your output.
-    *   If the input `app_name` for a selected health app **is** `null` or empty, **infer a likely, user-friendly application name** based primarily on the `package_name`. Use common sense for naming (e.g., `com.myfitnesspal.android` should become `"MyFitnessPal"`, `com.google.android.apps.fitness` should become `"Google Fit"`). Make your best guess for a concise, readable name.
+2.  **Populate Missing Names & Preserve Fields:** For the applications you identified in step 1 (the health-related ones):
+    *   You *must* ensure the `app_name` field in your output JSON is populated.
+        *   If the input `app_name` for a selected health app is **not** `null` and is a valid-looking name, **use that existing `app_name`** in your output.
+        *   If the input `app_name` for a selected health app **is** `null` or empty, **infer a likely, user-friendly application name** based primarily on the `package_name`. Use common sense for naming (e.g., `com.myfitnesspal.android` should become `"MyFitnessPal"`, `com.google.android.apps.fitness` should become `"Google Fit"`). Make your best guess for a concise, readable name.
+    *   You *must* include the original `package_name` from the input.
+    *   You *must* include the original `activity_name` from the input (this field can be `null` if it was `null` in the input data for that app).
+    *   You *must* infer a general application category (e.g., "Fitness", "Medical", "Wellness", "Productivity", "Social", "Game", "Utility") for each identified health-related app based on its `app_name` and `package_name`. Add this as a new field called `app_category` in your output.
 
-Output ONLY a valid JSON array containing the entries for the health-related applications identified in step 1. Each object in the output array MUST have a non-null `app_name` field, populated according to the rules in step 2.
+Output ONLY a valid JSON array containing the entries for the health-related applications identified in step 1. Each object in the output array MUST have the `package_name`, `app_name` (non-null, populated as per step 2), `activity_name` (preserved from input), and `app_category` (inferred as per step 2) fields.
 
 Do not include any explanatory text, comments, markdown formatting like ```json ... ``` around the JSON array, or any text other than the final JSON array itself. The output must be directly parseable as a JSON list of objects. If no apps in the input match the health criteria, output an empty JSON array `[]`.
                 Input JSON:
@@ -523,33 +527,38 @@ if __name__ == "__main__":
     print("Retrieving app label and main activity for each package...")
     total_packages = len(packages)
     label_missing_count = 0 # Track apps where label couldn't be found
+
+    activity_missing_count = 0 # Track apps where activity couldn't be found
+
     for i, pkg_name in enumerate(packages):
-        # Progress indicator
-        progress = f"[{i+1}/{total_packages}]"
-        # Use space padding to ensure previous line is overwritten
-        print(f"\rProcessing {progress}: {pkg_name:<50}", end="")
+        progress_percent = ((i + 1) / total_packages) * 100
+        # Display progress on the same line
+        print(f"\\rProcessing package {i+1}/{total_packages} ({progress_percent:.1f}%) [{pkg_name[:30].ljust(30)}]...", end="", flush=True)
 
         app_label = get_app_label(pkg_name)
-        main_activity = find_main_activity(pkg_name)
-
-        # Always add the app info, record if label is None
-        if app_label is None:
+        if not app_label:
             label_missing_count += 1
-            # Optional: Log missing label inline (might clutter output)
-            # print(f"\rProcessing {progress}: {pkg_name:<50} [Label not found]", end="")
+            # print(f"Warning: App label not found for {pkg_name}") # Optional detailed warning
 
-        app_info = {
+        main_activity = find_main_activity(pkg_name)
+        if not main_activity:
+            activity_missing_count += 1
+            # print(f"Warning: Main activity not found for {pkg_name}") # Optional detailed warning
+
+        current_app_info = {
             "package_name": pkg_name,
-            "app_name": app_label,        # Will be None if not found
-            "activity_name": main_activity # Will be None if not found
+            "app_name": app_label,
+            "activity_name": main_activity
         }
-        all_app_data.append(app_info)
+        all_app_data.append(current_app_info)
 
     # Print final status for info retrieval (clear the progress line first)
-    print(f"\r{' ' * 80}\r", end="") # Clear line
+    print(f"\\r{' ' * 80}\\r", end="") # Clear line
     print(f"Finished retrieving info for {total_packages} packages.")
     if label_missing_count > 0:
-        print(f"  NOTE: App label could not be retrieved for {label_missing_count} package(s).")
+        print(f"Warning: Could not determine app label for {label_missing_count} app(s).")
+    if activity_missing_count > 0:
+        print(f"Warning: Could not determine main activity for {activity_missing_count} app(s).")
 
     # 5. Apply AI Filtering (if enabled and possible)
     final_app_data = all_app_data
