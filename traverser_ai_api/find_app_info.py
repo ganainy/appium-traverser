@@ -26,9 +26,10 @@ import re
 import json
 import os
 import traceback
-from PIL.Image import Image
+from PIL.Image import Image # Assuming this is used elsewhere, keeping it. If not, it could be removed.
 from dotenv import load_dotenv
-import time # Added for potential delays/retries if needed
+import argparse # Added for command line arguments
+import time # Added: Missing import for time.time()
 
 # --- Try importing Google AI Library (required only for filtering) ---
 try:
@@ -65,7 +66,8 @@ AI_SAFETY_SETTINGS = {
     "HARM_CATEGORY_SEXUALLY_EXPLICIT": "BLOCK_MEDIUM_AND_ABOVE",
     "HARM_CATEGORY_DANGEROUS_CONTENT": "BLOCK_MEDIUM_AND_ABOVE",
 }
-OUTPUT_DIR = os.path.join(os.path.dirname(__file__) or '.', "output_data", "app_info") # Changed to match main.py's expectation
+# OUTPUT_DIR = os.path.join(os.path.dirname(__file__) or '.', "output_data", "app_info") # Old path
+OUTPUT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "output_data", "app_info")) # Changed to point to project root's output_data
 MAX_APPS_TO_SEND_TO_AI = 200 # Adjust based on model limits and typical response sizes
 THIRD_PARTY_APPS_ONLY = True # Set to False to include system apps
 
@@ -587,22 +589,112 @@ def generate_app_info_cache(target_package_name_filter=None, target_app_label_fi
 
     return output_path, apps_to_save
 
+def filter_existing_app_info_file(input_filepath: str):
+    """
+    Loads app data from an existing JSON file, filters it using AI based on a desired category,
+    and saves the filtered data to a new JSON file.
+    """
+    if not os.path.exists(input_filepath):
+        print(f"Error: Input file not found: {input_filepath}", file=sys.stderr)
+        return None
+
+    print(f"--- Processing existing app info file: {input_filepath} ---")
+    # The filter_apps_with_ai function uses a hardcoded prompt for health/fitness.
+
+    try:
+        with open(input_filepath, 'r', encoding='utf-8') as f:
+            all_apps_data = json.load(f)
+    except Exception as e:
+        print(f"Error loading JSON from {input_filepath}: {e}", file=sys.stderr)
+        return None
+
+    if not isinstance(all_apps_data, list):
+        print(f"Error: Data in {input_filepath} is not a JSON list.", file=sys.stderr)
+        return None
+
+    filtered_apps_data = []
+    if not all_apps_data:
+        print(f"Input file {input_filepath} contains no app data. Nothing to filter.", file=sys.stderr)
+        # Output will be an empty list, written to file.
+    else:
+        # Ensure AI is available and configured for filtering
+        if not ENABLE_AI_FILTERING: # This global is defined near the top of the script
+            print("Warning: AI Filtering is globally disabled in this script. Cannot filter.", file=sys.stderr)
+            return None 
+        if not GENAI_AVAILABLE or not GEMINI_API_KEY: # These globals are also defined/checked near the top
+            print("Warning: AI prerequisites (library/API key) are not met. Cannot filter.", file=sys.stderr)
+            return None
+
+        print(f"Sending {len(all_apps_data)} apps from input file to AI for filtering...")
+        # filter_apps_with_ai is an existing function in this file
+        ai_filtered_list = filter_apps_with_ai(list(all_apps_data)) # Pass a copy
+
+        if ai_filtered_list is None:
+            print("AI filtering returned None, indicating a problem. No output file will be saved.", file=sys.stderr)
+            return None
+        filtered_apps_data = ai_filtered_list
+
+    # Determine output filename
+    base, ext = os.path.splitext(os.path.basename(input_filepath)) # Use basename for constructing new filename
+    output_filename = f"{base}_fitness_filtered{ext}"
+    # Save in the same directory as the input file
+    output_filepath = os.path.join(os.path.dirname(input_filepath), output_filename)
+
+    print(f"--- Saving filtered app info to: {output_filepath} ---")
+    try:
+        with open(output_filepath, 'w', encoding='utf-8') as f:
+            json.dump(filtered_apps_data, f, indent=4, ensure_ascii=False)
+        print(f"Successfully saved {len(filtered_apps_data)} filtered app(s) to {output_filepath}")
+        return output_filepath
+    except IOError as e:
+        print(f"Error writing to file {output_filepath}: {e}", file=sys.stderr)
+        traceback.print_exc()
+        return None
+
 #==============================================================================
 # Main Execution Logic
 #==============================================================================
 if __name__ == "__main__":
-    start_time = time.time()
-    print("--- Starting App Info Finder (Standalone Mode) ---")
-    
-    # When run standalone, use_ai_filtering_for_this_cache is determined by the script's own ENABLE_AI_FILTERING setting
-    output_file, discovered_apps = generate_app_info_cache(
-        use_ai_filtering_for_this_cache=ENABLE_AI_FILTERING 
+    parser = argparse.ArgumentParser(description="Android App Info Finder and AI Filter.")
+    parser.add_argument(
+        "--mode",
+        choices=['discover', 'filter-existing'],
+        default='discover',
+        help="Operation mode: 'discover' new app info (default), or 'filter-existing' an input JSON file."
+    )
+    parser.add_argument(
+        "--input-file",
+        type=str,
+        help="Path to an existing app info JSON file (e.g., ..._all.json) to be filtered by AI. Required if --mode is 'filter-existing'."
     )
 
-    if output_file:
-        print(f"\\nCache file generated at: {output_file}")
-    else:
-        print("\\nApp info cache generation failed or did not produce a file.")
+    args = parser.parse_args()
+    start_time = time.time()
+
+    if args.mode == 'filter-existing':
+        if not args.input_file:
+            print("Error: --input-file is required when --mode is 'filter-existing'.", file=sys.stderr)
+            sys.exit(1)
+        print(f"--- Starting App Info Filter (Filter Existing File Mode) ---")
+        output_file_path = filter_existing_app_info_file(args.input_file)
+        if output_file_path:
+            print(f"Filtered file generated at: {output_file_path}")
+        else:
+            print("App info filtering failed or did not produce a file.")
+
+    elif args.mode == 'discover':
+        print("--- Starting App Info Finder (Standalone Discovery Mode) ---")
+        # When run standalone, use_ai_filtering_for_this_cache is determined by the script's own ENABLE_AI_FILTERING setting
+        # and also depends on GENAI_AVAILABLE and GEMINI_API_KEY being set up.
+        # The generate_app_info_cache function handles the logic of whether to apply AI filtering.
+        output_file_path, _ = generate_app_info_cache( # _ to ignore discovered_apps list
+            use_ai_filtering_for_this_cache=ENABLE_AI_FILTERING 
+        )
+
+        if output_file_path:
+            print(f"\\nCache file generated at: {output_file_path}")
+        else:
+            print("\\nApp info cache generation failed or did not produce a file.")
 
     end_time = time.time()
-    print(f"\\n--- App Info Finder Finished in {end_time - start_time:.2f} seconds ---")
+    print(f"\\n--- Script Finished in {end_time - start_time:.2f} seconds ---")

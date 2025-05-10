@@ -893,12 +893,12 @@ class AppCrawler:
 
 
             # --- Ensure Target App is Launched ---
-            target_pkg = self.config_dict.get("PACKAGE") # Changed key from "app_package_name"
-            target_activity = self.config_dict.get("ACTIVITY") # Changed key from "app_activity_name"
+            target_pkg = self.config_dict.get("APP_PACKAGE") # Changed key from "PACKAGE" to "APP_PACKAGE"
+            target_activity = self.config_dict.get("APP_ACTIVITY") # Changed key from "ACTIVITY" to "APP_ACTIVITY"
 
             if not target_pkg:
-                logging.critical("Target app package name (PACKAGE) not found in configuration. Stopping.") # Updated log message
-                print(f"{UI_END_PREFIX} CRITICAL_ERROR_NO_PACKAGE")
+                logging.critical("Target app package name (APP_PACKAGE) not found in configuration. Stopping.") # Updated log message
+                print(f"{UI_END_PREFIX} CRITICAL_ERROR_NO_APP_PACKAGE") # Updated UI message
                 return
 
             current_pkg = self.driver.get_current_package()

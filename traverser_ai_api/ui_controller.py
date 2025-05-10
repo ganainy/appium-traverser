@@ -488,7 +488,10 @@ class CrawlerControllerWindow(QMainWindow):
     @Slot()
     def start_crawler(self):
         """Starts the crawler process."""
+        self.log_output.append("Attempting to start crawler...") # Added log
+
         if not self.crawler_process:
+            self.log_output.append("Crawler process not already running. Proceeding to start.") # Added log
             # Save configuration before starting
             self.save_config()
             
@@ -497,27 +500,28 @@ class CrawlerControllerWindow(QMainWindow):
             self.crawler_process.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
             
             # Connect signals
-            self.crawler_process.readyReadStandardOutput.connect(self.read_stdout) # Changed
+            self.crawler_process.readyReadStandardOutput.connect(self.read_stdout)
             self.crawler_process.finished.connect(self.handle_process_finished)
+            self.crawler_process.errorOccurred.connect(self.handle_process_error) 
             
-            # Determine project root directory
-            # __file__ is the path to ui_controller.py
-            # The script's directory is .../traverser_ai_api
-            script_path = os.path.abspath(__file__)
-            script_dir = os.path.dirname(script_path)
-            project_root = os.path.dirname(script_dir)
+            python_executable = sys.executable 
+            module_to_run = "traverser_ai_api.main"
 
-            # Set the working directory for the subprocess
+            # Set working directory to the project root
+            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
             self.crawler_process.setWorkingDirectory(project_root)
-            
-            # Start the process
-            self.crawler_process.start(sys.executable, ['-m', 'traverser_ai_api.main'])
+            self.log_output.append(f"Set working directory for subprocess to: {project_root}")
+
+            self.log_output.append(f"Executing: {python_executable} -u -m {module_to_run}")
+            self.crawler_process.start(python_executable, ['-u', '-m', module_to_run])
             
             # Update UI
             self.start_btn.setEnabled(False)
             self.stop_btn.setEnabled(True)
-            self.status_label.setText("Status: Running")
-            self.log_output.append("Crawler process started.")
+            self.status_label.setText("Status: Running...")
+            self.progress_bar.setRange(0,0) # Indeterminate progress
+        else:
+            self.log_output.append("Crawler process is already considered active. Start button press ignored.") # Added log
     
     @Slot()
     def stop_crawler(self):
@@ -535,7 +539,8 @@ class CrawlerControllerWindow(QMainWindow):
             return
 
         output = self.crawler_process.readAllStandardOutput().data().decode()
-        lines = output.splitlines() # Process line by line
+        # No need to strip here if we process line by line and append raw lines
+        lines = output.splitlines() 
 
         UI_STEP_PREFIX = "UI_STEP: "
         UI_ACTION_PREFIX = "UI_ACTION: "
@@ -593,7 +598,7 @@ class CrawlerControllerWindow(QMainWindow):
     #         self.log_output.append(data.strip())
             
     #         # Look for step updates
-    #         if "--- Step " in data:
+    #         if \"--- Step \" in data:
     #             try:
     #                 step = int(data.split("Step ")[1].split("/")[0])
     #                 self.step_count = step
@@ -609,40 +614,69 @@ class CrawlerControllerWindow(QMainWindow):
     #             except Exception:
     #                 pass # Or log error
 
-    def update_progress(self):
-        """Updates the progress bar based on current step."""
-        if self.config_widgets['CRAWL_MODE'].currentText() == 'steps':
-            max_steps = self.config_widgets['MAX_CRAWL_STEPS'].value()
-            self.progress_bar.setMaximum(max_steps)
-            self.progress_bar.setValue(self.step_count)
-    
-    # def update_screenshot(self, path: str):
-    #     """Updates the screenshot display."""
-    #     # This functionality is now part of read_stdout
-    #     if os.path.exists(path):
-    #         pixmap = QPixmap(path)
-    #         scaled_pixmap = pixmap.scaled(
-    #             self.screenshot_label.size(),
-    #             Qt.AspectRatioMode.KeepAspectRatio,
-    #             Qt.TransformationMode.SmoothTransformation
-    #         )
-    #         self.screenshot_label.setPixmap(scaled_pixmap)
-    #         self.current_screenshot = path
-    
-    @Slot()
-    def handle_process_finished(self):
-        """Handles crawler process completion."""
+    @Slot(QProcess.ExitStatus) # Add type hint for clarity
+    def handle_process_finished(self, exit_code: int, exit_status: QProcess.ExitStatus):
+        """Handles the event when the crawler process finishes."""
+        status_message = f"Crawler process finished. Exit code: {exit_code}, Status: {exit_status.name}"
+        self.log_output.append(status_message)
+        logging.info(status_message)
+
+        self.crawler_process = None # Reset the process variable
         self.start_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
-        self.status_label.setText("Status: Finished")
-        self.log_output.append("Crawler process finished.")
-        self.crawler_process = None
+        self.status_label.setText("Status: Idle")
+        self.progress_bar.setRange(0, 100) # Reset progress bar
+        self.progress_bar.setValue(0)
 
-def main():
+    @Slot(QProcess.ProcessError)
+    def handle_process_error(self, error: QProcess.ProcessError):
+        """Handles errors that occur with the crawler process."""
+        error_message = f"Crawler process error: {error.name}"
+        if self.crawler_process:
+            error_details = self.crawler_process.readAllStandardError().data().decode().strip()
+            if error_details:
+                error_message += f"\nDetails: {error_details}"
+        
+        self.log_output.append(error_message)
+        logging.error(error_message)
+
+        # Ensure UI is reset even on error
+        if self.crawler_process: # Check if it's not None before trying to access methods
+            # It's possible finished signal might also be emitted after an error, 
+            # but resetting here ensures UI consistency if only errorOccurred is hit.
+            pass # Don't reset self.crawler_process here, finished will handle it or it's already None
+
+        # Reset UI elements regardless of whether finished is also called
+        self.crawler_process = None # Crucial reset
+        self.start_btn.setEnabled(True)
+        self.stop_btn.setEnabled(False)
+        self.status_label.setText("Status: Error")
+        self.progress_bar.setRange(0, 100) # Reset progress bar
+        self.progress_bar.setValue(0)
+
+    def update_progress(self):
+        """Updates the progress bar based on current step and crawl mode."""
+        if self.config_widgets['CRAWL_MODE'].currentText() == 'steps':
+            max_steps = self.config_widgets['MAX_CRAWL_STEPS'].value()
+            if max_steps > 0:
+                self.progress_bar.setRange(0, max_steps)
+                self.progress_bar.setValue(self.step_count)
+            else:
+                self.progress_bar.setRange(0,0) # Indeterminate if max_steps is 0
+        else: # For 'time' mode or other modes, use indeterminate progress
+            self.progress_bar.setRange(0,0)
+    
+    def closeEvent(self, event):
+        """Ensures the crawler process is terminated when the window is closed."""
+        self.stop_crawler() # Attempt to gracefully stop
+        super().closeEvent(event)
+
+# Main application execution (for standalone testing)
+if __name__ == '__main__':
+    # Configure basic logging for the UI itself (optional)
+    logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+
     app = QApplication(sys.argv)
     window = CrawlerControllerWindow()
     window.show()
     sys.exit(app.exec())
-
-if __name__ == "__main__":
-    main()

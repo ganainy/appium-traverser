@@ -14,17 +14,10 @@
     "MAX_CRAWL_DURATION_SECONDS": 600,
     "WAIT_AFTER_ACTION": 2,
     "STABILITY_WAIT": 1,
-    "APP_LAUNCH_WAIT_TIME": 7,
+    "APP_LAUNCH_WAIT_TIME": 5,
     "VISUAL_SIMILARITY_THRESHOLD": 5,
     "ALLOWED_EXTERNAL_PACKAGES": [
-        "com.google.android.gms",
-        "com.android.chrome",
-        "com.google.android.permissioncontroller",
-        "org.mozilla.firefox",
-        "com.sec.android.app.sbrowser",
-        "com.microsoft.emmx",
-        "com.brave.browser",
-        "com.duckduckgo.mobile.android"
+        "com.google.android.gms\ncom.android.chrome\ncom.google.android.permissioncontroller\norg.mozilla.firefox\ncom.sec.android.app.sbrowser\ncom.microsoft.emmx\ncom.brave.browser\ncom.duckduckgo.mobile.android"
     ],
     "MAX_CONSECUTIVE_AI_FAILURES": 3,
     "MAX_CONSECUTIVE_MAP_FAILURES": 3,
