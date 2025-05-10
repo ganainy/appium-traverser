@@ -76,8 +76,8 @@ ACTION_DESC_SCROLL_UP = "Scroll the screen up to reveal previous content."
 ACTION_DESC_BACK = "Press the device's back button."
 
 # --- Error Handling ---
-MAX_CONSECUTIVE_AI_FAILURES = 5
-MAX_CONSECUTIVE_MAP_FAILURES = 5
+MAX_CONSECUTIVE_AI_FAILURES = 3
+MAX_CONSECUTIVE_MAP_FAILURES = 3
 MAX_CONSECUTIVE_EXEC_FAILURES = 3
 
 # --- App Launch Configuration ---
