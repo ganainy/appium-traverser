@@ -4,7 +4,7 @@ import json
 from PIL import Image
 import io
 from typing import Optional, Dict, List
-import config
+from . import config
 import time  # Add this import at the top
 
 class AIAssistant:

@@ -3,10 +3,10 @@ import os
 from typing import Optional, Dict, List, Tuple, Set
 
 # Assuming config.py and utils.py exist and are relevant
-import config
-import utils
+from . import config
+from . import utils
 # Import only DatabaseManager from database.py
-from database import DatabaseManager
+from .database import DatabaseManager
 
 # *** Define ScreenRepresentation class here ***
 class ScreenRepresentation:

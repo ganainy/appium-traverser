@@ -4,6 +4,9 @@ import os
 import sys
 import json # Added for reading cache file
 # Import crawler only after basic checks - MOVED LATER
+from . import config as cfg # Try importing config
+from . import utils # Assuming utils is also a sibling module
+from .appium_driver import AppiumDriver # Assuming AppiumDriver is in appium_driver.py
 
 # Configure colored logging
 handler = colorlog.StreamHandler(sys.stdout)
@@ -29,8 +32,8 @@ for old_handler in logger.handlers[:-1]:
 # Make sure environment variables are loaded (especially API key)
 config = None  # Define config before try block to ensure it's in scope
 try:
-    import config as cfg # Try importing config
-    config = cfg # Assign to the outer scope variable if successful
+    from . import config as cfg_local # Changed to relative import, using a distinct alias
+    config = cfg_local # Assign to the outer scope variable if successful
     # Test if a known variable from config is accessible
     _ = config.APP_PACKAGE # This will raise AttributeError if config is None or not loaded properly
 except ImportError as e:
@@ -54,15 +57,35 @@ except Exception as e:
 
 # If we reach here, config is imported and seems okay.
 # Now, proceed with the rest of the setup that might use 'config'.
-try:
-    # Removed: from app_info_manager import discover_and_filter_apps
+# Try to load user configuration from JSON file
+user_config_path = "user_config.json"
+if os.path.exists(user_config_path):
+    try:
+        with open(user_config_path, 'r') as f:
+            user_config = json.load(f)
+            # Update config module attributes with user-provided values
+            logging.info("Loading user configuration from JSON file...")
+            for key, value in user_config.items():
+                if hasattr(config, key):
+                    # Convert boolean string to actual boolean if needed
+                    if isinstance(value, str) and value.lower() in ('true', 'false'):
+                        value = value.lower() == 'true'
+                    logging.info(f"Setting {key} = {value}")
+                    setattr(config, key, value)
+            for key, value in user_config.items():
+                if hasattr(config, key):
+                    setattr(config, key, value)
+            logging.info(f"User configuration loaded from {user_config_path}")
+    except Exception as e:
+        logging.warning(f"Failed to load user configuration from {user_config_path}: {e}")
 
+try:
     get_device_serial = None # Initialize
     generate_app_info_cache = None # Initialize
     try:
         # Attempt to import get_device_serial to construct cache filename
         # and generate_app_info_cache to regenerate it if needed.
-        from find_app_info import get_device_serial, generate_app_info_cache
+        from .find_app_info import get_device_serial, generate_app_info_cache # Changed to relative import
     except ImportError:
         # get_device_serial and generate_app_info_cache remain None
         logging.warning("Could not import get_device_serial or generate_app_info_cache from find_app_info.py.")
@@ -85,7 +108,14 @@ try:
                 if device_id and device_id != "unknown_device":
                     filter_suffix = "health_filtered" if config.USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY else "all"
                     cache_filename = f"{device_id}_app_info_{filter_suffix}.json"
-                    cache_filepath = os.path.join(config.APP_INFO_OUTPUT_DIR, cache_filename)
+                    
+                    # Determine the correct base path for APP_INFO_OUTPUT_DIR
+                    # config.py is in the same directory as this main.py when run as a module's __main__
+                    # however, the CWD is the project root.
+                    # The APP_INFO_OUTPUT_DIR in config.py is relative to config.py's location.
+                    traverser_ai_api_dir = os.path.dirname(__file__) # Should be d:\\VS-projects\\appium-traverser\\traverser_ai_api
+                    resolved_app_info_output_dir = os.path.join(traverser_ai_api_dir, config.APP_INFO_OUTPUT_DIR)
+                    cache_filepath = os.path.join(resolved_app_info_output_dir, cache_filename)
 
                     logging.info(f"Attempt {attempt + 1}: Checking for app info in cache file: {cache_filepath}")
                     if os.path.exists(cache_filepath):
@@ -226,7 +256,7 @@ except Exception as e: # General errors during setup
     sys.exit(1)
 
 # Import crawler only after basic checks
-from crawler import AppCrawler
+from .crawler import AppCrawler # Changed to relative import
 
 if __name__ == "__main__":
     logging.info("Initializing crawler...")

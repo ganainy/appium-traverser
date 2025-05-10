@@ -72,21 +72,55 @@ Modify the following variables near the top of the `screen_traverse.py` script:
 *   `expected_start_activity`: The main launcher activity of the app (you might need `adb` or tools like "App Inspector" to find this).
 *   `expected_target_device`: The device ID (from `adb devices`) or the name of your Android emulator (e.g., `"emulator-5554"`).
 
-## Running the Script
+## Running the UI Controller
 
-1.  Ensure the **Appium server is running** in a separate terminal.
-2.  Ensure your target **Android device/emulator is connected** and recognized (`adb devices`).
-3.  Open a **new terminal**, navigate to the project directory (`cd appium-traverser`).
-4.  **Activate the virtual environment** (see Setup step 3).
-5.  Run the script using the Python interpreter from the virtual environment:
-    ```bash
-    # On Windows
-    .\.venv\Scripts\python.exe main_script.py
+1. First, set up your virtual environment (if you haven't already):
+    ```powershell
+    # Create virtual environment
+    python -m venv .venv
 
-    # On macOS/Linux
-    python main_script.py
+    # Activate the virtual environment
+    .\.venv\Scripts\Activate.ps1
+
+    # Install required packages
+    pip install -r requirements.txt
     ```
-## Usage
 
-Run the script using Python:
-`python main_script.py`
+2. Now that your environment is set up:
+    - Ensure the **Appium server is running** in a separate terminal: `appium --allow-insecure adb_shell`
+    - Ensure your target **Android device/emulator is connected** and recognized (`adb devices`)
+    - Make sure your virtual environment is activated (you should see `(.venv)` in your prompt)
+
+3. Run the UI Controller:
+    ```powershell
+    # Make sure you're in the project root directory
+    cd d:\VS-projects\appium-traverser
+
+    #Navigate to the script directory
+    cd traverser_ai_api
+
+    # Run the UI controller module
+    python -m ui_controller
+    ```
+
+4. Use the UI Controller:
+    - Configure your crawler settings in the left panel
+    - Click "Save Config" to save your settings
+    - Click "Start Crawler" to begin the crawling process
+    - Monitor progress in the right panel (logs, screenshots, progress bar)
+    - Use "Stop Crawler" to halt the process if needed
+
+Note: If you get execution policy errors in PowerShell, you may need to run:
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+```
+
+## Troubleshooting
+
+- If you get import errors, make sure you're running from the project root directory
+- If PySide6 fails to install, ensure you have wheel and setuptools updated:
+  ```powershell
+  python -m pip install --upgrade pip setuptools wheel
+  pip install -r requirements.txt
+  ```
+- If the UI doesn't show up, make sure all requirements are installed correctly in your virtual environment

@@ -5,3 +5,4 @@ imagehash
 lxml
 colorlog
 python-dotenv
+PySide6>=6.6.0  # Qt-based GUI for crawler control

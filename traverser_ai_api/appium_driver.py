@@ -1,16 +1,15 @@
 import logging
-import time
-import shlex
-import config
-
-from typing import Optional, Tuple, List, Dict
-
+import shlex # Added shlex
 from appium import webdriver
-from appium.options.common.base import AppiumOptions
-from selenium.common import WebDriverException, NoSuchElementException
-from selenium.common.exceptions import InvalidElementStateException
-from selenium.webdriver.common.by import By
+from appium.options.android import UiAutomator2Options
+from appium.webdriver.common.appiumby import AppiumBy
+from selenium.common.exceptions import StaleElementReferenceException, WebDriverException, NoSuchElementException, InvalidElementStateException
 from selenium.webdriver.remote.webelement import WebElement
+from selenium.webdriver.common.by import By
+from typing import Optional, List, Dict, Any, Tuple # Added Tuple
+
+from . import config # Changed to relative import
+import time
 
 class AppiumDriver:
     """Wrapper for Appium WebDriver interactions."""
@@ -22,7 +21,7 @@ class AppiumDriver:
 
     def connect(self) -> bool:
         """Establishes connection to the Appium server."""
-        options = AppiumOptions()
+        options = UiAutomator2Options()
         caps = {
             "platformName": "Android",
             "appium:automationName": "UiAutomator2",

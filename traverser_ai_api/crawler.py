@@ -7,12 +7,12 @@ from io import BytesIO # Added BytesIO
 from PIL import Image # Added Image
 
 # Import local modules
-import config
-import utils
-from ai_assistant import AIAssistant
-from appium_driver import AppiumDriver
-from state_manager import CrawlingState, ScreenRepresentation
-from database import DatabaseManager
+from . import config
+from . import utils
+from .ai_assistant import AIAssistant
+from .appium_driver import AppiumDriver
+from .state_manager import CrawlingState, ScreenRepresentation
+from .database import DatabaseManager
 from selenium.webdriver.remote.webelement import WebElement
 from appium.webdriver.common.appiumby import AppiumBy
 from selenium.common.exceptions import NoSuchElementException, InvalidSelectorException # Added InvalidSelectorException
