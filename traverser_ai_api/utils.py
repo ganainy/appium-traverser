@@ -1,5 +1,5 @@
 import hashlib
-from typing import Tuple, Optional
+from typing import Tuple, Optional, Any
 
 import imagehash
 from PIL import Image
@@ -190,3 +190,19 @@ def draw_indicator_on_image(image_bytes: bytes, coordinates: Tuple[int, int], co
     except Exception as e:
         logging.error(f"Error drawing indicator at {coordinates}: {e}")
         return None # Return None if drawing fails
+
+def generate_action_description(action_type: str, target_obj: Optional[Any], input_text: Optional[str], ai_target_identifier: Optional[str]) -> str:
+    """Generates a human-readable description of an action."""
+    description = f"{action_type.upper()}"
+
+    if ai_target_identifier:
+        description += f" on '{ai_target_identifier}'"
+    elif isinstance(target_obj, str): # e.g., for scroll direction
+        description += f" {target_obj}"
+    # Add more specific details if target_obj is a WebElement, but be careful with stale elements
+    # For now, ai_target_identifier is preferred for UI display if available.
+
+    if input_text:
+        description += f" with text '{input_text}'"
+    
+    return description

@@ -90,6 +90,70 @@ class AppiumDriver:
             logging.error(f"Error taking screenshot: {e}")
             return None
 
+    def get_current_package(self) -> Optional[str]:
+        """Retrieves the current application package name."""
+        if not self.driver:
+            logging.warning("Driver not available, cannot get current package.")
+            return None
+        try:
+            return self.driver.current_package
+        except WebDriverException as e:
+            logging.error(f"Error getting current package: {e}")
+            return None
+
+    def get_current_activity(self) -> Optional[str]:
+        """Retrieves the current application activity name."""
+        if not self.driver:
+            logging.warning("Driver not available, cannot get current activity.")
+            return None
+        try:
+            return self.driver.current_activity
+        except WebDriverException as e:
+            logging.error(f"Error getting current activity: {e}")
+            return None
+
+    def launch_app(self, app_package: str, app_activity: str) -> bool:
+        """
+        Launches the specified application or brings it to the foreground if already running.
+        Note: This uses ADB via Appium's mobile: shell.
+        """
+        if not self.driver:
+            logging.error("Driver not available, cannot launch app.")
+            return False
+        if not app_package or not app_activity:
+            logging.error("App package or activity not provided, cannot launch app.")
+            return False
+        try:
+            logging.info(f"Attempting to launch app: {app_package}/{app_activity}")
+            # Using 'am start' is generally reliable for starting an activity.
+            # The -n flag specifies the component name (package/activity).
+            # It will bring an existing task to the foreground or start a new one.
+            self.driver.execute_script(
+                "mobile: shell",
+                {
+                    "command": "am",
+                    "args": ["start", "-n", f"{app_package}/{app_activity}"],
+                },
+            )
+            # Add a short delay to allow the app to launch and stabilize
+            time.sleep(getattr(self.config, 'APP_LAUNCH_WAIT_TIME', 3)) # Use configured or default
+            
+            # Verification step (optional but recommended)
+            current_pkg = self.get_current_package()
+            current_act = self.get_current_activity()
+            if current_pkg == app_package: # Check if the top activity is part of the package
+                logging.info(f"App {app_package} is now in the foreground (current activity: {current_act}).")
+                return True
+            else:
+                logging.warning(f"App launch command sent, but current foreground app is {current_pkg} (expected {app_package}). The target app might not have launched correctly or another app took focus.")
+                return False
+        except WebDriverException as e:
+            logging.error(f"WebDriverException launching app {app_package}/{app_activity}: {e}")
+            return False
+        except Exception as e:
+            logging.error(f"Unexpected error launching app {app_package}/{app_activity}: {e}", exc_info=True)
+            return False
+
     def find_element(self, by: str, value: str) -> Optional[WebElement]:
         """Finds a single element with a short timeout."""
         if not self.driver or not value: return None
@@ -275,25 +339,6 @@ class AppiumDriver:
             logging.error(f"Unexpected error during scroll: {e}", exc_info=True)
             return False
 
-    def get_current_activity(self) -> Optional[str]:
-         if not self.driver: return None
-         try:
-             return self.driver.current_activity
-         except WebDriverException as e:
-             logging.warning(f"Could not get current activity: {e}")
-             return None
-
-    def get_current_app_context(self) -> Optional[Tuple[str, str]]:
-         """Gets the current package and activity."""
-         if not self.driver: return None
-         try:
-             package = self.driver.current_package
-             activity = self.driver.current_activity
-             return package, activity
-         except WebDriverException as e:
-             logging.warning(f"Could not get current app context: {e}")
-             return None
-
     def relaunch_app(self):
          """Attempts to relaunch the target application activity."""
          if not self.driver: return
@@ -429,3 +474,52 @@ class AppiumDriver:
         except WebDriverException as e:
             # Often throws if keyboard wasn't shown, log as warning
             logging.warning(f"Error hiding keyboard (might be expected if not shown): {e}")
+
+    def perform_action(self, action_type: str, target: Optional[WebElement | str], input_text: Optional[str] = None) -> bool:
+        """Performs a given action based on type, target, and optional input text."""
+        if not self.driver:
+            logging.error("Driver not available, cannot perform action.")
+            return False
+
+        success = False
+        action_type_lower = action_type.lower()
+
+        try:
+            if action_type_lower == "click":
+                if isinstance(target, WebElement):
+                    success = self.click_element(target)
+                else:
+                    logging.error(f"Invalid target type for click: {type(target)}. Expected WebElement.")
+            elif action_type_lower == "input":
+                if isinstance(target, WebElement) and isinstance(input_text, str):
+                    success = self.input_text_into_element(target, input_text)
+                elif not isinstance(target, WebElement):
+                    logging.error(f"Invalid target type for input: {type(target)}. Expected WebElement.")
+                elif not isinstance(input_text, str):
+                    logging.error(f"Invalid input_text type for input: {type(input_text)}. Expected str.")
+            elif action_type_lower == "scroll":
+                if isinstance(target, str): # Target here is the direction, e.g., "down", "up"
+                    success = self.scroll(direction=target)
+                else:
+                    logging.error(f"Invalid target type for scroll: {type(target)}. Expected direction string.")
+            elif action_type_lower == "back":
+                success = self.press_back_button()
+            # Add other actions like tap_coordinates, type_text_by_adb if they are to be exposed via perform_action
+            # elif action_type_lower == "tap":
+            #     if isinstance(target, tuple) and len(target) == 2 and all(isinstance(coord, int) for coord in target):
+            #         success = self.tap_coordinates(target[0], target[1])
+            #     else:
+            #         logging.error(f"Invalid target for tap: {target}. Expected (x,y) tuple of integers.")
+            else:
+                logging.error(f"Unsupported action type: {action_type}")
+
+        except Exception as e:
+            logging.error(f"An unexpected error occurred during perform_action ({action_type}): {e}", exc_info=True)
+            success = False
+
+        if success:
+            logging.info(f"Action '{action_type_lower}' performed successfully.")
+        else:
+            logging.warning(f"Action '{action_type_lower}' failed or was not supported with given parameters.")
+        
+        return success

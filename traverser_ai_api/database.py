@@ -176,3 +176,26 @@ class DatabaseManager:
         """Retrieves all recorded transitions."""
         sql = f"SELECT source_composite_hash, action_description, dest_composite_hash FROM {self.TRANSITIONS_TABLE}"
         return self._execute_sql(sql, fetch_all=True) or []
+
+    def initialize_db(self) -> bool:
+        """Clears all data from crawler tables for a fresh start. Returns True on success."""
+        if not self.conn:
+            logging.info("Database not connected. Attempting to connect before initializing.")
+            if not self.connect():
+                logging.error("Failed to connect to DB. Cannot initialize (clear) tables.")
+                return False
+        
+        logging.info("Clearing data from crawler tables for a fresh run...")
+        try:
+            # Order matters if there are foreign key constraints, delete from child table first.
+            self._execute_sql(f"DELETE FROM {self.TRANSITIONS_TABLE};")
+            self._execute_sql(f"DELETE FROM {self.SCREENS_TABLE};")
+            
+            # Reset autoincrement counter for transitions table (SQLite specific)
+            self._execute_sql(f"DELETE FROM sqlite_sequence WHERE name='{self.TRANSITIONS_TABLE}';")
+            
+            logging.info("Crawler tables cleared successfully.")
+            return True
+        except Exception as e:
+            logging.error(f"Failed to clear tables during initialization: {e}", exc_info=True)
+            return False

@@ -2,15 +2,32 @@ import logging
 import colorlog
 import os
 import sys
-import json # Added for reading cache file
+import json
+import time
+from typing import Optional, Dict, Any # Added
+
+# --- Global Script Start Time ---
+SCRIPT_START_TIME = time.time()
+
 # Import crawler only after basic checks - MOVED LATER
-from . import config as cfg # Try importing config
-from . import utils # Assuming utils is also a sibling module
-from .appium_driver import AppiumDriver # Assuming AppiumDriver is in appium_driver.py
+from . import config as cfg
+from . import utils
+from .appium_driver import AppiumDriver
+
+# Added: Custom Formatter for Elapsed Time
+class ElapsedColoredFormatter(colorlog.ColoredFormatter):
+    """Custom formatter to log elapsed time since script start."""
+    def formatTime(self, record, datefmt=None):
+        elapsed_seconds = record.created - SCRIPT_START_TIME
+        h = int(elapsed_seconds // 3600)
+        m = int((elapsed_seconds % 3600) // 60)
+        s = int(elapsed_seconds % 60)
+        ms = int((elapsed_seconds - (h * 3600 + m * 60 + s)) * 1000)
+        return f"{h:02d}:{m:02d}:{s:02d}.{ms:03d}"
 
 # Configure colored logging
 handler = colorlog.StreamHandler(sys.stdout)
-handler.setFormatter(colorlog.ColoredFormatter(
+handler.setFormatter(ElapsedColoredFormatter(
     '%(log_color)s%(asctime)s [%(levelname)s] %(filename)s:%(lineno)d - %(message)s',
     log_colors={
         'DEBUG': 'cyan',
@@ -18,16 +35,61 @@ handler.setFormatter(colorlog.ColoredFormatter(
         'WARNING': 'yellow',
         'ERROR': 'red',
         'CRITICAL': 'red,bg_white',
-    }
+    },
+    datefmt=None
 ))
 
 logger = logging.getLogger()
 logger.addHandler(handler)
-logger.setLevel(logging.INFO)  # Set to DEBUG to see all logs
+logger.setLevel(logging.INFO)
 
 # Remove any existing handlers to avoid duplicate logs
 for old_handler in logger.handlers[:-1]:
     logger.removeHandler(old_handler)
+
+# --- Global Script Start Time ---
+SCRIPT_START_TIME = time.time() # Added
+
+class ElapsedTimeFormatter(logging.Formatter): # Added
+    """Custom formatter to log elapsed time since script start.""" # Added
+    def formatTime(self, record, datefmt=None): # Added
+        elapsed_seconds = record.created - SCRIPT_START_TIME # Added
+        return time.strftime('%H:%M:%S', time.gmtime(elapsed_seconds)) + f".{int((elapsed_seconds % 1) * 1000):03d}" # Added
+
+def setup_logging(log_level_str: str = "INFO", log_file: Optional[str] = None, config_dict: Optional[Dict[str, Any]] = None):
+    """Sets up basic logging configuration."""
+    numeric_level = getattr(logging, log_level_str.upper(), None)
+    if not isinstance(numeric_level, int):
+        raise ValueError(f"Invalid log level: {log_level_str}")
+
+    # Use the custom formatter
+    log_formatter = ElapsedTimeFormatter("[%(levelname)s] (%(asctime)s) %(message)s") # Modified
+
+    handlers = []
+    if log_file:
+        # Ensure the directory for the log file exists
+        log_file_dir = os.path.dirname(log_file)
+        if log_file_dir and not os.path.exists(log_file_dir):
+            os.makedirs(log_file_dir)
+        file_handler = logging.FileHandler(log_file, mode='a', encoding='utf-8')
+        file_handler.setFormatter(log_formatter) # Modified
+        handlers.append(file_handler)
+
+    # Always add console handler
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(log_formatter) # Modified
+    handlers.append(console_handler)
+
+    logging.basicConfig(
+        level=numeric_level,
+        handlers=handlers,
+        force=True # Ensure basicConfig can override existing handlers
+    )
+    # Ensure Appium server logs are less verbose if not in DEBUG mode
+    if numeric_level > logging.DEBUG:
+        logging.getLogger("appium.webdriver.webdriver").setLevel(logging.WARNING)
+        logging.getLogger("urllib3.connectionpool").setLevel(logging.WARNING)
+        logging.getLogger("selenium.webdriver.remote.remote_connection").setLevel(logging.WARNING)
 
 # Make sure environment variables are loaded (especially API key)
 config = None  # Define config before try block to ensure it's in scope
@@ -259,8 +321,18 @@ except Exception as e: # General errors during setup
 from .crawler import AppCrawler # Changed to relative import
 
 if __name__ == "__main__":
+    # Create config_dict from the updated config module attributes
+    # This should be done after all potential modifications to 'config' object (like APP_PACKAGE, APP_ACTIVITY)
+    # and before initializing AppCrawler.
+    current_config_dict = {key: getattr(config, key) for key in dir(config) if not key.startswith('__') and not callable(getattr(config, key)) and not isinstance(getattr(config, key), type(sys))} # type(sys) to exclude modules
+
+    # Ensure PACKAGE and ACTIVITY are present, using the dynamically updated values
+    current_config_dict["PACKAGE"] = config.APP_PACKAGE
+    current_config_dict["ACTIVITY"] = config.APP_ACTIVITY
+    
+    # Pass the created dictionary to the AppCrawler
     logging.info("Initializing crawler...")
-    crawler = AppCrawler()
+    crawler = AppCrawler(config_dict=current_config_dict) # Pass the created config_dict
     try:
         crawler.run()
     except Exception as e:

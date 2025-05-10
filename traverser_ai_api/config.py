@@ -78,7 +78,10 @@ ACTION_DESC_BACK = "Press the device's back button."
 # --- Error Handling ---
 MAX_CONSECUTIVE_AI_FAILURES = 5
 MAX_CONSECUTIVE_MAP_FAILURES = 5
-MAX_CONSECUTIVE_EXEC_FAILURES = 5
+MAX_CONSECUTIVE_EXEC_FAILURES = 3
+
+# --- App Launch Configuration ---
+APP_LAUNCH_WAIT_TIME = 7 # Seconds to wait after launching an app for it to stabilize
 
 # AI Settings
 USE_CHAT_MEMORY = True  # Enable/disable chat history for more context-aware responses

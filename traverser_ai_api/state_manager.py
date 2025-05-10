@@ -15,9 +15,8 @@ class ScreenRepresentation:
         self.id = screen_id
         self.xml_hash = xml_hash
         self.visual_hash = visual_hash
-        self.screenshot_path = screenshot_path
-        # Composite hash can be derived when needed or stored if preferred,
-        # but base attributes are essential.
+        self.screenshot_path = screenshot_path # Path to the original screenshot
+        self.annotated_screenshot_path: Optional[str] = None # Path to the annotated screenshot
 
     def get_composite_hash(self) -> str:
         """Helper to get the standard composite hash."""
@@ -39,6 +38,10 @@ class CrawlingState:
 
     def __init__(self, db_manager: DatabaseManager):
         self.db_manager = db_manager
+        # --- Run-specific Info ---
+        self.start_activity: Optional[str] = None
+        self.app_package: Optional[str] = None
+        self.current_step_number: int = 0
         # --- Data Structures ---
         # Stores ScreenRepresentation objects, keyed by composite_hash
         self.screens: Dict[str, ScreenRepresentation] = {}
@@ -59,20 +62,36 @@ class CrawlingState:
         self._next_screen_id = 1 # Tracks the next available numeric ID for *new* screens
 
         # --- Initialization ---
-        self._load_state_from_db() # Initialize persistent state from DB
+        # self._load_state_from_db() # Initialize persistent state from DB - now called by load_from_db or after fresh init
+        # No automatic load on init; crawler decides when to load or initialize.
+
+    def initialize_run(self, start_activity: str, app_package: str):
+        """Initializes state for a new crawling run."""
+        self.start_activity = start_activity
+        self.app_package = app_package
+        self.current_step_number = 0
+        self.screens.clear()
+        self.transitions_loaded.clear()
+        self.action_history_per_screen.clear()
+        self.current_run_visit_counts.clear()
+        self.visited_screen_hashes.clear()
+        self._next_screen_id = 1
+        logging.info(f"CrawlingState initialized for a new run. Start activity: {self.start_activity}, App: {self.app_package}")
 
     def _get_composite_hash(self, xml_hash: str, visual_hash: str) -> str:
          """Combines XML and visual hash for a screen identifier."""
          # Ensure consistency with ScreenRepresentation.get_composite_hash if used
          return f"{xml_hash}_{visual_hash}"
 
-    def _load_state_from_db(self):
-        """Loads existing screens and transitions from the database to populate internal state."""
+    def load_from_db(self) -> bool:
+        """Loads existing screens and transitions from the database to populate internal state.
+        Returns True if any screens were loaded, False otherwise.
+        """
         if not self.db_manager:
             logging.warning("No database manager provided, cannot load state.")
-            return
+            return False
 
-        logging.info("Loading previous state from database...")
+        logging.info("Loading previous state from database for CrawlingState...")
         self.screens.clear()
         self.transitions_loaded.clear()
         self.action_history_per_screen.clear()
@@ -136,18 +155,29 @@ class CrawlingState:
         logging.info(f"Loaded {loaded_transition_count} transitions from DB and populated action history.")
         # Reminder: current_run_visit_counts remains empty after loading.
 
-    def add_or_get_screen(self, xml_hash: str, visual_hash: str, screenshot_bytes: bytes) -> ScreenRepresentation:
+        if loaded_screen_count > 0:
+            # Simple continuation: set step number to max screen id found or transition count.
+            # This is a placeholder; a more robust system might store/retrieve the exact last step.
+            self.current_step_number = max_id_loaded # Or perhaps loaded_transition_count
+            logging.info(f"State loaded. Current step number estimated to: {self.current_step_number}")
+            return True
+        else:
+            self.current_step_number = 0
+            logging.info("No screens found in DB to load state from.")
+            return False
+
+    def add_or_get_screen_representation(self, xml_hash: str, visual_hash: str, screenshot_bytes: bytes) -> Tuple[ScreenRepresentation, bool]:
         """
         Adds a new screen if not seen (or visually similar), saves screenshot,
         increments current run visit count for the *actual* state being used,
-        and returns the correct ScreenRepresentation.
+        and returns the correct ScreenRepresentation and a boolean indicating if it was a new screen.
         Handles visual similarity checks properly.
         """
         exact_composite_hash = self._get_composite_hash(xml_hash, visual_hash)
-        # Variables to hold the final screen representation and its hash
         target_composite_hash = exact_composite_hash
-        screen_to_return = None
+        screen_to_return: Optional[ScreenRepresentation] = None
         found_similar = False
+        is_new_screen = False # Initialize
 
         # --- Visual Similarity Check ---
         similarity_threshold = getattr(config, 'VISUAL_SIMILARITY_THRESHOLD', 5)
@@ -174,19 +204,20 @@ class CrawlingState:
 
         # --- Increment Visit Count (using the determined target_composite_hash) ---
         self.current_run_visit_counts[target_composite_hash] = self.current_run_visit_counts.get(target_composite_hash, 0) + 1
-        # Log the visit count *for the hash being used* (either exact or similar)
         logging.debug(f"Visit count for hash '{target_composite_hash}' updated to: {self.current_run_visit_counts[target_composite_hash]}")
 
         # --- Return Existing or Create New ---
         if screen_to_return: # This is set if found_similar is True
             logging.debug(f"Returning existing (visually similar) Screen state ID: {screen_to_return.id}")
-            return screen_to_return
-        elif exact_composite_hash in self.screens: # Check if exact match exists (and wasn't visually similar)
+            is_new_screen = False
+            return screen_to_return, is_new_screen
+        elif exact_composite_hash in self.screens:
             logging.debug(f"Screen state (exact hash) {exact_composite_hash} already known (ID: {self.screens[exact_composite_hash].id}). Returning existing.")
-            # Increment visit count again? No, already done above using target_composite_hash which was exact_composite_hash in this case.
-            return self.screens[exact_composite_hash]
+            is_new_screen = False
+            return self.screens[exact_composite_hash], is_new_screen
         else:
             # --- Screen is genuinely new ---
+            is_new_screen = True # Mark as new
             logging.info(f"Creating new screen state record for hash: {exact_composite_hash}")
             new_id = self._next_screen_id
             self._next_screen_id += 1
@@ -226,41 +257,24 @@ class CrawlingState:
                      logging.error(f"Database error adding screen ID {new_id}: {db_err}", exc_info=True)
 
             logging.info(f"Added new screen state (ID: {new_id}, Exact Hash: {exact_composite_hash}).")
-            return new_screen_repr
+            return new_screen_repr, is_new_screen
+
+    def increment_step(self, 
+                         action_description: str, 
+                         action_type: str, 
+                         target_identifier: Optional[str], 
+                         target_element_id: Optional[str], 
+                         target_center_x: Optional[int], 
+                         target_center_y: Optional[int], 
+                         input_text: Optional[str], 
+                         ai_raw_output: Optional[str]):
+        """Increments the current step number and logs the action taken."""
+        self.current_step_number += 1
+        logging.info(f"Step: {self.current_step_number} | Action: {action_description} | Type: {action_type} | Target: {target_identifier or target_element_id or 'N/A'}")
+        # The detailed parameters are logged here for now.
+        # They could be stored in a more structured way if needed in CrawlingState later.
 
     # --- Keep add_transition, get_action_history, get_visit_count, etc. as they were ---
-    def add_transition(self, source_hash: str, action_desc: str, dest_hash: Optional[str]):
-        # ... (Keep existing implementation) ...
-        if not source_hash: logging.warning("Add transition missing source_hash."); return
-        dest_hash_str = dest_hash if dest_hash is not None else "UNKNOWN_DEST"
-        # Update Action History (for the current run)
-        if source_hash in self.action_history_per_screen:
-            if action_desc not in self.action_history_per_screen[source_hash]:
-                 self.action_history_per_screen[source_hash].append(action_desc)
-                 logging.debug(f"Added '{action_desc}' to history for {source_hash}")
-        else: logging.warning(f"Source hash '{source_hash}' not found in history. Initializing."); self.action_history_per_screen[source_hash] = [action_desc]
-        # Save to Database
-        if self.db_manager:
-            try: self.db_manager.insert_transition(source_hash=source_hash, action_desc=action_desc, dest_hash=dest_hash_str)
-            except Exception as db_err: logging.error(f"DB error adding transition {source_hash} -> {dest_hash_str}: {db_err}", exc_info=True)
-
-    def get_action_history(self, screen_hash: str) -> List[str]:
-        return self.action_history_per_screen.get(screen_hash, [])
-
-
-
-    def get_total_screens(self) -> int:
-        return len(self.screens)
-
-    def get_total_transitions(self) -> int:
-        if self.db_manager:
-            try: return self.db_manager.get_total_transitions()
-            except Exception as e: logging.error(f"Failed get total transitions from DB: {e}"); return -1
-        else: return 0
-
-    def get_screen_by_hash(self, composite_hash: str) -> Optional[ScreenRepresentation]:
-        return self.screens.get(composite_hash)
-
     def add_transition(self, source_hash: str, action_desc: str, dest_hash: Optional[str]):
         """Records a transition between screen states in memory (action history) and database."""
         if not source_hash:
@@ -270,21 +284,16 @@ class CrawlingState:
         dest_hash_str = dest_hash if dest_hash is not None else "UNKNOWN_DEST"
 
         # Update Action History (for the current run)
-        if source_hash in self.action_history_per_screen:
-            if action_desc not in self.action_history_per_screen[source_hash]:
-                 self.action_history_per_screen[source_hash].append(action_desc)
-                 logging.debug(f"Added '{action_desc}' to action history for {source_hash}")
-            # else: # Log less verbosely if action already exists
-            #      logging.debug(f"Action '{action_desc}' already in history for {source_hash} this run.")
-        else:
-            # Should ideally not happen if add_or_get_screen was called first, but handle defensively
-            logging.warning(f"Source hash '{source_hash}' not found in action history when adding transition. Initializing history.")
-            self.action_history_per_screen[source_hash] = [action_desc]
-
+        if source_hash not in self.action_history_per_screen:
+            self.action_history_per_screen[source_hash] = []
+        
+        if action_desc not in self.action_history_per_screen[source_hash]:
+             self.action_history_per_screen[source_hash].append(action_desc)
+             logging.debug(f"Added '{action_desc}' to action history for {source_hash}")
+        
         # Save to Database
         if self.db_manager:
             try:
-                 # Use the insert_transition method
                  transition_id = self.db_manager.insert_transition(
                     source_hash=source_hash,
                     action_desc=action_desc,
@@ -293,11 +302,9 @@ class CrawlingState:
                  if transition_id is not None:
                      logging.debug(f"Saved transition to DB (ID: {transition_id}): {source_hash} --[{action_desc}]--> {dest_hash_str}")
                  else:
-                     # insert_transition might return None on failure depending on implementation
                      logging.error(f"Database manager failed to add transition: {source_hash} -> {dest_hash_str}")
             except Exception as db_err:
                 logging.error(f"Database error adding transition {source_hash} -> {dest_hash_str}: {db_err}", exc_info=True)
-
 
     def get_action_history(self, screen_hash: str) -> List[str]:
         """Gets the list of actions already attempted FROM a given screen state during this run."""
@@ -307,8 +314,6 @@ class CrawlingState:
         """Gets the visit count for the given screen state *during the current run*."""
         return self.current_run_visit_counts.get(screen_hash, 0)
 
-
-
     def get_total_screens(self) -> int:
         """Gets the total number of unique screen states discovered (in memory)."""
         return len(self.screens)
@@ -317,20 +322,13 @@ class CrawlingState:
         """Gets the total number of transitions recorded *in the database*."""
         if self.db_manager:
             try:
-                # Assuming DatabaseManager has a method to count transitions
-                # If not, add one: e.g., SELECT COUNT(*) FROM transitions
-                # For now, let's assume it exists or approximate with loaded count + new ones
-                # return self.db_manager.get_total_transitions_count() # Ideal
-                # Fallback: Return count loaded + count added this run (less accurate if multiple runs)
-                sql = f"SELECT COUNT(*) FROM {self.db_manager.TRANSITIONS_TABLE}"
-                result = self.db_manager._execute_sql(sql, fetch_one=True)
+                sql = f"SELECT COUNT(*) FROM {self.db_manager.TRANSITIONS_TABLE}" # type: ignore
+                result = self.db_manager._execute_sql(sql, fetch_one=True) # type: ignore
                 return result[0] if result else 0
-
             except Exception as e:
                 logging.error(f"Failed to get total transitions count from DB: {e}")
-                return -1 # Indicate error
-        else:
-            return 0
+                return -1 
+        return 0
 
     def get_screen_by_hash(self, composite_hash: str) -> Optional[ScreenRepresentation]:
         """Gets the ScreenRepresentation object by its composite hash."""

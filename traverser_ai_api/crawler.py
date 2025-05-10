@@ -15,26 +15,34 @@ from .state_manager import CrawlingState, ScreenRepresentation
 from .database import DatabaseManager
 from selenium.webdriver.remote.webelement import WebElement
 from appium.webdriver.common.appiumby import AppiumBy
-from selenium.common.exceptions import NoSuchElementException, InvalidSelectorException # Added InvalidSelectorException
+from selenium.common.exceptions import NoSuchElementException, StaleElementReferenceException, InvalidSelectorException # Added InvalidSelectorException
 
 # --- Import for traffic capture ---
 import subprocess
 import sys
 # --- End import for traffic capture ---
 
+# --- UI Communication Prefixes ---
+UI_STATUS_PREFIX = "UI_STATUS:"
+UI_STEP_PREFIX = "UI_STEP:"
+UI_ACTION_PREFIX = "UI_ACTION:"
+UI_SCREENSHOT_PREFIX = "UI_SCREENSHOT:"
+UI_END_PREFIX = "UI_END:"
+# --- End UI Communication Prefixes ---
+
 class AppCrawler:
     """Orchestrates the AI-driven app crawling process."""
 
-    def __init__(self):
-        self.config_dict = {k: getattr(config, k) for k in dir(config) if not k.startswith('_')}
-        self.driver = AppiumDriver(config.APPIUM_SERVER_URL, self.config_dict)
+    def __init__(self, config_dict: dict): # Added config_dict parameter
+        self.config_dict = config_dict # Use passed config_dict
+        self.driver = AppiumDriver(self.config_dict.get('APPIUM_SERVER_URL'), self.config_dict) # Use .get for safety
         # Update AI Assistant initialization to use default model type
         self.ai_assistant = AIAssistant(
-            api_key=config.GEMINI_API_KEY,
-            model_name=getattr(config, 'DEFAULT_MODEL_TYPE', 'pro-vision'),
-            safety_settings=config.AI_SAFETY_SETTINGS
+            api_key=self.config_dict.get('GEMINI_API_KEY'), # Use .get
+            model_name=self.config_dict.get('DEFAULT_MODEL_TYPE', 'pro-vision'), # Use .get
+            safety_settings=self.config_dict.get('AI_SAFETY_SETTINGS') # Use .get
         )
-        self.db_manager = DatabaseManager(config.DB_NAME)
+        self.db_manager = DatabaseManager(self.config_dict.get('DB_NAME')) # Use .get
         self.state_manager: Optional[CrawlingState] = None
 
         # Failure counters
@@ -96,13 +104,19 @@ class AppCrawler:
         if not self.traffic_capture_enabled:
             return False
 
+        # Ensure driver is connected for UI interactions with PCAPdroid dialogs
+        # This check is a safeguard; run() should connect the driver beforehand.
+        driver_available_for_ui = self.driver and self.driver.driver
+        if not driver_available_for_ui:
+            logging.warning("Appium driver not connected at the start of _start_traffic_capture. UI interaction for PCAPdroid dialogs will be skipped.")
+
         target_app_package = self.config_dict.get('APP_PACKAGE')
         if not target_app_package:
             logging.error("TARGET_APP_PACKAGE not configured. Cannot start traffic capture.")
             return False
 
         # Sanitize package name for filename
-        sanitized_package = re.sub(r'[^\w\-.]+', '_', target_app_package)
+        sanitized_package = re.sub(r'[^\\w.-]+', '_', target_app_package) # Corrected regex
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         self.pcap_filename_on_device = f"{sanitized_package}_{timestamp}.pcap"
         
@@ -110,7 +124,7 @@ class AppCrawler:
         device_pcap_dir = getattr(config, 'DEVICE_PCAP_DIR', '/sdcard/Download/PCAPdroid')
         traffic_capture_output_dir = getattr(config, 'TRAFFIC_CAPTURE_OUTPUT_DIR', 'traffic_captures')
 
-        device_pcap_full_path = os.path.join(device_pcap_dir, self.pcap_filename_on_device).replace("\\", "/")
+        device_pcap_full_path = os.path.join(device_pcap_dir, self.pcap_filename_on_device).replace("\\\\", "/")
 
         # Prepare local path
         os.makedirs(traffic_capture_output_dir, exist_ok=True)
@@ -132,7 +146,7 @@ class AppCrawler:
             '-e', 'tls_decryption', 'true' # Assuming CA cert is installed on device
         ]
         
-        logging.info("\n" + "="*50)
+        logging.info("\\n" + "="*50)
         logging.info("PCAPDROID TRAFFIC CAPTURE:")
         logging.info(f"Ensure PCAPdroid is installed and has been granted remote control & VPN permissions.")
         logging.info(f"Targeting app: {target_app_package}")
@@ -140,7 +154,7 @@ class AppCrawler:
         logging.info("  1. Approve 'shell'/'remote control' permission for PCAPdroid on the device.")
         logging.info("  2. Approve VPN connection request from PCAPdroid on the device.")
         logging.info("Check PCAPdroid notifications on device if capture doesn't start.")
-        logging.info("="*50 + "\n")
+        logging.info("="*50 + "\\n")
 
         stdout, retcode = self._run_adb_command_for_capture(start_command)
 
@@ -151,45 +165,45 @@ class AppCrawler:
         logging.info(f"PCAPdroid 'start' command sent. Capture should be initializing for {target_app_package}.")
         
         # ---- Automate clicking PCAPdroid "ALLOW" button ----
-        time.sleep(2) # Wait a bit for the dialog to appear
-        try:
-            logging.info("Checking for PCAPdroid VPN confirmation dialog to click 'ALLOW'...")
-            allow_button = None
-            # Try finding by uppercase text "ALLOW"
+        if driver_available_for_ui: # Check if driver was available from the start of this method
+            time.sleep(2) # Wait a bit for the dialog to appear
             try:
-                logging.debug("Attempting to find 'ALLOW' button by exact text (uppercase)...")
-                allow_button = self.driver.driver.find_element(AppiumBy.XPATH, "//*[@text='ALLOW']")
-            except NoSuchElementException:
-                logging.debug("'ALLOW' (uppercase) button not found. Trying 'Allow' (title case)...")
+                logging.info("Checking for PCAPdroid VPN confirmation dialog to click 'ALLOW'...")
+                allow_button = None
+                # Try finding by uppercase text "ALLOW"
                 try:
-                    allow_button = self.driver.driver.find_element(AppiumBy.XPATH, "//*[@text='Allow']")
+                    logging.debug("Attempting to find 'ALLOW' button by exact text (uppercase)...")
+                    allow_button = self.driver.driver.find_element(AppiumBy.XPATH, "//*[@text='ALLOW']")
                 except NoSuchElementException:
-                    logging.debug("'Allow' (title case) button not found. Trying by common Android ID 'android:id/button1'...")
+                    logging.debug("'ALLOW' (uppercase) button not found. Trying 'Allow' (title case)...")
                     try:
-                        # This is a common ID for the positive button in Android dialogs
-                        allow_button = self.driver.driver.find_element(AppiumBy.ID, "android:id/button1")
+                        allow_button = self.driver.driver.find_element(AppiumBy.XPATH, "//*[@text='Allow']")
                     except NoSuchElementException:
-                        logging.info("PCAPdroid 'ALLOW' button not found by text or common ID. Assuming already permitted or dialog not present.")
+                        logging.debug("'Allow' (title case) button not found. Trying by common Android ID 'android:id/button1'...")
+                        try:
+                            # This is a common ID for the positive button in Android dialogs
+                            allow_button = self.driver.driver.find_element(AppiumBy.ID, "android:id/button1")
+                        except NoSuchElementException:
+                            logging.info("PCAPdroid 'ALLOW' button not found by text or common ID. Assuming already permitted or dialog not present.")
 
-            if allow_button and allow_button.is_displayed():
-                logging.info("PCAPdroid 'ALLOW' button found. Attempting to click...")
-                allow_button.click()
-                logging.info("Clicked PCAPdroid 'ALLOW' button successfully.")
-                time.sleep(1.5) # Brief pause after click for UI to respond
-            elif allow_button: # Found but not displayed
-                logging.info("PCAPdroid 'ALLOW' button was found but is not currently displayed. Proceeding...")
-            else: # Not found by any means
-                logging.info("PCAPdroid 'ALLOW' button was not found. Proceeding, assuming it's not needed or already handled.")
+                if allow_button and allow_button.is_displayed():
+                    logging.info("PCAPdroid 'ALLOW' button found. Attempting to click...")
+                    allow_button.click()
+                    logging.info("Clicked PCAPdroid 'ALLOW' button successfully.")
+                    time.sleep(1.5) # Brief pause after click for UI to respond
+                elif allow_button: # Found but not displayed
+                    logging.info("PCAPdroid 'ALLOW' button was found but is not currently displayed. Proceeding...")
+                else: # Not found by any means
+                    logging.info("PCAPdroid 'ALLOW' button was not found. Proceeding, assuming it's not needed or already handled.")
 
-        except Exception as e:
-            logging.warning(f"An error occurred while trying to find and click the PCAPdroid 'ALLOW' button: {e}. Capture might fail if permission is required and was not granted.")
+            except Exception as e:
+                logging.warning(f"An error occurred while trying to find and click the PCAPdroid 'ALLOW' button: {e}. Capture might fail if permission is required and was not granted.")
+        else:
+            logging.warning("Appium driver not available for PCAPdroid 'ALLOW' button interaction. Skipping.")
         # ---- End of PCAPdroid "ALLOW" button automation ----
 
         # Wait for capture to fully initialize after potential dialog interaction
-        # The original wait was: time.sleep(getattr(config, 'WAIT_AFTER_ACTION', 2.0) * 2)
-        # We've already waited ~2s for dialog + 1.5s after click.
-        # Let's use the configured wait time here.
-        time.sleep(getattr(config, 'WAIT_AFTER_ACTION', 2.0)) 
+        time.sleep(self.config_dict.get('WAIT_AFTER_ACTION', 2.0)) # Use config_dict
         return True
 
     def _stop_traffic_capture(self) -> bool:
@@ -198,8 +212,14 @@ class AppCrawler:
             logging.debug("Traffic capture was not enabled or not started by this crawler instance. Skipping stop.")
             return False
 
+        # Ensure driver is connected for UI interactions with PCAPdroid dialogs
+        # This check is a safeguard.
+        driver_available_for_ui = self.driver and self.driver.driver
+        if not driver_available_for_ui:
+            logging.warning("Appium driver not connected at the start of _stop_traffic_capture. UI interaction for PCAPdroid dialogs will be skipped.")
+
         logging.info("Attempting to stop PCAPdroid traffic capture...")
-        pcapdroid_activity = getattr(config, 'PCAPDROID_ACTIVITY', 'com.emanuelef.remote_capture/.activities.CaptureCtrl')
+        pcapdroid_activity = self.config_dict.get('PCAPDROID_ACTIVITY', 'com.emanuelef.remote_capture/.activities.CaptureCtrl') # Use config_dict
         stop_command = [
             'shell', 'am', 'start',
             '-n', pcapdroid_activity,
@@ -216,57 +236,59 @@ class AppCrawler:
         logging.info("PCAPdroid 'stop' command sent. Checking for confirmation dialog...")
 
         # ---- Automate clicking PCAPdroid VPN disconnect confirmation ----
-        # This dialog might say "OK", "Disconnect", "Allow" depending on Android version/PCAPdroid version
-        time.sleep(1.5) # Wait a bit for the dialog to appear
-        try:
-            logging.info("Checking for PCAPdroid VPN disconnect confirmation dialog...")
-            confirm_button = None
-            button_texts_to_try = ["OK", "DISCONNECT", "ALLOW", "Allow", "Ok"] # Common texts for such dialogs
+        if driver_available_for_ui: # Check if driver was available
+            time.sleep(1.5) # Wait a bit for the dialog to appear
+            try:
+                logging.info("Checking for PCAPdroid VPN disconnect confirmation dialog...")
+                confirm_button = None
+                button_texts_to_try = ["OK", "DISCONNECT", "ALLOW", "Allow", "Ok"] # Common texts for such dialogs
 
-            for btn_text in button_texts_to_try:
-                try:
-                    logging.debug(f"Attempting to find disconnect confirmation button by text: '{btn_text}'")
-                    confirm_button = self.driver.driver.find_element(AppiumBy.XPATH, f"//*[@text='{btn_text}']")
-                    if confirm_button and confirm_button.is_displayed():
-                        logging.info(f"Found disconnect confirmation button with text: '{btn_text}'")
-                        break # Found a visible button
-                    else:
-                        confirm_button = None # Reset if found but not displayed
-                except NoSuchElementException:
-                    logging.debug(f"Disconnect confirmation button with text '{btn_text}' not found.")
-                    continue
-            
-            if not confirm_button:
-                logging.debug("Disconnect confirmation button not found by text. Trying by common Android ID 'android:id/button1'...")
-                try:
-                    confirm_button = self.driver.driver.find_element(AppiumBy.ID, "android:id/button1") # Positive button
-                    if not (confirm_button and confirm_button.is_displayed()):
-                        confirm_button = None # Reset if not displayed
-                except NoSuchElementException:
-                    logging.debug("Disconnect confirmation button not found by 'android:id/button1'.")
-            
-            if not confirm_button:
-                logging.debug("Trying by common Android ID 'android:id/button2' (sometimes used for 'Cancel' or 'OK')...")
-                try:
-                    confirm_button = self.driver.driver.find_element(AppiumBy.ID, "android:id/button2") # Negative/neutral button
-                    if not (confirm_button and confirm_button.is_displayed()):
-                        confirm_button = None # Reset if not displayed
-                except NoSuchElementException:
-                    logging.debug("Disconnect confirmation button not found by 'android:id/button2'.")
+                for btn_text in button_texts_to_try:
+                    try:
+                        logging.debug(f"Attempting to find disconnect confirmation button by text: '{btn_text}'")
+                        confirm_button = self.driver.driver.find_element(AppiumBy.XPATH, f"//*[@text='{btn_text}']")
+                        if confirm_button and confirm_button.is_displayed():
+                            logging.info(f"Found disconnect confirmation button with text: '{btn_text}'")
+                            break # Found a visible button
+                        else:
+                            confirm_button = None # Reset if found but not displayed
+                    except NoSuchElementException:
+                        logging.debug(f"Disconnect confirmation button with text '{btn_text}' not found.")
+                        continue
+                
+                if not confirm_button:
+                    logging.debug("Disconnect confirmation button not found by text. Trying by common Android ID 'android:id/button1'...")
+                    try:
+                        confirm_button = self.driver.driver.find_element(AppiumBy.ID, "android:id/button1") # Positive button
+                        if not (confirm_button and confirm_button.is_displayed()):
+                            confirm_button = None # Reset if not displayed
+                    except NoSuchElementException:
+                        logging.debug("Disconnect confirmation button not found by 'android:id/button1'.")
+                
+                if not confirm_button:
+                    logging.debug("Trying by common Android ID 'android:id/button2' (sometimes used for 'Cancel' or 'OK')...")
+                    try:
+                        confirm_button = self.driver.driver.find_element(AppiumBy.ID, "android:id/button2") # Negative/neutral button
+                        if not (confirm_button and confirm_button.is_displayed()):
+                            confirm_button = None # Reset if not displayed
+                    except NoSuchElementException:
+                        logging.debug("Disconnect confirmation button not found by 'android:id/button2'.")
 
 
-            if confirm_button and confirm_button.is_displayed():
-                logging.info(f"Disconnect confirmation button found (text: '{confirm_button.text if hasattr(confirm_button, 'text') else 'N/A'}', id: '{confirm_button.id}'). Attempting to click...")
-                confirm_button.click()
-                logging.info("Clicked PCAPdroid disconnect confirmation button successfully.")
-                time.sleep(1.0) # Brief pause after click
-            elif confirm_button:
-                logging.info("Disconnect confirmation button was found but is not currently displayed. Proceeding...")
-            else:
-                logging.info("PCAPdroid disconnect confirmation button was not found. Proceeding, assuming it's not needed or already handled.")
+                if confirm_button and confirm_button.is_displayed():
+                    logging.info(f"Disconnect confirmation button found (text: '{confirm_button.text if hasattr(confirm_button, 'text') else 'N/A'}', id: '{confirm_button.id}'). Attempting to click...")
+                    confirm_button.click()
+                    logging.info("Clicked PCAPdroid disconnect confirmation button successfully.")
+                    time.sleep(1.0) # Brief pause after click
+                elif confirm_button:
+                    logging.info("Disconnect confirmation button was found but is not currently displayed. Proceeding...")
+                else:
+                    logging.info("PCAPdroid disconnect confirmation button was not found. Proceeding, assuming it's not needed or already handled.")
 
-        except Exception as e:
-            logging.warning(f"An error occurred while trying to find and click the PCAPdroid disconnect confirmation button: {e}. Capture stop process might be affected if confirmation was required.")
+            except Exception as e:
+                logging.warning(f"An error occurred while trying to find and click the PCAPdroid disconnect confirmation button: {e}. Capture stop process might be affected if confirmation was required.")
+        else:
+            logging.warning("Appium driver not available for PCAPdroid disconnect confirmation. Skipping UI interaction.")
         # ---- End of PCAPdroid disconnect confirmation automation ----
         
         if retcode != 0: # Now, after attempting dialog click, we can return based on original ADB command result
@@ -274,7 +296,7 @@ class AppCrawler:
             return False
 
         logging.info("PCAPdroid 'stop' sequence completed. Waiting for file finalization...")
-        time.sleep(getattr(config, 'WAIT_AFTER_ACTION', 2.0)) # Use configured wait, default 2s, was 3s
+        time.sleep(self.config_dict.get('WAIT_AFTER_ACTION', 2.0)) # Use config_dict, default 2s, was 3s
         return True
 
     def _pull_traffic_capture_file(self) -> bool:
@@ -309,11 +331,11 @@ class AppCrawler:
             
     def _cleanup_device_pcap_file(self):
         """Deletes the PCAP file from the device if configured."""
-        if not self.traffic_capture_enabled or not self.pcap_filename_on_device or not getattr(config, 'CLEANUP_DEVICE_PCAP_FILE', False):
+        if not self.traffic_capture_enabled or not self.pcap_filename_on_device or not self.config_dict.get('CLEANUP_DEVICE_PCAP_FILE', False): # Use config_dict
             return
 
-        device_pcap_dir = getattr(config, 'DEVICE_PCAP_DIR', '/sdcard/Download/PCAPdroid')
-        device_pcap_full_path = os.path.join(device_pcap_dir, self.pcap_filename_on_device).replace("\\", "/")
+        device_pcap_dir = self.config_dict.get('DEVICE_PCAP_DIR', '/sdcard/Download/PCAPdroid') # Use config_dict
+        device_pcap_full_path = os.path.join(device_pcap_dir, self.pcap_filename_on_device).replace("\\\\", "/")
         logging.info(f"Cleaning up device PCAP file: {device_pcap_full_path}")
         rm_command = ['shell', 'rm', device_pcap_full_path]
         stdout, retcode = self._run_adb_command_for_capture(rm_command, suppress_stderr=True)
@@ -324,8 +346,15 @@ class AppCrawler:
 
     def _get_element_center(self, element: WebElement) -> Optional[Tuple[int, int]]:
         """Safely gets the center coordinates of a WebElement."""
-        if not element: return None
+        if not element: 
+            logging.warning("Attempted to get center of a None element.")
+            return None
         try:
+            # Check if element is still valid before accessing properties
+            if not element.is_displayed(): # is_displayed() can also raise StaleElementReferenceException
+                logging.warning(f"Element (ID: {element.id if hasattr(element, 'id') else 'N/A'}) is not displayed. Cannot get center.")
+                return None
+
             loc = element.location # Dictionary {'x': ..., 'y': ...}
             size = element.size   # Dictionary {'width': ..., 'height': ...}
             if loc and size and 'x' in loc and 'y' in loc and 'width' in size and 'height' in size:
@@ -333,10 +362,14 @@ class AppCrawler:
                  center_y = loc['y'] + size['height'] // 2
                  return (center_x, center_y)
             else:
-                 logging.warning(f"Could not get valid location/size for element: {element.id if hasattr(element,'id') else 'Unknown ID'}")
+                 logging.warning(f"Could not get valid location/size for element: {element.id if hasattr(element,'id') else 'Unknown ID'}. Location: {loc}, Size: {size}")
                  return None
+        except StaleElementReferenceException:
+            logging.error(f"StaleElementReferenceException getting center for element (ID was: {element.id if hasattr(element, 'id') else 'N/A'}). Element is no longer attached to the DOM.", exc_info=True)
+            return None
         except Exception as e:
-            logging.error(f"Error getting element center coordinates: {e}")
+            element_id_str = element.id if hasattr(element, 'id') else 'Unknown ID'
+            logging.error(f"Error getting element center coordinates for element {element_id_str}: {e}", exc_info=True)
             return None
 
     def _find_element_by_ai_identifier(self, identifier: str) -> Optional[WebElement]:
@@ -444,7 +477,7 @@ class AppCrawler:
     def _get_current_state(self) -> Optional[Tuple[bytes, str]]:
         """Gets the current screenshot bytes and page source."""
         # Add stability wait *before* getting state
-        time.sleep(getattr(config, 'STABILITY_WAIT', 1.0)) # Wait for UI stability
+        time.sleep(self.config_dict.get('STABILITY_WAIT', 1.0)) # Use config_dict # Wait for UI stability
         try:
             screenshot_bytes = self.driver.get_screenshot_bytes()
             page_source = self.driver.get_page_source()
@@ -840,291 +873,324 @@ class AppCrawler:
 
     
     def run(self):
-        """Starts and manages the crawling loop based on configured mode (steps or time)."""
-        logging.info("--- Starting AI App Crawler ---")
-        crawl_start_time = time.time() # Record start time for time-based crawling
-        run_successful = False # Flag to track if the main loop starts
-        capture_started_successfully = False # Flag for traffic capture
+        """Main crawling loop."""
+        logging.info("Starting crawler run...")
+        print(f"{UI_STATUS_PREFIX} INITIALIZING") # UI Update
 
-        # --- Get Crawl Mode Configuration ---
-        crawl_mode = getattr(config, 'CRAWL_MODE', 'steps').lower()
-        max_steps = getattr(config, 'MAX_CRAWL_STEPS', 100)
-        max_duration_seconds = getattr(config, 'MAX_CRAWL_DURATION_SECONDS', 600)
-
-        if crawl_mode == 'steps':
-            logging.info(f"Running in 'steps' mode. Max steps: {max_steps}")
-        elif crawl_mode == 'time':
-            logging.info(f"Running in 'time' mode. Max duration: {max_duration_seconds} seconds")
-        else:
-            logging.warning(f"Unknown CRAWL_MODE '{crawl_mode}'. Defaulting to 'steps' mode with max steps: {max_steps}")
-            crawl_mode = 'steps'
-
-        # --- Setup ---
         try:
-            # 1. Connect DB first
-            logging.info("Connecting to database...")
-            if not self.db_manager.connect():
-                 logging.critical("Failed to connect to database. Aborting run.")
-                 return
-
-            logging.info("Database connection successful.")
-
-            # 2. Initialize StateManager *after* DB connection
-            logging.info("Initializing State Manager...")
-            try:
-                self.state_manager = CrawlingState(self.db_manager)
-                logging.info("State Manager initialized and loaded state from DB.")
-            except Exception as sm_init_err:
-                 logging.critical(f"Failed to initialize State Manager: {sm_init_err}", exc_info=True)
-                 if self.db_manager: self.db_manager.close()
-                 return
-
-            # 3. Connect Appium Driver
-            logging.info("Connecting to Appium driver...")
-            if not self.driver.connect():
-                logging.critical("Failed to establish Appium connection. Aborting run.")
-                if self.db_manager: self.db_manager.close()
-                return ########## ADDED RETURN HERE
-            logging.info("Appium driver connection successful.")
+            # Connect to Appium FIRST to make self.driver.driver available
+            self.driver.connect()
+            logging.info("Appium driver connected successfully before traffic capture initiation.")
 
             # --- Start Traffic Capture (if enabled) ---
             if self.traffic_capture_enabled:
-                logging.info("Traffic capture is ENABLED in config.")
-                if self._start_traffic_capture():
-                    capture_started_successfully = True
-                    logging.info("Traffic capture initiated.")
+                if not self._start_traffic_capture(): # Now self.driver.driver should be available
+                    logging.warning("Failed to start traffic capture. Continuing without it.")
+                    # Optionally, decide if this is a critical failure
                 else:
-                    logging.warning("Failed to start traffic capture. Crawling will continue without it.")
-                    # Optionally, decide if this is a critical failure:
-                    # if config.REQUIRE_TRAFFIC_CAPTURE_TO_RUN:
-                    #     logging.critical("Traffic capture failed and is required. Aborting run.")
-                    #     if self.db_manager: self.db_manager.close()
-                    #     if self.driver: self.driver.disconnect()
-                    #     return
+                    logging.info("Traffic capture started successfully.")
+            # --- End Start Traffic Capture ---
+
+
+            # --- Ensure Target App is Launched ---
+            target_pkg = self.config_dict.get("PACKAGE") # Changed key from "app_package_name"
+            target_activity = self.config_dict.get("ACTIVITY") # Changed key from "app_activity_name"
+
+            if not target_pkg:
+                logging.critical("Target app package name (PACKAGE) not found in configuration. Stopping.") # Updated log message
+                print(f"{UI_END_PREFIX} CRITICAL_ERROR_NO_PACKAGE")
+                return
+
+            current_pkg = self.driver.get_current_package()
+            current_activity = self.driver.get_current_activity()
+
+            if current_pkg != target_pkg:
+                logging.info(f"Target app {target_pkg} is not active (current: {current_pkg}). Attempting to launch.")
+                self.driver.launch_app(target_pkg, target_activity)
+                # Wait a bit for the app to launch and stabilize
+                time.sleep(config.APP_LAUNCH_WAIT_TIME if hasattr(config, 'APP_LAUNCH_WAIT_TIME') else 5) 
+                
+                # Verify again
+                current_pkg = self.driver.get_current_package()
+                current_activity = self.driver.get_current_activity()
+                if current_pkg != target_pkg:
+                    logging.error(f"Failed to launch target app {target_pkg}. Current app is still {current_pkg}. Stopping.")
+                    print(f"{UI_END_PREFIX} FAILURE_APP_LAUNCH")
+                    # Attempt to stop traffic capture before exiting
+                    if self.traffic_capture_enabled: # Removed self.pcap_process_pid check
+                        self._stop_traffic_capture()
+                    return 
+                logging.info(f"Successfully launched target app: {target_pkg}/{current_activity}")
             else:
-                logging.info("Traffic capture is DISABLED in config.")
-            # --- End Traffic Capture Start ---
+                logging.info(f"Target app {target_pkg} is already active.")
+            # --- End Ensure Target App is Launched ---
 
-
-            # --- Initialization successful ---
-            run_successful = True
-            self.previous_composite_hash = None
-            self._last_action_description = "START"
-            step_count = 0 # Initialize step counter
-
-            # --- Main Crawling Loop (modified for time/step modes) ---
-            while True: # Loop indefinitely until a break condition is met
-                step_count += 1
-                current_time = time.time()
-                elapsed_time = current_time - crawl_start_time
-
-                # --- Check Termination Conditions (Mode Dependent) ---
-                if crawl_mode == 'steps':
-                    if step_count > max_steps:
-                        logging.info(f"Termination: Reached max step count ({max_steps}).")
-                        break
-                    logging.info(f"\\n--- Step {step_count}/{max_steps} ---")
-                elif crawl_mode == 'time':
-                    if elapsed_time > max_duration_seconds:
-                        logging.info(f"Termination: Reached max duration ({elapsed_time:.1f}s / {max_duration_seconds}s). Total steps: {step_count-1}")
-                        break
-                    logging.info(f"\\n--- Step {step_count} (Time: {elapsed_time:.1f}s / {max_duration_seconds}s) ---")
-
-                # Check failure-based termination (common to both modes)
-                if self._check_termination(): # Call the updated method (checks failures only)
-                    break
-
-                # 0. Ensure Correct App Context
-                if not self._ensure_in_app():
-                    logging.critical("Cannot ensure app context. Stopping crawl.")
-                    break
-
-                # 1. Get Current State
-                state_data = self._get_current_state()
-                if state_data is None:
-                    logging.warning(f"Failed get state step {step_count}, fallback: BACK.")
-                    self.driver.press_back_button(); time.sleep(config.WAIT_AFTER_ACTION);
-                    self._last_action_description = f"GET_STATE_FAIL_BACK (Step {step_count})"
-                    self.previous_composite_hash = None; continue
-
-                screenshot_bytes, page_source = state_data
-                xml_hash = utils.calculate_xml_hash(page_source) or "xml_hash_error"
-                visual_hash = utils.calculate_visual_hash(screenshot_bytes) or "visual_hash_error"
-                if "error" in xml_hash or "error" in visual_hash:
-                     logging.error(f"Hash error (XML:{xml_hash}, Vis:{visual_hash}). Fallback: BACK.")
-                     self.driver.press_back_button(); time.sleep(config.WAIT_AFTER_ACTION);
-                     self._last_action_description = f"HASH_ERROR_BACK (Step {step_count})"
-                     self.previous_composite_hash = None; continue
-
-                # --- CHANGE 1: Calculate initial hash, but rely on state_manager's result ---
-                initial_composite_hash = f"{xml_hash}_{visual_hash}"
-                logging.debug(f"Calculated initial hash for step {step_count}: {initial_composite_hash}")
-
-                # 2. Add/Get Screen Representation (Handles similarity)
-                try:
-                    if not self.state_manager: raise RuntimeError("StateManager not initialized!")
-                    # This call returns the ScreenRepresentation for the *actual* state being used
-                    # (either new or the visually similar existing one)
-                    current_screen_repr = self.state_manager.add_or_get_screen(
-                        xml_hash, visual_hash, screenshot_bytes
-                    )
-                    if not current_screen_repr: raise RuntimeError("add_or_get_screen returned None")
-
-                    # --- CHANGE 2: Get the definitive hash *from the returned object* ---
-                    # This hash will be correct whether it's a new screen or a similar match
-                    definitive_composite_hash = current_screen_repr.get_composite_hash()
-                    logging.info(f"Using definitive hash: {definitive_composite_hash} (Screen ID: {current_screen_repr.id})")
-                    # --------------------------------------------------------------------
-
-                except Exception as screen_err:
-                    logging.error(f"Error add/get screen: {screen_err}. Fallback: BACK.", exc_info=True)
-                    self.driver.press_back_button(); time.sleep(config.WAIT_AFTER_ACTION);
-                    self._last_action_description = f"STATE_MGR_SCREEN_ERR_BACK (Step {step_count})"
-                    self.previous_composite_hash = None; continue
-
-                # Logging the retrieved screen info
-                logging.info(f"Current Screen: ID={current_screen_repr.id}, Hash={definitive_composite_hash}") # Use definitive hash
-
-                # 3. Record Transition (using previous step's hash and current definitive hash)
-                if self.previous_composite_hash is not None:
-                     try: self.state_manager.add_transition(self.previous_composite_hash, self._last_action_description, definitive_composite_hash)
-                     except Exception as trans_err: logging.error(f"Error adding transition: {trans_err}", exc_info=True)
-
-                # 4. Check Termination
-                if self._check_termination(): break # Corrected: _check_termination no longer takes step_count
-
-                # --- CHANGE 3: Use definitive_composite_hash for history and visit count ---
-                # 5. Get Action History for Current Screen
-                action_history = self.state_manager.get_action_history(definitive_composite_hash)
-                logging.debug(f"Action history for screen {current_screen_repr.id} (Hash: {definitive_composite_hash}): {action_history}")
-
-                # 6. Get Visit Count for Current Screen (for Loop Detection)
-                current_visit_count = self.state_manager.get_visit_count(definitive_composite_hash)
-                logging.info(f"Visit count for {definitive_composite_hash}: {current_visit_count}") # Use definitive hash
-
-                # 7. Get AI Action Suggestion (Passing correct hash and count)
-                xml_for_ai = utils.simplify_xml_for_ai(page_source, config.XML_SNIPPET_MAX_LEN) if getattr(config, 'ENABLE_XML_CONTEXT', True) else ""
-                ai_suggestion = self.ai_assistant.get_next_action(
-                    screenshot_bytes, xml_for_ai, action_history, config.AVAILABLE_ACTIONS,
-                    current_visit_count,  # Pass the correct count
-                    definitive_composite_hash # Pass the correct hash
-                )
-                # ---------------------------------------------------------------------------
-
-                # 8. Handle AI Failure
-                if ai_suggestion is None:
-                    logging.error(f"AI fail step {step_count}. Fallback: BACK.")
-                    self.consecutive_ai_failures += 1; fallback_ok = self.driver.press_back_button();
-                    self._last_action_description = f"AI_FAIL_BACK (Step {step_count})"
-                    if not fallback_ok: self.consecutive_exec_failures += 1
-                    time.sleep(config.WAIT_AFTER_ACTION);
-                    self.previous_composite_hash = definitive_composite_hash # Use definitive hash
-                    continue
+            # Corrected: Removed self.config_dict from CrawlingState constructor call
+            self.state_manager = CrawlingState(self.db_manager)
+            
+            # --- Load or Initialize Run ---
+            if config.CONTINUE_EXISTING_RUN:
+                logging.info("Attempting to continue existing run...")
+                # When continuing, we assume the app state is where we left off, or will be handled by existing logic.
+                # No explicit re-launch here, but ensure state_manager loads correctly.
+                if not self.state_manager.load_from_db():
+                    logging.warning("Failed to load existing run, starting fresh. Will use current foreground app state.")
+                    # If load fails, initialize with whatever is current, which should be target app due to above check
+                    self.state_manager.initialize_run(self.driver.get_current_activity(), self.driver.get_current_package())
                 else:
-                    self.consecutive_ai_failures = 0
-                    action_type_sugg = ai_suggestion.get('action', '??'); target_id_sugg = ai_suggestion.get('target_identifier', 'N/A')
-                    # Description of the action *to be taken* in this step
-                    self._last_action_description = f"{action_type_sugg}: '{target_id_sugg}' (Step {step_count})"
+                    logging.info(f"Successfully loaded run. Current step: {self.state_manager.current_step_number}")
+                    # Optional: Add a check here if the loaded state's package matches target_pkg
+                    if self.state_manager.app_package != target_pkg:
+                        logging.warning(f"Loaded run's package ({self.state_manager.app_package}) does not match target ({target_pkg}). This might lead to issues.")
 
+            else: # Starting a fresh run
+                logging.info("Starting a fresh run (CONTINUE_EXISTING_RUN is False).")
+                self.db_manager.initialize_db() # Clear and init DB for a fresh run
+                # Initialize with the (now confirmed) target app's activity and package
+                self.state_manager.initialize_run(self.driver.get_current_activity(), self.driver.get_current_package())
+            # ---
+            logging.info(f"Crawler initialized. Starting activity: {self.state_manager.start_activity}, App package: {self.state_manager.app_package}")
+            print(f"{UI_STATUS_PREFIX} RUNNING") # UI Update
 
-                # 9. Map AI Suggestion
-                mapped_action = self._map_ai_to_action(ai_suggestion)
+            start_time = time.time()
+            steps_taken = 0
 
-                # 10. Handle Mapping Failure
-                if mapped_action is None:
-                    # Increment counter if not already done by an exception in _map_ai_to_action
-                    # (This check prevents double counting if _map_ai_to_action returned None explicitly)
-                    pass # Assuming _map_ai_to_action handles its own failure count increment
+            while True:
+                # --- Crawl Limit Checks ---
+                if config.CRAWL_MODE == 'steps' and steps_taken >= config.MAX_CRAWL_STEPS:
+                    logging.info(f"Reached max steps ({config.MAX_CRAWL_STEPS}). Stopping crawl.")
+                    print(f"{UI_STATUS_PREFIX} MAX_STEPS_REACHED") # UI Update
+                    break
+                elif config.CRAWL_MODE == 'time':
+                    elapsed_time = time.time() - start_time
+                    if elapsed_time >= config.MAX_CRAWL_DURATION_SECONDS:
+                        logging.info(f"Reached max duration ({config.MAX_CRAWL_DURATION_SECONDS}s). Stopping crawl.")
+                        print(f"{UI_STATUS_PREFIX} MAX_DURATION_REACHED") # UI Update
+                        break
+                # ---
 
-                    logging.error(f"Map fail step {step_count}. Fallback: BACK.")
-                    # --- Add keyboard check for double back ---
-                    keyboard_shown = False
-                    try:
-                        keyboard_shown = self.driver.is_keyboard_shown()
-                        logging.debug(f"Keyboard shown before fallback BACK: {keyboard_shown}")
-                    except Exception as key_err:
-                        logging.warning(f"Could not check keyboard status: {key_err}")
+                logging.info(f"\\n--- Step {self.state_manager.current_step_number} ---")
+                current_state_tuple = self._get_current_state()
+                if not current_state_tuple:
+                    logging.error("Failed to get current screen state. Cannot continue step.")
+                    # Potentially increment a failure counter or attempt recovery
+                    self.consecutive_exec_failures += 1
+                    if self.consecutive_exec_failures >= config.MAX_CONSECUTIVE_EXEC_FAILURES:
+                        logging.critical("Max consecutive execution failures reached. Stopping crawl.")
+                        print(f"{UI_END_PREFIX} FAILURE_MAX_EXEC_FAIL") # UI Update
+                        break
+                    time.sleep(config.WAIT_AFTER_ACTION) # Wait before retrying or next step
+                    continue # Skip to next iteration, hoping state recovers
+                screenshot_bytes, page_source = current_state_tuple
+                current_activity = self.driver.get_current_activity()
+                current_package = self.driver.get_current_package()
 
-                    self.driver.press_back_button() # Press back once regardless
-                    self._last_action_description = f"MAP_FAIL_BACK (Step {step_count})"
-                    if keyboard_shown:
-                        logging.info("Keyboard was shown, pressing BACK a second time for navigation.")
-                        time.sleep(0.5) # Small delay before second back press
-                        self.driver.press_back_button()
-                        self._last_action_description = f"MAP_FAIL_KEYBOARD_DOUBLE_BACK (Step {step_count})"
-                    # --- End keyboard check ---
-
+                # --- Check if outside allowed packages ---
+                if current_package != self.state_manager.app_package and current_package not in config.ALLOWED_EXTERNAL_PACKAGES:
+                    logging.warning(f"Outside target app ({current_package}) and not in allowed external packages. Attempting to go back.")
+                    self.driver.perform_action("back", None)
+                    self._last_action_description = "BACK (auto due to off-app)"
+                    self.state_manager.increment_step(self._last_action_description, "auto_back_off_app", None, None, None, None, None, None)
+                    steps_taken += 1
                     time.sleep(config.WAIT_AFTER_ACTION)
-                    self.previous_composite_hash = None # Reset hash to force re-evaluation after fallback
-                    if self._check_termination(): break # Check termination after failure
-                    continue # Skip to next step after fallback
+                    continue
+                # ---
 
-                # 11. SAVE ANNOTATED SCREENSHOT (Optional)
-                self._save_annotated_screenshot(screenshot_bytes, step_count, current_screen_repr.id, ai_suggestion)
+                # --- Calculate Hashes ---
+                xml_hash = utils.calculate_xml_hash(page_source) if page_source else "no_xml_hash"
+                visual_hash = utils.calculate_visual_hash(screenshot_bytes) if screenshot_bytes else "no_visual_hash"
 
-                # 12. Execute Action
-                execution_success = self._execute_action(mapped_action)
+                # --- Add/Get Screen Representation ---
+                screen_rep, is_new_screen = self.state_manager.add_or_get_screen_representation(
+                    xml_hash, visual_hash, screenshot_bytes
+                )
+                if not screen_rep:
+                    logging.error("Could not get or create screen representation. Critical error.")
+                    print(f"{UI_END_PREFIX} FAILURE_SCREEN_REP") # UI Update
+                    break
+                # --- UI Update for Step and Screenshot ---
+                print(f"{UI_STEP_PREFIX} {self.state_manager.current_step_number}")
+                if screen_rep.annotated_screenshot_path:
+                    print(f"{UI_SCREENSHOT_PREFIX} {os.path.abspath(screen_rep.annotated_screenshot_path)}")
+                # ---
 
-                # 13. Wait After Action
-                time.sleep(config.WAIT_AFTER_ACTION)
+                # --- AI Interaction ---
+                logging.info(f"Getting AI suggestion for screen: {screen_rep.id} (Composite Hash: {screen_rep.get_composite_hash()})")
+                # Prepare XML snippet if enabled
+                xml_snippet = None
+                if getattr(config, 'ENABLE_XML_CONTEXT', False) and page_source:
+                    max_len = getattr(config, 'XML_SNIPPET_MAX_LEN', 30000)
+                    xml_snippet = utils.simplify_xml_for_ai(page_source, max_len=max_len) 
+                
+                current_screen_hash = screen_rep.get_composite_hash() # Get hash for use below
+                
+                history_for_screen = self.state_manager.get_action_history(current_screen_hash) # Correct method & arg
+                max_prompt_history = getattr(config, 'MAX_CHAT_HISTORY', 10) # Length for prompt history
+                previous_actions_for_prompt = history_for_screen[-max_prompt_history:]
+                
+                current_visit_count = self.state_manager.get_visit_count(current_screen_hash) # Correct way to get visit count
 
-                # --- CHANGE 4: Update previous_composite_hash with the definitive hash ---
-                # 14. Update Previous State Hash for *Next* Iteration
-                self.previous_composite_hash = definitive_composite_hash
-                # ----------------------------------------------------------------------
+                # Use the new method in AIAssistant that handles model selection
+                ai_suggestion_json = self.ai_assistant.get_next_action(
+                    screenshot_bytes=screenshot_bytes, 
+                    xml_context=xml_snippet,
+                    previous_actions=previous_actions_for_prompt, # Use the prepared list
+                    available_actions=config.AVAILABLE_ACTIONS,                    
+                    current_screen_visit_count=current_visit_count, # Use correct visit count
+                    current_composite_hash=current_screen_hash # Use the hash variable
+                )
 
-            # --- End of Loop ---
-            # Check if loop finished due to max steps or early termination
-            if step_count < max_steps : # Corrected: current_step_number to step_count
-                 logging.info(f"Crawling loop terminated at step {step_count} before reaching max steps ({max_steps}).") # Corrected: current_step_number to step_count
-            else:
-                 logging.info(f"Crawling loop finished after reaching max steps ({max_steps}).")
+                if not ai_suggestion_json:
+                    logging.error("AI failed to provide a suggestion.")
+                    self.consecutive_ai_failures += 1
+                    if self.consecutive_ai_failures >= config.MAX_CONSECUTIVE_AI_FAILURES:
+                        logging.critical("Max consecutive AI failures reached. Stopping crawl.")
+                        print(f"{UI_END_PREFIX} FAILURE_MAX_AI_FAIL") # UI Update
+                        break
+                    # Simple fallback: try to go back or pick a default action
+                    self.driver.perform_action("back", None)
+                    self._last_action_description = "BACK (AI failure fallback)"
+                    self.state_manager.increment_step(self._last_action_description, "auto_back_ai_fail", None, None, None, None, None, None)
+                    steps_taken += 1
+                    continue
+                self.consecutive_ai_failures = 0 # Reset on success
+                logging.info(f"AI Suggestion: {ai_suggestion_json}")
 
+                # --- Map AI suggestion to executable action ---
+                mapped_action = self._map_ai_to_action(ai_suggestion_json)
+                if not mapped_action:
+                    logging.error("Failed to map AI suggestion to an executable action.")
+                    self.consecutive_map_failures += 1
+                    if self.consecutive_map_failures >= config.MAX_CONSECUTIVE_MAP_FAILURES:
+                        logging.critical("Max consecutive mapping failures reached. Stopping crawl.")
+                        print(f"{UI_END_PREFIX} FAILURE_MAX_MAP_FAIL") # UI Update
+                        break
+                    # Fallback for mapping failure
+                    self.driver.perform_action("back", None)
+                    self._last_action_description = "BACK (mapping failure fallback)"
+                    self.state_manager.increment_step(self._last_action_description, "auto_back_map_fail", None, None, None, None, None, None)
+                    steps_taken += 1
+                    continue
+                self.consecutive_map_failures = 0 # Reset on success
 
-        except KeyboardInterrupt:
-             logging.warning("Crawling interrupted by user (KeyboardInterrupt).")
-             run_successful = False
+                action_type_sugg, target_obj_sugg, input_text_sugg = mapped_action
+                # --- UI Update for Action ---
+                action_desc_for_ui = f"{action_type_sugg}"
+                if isinstance(target_obj_sugg, WebElement):
+                    try: # Safely get text or content-desc for UI
+                        el_text = target_obj_sugg.text
+                        el_cd = target_obj_sugg.get_attribute('content-desc')
+                        el_id = target_obj_sugg.id
+                        ui_target_id = el_text if el_text else el_cd if el_cd else el_id if el_id else "element"
+                        action_desc_for_ui += f" on '{ui_target_id}'"
+                    except Exception:
+                        action_desc_for_ui += " on [element]"
+                elif isinstance(target_obj_sugg, str): # For scroll actions
+                    action_desc_for_ui += f" {target_obj_sugg}"
+                if input_text_sugg:
+                    action_desc_for_ui += f" with text '{input_text_sugg}'"
+                print(f"{UI_ACTION_PREFIX} {action_desc_for_ui}")
+                # ---
+
+                # --- Get element details *before* action for logging/DB ---
+                # This needs to happen before perform_action, as the element might become stale.
+                _last_action_description_for_db = utils.generate_action_description(
+                    action_type_sugg, target_obj_sugg, input_text_sugg, ai_suggestion_json.get("target_identifier")
+                )
+                element_center_for_db = self._get_element_center(target_obj_sugg) if isinstance(target_obj_sugg, WebElement) else None
+                center_x_for_db, center_y_for_db = element_center_for_db if element_center_for_db else (None, None)
+                target_element_id_for_db = None
+                if isinstance(target_obj_sugg, WebElement):
+                    try:
+                        target_element_id_for_db = target_obj_sugg.id
+                    except StaleElementReferenceException:
+                        logging.warning("Element became stale even before trying to get its ID for DB logging (pre-action).")
+                        # target_element_id_for_db remains None
+                # --- End pre-action detail gathering ---
+
+                # --- Execute Action ---
+                logging.info(f"Executing action: {action_type_sugg}, Target: {target_obj_sugg}, Input: {input_text_sugg}")
+                action_successful = self.driver.perform_action(action_type_sugg, target_obj_sugg, input_text_sugg)
+
+                if not action_successful:
+                    logging.error(f"Failed to execute action: {action_type_sugg}")
+                    self.consecutive_exec_failures += 1
+                    if self.consecutive_exec_failures >= config.MAX_CONSECUTIVE_EXEC_FAILURES:
+                        logging.critical("Max consecutive execution failures reached. Stopping crawl.")
+                        print(f"{UI_END_PREFIX} FAILURE_MAX_EXEC_FAIL") # UI Update
+                        break
+                    # Fallback for execution failure
+                    if current_package == self.state_manager.app_package or current_package in config.ALLOWED_EXTERNAL_PACKAGES:
+                        self.driver.perform_action("back", None)
+                        self._last_action_description = "BACK (execution failure fallback)" # For overall tracking
+                        # Log this specific fallback step
+                        self.state_manager.increment_step(
+                            action_description=self._last_action_description,
+                            action_type="auto_back_exec_fail", 
+                            target_identifier=None, target_element_id=None, 
+                            target_center_x=None, target_center_y=None, 
+                            input_text=None, ai_raw_output=None
+                        )
+                    else: 
+                        self._last_action_description = "NO_ACTION (execution failure, already off-app)"
+                        self.state_manager.increment_step(
+                            action_description=self._last_action_description,
+                            action_type="no_action_exec_fail_off_app",
+                            target_identifier=None, target_element_id=None,
+                            target_center_x=None, target_center_y=None,
+                            input_text=None, ai_raw_output=None
+                        )
+                    steps_taken +=1 
+                    continue 
+                self.consecutive_exec_failures = 0 # Reset on success
+                
+                # If action was successful, use the pre-action gathered details for DB
+                self._last_action_description = _last_action_description_for_db 
+
+                self.state_manager.increment_step(
+                    action_description=self._last_action_description, # Use the description generated before action
+                    action_type=action_type_sugg,
+                    target_identifier=ai_suggestion_json.get("target_identifier"),
+                    target_element_id=target_element_id_for_db, 
+                    target_center_x=center_x_for_db, 
+                    target_center_y=center_y_for_db, 
+                    input_text=input_text_sugg,
+                    ai_raw_output=str(ai_suggestion_json) 
+                )
+                # ---
+
+                steps_taken += 1
+                time.sleep(config.WAIT_AFTER_ACTION) # Wait for UI to settle
+
+            # --- End of main loop ---
+            logging.info("Crawling loop finished.")
+            print(f"{UI_END_PREFIX} SUCCESS") # UI Update
+
         except Exception as e:
-            logging.critical(f"An uncaught exception occurred during crawling setup or loop: {e}", exc_info=True)
-            run_successful = False
+            logging.critical(f"An unhandled exception occurred during crawling: {e}", exc_info=True)
+            print(f"{UI_END_PREFIX} FAILURE_UNHANDLED_EXCEPTION: {str(e)}") # UI Update
         finally:
-            # --- Stop and Pull Traffic Capture (if started) ---
-            if capture_started_successfully: # Only if it was successfully started
-                logging.info("Stopping and processing traffic capture data...")
-                self._stop_traffic_capture() # Attempt to stop
-                if self._pull_traffic_capture_file(): # Attempt to pull
-                    if getattr(config, 'CLEANUP_DEVICE_PCAP_FILE', False):
-                        self._cleanup_device_pcap_file() # Cleanup if pull was successful and configured
+            logging.info("Performing cleanup...")
+            # --- Stop and Pull Traffic Capture File (if enabled and started) ---
+            if self.traffic_capture_enabled and self.pcap_filename_on_device:
+                if self._stop_traffic_capture():
+                    logging.info("Traffic capture stopped.")
+                    if self._pull_traffic_capture_file():
+                        logging.info("Traffic capture file pulled.")
+                        if getattr(config, 'CLEANUP_DEVICE_PCAP_FILE', False):
+                            self._cleanup_device_pcap_file()
+                    else:
+                        logging.error("Failed to pull traffic capture file.")
                 else:
-                    logging.warning("Failed to pull the traffic capture file. It might still be on the device.")
-            elif self.traffic_capture_enabled and not capture_started_successfully:
-                logging.info("Traffic capture was enabled but did not start successfully, so no capture data to process.")
-            # --- End Traffic Capture Stop/Pull ---
-
-            # --- Original Cleanup ---
-            logging.info("--- Crawling Finished / Cleaning Up ---")
-            duration = time.time() - crawl_start_time # Corrected: start_time to crawl_start_time
-            logging.info(f"Total duration: {duration:.2f} seconds")
-            if self.state_manager:
-                try:
-                    total_screens = self.state_manager.get_total_screens()
-                    total_transitions = self.state_manager.get_total_transitions()
-                    logging.info(f"Discovered {total_screens} unique screen states (in memory).")
-                    logging.info(f"Recorded approximately {total_transitions} transitions in DB.")
-                except Exception as report_err:
-                    logging.error(f"Error generating final report stats: {report_err}")
-            elif run_successful:
-                 logging.error("State manager was not available for final reporting despite run starting.")
-            else:
-                 logging.info("Setup did not complete fully, final stats may be inaccurate.")
-
-            if self.driver: self.driver.disconnect()
-            if self.db_manager: self.db_manager.close()
-            logging.info("--- Cleanup Complete ---")
-
-if __name__ == "__main__":
-    # Basic logging setup
-    logging.basicConfig(level=logging.INFO, 
-                        format='%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s')
-    crawler = AppCrawler()
-    crawler.run()
+                    logging.warning("Failed to stop traffic capture cleanly. May attempt to pull anyway.")
+                    # Attempt pull even if stop failed, as file might exist
+                    if self._pull_traffic_capture_file():
+                        logging.info("Traffic capture file pulled (after stop command issue).")
+                        if getattr(config, 'CLEANUP_DEVICE_PCAP_FILE', False):
+                            self._cleanup_device_pcap_file()
+                    else:
+                        logging.error("Failed to pull traffic capture file (after stop command issue).")
+            # --- End Stop and Pull Traffic Capture ---
+            self.driver.disconnect()
+            self.db_manager.close()
+            logging.info("Crawler run finished and cleaned up.")
