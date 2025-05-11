@@ -736,6 +736,7 @@ class CrawlerControllerWindow(QMainWindow):
         QApplication.processEvents()
 
     @Slot(int, QProcess.ExitStatus)
+    @Slot(int, QProcess.ExitStatus)
     def handle_process_finished(self, exit_code: int, exit_status: QProcess.ExitStatus):
         self.shutdown_timer.stop()
         if self._shutdown_flag_file_path and os.path.exists(self._shutdown_flag_file_path):

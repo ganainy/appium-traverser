@@ -340,6 +340,7 @@ if __name__ == "__main__":
         total_elapsed_from_start = main_end_time - SCRIPT_START_TIME
         
         logging.info(f"======== Script '{os.path.basename(__file__)}' finished with exit_code: {exit_code} ========")
+        logging.info(f"======== Script '{os.path.basename(__file__)}' finished with exit_code: {exit_code} ========")
         logging.info(f"Total execution time for __main__ block: {time.strftime('%H:%M:%S', time.gmtime(total_script_duration))}.{int((total_script_duration % 1) * 1000):03d}")
         logging.info(f"Total elapsed time since script start: {time.strftime('%H:%M:%S', time.gmtime(total_elapsed_from_start))}.{int((total_elapsed_from_start % 1) * 1000):03d}")
 
