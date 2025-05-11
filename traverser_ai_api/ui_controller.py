@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
     QTextEdit, QFormLayout, QFrame, QComboBox, QGroupBox,
     QScrollArea, QSizePolicy, QProgressBar
 )
-from PySide6.QtCore import Qt, QProcess, Signal, Slot, QTimer
+from PySide6.QtCore import Qt, QProcess, Signal, Slot, QTimer, QIODevice
 from PySide6.QtGui import QPixmap, QImage # QScreen is part of QtGui but often accessed via QApplication
 
 import config
@@ -525,85 +525,84 @@ class CrawlerControllerWindow(QMainWindow):
     
     @Slot()
     def read_stdout(self):
-        """Reads and processes standard output from the crawler process."""
+        """Reads standard output from the crawler process."""
         if not self.crawler_process:
             return
-
-        output = self.crawler_process.readAllStandardOutput().data().decode()
-        # No need to strip here if we process line by line and append raw lines
-        lines = output.splitlines() 
-
-        UI_STEP_PREFIX = "UI_STEP: "
-        UI_ACTION_PREFIX = "UI_ACTION: "
-        UI_SCREENSHOT_PREFIX = "UI_SCREENSHOT: "
-
+        
+        data = self.crawler_process.readAllStandardOutput().data().decode(errors='ignore')
+        
+        lines = data.strip().split('\n')
+        processed_for_ui_widget_at_least_once = False
         for line in lines:
-            self.log_output.append(line)  # Append raw line to log
+            if not line.strip():  # Skip empty or whitespace-only lines
+                continue
 
-            if line.startswith(UI_STEP_PREFIX):
-                step_data = line[len(UI_STEP_PREFIX):].strip()
-                # Assuming step_data could be "current" or "current/max"
-                current_step_str = step_data.split('/')[0]
+            print(line)  # Print to ui_controller's stdout (VS Code terminal)
+
+            if line.startswith("UI_STATUS:"):
+                status = line.replace("UI_STATUS:", "").strip()
+                self.status_label.setText(f"Status: {status}")
+                if status == "RUNNING":
+                    self.progress_bar.setRange(0, 0)  # Indeterminate
+                elif status == "INITIALIZING":
+                    self.progress_bar.setRange(0, 0)
+                    self.progress_bar.setValue(0)  # Reset value for indeterminate
+                else:  # IDLE, SUCCESS, FAILURE etc.
+                    self.progress_bar.setRange(0, 100)  # Determinate
+                    self.progress_bar.setValue(100 if status in ["SUCCESS", "FAILURE_UNHANDLED_EXCEPTION"] else 0)
+                processed_for_ui_widget_at_least_once = True
+
+            elif line.startswith("UI_STEP:"):
                 try:
-                    self.step_count = int(current_step_str)
-                    if self.config_widgets['CRAWL_MODE'].currentText() == 'steps':
-                        max_steps = self.config_widgets['MAX_CRAWL_STEPS'].value()
-                        if self.step_label:
-                            self.step_label.setText(f"Step: {self.step_count}/{max_steps}")
-                    elif self.step_label: # For time mode or other modes where only current step is relevant
+                    step_val_str = line.replace("UI_STEP:", "").strip()
+                    self.step_count = int(step_val_str)
+                    if self.step_label:
                         self.step_label.setText(f"Step: {self.step_count}")
-                    self.update_progress() # Update progress bar as well
                 except ValueError:
-                    self.log_output.append(f"Error parsing step data: {step_data}")
+                    self.log_output.append(f"Warning: Could not parse step count from: {line}")
+                except Exception as e:
+                    self.log_output.append(f"Error updating step label: {e}")
+                processed_for_ui_widget_at_least_once = True
 
-            elif line.startswith(UI_ACTION_PREFIX):
-                action_data = line[len(UI_ACTION_PREFIX):].strip()
+            elif line.startswith("UI_ACTION:"):
+                action_desc = line.replace("UI_ACTION:", "").strip()
                 if self.last_action_label:
-                    self.last_action_label.setText(f"Last Action: {action_data}")
+                    self.last_action_label.setText(f"Last Action: {action_desc}")
+                processed_for_ui_widget_at_least_once = True
 
-            elif line.startswith(UI_SCREENSHOT_PREFIX):
-                screenshot_path = line[len(UI_SCREENSHOT_PREFIX):].strip()
-                if os.path.exists(screenshot_path):
-                    image = QImage(screenshot_path) # Load image using QImage
-                    if not image.isNull():
-                        pixmap = QPixmap.fromImage(image) # Convert QImage to QPixmap
-                        # Scale pixmap to fit the label while keeping aspect ratio
+            elif line.startswith("UI_SCREENSHOT:"):
+                screenshot_path = line.replace("UI_SCREENSHOT:", "").strip()
+                self.current_screenshot = screenshot_path
+                if os.path.exists(self.current_screenshot):
+                    try:
+                        pixmap = QPixmap(self.current_screenshot)
                         scaled_pixmap = pixmap.scaled(
                             self.screenshot_label.size(),
                             Qt.AspectRatioMode.KeepAspectRatio,
                             Qt.TransformationMode.SmoothTransformation
                         )
                         self.screenshot_label.setPixmap(scaled_pixmap)
-                        self.current_screenshot = screenshot_path
-                    else:
-                        self.log_output.append(f"Error loading screenshot image: {screenshot_path}")
+                    except Exception as e:
+                        self.log_output.append(f"Error loading screenshot {screenshot_path}: {e}")
+                        self.screenshot_label.setText("Error loading screenshot.")
                 else:
-                    self.log_output.append(f"Screenshot path not found: {screenshot_path}")
-    
-    # @Slot()
-    # def handle_stdout(self):
-    #     """Handles standard output from the crawler process."""
-    #     # This functionality is now part of read_stdout
-    #     if self.crawler_process:
-    #         data = self.crawler_process.readAllStandardOutput().data().decode()
-    #         self.log_output.append(data.strip())
-            
-    #         # Look for step updates
-    #         if \"--- Step \" in data:
-    #             try:
-    #                 step = int(data.split("Step ")[1].split("/")[0])
-    #                 self.step_count = step
-    #                 self.update_progress()
-    #             except Exception:
-    #                 pass # Or log error
-            
-    #         # Look for screenshot updates
-    #         if "Saved annotated screenshot:" in data:
-    #             try:
-    #                 screenshot_path = data.split("Saved annotated screenshot: ")[1].split(" (")[0]
-    #                 # self.update_screenshot(screenshot_path) # Original call, now handled in read_stdout
-    #             except Exception:
-    #                 pass # Or log error
+                    self.screenshot_label.setText(f"Screenshot not found: {os.path.basename(screenshot_path)}")
+                processed_for_ui_widget_at_least_once = True
+
+            elif line.startswith("UI_END:"):
+                end_message = line.replace("UI_END:", "").strip()
+                self.status_label.setText(f"Status: Ended ({end_message})")
+                self.progress_bar.setRange(0, 100)
+                self.progress_bar.setValue(100)  # Mark as complete
+                processed_for_ui_widget_at_least_once = True
+            else:
+                self.log_output.append(line)
+                processed_for_ui_widget_at_least_once = True
+
+        if not processed_for_ui_widget_at_least_once and data.strip():
+            self.log_output.append(data.strip())
+
+        QApplication.processEvents()  # Keep UI responsive
 
     @Slot(QProcess.ExitStatus) # Add type hint for clarity
     def handle_process_finished(self, exit_code: int, exit_status: QProcess.ExitStatus):
@@ -622,27 +621,55 @@ class CrawlerControllerWindow(QMainWindow):
     @Slot(QProcess.ProcessError)
     def handle_process_error(self, error: QProcess.ProcessError):
         """Handles errors that occur with the crawler process."""
-        error_message = f"Crawler process error: {error.name}"
-        if self.crawler_process:
-            error_details = self.crawler_process.readAllStandardError().data().decode().strip()
-            if error_details:
-                error_message += f"\nDetails: {error_details}"
+        error_name_str = "Unknown Error"
+        try:
+            error_name_str = QProcess.ProcessError(error).name 
+        except Exception:
+            if error == QProcess.ProcessError.FailedToStart: error_name_str = "FailedToStart"
+            elif error == QProcess.ProcessError.Crashed: error_name_str = "Crashed"
+            elif error == QProcess.ProcessError.Timedout: error_name_str = "Timedout"
+            elif error == QProcess.ProcessError.ReadError: error_name_str = "ReadError"
+            elif error == QProcess.ProcessError.WriteError: error_name_str = "WriteError"
+            elif error == QProcess.ProcessError.UnknownError: error_name_str = "UnknownError"
+
+        error_message = f"Crawler process error: {error_name_str}"
+        
+        output_details = ""
+        if self.crawler_process and self.crawler_process.isOpen():
+            if self.crawler_process.processChannelMode() == QProcess.ProcessChannelMode.MergedChannels:
+                if self.crawler_process.bytesAvailable() > 0:
+                    output_details = self.crawler_process.readAllStandardOutput().data().decode(errors='ignore').strip()
+            elif self.crawler_process.processChannelMode() == QProcess.ProcessChannelMode.SeparateChannels:
+                if self.crawler_process.bytesAvailableOnStandardError() > 0:
+                    output_details = self.crawler_process.readAllStandardError().data().decode(errors='ignore').strip()
+                elif self.crawler_process.bytesAvailable() > 0:
+                    output_details = self.crawler_process.readAllStandardOutput().data().decode(errors='ignore').strip()
+            
+        if output_details:
+            error_message += f"\nLast output from process: {output_details}"
         
         self.log_output.append(error_message)
         logging.error(error_message)
 
-        # Ensure UI is reset even on error
-        if self.crawler_process: # Check if it's not None before trying to access methods
-            # It's possible finished signal might also be emitted after an error, 
-            # but resetting here ensures UI consistency if only errorOccurred is hit.
-            pass # Don't reset self.crawler_process here, finished will handle it or it's already None
+        current_process_obj = self.crawler_process
 
-        # Reset UI elements regardless of whether finished is also called
-        self.crawler_process = None # Crucial reset
+        self.crawler_process = None 
+
+        if current_process_obj:
+            try:
+                current_process_obj.finished.disconnect(self.handle_process_finished)
+            except (TypeError, RuntimeError): pass 
+            try:
+                current_process_obj.errorOccurred.disconnect(self.handle_process_error)
+            except (TypeError, RuntimeError): pass
+            try:
+                current_process_obj.readyReadStandardOutput.disconnect(self.read_stdout)
+            except (TypeError, RuntimeError): pass
+        
         self.start_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
-        self.status_label.setText("Status: Error")
-        self.progress_bar.setRange(0, 100) # Reset progress bar
+        self.status_label.setText(f"Status: Error ({error_name_str})")
+        self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
 
     def update_progress(self):
