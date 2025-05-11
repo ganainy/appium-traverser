@@ -88,6 +88,13 @@ except Exception as e: # Catch any other exception during import or path resolut
     logging.critical(f"CRITICAL: Unexpected error during 'config' module import or path setup. Error: {e}", exc_info=True)
     sys.exit(1)
 
+# --- Define Shutdown Flag ---
+# This flag is used to signal the crawler process (main.py) to shut down gracefully.
+# It's created by ui_controller.py and checked periodically by the crawler.
+SHUTDOWN_FLAG_FILENAME = "crawler_shutdown.flag"
+_shutdown_flag_file_path = os.path.join(CONFIG_DIR, SHUTDOWN_FLAG_FILENAME)
+logging.info(f"Shutdown flag file path set to: {_shutdown_flag_file_path}")
+
 # Re-initialize logging with values from config.py
 _log_level = getattr(cfg, 'LOG_LEVEL', 'INFO')
 _log_file_template = getattr(cfg, 'LOG_FILE_TEMPLATE', None) # e.g., "../output_data/logs/{package}_main.log"
@@ -134,7 +141,7 @@ if os.path.exists(user_config_path):
                         value = [item.strip() for item in value.replace('\\n', ',').split(',') if item.strip()]
                     
                     setattr(cfg, key, value)
-                    logging.info(f"User config override: cfg.{key} = {value}")
+                    #logging.info(f"User config override: cfg.{key} = {value}")
                 except ValueError as ve:
                     logging.warning(f"Type conversion error for user_config key '{key}' (value: '{value}'). Expected {original_type}. Error: {ve}")
             else:
@@ -227,6 +234,17 @@ if __name__ == "__main__":
     logging.info(f"Python: {sys.version.splitlines()[0]} on {sys.platform}")
     logging.info(f"Initial CWD: {os.getcwd()}")
     logging.info(f"Config module location: {CONFIG_MODULE_PATH}")
+    logging.info(f"Shutdown flag will be checked at: {_shutdown_flag_file_path}")
+
+    # Ensure no leftover shutdown flag from a previous unclean shutdown of the crawler itself.
+    # The UI controller also attempts to clear this before starting a new process,
+    # but this is an additional safeguard, especially if main.py is run directly.
+    if os.path.exists(_shutdown_flag_file_path):
+        logging.warning(f"Found existing shutdown flag at startup: {_shutdown_flag_file_path}. Removing it.")
+        try:
+            os.remove(_shutdown_flag_file_path)
+        except OSError as e_remove_flag:
+            logging.error(f"Error removing stale shutdown flag at startup: {e_remove_flag}")
 
     # 1. Validate Essential Configurations from cfg
     if not getattr(cfg, 'APP_PACKAGE', None):
@@ -396,46 +414,76 @@ if __name__ == "__main__":
     # Explicitly ensure APP_PACKAGE and APP_ACTIVITY are the finalized ones.
     current_config_dict["APP_PACKAGE"] = current_app_package
     current_config_dict["APP_ACTIVITY"] = current_app_activity
+    # Add the shutdown flag path to the config for the crawler
+    current_config_dict["SHUTDOWN_FLAG_PATH"] = _shutdown_flag_file_path
     
     logging.debug(f"Final configuration being passed to AppCrawler: \n{json.dumps(current_config_dict, indent=2, default=str)}")
 
     # 7. Initialize and Run the Crawler
     logging.info(f"Initializing AppCrawler for '{current_app_package}'...")
     crawler_instance = None
+    exit_code = 0 # Default exit code for success
     try:
         crawler_instance = AppCrawler(config_dict=current_config_dict)
         logging.info("AppCrawler initialized. Starting crawl...")
-        crawler_instance.run() # Changed start_crawl() to run()
-        logging.info("AppCrawler crawl process finished.")
+        # The run() method in AppCrawler should now periodically check for the shutdown signal
+        # and handle its own graceful shutdown, including removing the flag file and exiting.
+        crawler_instance.run() 
+        logging.info("AppCrawler crawl process finished normally.")
 
     except KeyboardInterrupt:
-        logging.warning("KeyboardInterrupt received. Attempting to shut down crawler gracefully...")
-        # Graceful shutdown logic might be in crawler's __del__ or a specific stop method
+        logging.warning("KeyboardInterrupt received in main.py. Signaling for graceful shutdown (if crawler handles it) or relying on finally block.")
+        # The AppCrawler's run() method or its periodic checks should ideally also catch KeyboardInterrupt
+        # to initiate its own graceful shutdown sequence (including removing the flag).
+        # If ui_controller.py sent a flag, that's the primary mechanism. This catch is more for direct `python main.py` runs.
+        exit_code = 1 # Indicate interruption
     except SystemExit as se:
-        logging.warning(f"SystemExit called: {se}. This might be due to a critical error handled elsewhere.")
-        # Re-raise if necessary, or handle as a specific termination cause
-        # For now, assume it's handled and proceed to finally block.
+        # This can be triggered if AppCrawler calls sys.exit() after a graceful shutdown.
+        logging.info(f"SystemExit caught in main.py with code: {se.code}. Assuming crawler-initiated exit.")
+        exit_code = int(se.code) if isinstance(se.code, int) else 0 # Use crawler's exit code, default to 0
     except Exception as e_crawler:
-        logging.critical(f"An unexpected error occurred while initializing or running the AppCrawler: {e_crawler}", exc_info=True)
-        # Depending on the error, you might want to sys.exit(1) here or let finally block handle cleanup.
+        logging.critical(f"An unexpected error occurred while initializing or running the AppCrawler in main.py: {e_crawler}", exc_info=True)
+        exit_code = 1 # Indicate an error
     finally:
-        if crawler_instance and hasattr(crawler_instance, 'quit_driver') and callable(crawler_instance.quit_driver):
-            logging.info("Attempting to quit Appium driver...")
+        if crawler_instance:
+            # The AppCrawler's own graceful shutdown (triggered by flag or KeyboardInterrupt)
+            # should ideally handle quitting the driver and other cleanup.
+            # This 'finally' block in main.py serves as a fallback.
+            if hasattr(crawler_instance, 'driver') and crawler_instance.driver is not None:
+                 logging.info("Main.py finally block: Checking Appium driver status for fallback quit...")
+                 try:
+                     # Check if driver session is active before trying to quit, to avoid errors if already quit.
+                     # A more robust check might involve `crawler_instance.driver.session_id` if available and not None.
+                     # For now, we rely on quit_driver being safe to call multiple times or on an already quit driver.
+                     if hasattr(crawler_instance, 'quit_driver') and callable(crawler_instance.quit_driver):
+                         logging.info("Main.py finally block: Calling crawler_instance.quit_driver() as a fallback.")
+                         crawler_instance.quit_driver() # This method should be robust.
+                         logging.info("Main.py finally block: Fallback Appium driver quit attempt finished.")
+                     else:
+                         logging.warning("Main.py finally block: crawler_instance.quit_driver method not found or not callable.")
+                 except Exception as e_quit:
+                     logging.error(f"Main.py finally block: Error during fallback Appium driver quit: {e_quit}", exc_info=True)
+            else:
+                logging.info("Main.py finally block: Appium driver seems to be already quit or was not initialized by crawler.")
+        
+        # As a final cleanup, if the shutdown flag file still exists, try to remove it.
+        # The crawler should remove this upon its own successful graceful shutdown.
+        # This handles cases where the crawler might have exited prematurely after being signaled
+        # but before removing the flag, or if main.py itself is exiting due to an error after the flag was set.
+        if os.path.exists(_shutdown_flag_file_path):
+            logging.warning(f"Main.py finally block: Shutdown flag file still exists at {_shutdown_flag_file_path}. Attempting to remove as final cleanup.")
             try:
-                crawler_instance.quit_driver()
-                logging.info("Appium driver quit successfully.")
-            except Exception as e_quit:
-                logging.error(f"Error encountered while quitting Appium driver: {e_quit}", exc_info=True)
-        else:
-            logging.info("No active Appium driver to quit or quit_driver method not found.")
+                os.remove(_shutdown_flag_file_path)
+                logging.info(f"Main.py finally block: Successfully removed shutdown flag file.")
+            except OSError as e_remove_final:
+                logging.error(f"Main.py finally block: Error removing shutdown flag file during final cleanup: {e_remove_final}")
         
         main_end_time = time.time()
         total_script_duration = main_end_time - main_start_time
-        # Use SCRIPT_START_TIME for total elapsed since script file execution began
         total_elapsed_from_start = main_end_time - SCRIPT_START_TIME
         
-        logging.info(f"======== Script '{os.path.basename(__file__)}' finished. ========")
+        logging.info(f"======== Script '{os.path.basename(__file__)}' finished with exit_code: {exit_code} ========")
         logging.info(f"Total execution time for __main__ block: {time.strftime('%H:%M:%S', time.gmtime(total_script_duration))}.{int((total_script_duration % 1) * 1000):03d}")
         logging.info(f"Total elapsed time since script start: {time.strftime('%H:%M:%S', time.gmtime(total_elapsed_from_start))}.{int((total_elapsed_from_start % 1) * 1000):03d}")
 
-    # sys.exit(0) # Explicitly exit with 0 if successful, though it's default
+    sys.exit(exit_code) # Ensure main.py exits with the determined code.

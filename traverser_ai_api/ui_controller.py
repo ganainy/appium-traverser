@@ -1,7 +1,7 @@
 import sys
 import os
-import json
-import logging
+import logging # Ensure logging is explicitly imported
+import json # For save_config/load_config, ensure it's imported
 from typing import Optional, Dict, Any
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -10,15 +10,26 @@ from PySide6.QtWidgets import (
     QScrollArea, QSizePolicy, QProgressBar
 )
 from PySide6.QtCore import Qt, QProcess, Signal, Slot, QTimer, QIODevice
-from PySide6.QtGui import QPixmap, QImage # QScreen is part of QtGui but often accessed via QApplication
+from PySide6.QtGui import QPixmap
 
-import config
+# --- (Assuming config.py is in the same directory or package) ---
+# This is used to determine where to place the shutdown flag.
+# It's placed here to ensure `config` is imported before CrawlerControllerWindow uses it.
+# If this causes issues, the import can be moved into __init__ with more robust error handling.
+# try:
+#     from . import config as traverser_config
+# except ImportError:
+#     traverser_config = None
+#     logging.warning("Could not import .config module at the top level of ui_controller.py. Shutdown flag path may not be configured correctly.")
+# Removed the above block
+
+import config # This existing import will be used
 
 class CrawlerControllerWindow(QMainWindow):
     """Main window for the Appium Crawler Controller."""
     
-    def __init__(self):
-        super().__init__()
+    def __init__(self, parent=None):
+        super().__init__(parent)
         self.setWindowTitle("Appium Crawler Controller")
         
         # Get screen geometry
@@ -48,7 +59,7 @@ class CrawlerControllerWindow(QMainWindow):
         
         # Create left (config) and right (output) panels
         left_panel = self._create_left_panel()
-        right_panel = self._create_right_panel()
+        right_panel = self._create_right_panel() # self.log_output is initialized here
         
         # Add panels to main layout with stretch factors
         main_layout.addWidget(left_panel, 1)
@@ -56,6 +67,41 @@ class CrawlerControllerWindow(QMainWindow):
         
         # Load configuration if exists
         self.load_config()
+
+        self._config_module_dir_path = None
+        self._shutdown_flag_file_path = None
+        # Use the 'config' module (from 'import config') to determine the path,
+        # as 'traverser_config' (from relative import) might be None when run as a script.
+        # Also ensure config.__file__ is not None or empty string.
+        if config and hasattr(config, '__file__') and config.__file__:
+            try:
+                # Ensure config.__file__ is not None before calling abspath
+                self._config_module_dir_path = os.path.dirname(os.path.abspath(config.__file__)) # Use config.__file__
+                self._shutdown_flag_file_path = os.path.join(self._config_module_dir_path, "crawler_shutdown.flag")
+                log_message = f"Shutdown flag path configured: {self._shutdown_flag_file_path}"
+                # Defer logging to log_output until it's initialized, or use standard logging
+                if hasattr(self, 'log_output') and self.log_output:
+                    self.log_output.append(log_message)
+                else:
+                    # If log_output is not yet available, use standard logging.
+                    logging.info(log_message)
+            except Exception as e:
+                # Log error using standard logging as self.log_output might not be available
+                logging.error(f"Error determining shutdown flag path using 'config' module: {e}") # Updated error message
+                self._shutdown_flag_file_path = None # Ensure it's None on error
+        else:
+            # This case means 'import config' failed or config.__file__ is not set.
+            log_message = "Warning: The 'config' module or its '__file__' attribute was not found or is invalid. Graceful shutdown via flag will be disabled." # Updated warning message
+            if hasattr(self, 'log_output') and self.log_output:
+                 self.log_output.append(log_message)
+            else:
+                # If log_output is not yet available, use standard logging.
+                logging.warning(log_message)
+            self._shutdown_flag_file_path = None
+
+        self.shutdown_timer = QTimer(self)
+        self.shutdown_timer.setSingleShot(True)
+        self.shutdown_timer.timeout.connect(self.force_stop_crawler_on_timeout)
     
     def _create_left_panel(self) -> QWidget:
         """Creates the left panel with configuration options."""
@@ -479,51 +525,121 @@ class CrawlerControllerWindow(QMainWindow):
     @Slot()
     def start_crawler(self):
         """Starts the crawler process."""
-        self.log_output.append("Attempting to start crawler...") # Added log
+        # Ensure flag is not present from a previous unclean shutdown
+        if self._shutdown_flag_file_path and os.path.exists(self._shutdown_flag_file_path):
+            log_msg = f"Found existing shutdown flag: {self._shutdown_flag_file_path}. Removing."
+            if hasattr(self, 'log_output') and self.log_output: self.log_output.append(log_msg)
+            else: logging.info(log_msg)
+            try:
+                os.remove(self._shutdown_flag_file_path)
+            except OSError as e:
+                err_msg = f"Could not remove existing shutdown flag: {e}. Crawler might not start correctly."
+                if hasattr(self, 'log_output') and self.log_output: self.log_output.append(err_msg)
+                else: logging.warning(err_msg)
+        
+        if hasattr(self, 'log_output') and self.log_output:
+            self.log_output.append("Attempting to start crawler...")
+        else: # Fallback if log_output not ready (e.g. during early init)
+            logging.info("Attempting to start crawler...")
 
-        if not self.crawler_process:
-            self.log_output.append("Crawler process not already running. Proceeding to start.") # Added log
-            # Save configuration before starting
-            self.save_config()
+        # Ensure crawler_process is either None or not running before starting
+        if not self.crawler_process or self.crawler_process.state() == QProcess.ProcessState.NotRunning:
+            if hasattr(self, 'log_output') and self.log_output:
+                 self.log_output.append("Crawler process not already running. Proceeding to start.")
             
-            # Create QProcess
+            if hasattr(self, 'save_config'): # Check if method exists
+                self.save_config() 
+            
             self.crawler_process = QProcess()
             self.crawler_process.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
             
             # Connect signals
-            self.crawler_process.readyReadStandardOutput.connect(self.read_stdout)
+            if hasattr(self, 'read_stdout'): self.crawler_process.readyReadStandardOutput.connect(self.read_stdout)
             self.crawler_process.finished.connect(self.handle_process_finished)
-            self.crawler_process.errorOccurred.connect(self.handle_process_error) 
+            if hasattr(self, 'handle_process_error'): self.crawler_process.errorOccurred.connect(self.handle_process_error) 
             
             python_executable = sys.executable 
-            module_to_run = "traverser_ai_api.main"
+            module_to_run = "traverser_ai_api.main" # Ensure this is the correct module
 
-            # Set working directory to the project root
             project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
             self.crawler_process.setWorkingDirectory(project_root)
-            self.log_output.append(f"Set working directory for subprocess to: {project_root}")
+            if hasattr(self, 'log_output'): self.log_output.append(f"Set working directory for subprocess to: {project_root}")
 
-            self.log_output.append(f"Executing: {python_executable} -u -m {module_to_run}")
+            if hasattr(self, 'log_output'): self.log_output.append(f"Executing: {python_executable} -u -m {module_to_run}")
             self.crawler_process.start(python_executable, ['-u', '-m', module_to_run])
             
             # Update UI
-            self.start_btn.setEnabled(False)
-            self.stop_btn.setEnabled(True)
-            self.status_label.setText("Status: Running...")
-            self.progress_bar.setRange(0,0) # Indeterminate progress
+            if hasattr(self, 'start_btn'): self.start_btn.setEnabled(False)
+            if hasattr(self, 'stop_btn'): self.stop_btn.setEnabled(True)
+            if hasattr(self, 'status_label'): self.status_label.setText("Status: Running...")
+            if hasattr(self, 'progress_bar'): self.progress_bar.setRange(0,0) # Indeterminate progress
         else:
-            self.log_output.append("Crawler process is already considered active. Start button press ignored.") # Added log
+            if hasattr(self, 'log_output') and self.log_output:
+                self.log_output.append("Crawler process is already considered active. Start button press ignored.")
+            else:
+                logging.info("Crawler process is already considered active. Start button press ignored.")
     
     @Slot()
     def stop_crawler(self):
-        """Stops the crawler process."""
+        """Initiates graceful shutdown of the crawler process."""
         if self.crawler_process and self.crawler_process.state() == QProcess.ProcessState.Running:
+            if hasattr(self, 'stop_btn'): self.stop_btn.setEnabled(False) # Disable button early
+
+            if self._shutdown_flag_file_path:
+                try:
+                    with open(self._shutdown_flag_file_path, 'w') as f:
+                        f.write("stop")
+                    msg_graceful = "Shutdown signal sent via flag file. Waiting for graceful exit (15s)..."
+                    if hasattr(self, 'log_output'): self.log_output.append(msg_graceful)
+                    else: logging.info(msg_graceful)
+                    if hasattr(self, 'status_label'): self.status_label.setText("Status: Stopping (graceful)...")
+                    self.shutdown_timer.start(15000) # 15 seconds for graceful shutdown
+                    return # Wait for timer or process finished signal
+                except Exception as e:
+                    msg_err_flag = f"Error creating shutdown flag: {e}. Proceeding with direct termination."
+                    if hasattr(self, 'log_output'): self.log_output.append(msg_err_flag)
+                    else: logging.error(msg_err_flag)
+                    # Fall through to terminate if flag creation failed
+
+            # Fallback: Flag path not set, or flag creation failed
+            msg_terminate = "Attempting direct termination (7s timeout)..."
+            if hasattr(self, 'log_output'): self.log_output.append(msg_terminate)
+            else: logging.info(msg_terminate)
+            if hasattr(self, 'status_label'): self.status_label.setText("Status: Terminating...")
             self.crawler_process.terminate()
-            self.crawler_process.waitForFinished(5000)  # Wait up to 5 seconds
-            if self.crawler_process.state() == QProcess.ProcessState.Running:
-                self.crawler_process.kill()  # Force kill if still running
-    
+            self.shutdown_timer.start(7000) # 7 seconds for terminate to work before force_stop_crawler_on_timeout
+        else:
+            msg_ignored = "Stop command ignored: Crawler process not running or not initialized."
+            if hasattr(self, 'log_output'): self.log_output.append(msg_ignored)
+            else: logging.info(msg_ignored)
+            # Ensure UI consistency if process is already stopped or never started
+            if not (self.crawler_process and self.crawler_process.state() == QProcess.ProcessState.Running):
+                if hasattr(self, 'stop_btn'): self.stop_btn.setEnabled(False)
+                if hasattr(self, 'start_btn'): self.start_btn.setEnabled(True)
+                if hasattr(self, 'status_label'): self.status_label.setText("Status: Idle/Stopped")
+
     @Slot()
+    def force_stop_crawler_on_timeout(self):
+        """Called by QTimer if graceful shutdown or initial terminate takes too long."""
+        if self.crawler_process and self.crawler_process.state() == QProcess.ProcessState.Running:
+            msg_timeout = "Previous stop attempt timed out. Attempting terminate..."
+            if hasattr(self, 'log_output'): self.log_output.append(msg_timeout)
+            else: logging.warning(msg_timeout)
+            if hasattr(self, 'status_label'): self.status_label.setText("Status: Terminating (timeout)...")
+            
+            self.crawler_process.terminate() # Attempt terminate 
+            if not self.crawler_process.waitForFinished(30000): # Wait up to 30 seconds
+                msg_kill = "Process still running after terminate. Killing."
+                if hasattr(self, 'log_output'): self.log_output.append(msg_kill)
+                else: logging.warning(msg_kill)
+                if hasattr(self, 'status_label'): self.status_label.setText("Status: Killing (timeout)...")
+                self.crawler_process.kill()
+        else:
+            msg_not_running = "Force stop timeout triggered, but process is no longer running."
+            if hasattr(self, 'log_output'): self.log_output.append(msg_not_running)
+            else: logging.info(msg_not_running)
+        # UI updates (button states etc.) will be handled by handle_process_finished if the process exits
+
     def read_stdout(self):
         """Reads standard output from the crawler process."""
         if not self.crawler_process:
@@ -604,19 +720,42 @@ class CrawlerControllerWindow(QMainWindow):
 
         QApplication.processEvents()  # Keep UI responsive
 
-    @Slot(QProcess.ExitStatus) # Add type hint for clarity
+    @Slot(int, QProcess.ExitStatus)
     def handle_process_finished(self, exit_code: int, exit_status: QProcess.ExitStatus):
-        """Handles the event when the crawler process finishes."""
-        status_message = f"Crawler process finished. Exit code: {exit_code}, Status: {exit_status.name}"
-        self.log_output.append(status_message)
-        logging.info(status_message)
+        """Handles the crawler process finishing."""
+        self.shutdown_timer.stop() # Stop the timer if it's running
 
-        self.crawler_process = None # Reset the process variable
-        self.start_btn.setEnabled(True)
-        self.stop_btn.setEnabled(False)
-        self.status_label.setText("Status: Idle")
-        self.progress_bar.setRange(0, 100) # Reset progress bar
-        self.progress_bar.setValue(0)
+        # Clean up the shutdown flag file if it exists (crawler should ideally do this, UI is a fallback)
+        if self._shutdown_flag_file_path and os.path.exists(self._shutdown_flag_file_path):
+            try:
+                os.remove(self._shutdown_flag_file_path)
+                msg_cleaned = "Cleaned up shutdown flag file from UI controller."
+                if hasattr(self, 'log_output'): self.log_output.append(msg_cleaned)
+                else: logging.info(msg_cleaned)
+            except OSError as e:
+                msg_err_remove = f"UI controller could not remove shutdown flag file: {e}"
+                if hasattr(self, 'log_output'): self.log_output.append(msg_err_remove)
+                else: logging.warning(msg_err_remove)
+
+        # --- Integrating existing handle_process_finished logic from your context ---
+        current_status_text = f"Finished. Exit code: {exit_code}"
+        if exit_status == QProcess.ExitStatus.CrashExit:
+            current_status_text = f"Crashed. Exit code: {exit_code}"
+        
+        final_status_message = f"Status: {current_status_text}"
+        if hasattr(self, 'log_output'): self.log_output.append(final_status_message)
+        else: logging.info(final_status_message) 
+        
+        if hasattr(self, 'status_label'): self.status_label.setText(final_status_message)
+        
+        if hasattr(self, 'start_btn'): self.start_btn.setEnabled(True)
+        if hasattr(self, 'stop_btn'): self.stop_btn.setEnabled(False)
+        
+        if hasattr(self, 'progress_bar'):
+            self.progress_bar.setRange(0,100) 
+            self.progress_bar.setValue(100 if exit_status == QProcess.ExitStatus.NormalExit and exit_code == 0 else 0)
+        
+        self.crawler_process = None # Clear the process reference
 
     @Slot(QProcess.ProcessError)
     def handle_process_error(self, error: QProcess.ProcessError):

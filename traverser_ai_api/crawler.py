@@ -316,6 +316,14 @@ class AppCrawler:
             steps_taken = 0
 
             while True:
+                # --- Shutdown Flag Check (Beginning of Step) ---
+                shutdown_flag_path = self.config_dict.get('SHUTDOWN_FLAG_PATH')
+                if shutdown_flag_path and os.path.exists(shutdown_flag_path):
+                    logging.info(f"Shutdown flag detected at path '{shutdown_flag_path}' at the beginning of a step. Stopping crawl.")
+                    print(f"{UI_END_PREFIX} SHUTDOWN_FLAG_DETECTED")
+                    break
+                # ---
+
                 # --- Crawl Limit Checks ---
                 if config.CRAWL_MODE == 'steps' and steps_taken >= config.MAX_CRAWL_STEPS:
                     logging.info(f"Reached max steps ({config.MAX_CRAWL_STEPS}). Stopping crawl.")
@@ -404,6 +412,13 @@ class AppCrawler:
                     current_screen_visit_count=current_visit_count, # Use correct visit count
                     current_composite_hash=current_screen_hash # Use the hash variable
                 )
+
+                # --- Shutdown Flag Check (After AI Interaction) ---
+                if shutdown_flag_path and os.path.exists(shutdown_flag_path):
+                    logging.info(f"Shutdown flag detected at path '{shutdown_flag_path}' after AI interaction. Stopping crawl.")
+                    print(f"{UI_END_PREFIX} SHUTDOWN_FLAG_DETECTED_POST_AI")
+                    break
+                # ---
 
                 if not ai_suggestion_json:
                     logging.error("AI failed to provide a suggestion.")
