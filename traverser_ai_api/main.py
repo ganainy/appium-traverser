@@ -44,9 +44,14 @@ def setup_logging(log_level_str: str = "INFO", log_file: Optional[str] = None):
     logger.setLevel(numeric_level) # Set level on the logger itself
 
     # Console Handler (always to sys.stdout for QProcess capture)
-    console_handler = logging.StreamHandler(sys.stdout) 
-    console_handler.setFormatter(log_formatter)
-    logger.addHandler(console_handler)
+    console_handler_stdout = logging.StreamHandler(sys.stdout)
+    console_handler_stdout.setFormatter(log_formatter)
+    logger.addHandler(console_handler_stdout)
+
+    # Console Handler for VS Code console (writes to sys.stderr)
+    console_handler_stderr = logging.StreamHandler(sys.stderr)
+    console_handler_stderr.setFormatter(log_formatter)
+    logger.addHandler(console_handler_stderr)
 
     # File Handler (Optional)
     if log_file:

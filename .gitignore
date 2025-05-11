@@ -7,3 +7,6 @@ find_app_info/output
 capture_app_traffic/output
 script_setup_manual_config
 output_data/
+
+# Python virtual environment
+.venv/

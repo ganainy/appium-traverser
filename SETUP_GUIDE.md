@@ -56,11 +56,23 @@ Before you begin, ensure you have the following installed and configured:
     ```bash
     pip install -r requirements.txt
     ```
-5.  **Appium Server Setup:**
+
+5.  **Set up Environment Variables (API Key):**
+    *   The application uses Google Gemini for AI-powered features. If you plan to use these features (e.g., AI-assisted element interaction, app info discovery), you'll need a Gemini API key.
+    *   Create a new file named `.env` inside the `traverser_ai_api` directory (i.e., `appium-traverser/traverser_ai_api/.env`).
+    *   Open the `.env` file and add your Gemini API key in the following format:
+        ```env
+        GEMINI_API_KEY="YOUR_ACTUAL_API_KEY_HERE"
+        ```
+    *   Replace `"YOUR_ACTUAL_API_KEY_HERE"` with your actual API key. You can obtain a Gemini API key from [Google AI Studio](https://aistudio.google.com/app/apikey).
+    *   This key is loaded by the application from the `.env` file. If AI features are enabled in the configuration and this key is missing or invalid, those features may not work, or the application might exit.
+
+6.  **Appium Server Setup:**
     *   Start the Appium server in a separate terminal window by simply running: `appium --allow-insecure adb_shell`
     *   Keep this server running while you execute the Python script.
     > Note: The `--allow-insecure adb_shell` flag is required to enable direct ADB shell commands execution. This is necessary for certain Android automation tasks and device interactions that require shell access. Without this flag, some automation commands (e.g. sending keyboard keys to fill input fields) will fail with permission errors.
-6.  **Android Device/Emulator Setup:**
+
+7.  **Android Device/Emulator Setup:**
     *   Ensure you have an Android device connected via USB with **Developer Options** and **USB Debugging** enabled, or have an Android Virtual Device (Emulator) running.
     *   Verify your device is recognized by ADB: `adb devices` (You might need to run this from the Android SDK's `platform-tools` directory if it's not in your PATH).
 

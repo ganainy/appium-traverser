@@ -112,6 +112,15 @@ class AppiumDriver:
             logging.error(f"Error getting current activity: {e}")
             return None
 
+    def get_current_app_context(self) -> Optional[Tuple[Optional[str], Optional[str]]]:
+        """Retrieves the current application package and activity."""
+        current_pkg = self.get_current_package()
+        current_act = self.get_current_activity()
+        if current_pkg is None and current_act is None: # Only return None if both are None
+            logging.warning("Could not retrieve current app context (both package and activity are None).")
+            return None
+        return current_pkg, current_act
+
     def launch_app(self, app_package: str, app_activity: str) -> bool:
         """
         Launches the specified application or brings it to the foreground if already running.

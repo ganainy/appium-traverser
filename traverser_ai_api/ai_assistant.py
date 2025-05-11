@@ -3,7 +3,7 @@ import logging
 import json
 from PIL import Image
 import io
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Any  # Add Any here
 from . import config
 import time  # Add this import at the top
 
@@ -48,6 +48,67 @@ class AIAssistant:
             logging.error(f"Failed to initialize GenerativeModel: {e}")
             raise
 
+    def _log_empty_response_details(self, response):
+        """Helper to log details when an AI response is considered empty or problematic."""
+        logging.info("Detailed AI Response Analysis:")
+        try:
+            if not response:
+                logging.warning("  Response object itself is None.")
+                return
+
+            if hasattr(response, 'prompt_feedback') and response.prompt_feedback:
+                logging.info(f"  Prompt Feedback: {response.prompt_feedback}")
+            else:
+                logging.info("  No prompt feedback available or attribute missing.")
+
+            if hasattr(response, 'candidates') and response.candidates:
+                candidate = response.candidates[0]
+                finish_reason_value = getattr(candidate, 'finish_reason', 'N/A')
+                finish_reason_name = genai.protos.Candidate.FinishReason(finish_reason_value).name if isinstance(finish_reason_value, int) else str(finish_reason_value)
+                logging.info(f"  Candidate Finish Reason: {finish_reason_name} ({finish_reason_value})")
+                
+                if hasattr(candidate, 'safety_ratings') and candidate.safety_ratings:
+                    logging.info("  Candidate Safety Ratings:")
+                    for rating in candidate.safety_ratings:
+                        category = getattr(rating, 'category', 'N/A')
+                        probability = getattr(rating, 'probability', 'N/A')
+                        category_name = genai.protos.HarmCategory(category).name if isinstance(category, int) else str(category)
+                        probability_name = genai.protos.HarmProbability(probability).name if isinstance(probability, int) else str(probability)
+                        logging.info(f"    Category: {category_name}, Probability: {probability_name}")
+                else:
+                    logging.info("  No safety ratings available for the candidate or attribute missing.")
+                
+                if hasattr(candidate, 'content') and candidate.content and hasattr(candidate.content, 'parts') and candidate.content.parts:
+                    logging.info(f"  Candidate Content Parts ({len(candidate.content.parts)} part(s)):")
+                    for i, part in enumerate(candidate.content.parts):
+                        part_text_snippet = "N/A"
+                        if hasattr(part, 'text') and part.text:
+                            part_text_snippet = part.text[:100] + ('...' if len(part.text) > 100 else '')
+                        elif hasattr(part, 'function_call'):
+                            part_text_snippet = f"FunctionCall: {part.function_call}"
+                        elif hasattr(part, 'inline_data'):
+                            part_text_snippet = f"InlineData: mime_type={part.inline_data.mime_type}"
+                        elif not hasattr(part, 'text') or not part.text:
+                            part_text_snippet = "<Part has no text or text is empty>"
+
+                        logging.info(f"    Part {i} ({type(part).__name__}): {part_text_snippet}")
+                else:
+                    logging.info("  No content parts found for the candidate or attributes missing.")
+            else:
+                logging.info("  No candidates found in AI response or attribute missing.")
+            
+            if hasattr(response, 'text'):
+                logging.info(f"  Raw response.text (stripped): '{response.text.strip() if response.text is not None else '<None>'}'")
+
+            # Ensure usage_metadata and its attributes exist before accessing them
+            if hasattr(response, 'usage_metadata') and response.usage_metadata:
+                logging.info(f"Usage Metadata: Prompt Tokens={getattr(response.usage_metadata, 'prompt_token_count', 'N/A')}, Candidates Tokens={getattr(response.usage_metadata, 'candidates_token_count', 'N/A')}, Total Tokens={getattr(response.usage_metadata, 'total_token_count', 'N/A')}")
+            else:
+                logging.warning("Usage metadata not available in AI response.")
+
+        except Exception as e_details:
+            logging.error(f"  Error during detailed AI response analysis: {e_details}", exc_info=True)
+
     def _prepare_image_part(self, screenshot_bytes: bytes) -> Optional[Image.Image]:
         """Converts screenshot bytes to PIL Image."""
         try:
@@ -56,14 +117,11 @@ class AIAssistant:
             logging.error(f"Failed to load image for AI: {e}")
             return None
 
-        # Function to build the prompt for the AI model
     def _build_prompt(self, xml_context: str, previous_actions: List[str], available_actions: List[str], current_screen_visit_count: int, current_composite_hash: str) -> str:
         """Builds the detailed prompt for the AI model, including visit count awareness."""
         action_descriptions = {
             "click": "Visually identify and select an interactive element. Provide its best identifier (resource-id, content-desc, or text).",
-            # --- Edit: Added clarification for input action ---
             "input": "Visually identify a text input field (e.g., class='android.widget.EditText'). Provide its best identifier AND the text to input. **CRITICAL: ONLY suggest 'input' for elements designed for text entry.**",
-            # --- End Edit ---
             "scroll_down": "Scroll the view downwards.",
             "scroll_up": "Scroll the view upwards.",
             "back": "Navigate back using the system back button."
@@ -71,25 +129,20 @@ class AIAssistant:
         action_list_str = "\n".join([f"- {a}: {action_descriptions.get(a, '')}" for a in available_actions])
         history_str = "\n".join([f"- {pa}" for pa in previous_actions]) if previous_actions else "None"
 
-        # --- Added Visit Count Context ---
         visit_context = f"""
         CURRENT SCREEN CONTEXT:
         - Hash: {current_composite_hash}
         - Visit Count (this session): {current_screen_visit_count}
         """
-        # --- Instruction based on Visit Count ---
         visit_instruction = ""
-        # Use a configurable threshold, e.g., from config.LOOP_DETECTION_VISIT_THRESHOLD
-        loop_threshold = getattr(config, 'LOOP_DETECTION_VISIT_THRESHOLD', 3) # Default to 3 if not in config
+        loop_threshold = getattr(config, 'LOOP_DETECTION_VISIT_THRESHOLD', 3)
         if current_screen_visit_count > loop_threshold:
             visit_instruction = f"""
         **IMPORTANT LOOP PREVENTION:** This screen has been visited {current_screen_visit_count} times (more than the threshold of {loop_threshold}).
         Strongly prioritize actions that explore *new* functionality or are highly likely lead to a *different screen state* you haven't just come from.
         AVOID actions (like clicking standard confirmation buttons or simple navigation elements) if you suspect they will just return you to the immediately preceding screen state, unless absolutely necessary to fulfill a prerequisite for *further* progression. Consider scrolling or interacting with less obvious elements if possible.
         """
-        # ---------------------------------
 
-        # --- Define JSON examples as separate, standard strings ---
         json_format_example = """
         {
             "action": "click" | "input" | "scroll_up" | "scroll_down" | "back",
@@ -134,7 +187,6 @@ class AIAssistant:
             "reasoning": "Content appears to continue below viewport"
         }
         """
-        # --- End JSON example definitions ---
 
         prompt = f"""
         You are an expert Android application tester exploring an app using screen analysis.
@@ -145,7 +197,7 @@ class AIAssistant:
         - CORRECT: "Back"
         - INCORRECT: 'content-desc="Back"' or 'text="Back"'**
 
-        {visit_context}  # Insert visit count context here
+        {visit_context}
 
         CONTEXT:
         1. Screenshot: Provided as image input.
@@ -156,14 +208,13 @@ class AIAssistant:
         TASK:
         Analyze the screenshot and XML. Identify the BEST SINGLE action to perform next to logically progress or explore the app. Prioritize reaching NEW screens or enabling PROGRESSION buttons.
 
-        {visit_instruction} # Insert visit count instruction here
+        {visit_instruction}
 
         **CRUCIAL RULE for Progression Buttons (Next, Continue, Save, etc.):**
         - CHECK PREREQUISITES: Check XML for identifier and `enabled="true"`. Check visually.
         - IF DISABLED: Perform the prerequisite action first (provide its identifier).
         - PRIORITIZE PREREQUISITES.
 
-        # --- Edit: Added explicit rule for INPUT action ---
         **CRUCIAL RULE for 'input' Action:**
         - VERIFY ELEMENT TYPE: Before suggesting 'input', check the XML context for the target element. Ensure its `class` attribute indicates it is an editable field (e.g., `android.widget.EditText`, `android.widget.AutoCompleteTextView`, etc.).
         - DO NOT suggest 'input' for non-editable elements like `android.widget.TextView`, `android.widget.Button`, etc.
@@ -177,7 +228,6 @@ class AIAssistant:
           * android.widget.AutoCompleteTextView
           * android.widget.TextInputEditText
           * android.widget.SearchView
-        # --- End Edit ---
 
         General Priorities:
         1. Fulfill required prerequisites if progression buttons are disabled.
@@ -261,7 +311,6 @@ class AIAssistant:
         content_parts = [prompt, image_part]
 
         logging.info("--- Sending Prompt to AI ---")
-        # Truncate potentially long XML for logging clarity
         log_prompt = prompt.replace(xml_context, f"[XML Context Len:{len(xml_context)}]") if len(xml_context) > 1000 else prompt
         logging.debug(f"AI Prompt (XML potentially truncated):\n{log_prompt}")
         logging.info("-----------------------------")
@@ -271,184 +320,96 @@ class AIAssistant:
             content_parts = [prompt, image_part]
 
             if self.use_chat and self.chat:
-                # Use chat with history
                 response = self.chat.send_message(content_parts, safety_settings=self.safety_settings)
                 
-                # Manage history size if needed
                 if len(self.chat.history) > self.max_history:
-                    # Remove older messages while keeping the initial system prompt
                     excess = len(self.chat.history) - self.max_history
                     self.chat.history = self.chat.history[:1] + self.chat.history[1+excess:]
                     logging.debug(f"Trimmed chat history to {self.max_history} entries")
             else:
-                # Use standard generation without history
                 response = self.model.generate_content(content_parts, safety_settings=self.safety_settings)
 
-            # Calculate and log total elapsed time
             elapsed_time = time.time() - start_time
             logging.info(f"Total AI Processing Time: {elapsed_time:.2f} seconds")
 
-            # --- Streamline Response Processing ---
-            if not response.parts:
-                logging.warning("AI response has no parts (potentially blocked or empty).")
+            # Ensure usage_metadata and its attributes exist before accessing them
+            if hasattr(response, 'usage_metadata') and response.usage_metadata:
+                logging.info(f"Tokens used: Prompt={getattr(response.usage_metadata, 'prompt_token_count', 'N/A')}, Candidates={getattr(response.usage_metadata, 'candidates_token_count', 'N/A')}, Total={getattr(response.usage_metadata, 'total_token_count', 'N/A')}")
+            else:
+                logging.warning("Usage metadata not available in AI response.")
+
+            if not response.candidates:
+                logging.error("AI response has no candidates.")
+                self._log_empty_response_details(response)
                 return None
 
-            raw_response_text = response.text.strip()
-            if not raw_response_text:
-                logging.error("AI returned empty response.")
+            candidate = response.candidates[0]
+            if candidate.finish_reason != genai.protos.Candidate.FinishReason.STOP:
+                logging.warning(f"AI generation finished abnormally.")
+                self._log_empty_response_details(response)
                 return None
 
-            # Quick finish reason check
-            if response.candidates and response.candidates[0].finish_reason != 1:  # 1 = STOP
-                logging.warning(f"AI generation finished abnormally: {response.candidates[0].finish_reason}")
+            if not candidate.content or not candidate.content.parts:
+                logging.warning("AI response candidate has no content parts.")
+                self._log_empty_response_details(response) 
                 return None
+            
+            raw_response_text = response.text
+            if raw_response_text is None or not raw_response_text.strip():
+                logging.error("AI returned empty response (text is None or empty after strip, though parts may exist).")
+                self._log_empty_response_details(response)
+                return None
+            
+            raw_response_text = raw_response_text.strip()
 
-            # Simplified JSON extraction
             json_str = raw_response_text
             if json_str.startswith("```"): 
                 json_str = json_str.split("```")[1]
                 if json_str.startswith("json"): json_str = json_str[4:]
             json_str = json_str.strip()
 
-            # --- Logging for Raw Response ---
-            logging.info("--- Received Raw Response from AI ---")
-            raw_response_text = "[Response Error]" # Default in case of issues
-            try:
-                 # Accessing response.text might fail if response is blocked etc.
-                 if response.parts:
-                     raw_response_text = response.text # Get the actual text part
-                 else:
-                     # Log if the response structure is unexpected (e.g., blocked)
-                     logging.warning("AI response has no parts (potentially blocked or empty).")
-                     raw_response_text = "[No Text Part in Response]" # Placeholder text
-
-                 # Log the raw text (might be long) at DEBUG level
-                 logging.debug(f"Raw AI Response Text:\n{raw_response_text}")
-
-            except AttributeError:
-                 # Handle cases where response structure might be different than expected
-                 logging.warning("Could not access response.text or response.parts directly.")
-                 # Try accessing candidates if available as a fallback inspection
-                 if hasattr(response, 'candidates') and response.candidates:
-                     try: raw_response_text = response.candidates[0].content.parts[0].text
-                     except Exception: raw_response_text = "[Error accessing candidate text]"
-                 else: raw_response_text = "[No text found in response structure]"
-                 logging.debug(f"Fallback Raw AI Response Text:\n{raw_response_text}")
-            except Exception as log_err:
-                 # Catch any other errors during logging attempt
-                 logging.warning(f"Could not log or access raw AI response text: {log_err}")
-                 raw_response_text = f"[Error Logging Response: {log_err}]"
-
-
-            # --- Detailed Logging of Response Metadata ---
-            if hasattr(response, 'prompt_feedback'):
-                logging.debug(f"Prompt Feedback: {response.prompt_feedback}")
-            else: logging.debug("Prompt Feedback attribute not found.")
-
-            finish_reason_val = None; finish_reason_name = 'UNKNOWN'; safety_ratings_log = "N/A"
-            if response.candidates:
-                candidate = response.candidates[0] # Process first candidate
-                if hasattr(candidate, 'finish_reason'):
-                    finish_reason_val = candidate.finish_reason
-                    try: finish_reason_name = genai.protos.Candidate.FinishReason(finish_reason_val).name
-                    except Exception: finish_reason_name = f"Value({finish_reason_val})" # Fallback to value
-                else: logging.debug("Finish Reason attribute not found in candidate.")
-
-                if hasattr(candidate, 'safety_ratings'):
-                     safety_ratings_log = str(candidate.safety_ratings)
-                     logging.debug(f"Safety Ratings: {safety_ratings_log}")
-                else: logging.debug("Safety Ratings attribute not found in candidate.")
-            else: logging.warning("AI response has no candidates.")
-
-            logging.info(f"Generation Finish Reason: {finish_reason_name}")
-            logging.info("------------------------------------")
-
-            # --- Check for abnormal finish or safety blocks ---
-            # Define normal finish reason value (usually 1 for STOP)
-            NORMAL_FINISH_REASON = 1
-            if finish_reason_val != NORMAL_FINISH_REASON:
-                 logging.warning(f"AI generation finished abnormally or was blocked. Reason: {finish_reason_name} ({finish_reason_val}).")
-                 # Provide more context if blocked for safety
-                 SAFETY_FINISH_REASON = 3 # Assuming 3 indicates safety block
-                 if finish_reason_val == SAFETY_FINISH_REASON:
-                     logging.warning(f"Safety Ratings causing block: {safety_ratings_log}")
-                 logging.warning(f"Raw response content that was blocked/abnormal: {raw_response_text}")
-                 return None # Do not proceed
-
-            # --- Process Normal Response ---
-            ai_response_text = raw_response_text.strip()
-            if not ai_response_text:
-                 logging.error("AI returned an empty response string after successful finish.")
-                 return None
-
-            # Attempt to clean and extract JSON from the final text
-            json_str = ai_response_text
-            # Handle common markdown code blocks
-            if json_str.startswith("```json"): json_str = json_str[7:]
-            elif json_str.startswith("```"): json_str = json_str[3:]
-            if json_str.endswith("```"): json_str = json_str[:-3]
-            json_str = json_str.strip() # Clean trailing/leading whitespace
-
-            if not json_str:
-                logging.error("Extracted JSON string is empty after cleaning markdown.")
-                logging.error(f"Original problematic AI response was: '{ai_response_text}'")
-                return None
-
-            # Attempt to parse the potentially list-or-dict JSON string
             try:
                 parsed_data: Any = json.loads(json_str)
-                action_data: Optional[Dict] = None # Variable to hold the final action dictionary
+                action_data: Optional[Dict] = None
 
-                # --- Handle list wrapper: Check if response is list like [{...}] ---
                 if isinstance(parsed_data, list):
-                    # Check if it's a list containing exactly one dictionary
                     if len(parsed_data) == 1 and isinstance(parsed_data[0], dict):
                         logging.warning("AI returned response wrapped in a list '[{...}]', extracting the inner dictionary.")
-                        action_data = parsed_data[0] # Use the dictionary inside the list
+                        action_data = parsed_data[0]
                     else:
                         logging.error(f"AI returned a list, but not the expected format [dict] (length={len(parsed_data)}): {parsed_data}")
-                        return None # Fail if list format is wrong
+                        return None
                 elif isinstance(parsed_data, dict):
-                    # If it's already a dictionary, use it directly
                     action_data = parsed_data
                 else:
-                    # The parsed data is neither a list nor a dict
                     logging.error(f"AI response parsed, but is neither a list nor a dict. Type: {type(parsed_data)}, Data: {parsed_data}")
                     return None
-                # ---------------------------------------------------------------------
 
-                # --- Validation (Operates on the extracted action_data dictionary) ---
                 if action_data is None:
-                    # This check is defensive, should not be reached if logic above is correct
                     logging.error("Internal logic error: action_data is None after parsing/extraction checks.")
                     return None
 
-                # Check for required 'action' key
                 if "action" not in action_data:
                     logging.error(f"Extracted JSON object lacks required 'action' key: {action_data}")
                     return None
 
-                # Validate identifier presence for relevant actions
                 action_type = action_data.get("action")
                 if action_type in ["click", "input"] and not action_data.get("target_identifier"):
                      logging.error(f"AI response for action '{action_type}' missing required 'target_identifier'. Data: {action_data}")
                      return None
 
-                # Validate input_text presence for input action (allow empty string, but not null/None)
                 if action_type == "input" and action_data.get("input_text") is None:
                     logging.error(f"AI response for action 'input' missing required 'input_text' (was None). Data: {action_data}")
                     return None
 
-                # Optional bbox validation (if present)
                 bbox = action_data.get("target_bounding_box")
                 if bbox:
                     if not isinstance(bbox, dict) or \
                        "top_left" not in bbox or not isinstance(bbox["top_left"], list) or len(bbox["top_left"]) != 2 or \
                        "bottom_right" not in bbox or not isinstance(bbox["bottom_right"], list) or len(bbox["bottom_right"]) != 2:
                         logging.warning(f"AI provided 'target_bounding_box' but format is invalid: {bbox}. Nullifying bbox for this action.")
-                        action_data["target_bounding_box"] = None # Correct the data for subsequent use
+                        action_data["target_bounding_box"] = None
 
-                # --- Log Success and Return Validated Data ---
                 logging.info(f"AI Suggested Action: {action_data.get('action')} - Target Identifier: {action_data.get('target_identifier')}")
                 logging.debug(f"AI Full Parsed & Validated Suggestion: {action_data}")
                 return action_data
@@ -458,11 +419,9 @@ class AIAssistant:
                 logging.error(f"Problematic JSON string received from AI: '{json_str}'")
                 return None
             except Exception as parse_err:
-                # Catch other potential errors during validation (e.g., unexpected types)
                 logging.error(f"Error during JSON processing or validation: {parse_err}", exc_info=True)
                 return None
 
         except Exception as e:
-            # Catch broader errors during the API call or initial response handling
             logging.error(f"Unhandled error during AI interaction or response processing: {e}", exc_info=True)
             return None

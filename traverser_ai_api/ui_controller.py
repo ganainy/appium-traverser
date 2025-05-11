@@ -435,32 +435,25 @@ class CrawlerControllerWindow(QMainWindow):
         """Applies default values from config.py to UI widgets.
            Does not log directly, intended for internal use or by a logging wrapper.
         """
-        logging.debug("Attempting to apply default config values to UI widgets...")
         for key, widget in self.config_widgets.items():
-            logging.debug(f"Processing default for UI widget bound to config key: '{key}'")
             if hasattr(config, key):
                 value = getattr(config, key)
-                logging.debug(f"Key '{key}' found in config.py. Retrieved value: '{value}' (type: {type(value)})")
                 
                 if isinstance(widget, QLineEdit):
                     widget.setText(str(value if value is not None else ""))
-                    logging.debug(f"Set QLineEdit '{key}' to: '{widget.text()}'")
                 elif isinstance(widget, QSpinBox):
                     try:
                         val_to_set = int(value)
                         widget.setValue(val_to_set)
-                        logging.debug(f"Successfully set QSpinBox '{key}' to: {val_to_set}")
                     except (ValueError, TypeError) as e:
                         logging.warning(f"Could not set QSpinBox '{key}' from config value: '{value}' (type: {type(value)}). Error: {e}. Setting to widget's minimum.")
                         widget.setValue(widget.minimum())
                 elif isinstance(widget, QCheckBox):
                     widget.setChecked(bool(value))
-                    logging.debug(f"Set QCheckBox '{key}' to: {widget.isChecked()}")
                 elif isinstance(widget, QComboBox):
                     index = widget.findText(str(value))
                     if index >= 0:
                         widget.setCurrentIndex(index)
-                        logging.debug(f"Set QComboBox '{key}' to index: {index} ('{str(value)}')")
                     else:
                         logging.warning(f"Default value '{value}' for QComboBox '{key}' not found in items. Current items: {[widget.itemText(i) for i in range(widget.count())]}")
                         if hasattr(self, 'log_output') and self.log_output: # Also log to UI log for visibility
@@ -472,10 +465,8 @@ class CrawlerControllerWindow(QMainWindow):
                     elif value is not None:
                         text_to_set = str(value)
                     widget.setPlainText(text_to_set)
-                    logging.debug(f"Set QTextEdit '{key}'") # Avoid logging potentially long text
             else:
                 logging.warning(f"Config key '{key}' not found in config.py module using hasattr. Widget will retain its current value or value from user_config.json if loaded.")
-                # If this is a QSpinBox, it will retain its initial value (likely its minimum).
                 if hasattr(self, 'log_output') and self.log_output: # Also log to UI log for visibility
                     self.log_output.append(f"Warning: Config key '{key}' not found in config.py. Using existing or initial value for this UI field.")
 
