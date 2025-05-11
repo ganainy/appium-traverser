@@ -86,6 +86,7 @@ APP_LAUNCH_WAIT_TIME = 7 # Seconds to wait after launching an app for it to stab
 # AI Settings
 USE_CHAT_MEMORY = True  # Enable/disable chat history for more context-aware responses
 MAX_CHAT_HISTORY = 10   # Maximum number of previous interactions to keep in memory
+DEFAULT_MODEL_TYPE = 'flash-latest-fast' # Specify the default model to use
 
 
 # Gemini Model Configurations
@@ -101,7 +102,7 @@ GEMINI_MODELS = {
             'temperature': 0.3,
             'top_p': 0.8,
             'top_k': 20,
-            'max_output_tokens': 1024, # Adjust if needed for Flash
+            'max_output_tokens': 65536  
         }
     },
     'pro-latest-accurate': { # Optimized for accuracy using Pro model and generation config
@@ -111,13 +112,10 @@ GEMINI_MODELS = {
             'temperature': 0.7,
             'top_p': 0.95,
             'top_k': 40,
-            'max_output_tokens': 2048, # Adjust if needed for Pro
+            'max_output_tokens': 65536, 
         }
     }
 }
-
-# Default model configuration
-DEFAULT_MODEL_TYPE = 'flash-latest-fast' # Changed default to the latest flash model
 
 # --- Traffic Capture Settings (PCAPdroid) ---
 ENABLE_TRAFFIC_CAPTURE = True # Set to True to enable traffic capture during crawl

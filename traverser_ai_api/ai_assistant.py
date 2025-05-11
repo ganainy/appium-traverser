@@ -354,14 +354,24 @@ class AIAssistant:
                 self._log_empty_response_details(response) 
                 return None
             
-            raw_response_text = response.text
-            if raw_response_text is None or not raw_response_text.strip():
-                logging.error("AI returned empty response (text is None or empty after strip, though parts may exist).")
+            # Directly use the text from the first part of the candidate's content.
+            # The previous check ensures candidate.content.parts is not empty.
+            first_part = candidate.content.parts[0]
+            
+            if not hasattr(first_part, 'text') or not first_part.text:
+                logging.error("AI response's first candidate part has no 'text' attribute or 'text' is empty.")
+                self._log_empty_response_details(response) 
+                return None
+
+            raw_response_text = first_part.text.strip() # Extract and strip whitespace
+            
+            if not raw_response_text: # Check if empty after strip
+                logging.error("AI response's first candidate part text became empty after stripping.")
                 self._log_empty_response_details(response)
                 return None
             
-            raw_response_text = raw_response_text.strip()
-
+            # raw_response_text is now a non-empty string.
+            # The original separate strip() call and subsequent assignment to json_str will use this.
             json_str = raw_response_text
             if json_str.startswith("```"): 
                 json_str = json_str.split("```")[1]

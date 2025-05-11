@@ -91,6 +91,75 @@ class AppCrawler:
         self.screenshot_annotator = ScreenshotAnnotator(self.driver, config) # Pass the config module
 
 
+    def perform_full_cleanup(self):
+        logging.info("Performing full cleanup sequence...")
+
+        # 1. Stop and Pull Traffic Capture File
+        try:
+            if self.traffic_capture_enabled and self.traffic_capture_manager and self.traffic_capture_manager.pcap_filename_on_device:
+                logging.info("Attempting to stop and pull traffic capture...")
+                if self.traffic_capture_manager.stop_traffic_capture():
+                    logging.info("Traffic capture stopped successfully via full_cleanup.")
+                    if self.traffic_capture_manager.pull_traffic_capture_file():
+                        logging.info("Traffic capture file pulled successfully via full_cleanup.")
+                        if self.config_dict.get('CLEANUP_DEVICE_PCAP_FILE', False):
+                            self.traffic_capture_manager.cleanup_device_pcap_file()
+                    else:
+                        logging.error("Failed to pull traffic capture file during full_cleanup.")
+                else:
+                    logging.warning("Failed to stop traffic capture cleanly during full_cleanup. Attempting to pull anyway.")
+                    if self.traffic_capture_manager.pcap_filename_on_device and self.traffic_capture_manager.local_pcap_file_path:
+                        if self.traffic_capture_manager.pull_traffic_capture_file():
+                            logging.info("Traffic capture file pulled (after stop command issue) via full_cleanup.")
+                            if self.config_dict.get('CLEANUP_DEVICE_PCAP_FILE', False):
+                                self.traffic_capture_manager.cleanup_device_pcap_file()
+                        else:
+                            logging.error("Failed to pull traffic capture file (after stop command issue) during full_cleanup.")
+                    else:
+                        logging.info("Skipping pull after failed stop, as necessary info for pull might be missing (e.g. pcap_filename_on_device or local_pcap_file_path not set).")
+            elif not self.traffic_capture_enabled:
+                logging.info("Traffic capture was not enabled. Skipping traffic cleanup.")
+            elif not self.traffic_capture_manager:
+                logging.warning("TrafficCaptureManager not initialized. Skipping traffic cleanup.")
+            elif not (self.traffic_capture_manager.pcap_filename_on_device if self.traffic_capture_manager else False):
+                 logging.info("Traffic capture was enabled but pcap_filename_on_device not set (capture might not have started). Skipping traffic cleanup.")
+        except Exception as e_traffic:
+            logging.error(f"Error during traffic capture cleanup: {e_traffic}", exc_info=True)
+        
+        # 2. Disconnect Appium Driver
+        try:
+            if self.driver:
+                logging.info("Attempting to disconnect Appium driver...")
+                self.driver.disconnect()
+                logging.info("Appium driver disconnected successfully.")
+            else:
+                logging.info("Appium driver instance not found. Skipping disconnect.")
+        except Exception as e_driver:
+            logging.error(f"Error during Appium driver disconnect: {e_driver}", exc_info=True)
+        
+        # 3. Close Database
+        try:
+            if self.db_manager:
+                logging.info("Attempting to close database connection...")
+                self.db_manager.close()
+                logging.info("Database connection closed successfully.")
+            else:
+                logging.info("Database manager instance not found. Skipping DB close.")
+        except Exception as e_db:
+            logging.error(f"Error during database close: {e_db}", exc_info=True)
+            
+        try:
+            if self.screen_state_manager:
+                logging.info(f"Full cleanup: Total unique screens discovered: {self.screen_state_manager.get_total_screens()}")
+                logging.info(f"Full cleanup: Total transitions recorded in DB: {self.screen_state_manager.get_total_transitions()}")
+            else:
+                logging.info("Screen state manager not available for final stats.")
+        except Exception as e_stats:
+            logging.error(f"Error retrieving final stats: {e_stats}", exc_info=True)
+            
+        logging.info("Crawler full cleanup finished.")
+
+
     def _get_element_center(self, element: WebElement) -> Optional[Tuple[int, int]]:
         """Safely gets the center coordinates of a WebElement."""
         if not element: 
@@ -145,6 +214,24 @@ class AppCrawler:
             self.driver.connect()
             logging.info("Appium driver connected successfully before traffic capture initiation.")
 
+            # Ensure database is connected
+            if self.db_manager:
+                try:
+                    logging.info("Attempting to connect to the database...")
+                    # Assuming connect() is idempotent or handles already connected state
+                    self.db_manager.connect() 
+                    logging.info("Database connection successful or already established.")
+                except Exception as e_db_connect:
+                    logging.critical(f"Failed to connect to the database: {e_db_connect}. Stopping crawler.", exc_info=True)
+                    print(f"{UI_END_PREFIX} FAILURE_DB_CONNECT: {str(e_db_connect)}")
+                    # perform_full_cleanup will be called in the outer finally block
+                    return 
+            else:
+                logging.critical("Database manager (self.db_manager) is not initialized. Stopping crawler.")
+                print(f"{UI_END_PREFIX} FAILURE_DB_MANAGER_MISSING")
+                # perform_full_cleanup will be called in the outer finally block
+                return
+
             # --- Start Traffic Capture (if enabled) ---
             if self.traffic_capture_enabled:
                 if not self.traffic_capture_manager.start_traffic_capture(): # Updated to use TrafficCaptureManager
@@ -171,25 +258,58 @@ class AppCrawler:
             # --- Load or Initialize Run ---
             if config.CONTINUE_EXISTING_RUN:
                 logging.info("Attempting to continue existing run...")
-                # When continuing, we assume the app state is where we left off, or will be handled by existing logic.
-                # No explicit re-launch here, but ensure screen_state_manager loads correctly.
                 if not self.screen_state_manager.load_from_db():
-                    logging.warning("Failed to load existing run, starting fresh. Will use current foreground app state.")
-                    # If load fails, initialize with whatever is current, which should be target app due to above check
-                    self.screen_state_manager.initialize_run(self.driver.get_current_activity(), self.driver.get_current_package())
+                    logging.warning("Failed to load existing run data from DB, starting fresh. Will use current foreground app state.")
+                    # Initialize with the (now confirmed) target app's activity and package
+                    current_activity = self.driver.get_current_activity()
+                    current_package = self.driver.get_current_package()
+                    if current_package != self.config_dict.get("APP_PACKAGE"):
+                        logging.warning(f"Current foreground app ({current_package}/{current_activity}) does not match target ({self.config_dict.get('APP_PACKAGE')}). Will initialize SSM with target config.")
+                        current_activity = self.config_dict.get("APP_ACTIVITY")
+                        current_package = self.config_dict.get("APP_PACKAGE")
+                    self.screen_state_manager.initialize_run(current_activity, current_package)
                 else:
-                    logging.info(f"Successfully loaded run. Current step: {self.screen_state_manager.current_step_number}")
-                    # Optional: Add a check here if the loaded state's package matches target_pkg
-                    if self.screen_state_manager.app_package != self.config_dict.get("APP_PACKAGE"):
-                        logging.warning(f"Loaded run's package ({self.screen_state_manager.app_package}) does not match target ({self.config_dict.get('APP_PACKAGE')}). This might lead to issues.")
+                    logging.info(f"Successfully loaded some data from DB. Current step from DB: {self.screen_state_manager.current_step_number}")
+                    # Check if the loaded run's package information is valid, if not, re-initialize with current target.
+                    if not self.screen_state_manager.app_package or not self.screen_state_manager.start_activity:
+                        logging.warning(f"Loaded run from DB but app_package ('{self.screen_state_manager.app_package}') or start_activity ('{self.screen_state_manager.start_activity}') is missing. Re-initializing SSM with current target app details.")
+                        current_activity = self.config_dict.get("APP_ACTIVITY")
+                        current_package = self.config_dict.get("APP_PACKAGE")
+                        self.screen_state_manager.initialize_run(current_activity, current_package)
+                        logging.info("Step number reset to 0 due to re-initialization of SSM with current target app details.")
+                    elif self.screen_state_manager.app_package != self.config_dict.get("APP_PACKAGE"):
+                        logging.warning(f"Loaded run's package ({self.screen_state_manager.app_package}) does not match current target ({self.config_dict.get('APP_PACKAGE')}). Re-initializing SSM with current target app details.")
+                        current_activity = self.config_dict.get("APP_ACTIVITY")
+                        current_package = self.config_dict.get("APP_PACKAGE")
+                        self.screen_state_manager.initialize_run(current_activity, current_package)
+                        logging.info("Step number reset to 0 due to mismatch with current target app.")
+                    else:
+                        logging.info(f"SSM retains loaded app_package='{self.screen_state_manager.app_package}' and start_activity='{self.screen_state_manager.start_activity}'.")
 
             else: # Starting a fresh run
                 logging.info("Starting a fresh run (CONTINUE_EXISTING_RUN is False).")
-                self.db_manager.initialize_db() # Clear and init DB for a fresh run
+                if self.db_manager:
+                    self.db_manager.initialize_db() # Clear and init DB for a fresh run
+                else:
+                    logging.warning("DB Manager not available, cannot initialize DB for fresh run.")
                 # Initialize with the (now confirmed) target app's activity and package
-                self.screen_state_manager.initialize_run(self.driver.get_current_activity(), self.driver.get_current_package())
+                current_activity = self.driver.get_current_activity()
+                current_package = self.driver.get_current_package()
+                if current_package != self.config_dict.get("APP_PACKAGE"):
+                    logging.warning(f"Current foreground app ({current_package}/{current_activity}) does not match target ({self.config_dict.get('APP_PACKAGE')}). Initializing SSM with target config.")
+                    current_activity = self.config_dict.get("APP_ACTIVITY")
+                    current_package = self.config_dict.get("APP_PACKAGE")
+                self.screen_state_manager.initialize_run(current_activity, current_package)
             # ---
-            logging.info(f"Crawler initialized. Starting activity: {self.screen_state_manager.start_activity}, App package: {self.screen_state_manager.app_package}")
+            # Ensure app_package and start_activity in screen_state_manager are now correctly set from target config if they were None
+            if not self.screen_state_manager.app_package:
+                self.screen_state_manager.app_package = self.config_dict.get("APP_PACKAGE")
+                logging.info(f"SSM app_package was None, set to target: {self.screen_state_manager.app_package}")
+            if not self.screen_state_manager.start_activity: # start_activity can be tricky if not well-defined for target
+                self.screen_state_manager.start_activity = self.config_dict.get("APP_ACTIVITY")
+                logging.info(f"SSM start_activity was None, set to target: {self.screen_state_manager.start_activity}")
+
+            logging.info(f"Crawler initialized. Using Start Activity: '{self.screen_state_manager.start_activity}', App Package: '{self.screen_state_manager.app_package}' for the run.")
             print(f"{UI_STATUS_PREFIX} RUNNING") # UI Update
 
             start_time = time.time()
@@ -333,18 +453,33 @@ class AppCrawler:
                 action_desc_for_ui = f"{action_type_sugg}"
                 if isinstance(target_obj_sugg, WebElement):
                     try: # Safely get text or content-desc for UI
+                        logging.debug("Attempting to get element text for UI description.")
                         el_text = target_obj_sugg.text
+                        logging.debug(f"Element text for UI: '{el_text}'")
+
+                        logging.debug("Attempting to get element content-desc for UI description.")
                         el_cd = target_obj_sugg.get_attribute('content-desc')
-                        el_id = target_obj_sugg.id
+                        logging.debug(f"Element content-desc for UI: '{el_cd}'")
+
+                        logging.debug("Attempting to get element id for UI description.")
+                        el_id = target_obj_sugg.id # This might be the problematic access if element is stale
+                        logging.debug(f"Element id for UI: '{el_id}'")
+                        
                         ui_target_id = el_text if el_text else el_cd if el_cd else el_id if el_id else "element"
                         action_desc_for_ui += f" on '{ui_target_id}'"
-                    except Exception:
-                        action_desc_for_ui += " on [element]"
+                    except StaleElementReferenceException as sere:
+                        logging.warning(f"StaleElementReferenceException generating UI action description: {str(sere)}")
+                        action_desc_for_ui += " on [stale element]"
+                    except Exception as e_ui_desc:
+                        logging.error(f"Unexpected {type(e_ui_desc).__name__} generating UI action description: {str(e_ui_desc)}", exc_info=True)
+                        action_desc_for_ui += " on [error accessing element]"
                 elif isinstance(target_obj_sugg, str): # For scroll actions
                     action_desc_for_ui += f" {target_obj_sugg}"
                 if input_text_sugg:
                     action_desc_for_ui += f" with text '{input_text_sugg}'"
-                print(f"{UI_ACTION_PREFIX} {action_desc_for_ui}")
+                
+                logging.info(f"Preparing to print UI action update: {action_desc_for_ui}") # Added log
+                print(f"{UI_ACTION_PREFIX} {action_desc_for_ui}") # UI Update
                 # ---
 
                 # --- Get element details *before* action for logging/DB ---
@@ -419,33 +554,16 @@ class AppCrawler:
             logging.info("Crawling loop finished.")
             print(f"{UI_END_PREFIX} SUCCESS") # UI Update
 
+        except KeyboardInterrupt:
+            logging.warning("KeyboardInterrupt caught within Crawler.run(). Cleanup will proceed in finally block.")
+            # Allow finally block to handle cleanup
+            print(f"{UI_END_PREFIX} INTERRUPTED_KEYBOARD") # UI Update
+        except SystemExit as se:
+            logging.warning(f"SystemExit caught in Crawler.run(): {se}. Cleanup will proceed in finally block.")
+            print(f"{UI_END_PREFIX} INTERRUPTED_SYSTEM_EXIT: {str(se)}") # UI Update
         except Exception as e:
             logging.critical(f"An unhandled exception occurred during crawling: {e}", exc_info=True)
             print(f"{UI_END_PREFIX} FAILURE_UNHANDLED_EXCEPTION: {str(e)}") # UI Update
         finally:
-            logging.info("Performing cleanup...")
-            # --- Stop and Pull Traffic Capture File (if enabled and started) ---
-            if self.traffic_capture_enabled and self.traffic_capture_manager.pcap_filename_on_device:
-                if self.traffic_capture_manager.stop_traffic_capture(): # Updated to use TrafficCaptureManager
-                    logging.info("Traffic capture stopped.")
-                    if self.traffic_capture_manager.pull_traffic_capture_file(): # Updated to use TrafficCaptureManager
-                        logging.info("Traffic capture file pulled.")
-                        if self.config_dict.get('CLEANUP_DEVICE_PCAP_FILE', False): # Changed from getattr
-                            self.traffic_capture_manager.cleanup_device_pcap_file() # Updated to use TrafficCaptureManager
-                    else:
-                        logging.error("Failed to pull traffic capture file.")
-                else:
-                    logging.warning("Failed to stop traffic capture cleanly. May attempt to pull anyway.")
-                    # Attempt pull even if stop failed, as file might exist
-                    if self.traffic_capture_manager.pull_traffic_capture_file(): # Updated to use TrafficCaptureManager
-                        logging.info("Traffic capture file pulled (after stop command issue).")
-                        if self.config_dict.get('CLEANUP_DEVICE_PCAP_FILE', False): # Changed from getattr
-                            self.traffic_capture_manager.cleanup_device_pcap_file() # Updated to use TrafficCaptureManager
-                    else:
-                        logging.error("Failed to pull traffic capture file (after stop command issue).")
-            # --- End Stop and Pull Traffic Capture ---
-            self.driver.disconnect()
-            self.db_manager.close()
-            logging.info(f"Total unique screens discovered: {self.screen_state_manager.get_total_screens()}") # MODIFIED
-            logging.info(f"Total transitions recorded in DB: {self.screen_state_manager.get_total_transitions()}") # MODIFIED
-            logging.info("Crawler run finished and cleaned up.")
+            logging.info("Crawler.run() is now in its finally block.")
+            self.perform_full_cleanup()

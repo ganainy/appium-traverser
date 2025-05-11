@@ -4,3 +4,5 @@
 
 # Python virtual environment
 .venv/
+
+/traverser_ai_api/user_config.json
