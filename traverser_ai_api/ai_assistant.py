@@ -3,9 +3,10 @@ import logging
 import json
 from PIL import Image
 import io
-from typing import Optional, Dict, List, Any  # Add Any here
+from typing import Optional, Dict, List, Any
 from . import config
-import time  # Add this import at the top
+import time
+import re 
 
 class AIAssistant:
     """Handles interactions with the Generative AI model."""
@@ -16,15 +17,13 @@ class AIAssistant:
         try:
             genai.configure(api_key=api_key)
             
-            # Get model configuration
             model_type = model_name or getattr(config, 'DEFAULT_MODEL_TYPE', 'pro-vision')
             model_config = getattr(config, 'GEMINI_MODELS', {}).get(model_type)
             
             if not model_config:
                 logging.warning(f"Model type '{model_type}' not found in config, using default pro-vision")
-                model_config = {'name': 'gemini-pro-vision'}
+                model_config = {'name': 'gemini-pro-vision'} # Fallback, though pro-vision might not be ideal for chat
             
-            # Initialize model with configuration
             self.model = genai.GenerativeModel(
                 model_config['name'],
                 generation_config=model_config.get('generation_config')
@@ -35,12 +34,19 @@ class AIAssistant:
             
             self.safety_settings = safety_settings
             
-            # Initialize chat if enabled
             self.use_chat = getattr(config, 'USE_CHAT_MEMORY', False)
             if self.use_chat:
-                self.chat = self.model.start_chat(history=[])
-                self.max_history = getattr(config, 'MAX_CHAT_HISTORY', 10)
-                logging.info(f"Chat memory enabled (max history: {self.max_history})")
+                # Check if model supports chat (multi-turn conversations)
+                # Basic check: Vision models often don't support .start_chat directly, non-vision 'pro' models do.
+                # A more robust check might involve inspecting model capabilities if API provides it.
+                if "vision" not in model_config['name']:
+                    self.chat = self.model.start_chat(history=[])
+                    self.max_history = getattr(config, 'MAX_CHAT_HISTORY', 10)
+                    logging.info(f"Chat memory enabled (max history: {self.max_history})")
+                else:
+                    logging.warning(f"Model {model_config['name']} may not support chat history. Disabling chat memory.")
+                    self.chat = None
+                    self.use_chat = False # Force disable
             else:
                 self.chat = None
                 
@@ -64,16 +70,27 @@ class AIAssistant:
             if hasattr(response, 'candidates') and response.candidates:
                 candidate = response.candidates[0]
                 finish_reason_value = getattr(candidate, 'finish_reason', 'N/A')
-                finish_reason_name = genai.protos.Candidate.FinishReason(finish_reason_value).name if isinstance(finish_reason_value, int) else str(finish_reason_value)
+                # Convert enum int to name if possible
+                finish_reason_name = finish_reason_value
+                if isinstance(finish_reason_value, int):
+                    try: finish_reason_name = genai.protos.Candidate.FinishReason(finish_reason_value).name
+                    except ValueError: pass # Keep as int if unknown enum
+
                 logging.info(f"  Candidate Finish Reason: {finish_reason_name} ({finish_reason_value})")
                 
                 if hasattr(candidate, 'safety_ratings') and candidate.safety_ratings:
                     logging.info("  Candidate Safety Ratings:")
                     for rating in candidate.safety_ratings:
-                        category = getattr(rating, 'category', 'N/A')
-                        probability = getattr(rating, 'probability', 'N/A')
-                        category_name = genai.protos.HarmCategory(category).name if isinstance(category, int) else str(category)
-                        probability_name = genai.protos.HarmProbability(probability).name if isinstance(probability, int) else str(probability)
+                        category_val = getattr(rating, 'category', 'N/A')
+                        probability_val = getattr(rating, 'probability', 'N/A')
+                        category_name = category_val
+                        probability_name = probability_val
+                        if isinstance(category_val, int):
+                            try: category_name = genai.protos.HarmCategory(category_val).name
+                            except ValueError: pass
+                        if isinstance(probability_val, int):
+                            try: probability_name = genai.protos.HarmProbability(probability_val).name
+                            except ValueError: pass
                         logging.info(f"    Category: {category_name}, Probability: {probability_name}")
                 else:
                     logging.info("  No safety ratings available for the candidate or attribute missing.")
@@ -90,17 +107,15 @@ class AIAssistant:
                             part_text_snippet = f"InlineData: mime_type={part.inline_data.mime_type}"
                         elif not hasattr(part, 'text') or not part.text:
                             part_text_snippet = "<Part has no text or text is empty>"
-
                         logging.info(f"    Part {i} ({type(part).__name__}): {part_text_snippet}")
                 else:
                     logging.info("  No content parts found for the candidate or attributes missing.")
             else:
                 logging.info("  No candidates found in AI response or attribute missing.")
             
-            if hasattr(response, 'text'):
+            if hasattr(response, 'text'): # For non-chat responses or simple text access
                 logging.info(f"  Raw response.text (stripped): '{response.text.strip() if response.text is not None else '<None>'}'")
 
-            # Ensure usage_metadata and its attributes exist before accessing them
             if hasattr(response, 'usage_metadata') and response.usage_metadata:
                 logging.info(f"Usage Metadata: Prompt Tokens={getattr(response.usage_metadata, 'prompt_token_count', 'N/A')}, Candidates Tokens={getattr(response.usage_metadata, 'candidates_token_count', 'N/A')}, Total Tokens={getattr(response.usage_metadata, 'total_token_count', 'N/A')}")
             else:
@@ -110,7 +125,6 @@ class AIAssistant:
             logging.error(f"  Error during detailed AI response analysis: {e_details}", exc_info=True)
 
     def _prepare_image_part(self, screenshot_bytes: bytes) -> Optional[Image.Image]:
-        """Converts screenshot bytes to PIL Image."""
         try:
             return Image.open(io.BytesIO(screenshot_bytes))
         except Exception as e:
@@ -118,7 +132,6 @@ class AIAssistant:
             return None
 
     def _build_prompt(self, xml_context: str, previous_actions: List[str], available_actions: List[str], current_screen_visit_count: int, current_composite_hash: str) -> str:
-        """Builds the detailed prompt for the AI model, including visit count awareness."""
         action_descriptions = {
             "click": "Visually identify and select an interactive element. Provide its best identifier (resource-id, content-desc, or text).",
             "input": "Visually identify a text input field (e.g., class='android.widget.EditText'). Provide its best identifier AND the text to input. **CRITICAL: ONLY suggest 'input' for elements designed for text entry.**",
@@ -129,136 +142,72 @@ class AIAssistant:
         action_list_str = "\n".join([f"- {a}: {action_descriptions.get(a, '')}" for a in available_actions])
         history_str = "\n".join([f"- {pa}" for pa in previous_actions]) if previous_actions else "None"
 
-        visit_context = f"""
-        CURRENT SCREEN CONTEXT:
-        - Hash: {current_composite_hash}
-        - Visit Count (this session): {current_screen_visit_count}
-        """
+        visit_context = f"CURRENT SCREEN CONTEXT:\n- Hash: {current_composite_hash}\n- Visit Count (this session): {current_screen_visit_count}"
         visit_instruction = ""
         loop_threshold = getattr(config, 'LOOP_DETECTION_VISIT_THRESHOLD', 3)
         if current_screen_visit_count > loop_threshold:
             visit_instruction = f"""
-        **IMPORTANT LOOP PREVENTION:** This screen has been visited {current_screen_visit_count} times (more than the threshold of {loop_threshold}).
-        Strongly prioritize actions that explore *new* functionality or are highly likely lead to a *different screen state* you haven't just come from.
-        AVOID actions (like clicking standard confirmation buttons or simple navigation elements) if you suspect they will just return you to the immediately preceding screen state, unless absolutely necessary to fulfill a prerequisite for *further* progression. Consider scrolling or interacting with less obvious elements if possible.
+        **IMPORTANT LOOP PREVENTION:** This screen has been visited {current_screen_visit_count} times (more than threshold {loop_threshold}).
+        Strongly prioritize actions that explore *new* functionality or lead to a *different screen state*.
+        AVOID actions likely to return to the immediately preceding state unless necessary for progression.
+        Consider scrolling or interacting with less obvious elements.
         """
 
         json_format_example = """
         {
             "action": "click" | "input" | "scroll_up" | "scroll_down" | "back",
-            "target_identifier": "element identifier (required for click/input)",
-            "target_bounding_box": {
-                "top_left": [0.1, 0.5],
-                "bottom_right": [0.3, 0.6]
-            },
+            "target_identifier": "element identifier (required for click/input, use resource-id, content-desc, or text value)",
+            "target_bounding_box": {"top_left": [y1, x1], "bottom_right": [y2, x2]},
             "input_text": "text to input (required for input action)",
             "reasoning": "Brief explanation of why this action was chosen"
         }
         """
-
-        json_example_click = """
-        {
-            "action": "click",
-            "target_identifier": "Continue",
-            "target_bounding_box": {
-                "top_left": [0.1, 0.5],
-                "bottom_right": [0.3, 0.6]
-            },
-            "reasoning": "Clicking 'Continue' button to progress through setup"
-        }
-        """
-
-        json_example_input = """
-        {
-            "action": "input",
-            "target_identifier": "email_input",
-            "target_bounding_box": {
-                "top_left": [0.2, 0.3],
-                "bottom_right": [0.8, 0.4]
-            },
-            "input_text": "test@example.com",
-            "reasoning": "Filling email field to complete registration form"
-        }
-        """
-
-        json_example_scroll = """
-        {
-            "action": "scroll_down",
-            "reasoning": "Content appears to continue below viewport"
-        }
-        """
-
         prompt = f"""
-        You are an expert Android application tester exploring an app using screen analysis.
-        Your goal is to discover new screens and interactions systematically by performing ONE logical action at a time, with a focus on PROGRESSION.
-        You will be given the current screen's screenshot and its XML layout structure.
-        **IMPORTANT: 'click' and 'input' actions rely on you providing a good identifier (resource-id, content-desc, or text).
-        Provide ONLY the value without the attribute name. For example:
-        - CORRECT: "Back"
-        - INCORRECT: 'content-desc="Back"' or 'text="Back"'**
+        You are an expert Android app tester. Your goal is to explore systematically by performing ONE logical action.
+        You get a screenshot and XML layout. Prioritize PROGRESSION.
+        **IMPORTANT: For 'click'/'input', provide identifier (resource-id, content-desc, or text). ONLY the value.**
+        CORRECT: "Continue", INCORRECT: 'text="Continue"'.
 
         {visit_context}
 
         CONTEXT:
-        1. Screenshot: Provided as image input.
-        2. XML Layout: Provided below. Use this to find identifiers and check element states (like `class`, `enabled`, `clickable`).
+        1. Screenshot: Provided as image.
+        2. XML Layout: Provided below. Use for identifiers and element states (class, enabled, clickable).
         3. Previous Actions Taken *From This Screen*:
         {history_str}
 
         TASK:
-        Analyze the screenshot and XML. Identify the BEST SINGLE action to perform next to logically progress or explore the app. Prioritize reaching NEW screens or enabling PROGRESSION buttons.
+        Analyze screenshot/XML. Identify BEST SINGLE action to progress/explore. Prioritize NEW screens.
 
         {visit_instruction}
 
-        **CRUCIAL RULE for Progression Buttons (Next, Continue, Save, etc.):**
-        - CHECK PREREQUISITES: Check XML for identifier and `enabled="true"`. Check visually.
-        - IF DISABLED: Perform the prerequisite action first (provide its identifier).
+        **CRUCIAL: Progression Buttons (Next, Continue, Save):**
+        - CHECK PREREQUISITES: Check XML for identifier and `enabled="true"`. Visually verify.
+        - IF DISABLED: Perform prerequisite action first.
         - PRIORITIZE PREREQUISITES.
 
-        **CRUCIAL RULE for 'input' Action:**
-        - VERIFY ELEMENT TYPE: Before suggesting 'input', check the XML context for the target element. Ensure its `class` attribute indicates it is an editable field (e.g., `android.widget.EditText`, `android.widget.AutoCompleteTextView`, etc.).
-        - DO NOT suggest 'input' for non-editable elements like `android.widget.TextView`, `android.widget.Button`, etc.
-        - PARENT ELEMENT PRIORITY: If you see a non-editable text element (TextView) that appears to be part of an input field:
-          1. Look for its parent container that has an editable class
-          2. Use the parent's identifier instead of the child TextView
-          3. Verify the parent is actually editable (class='android.widget.EditText' or similar)
-          4. Only suggest 'input' if you find a proper editable parent
-        - EDITABLE CLASS EXAMPLES:
-          * android.widget.EditText
-          * android.widget.AutoCompleteTextView
-          * android.widget.TextInputEditText
-          * android.widget.SearchView
+        **CRUCIAL: 'input' Action:**
+        - VERIFY ELEMENT TYPE: Ensure XML class is editable (e.g., `android.widget.EditText`).
+        - DO NOT suggest 'input' for non-editable elements (TextView, Button).
+        - PARENT ELEMENT: If a non-editable text element is part of an input field, use its editable parent's identifier.
+        - EDITABLE CLASSES: `android.widget.EditText`, `android.widget.AutoCompleteTextView`, `android.widget.TextInputEditText`, `android.widget.SearchView`.
 
         General Priorities:
-        1. Fulfill required prerequisites if progression buttons are disabled.
-        2. Click enabled progression buttons ('Next', 'Save', 'Continue', etc.) to move forward.
-        3. Look for and prioritize elements related to:
-           - Privacy Policy, Terms of Service, Data Protection
-           - Account settings, Personal Information, Profile
-           - Registration, Login, or Data Collection forms
-        4. Explore other interactive elements likely to lead to NEW areas (especially if visit count is high).
-        5. Input text into fields if required or relevant for exploration.
-        6. Scroll if more content seems available OR if other actions seem unproductive/looping.
-        7. Use 'back' if exploration seems stuck or to return from a detail view (but avoid if it just completes a loop).
+        1. Fulfill prerequisites for disabled progression buttons.
+        2. Click enabled progression buttons.
+        3. Explore elements related to: Privacy, Terms, Data Protection, Account, Profile, Register, Login, Consent.
+        4. Explore other interactive elements likely leading to NEW areas (especially if visit count is high).
+        5. Input text if required/relevant.
+        6. Scroll if more content seems available OR if stuck/looping.
+        7. Use 'back' if stuck or to return from detail view (avoid if it completes a loop).
 
-        Look for elements with keywords like:
-        - "Privacy", "Policy", "Terms", "GDPR", "Data Protection"
-        - "Account", "Profile", "Personal", "Settings"
-        - "Register", "Sign up", "Login", "Create Account"
-        - "Consent", "Permissions", "Allow"
-
-        Choose ONE action from the available types:
+        Choose ONE action from:
         {action_list_str}
 
-        RESPONSE FORMAT: Return a JSON object with the following structure:
+        RESPONSE FORMAT (JSON only):
         {json_format_example}
 
-        Example responses:
-        {json_example_click}
-        {json_example_input}
-        {json_example_scroll}
-
-        XML CONTEXT FOR CURRENT SCREEN:
+        XML CONTEXT:
         ```xml
         {xml_context}
         ```
@@ -273,165 +222,118 @@ class AIAssistant:
                         current_screen_visit_count: int,
                         current_composite_hash: str
                        ) -> Optional[Dict]:
-        """
-        Gets the next action suggestion from the AI, providing visit count context.
-        Includes logic to handle responses wrapped in a single-element list.
-
-        Args:
-            screenshot_bytes: PNG bytes of the current screen.
-            xml_context: Simplified XML string of the current screen.
-            previous_actions: List of action descriptions already attempted from this screen state.
-            available_actions: List of action types the AI can choose from.
-            current_screen_visit_count: How many times this screen state has been visited in the current run.
-            current_composite_hash: The unique hash identifier for the current screen state.
-
-        Returns:
-            A dictionary representing the AI's suggested action in JSON format, or None if an error occurs
-            or the AI fails to provide a valid suggestion.
-        """
         image_part = self._prepare_image_part(screenshot_bytes)
         if not image_part:
             logging.error("Failed to prepare image for AI.")
             return None
 
-        start_time = time.time()  # Start timing at the beginning
-
+        start_time = time.time()
         try:
             prompt = self._build_prompt(
-                xml_context,
-                previous_actions,
-                available_actions,
-                current_screen_visit_count,
-                current_composite_hash
+                xml_context, previous_actions, available_actions,
+                current_screen_visit_count, current_composite_hash
             )
         except Exception as prompt_err:
              logging.error(f"Error building AI prompt: {prompt_err}", exc_info=True)
              return None
 
         content_parts = [prompt, image_part]
-
-        logging.info("--- Sending Prompt to AI ---")
-        log_prompt = prompt.replace(xml_context, f"[XML Context Len:{len(xml_context)}]") if len(xml_context) > 1000 else prompt
-        logging.debug(f"AI Prompt (XML potentially truncated):\n{log_prompt}")
-        logging.info("-----------------------------")
+        # logging.debug(f"AI Prompt (XML potentially truncated):\n{prompt[:2000]}...") # Log snippet
 
         try:
             logging.debug("Requesting AI generation...")
-            content_parts = [prompt, image_part]
-
-            if self.use_chat and self.chat:
+            if self.use_chat and self.chat: # Check self.chat is not None
                 response = self.chat.send_message(content_parts, safety_settings=self.safety_settings)
-                
-                if len(self.chat.history) > self.max_history:
+                if len(self.chat.history) > self.max_history * 2: # Trim more aggressively if it grows too large
                     excess = len(self.chat.history) - self.max_history
-                    self.chat.history = self.chat.history[:1] + self.chat.history[1+excess:]
-                    logging.debug(f"Trimmed chat history to {self.max_history} entries")
+                    self.chat.history = self.chat.history[:1] + self.chat.history[1+excess:] # Keep first (system?) and latest
+                    logging.debug(f"Aggressively trimmed chat history to ~{self.max_history} entries")
             else:
                 response = self.model.generate_content(content_parts, safety_settings=self.safety_settings)
 
             elapsed_time = time.time() - start_time
             logging.info(f"Total AI Processing Time: {elapsed_time:.2f} seconds")
-
-            # Ensure usage_metadata and its attributes exist before accessing them
             if hasattr(response, 'usage_metadata') and response.usage_metadata:
-                logging.info(f"Tokens used: Prompt={getattr(response.usage_metadata, 'prompt_token_count', 'N/A')}, Candidates={getattr(response.usage_metadata, 'candidates_token_count', 'N/A')}, Total={getattr(response.usage_metadata, 'total_token_count', 'N/A')}")
-            else:
-                logging.warning("Usage metadata not available in AI response.")
+                logging.info(f"Tokens: P={getattr(response.usage_metadata, 'prompt_token_count', 'N')}, C={getattr(response.usage_metadata, 'candidates_token_count', 'N')}, T={getattr(response.usage_metadata, 'total_token_count', 'N')}")
 
-            if not response.candidates:
+            if not hasattr(response, 'candidates') or not response.candidates:
                 logging.error("AI response has no candidates.")
                 self._log_empty_response_details(response)
                 return None
 
             candidate = response.candidates[0]
             if candidate.finish_reason != genai.protos.Candidate.FinishReason.STOP:
-                logging.warning(f"AI generation finished abnormally.")
+                logging.warning(f"AI generation finished abnormally (Reason: {candidate.finish_reason}).")
                 self._log_empty_response_details(response)
                 return None
 
-            if not candidate.content or not candidate.content.parts:
-                logging.warning("AI response candidate has no content parts.")
-                self._log_empty_response_details(response) 
-                return None
-            
-            # Directly use the text from the first part of the candidate's content.
-            # The previous check ensures candidate.content.parts is not empty.
-            first_part = candidate.content.parts[0]
-            
-            if not hasattr(first_part, 'text') or not first_part.text:
-                logging.error("AI response's first candidate part has no 'text' attribute or 'text' is empty.")
-                self._log_empty_response_details(response) 
-                return None
-
-            raw_response_text = first_part.text.strip() # Extract and strip whitespace
-            
-            if not raw_response_text: # Check if empty after strip
-                logging.error("AI response's first candidate part text became empty after stripping.")
+            if not hasattr(candidate, 'content') or not candidate.content or \
+               not hasattr(candidate.content, 'parts') or not candidate.content.parts or \
+               not hasattr(candidate.content.parts[0], 'text') or not candidate.content.parts[0].text:
+                logging.error("AI response candidate lacks valid text content in the first part.")
                 self._log_empty_response_details(response)
                 return None
             
-            # raw_response_text is now a non-empty string.
-            # The original separate strip() call and subsequent assignment to json_str will use this.
+            raw_response_text = candidate.content.parts[0].text.strip()
+            if not raw_response_text:
+                logging.error("AI response text is empty after stripping.")
+                self._log_empty_response_details(response)
+                return None
+            
             json_str = raw_response_text
             if json_str.startswith("```"): 
-                json_str = json_str.split("```")[1]
-                if json_str.startswith("json"): json_str = json_str[4:]
+                json_str = re.sub(r"```json\s*|```", "", json_str) # More robust removal
             json_str = json_str.strip()
 
             try:
                 parsed_data: Any = json.loads(json_str)
                 action_data: Optional[Dict] = None
 
-                if isinstance(parsed_data, list):
-                    if len(parsed_data) == 1 and isinstance(parsed_data[0], dict):
-                        logging.warning("AI returned response wrapped in a list '[{...}]', extracting the inner dictionary.")
-                        action_data = parsed_data[0]
-                    else:
-                        logging.error(f"AI returned a list, but not the expected format [dict] (length={len(parsed_data)}): {parsed_data}")
-                        return None
+                if isinstance(parsed_data, list) and len(parsed_data) == 1 and isinstance(parsed_data[0], dict):
+                    action_data = parsed_data[0]
                 elif isinstance(parsed_data, dict):
                     action_data = parsed_data
                 else:
-                    logging.error(f"AI response parsed, but is neither a list nor a dict. Type: {type(parsed_data)}, Data: {parsed_data}")
+                    logging.error(f"AI response parsed, but not dict or [dict]. Type: {type(parsed_data)}, Data: {parsed_data}")
                     return None
 
-                if action_data is None:
-                    logging.error("Internal logic error: action_data is None after parsing/extraction checks.")
-                    return None
-
-                if "action" not in action_data:
-                    logging.error(f"Extracted JSON object lacks required 'action' key: {action_data}")
+                if not action_data or "action" not in action_data:
+                    logging.error(f"Extracted JSON object lacks 'action' key or is empty: {action_data}")
                     return None
 
                 action_type = action_data.get("action")
                 if action_type in ["click", "input"] and not action_data.get("target_identifier"):
-                     logging.error(f"AI response for action '{action_type}' missing required 'target_identifier'. Data: {action_data}")
+                     logging.error(f"AI response for '{action_type}' missing 'target_identifier'. Data: {action_data}")
                      return None
-
-                if action_type == "input" and action_data.get("input_text") is None:
-                    logging.error(f"AI response for action 'input' missing required 'input_text' (was None). Data: {action_data}")
+                if action_type == "input" and action_data.get("input_text") is None: # Check for explicit None
+                    logging.error(f"AI response for 'input' missing 'input_text'. Data: {action_data}")
                     return None
-
+                
+                # Validate bounding box structure if present
                 bbox = action_data.get("target_bounding_box")
                 if bbox:
-                    if not isinstance(bbox, dict) or \
-                       "top_left" not in bbox or not isinstance(bbox["top_left"], list) or len(bbox["top_left"]) != 2 or \
-                       "bottom_right" not in bbox or not isinstance(bbox["bottom_right"], list) or len(bbox["bottom_right"]) != 2:
-                        logging.warning(f"AI provided 'target_bounding_box' but format is invalid: {bbox}. Nullifying bbox for this action.")
+                    if not (isinstance(bbox, dict) and \
+                            "top_left" in bbox and isinstance(bbox["top_left"], list) and len(bbox["top_left"]) == 2 and \
+                            "bottom_right" in bbox and isinstance(bbox["bottom_right"], list) and len(bbox["bottom_right"]) == 2 and \
+                            all(isinstance(coord, (int, float)) for coord_pair in [bbox["top_left"], bbox["bottom_right"]] for coord in coord_pair)):
+                        logging.warning(f"AI 'target_bounding_box' format invalid: {bbox}. Nullifying.")
                         action_data["target_bounding_box"] = None
-
-                logging.info(f"AI Suggested Action: {action_data.get('action')} - Target Identifier: {action_data.get('target_identifier')}")
-                logging.debug(f"AI Full Parsed & Validated Suggestion: {action_data}")
+                
+                logging.info(f"AI Suggested Action: {action_data.get('action')} - Target: {action_data.get('target_identifier')}")
+                # logging.debug(f"AI Full Parsed Suggestion: {action_data}") # Can be verbose
                 return action_data
 
             except json.JSONDecodeError as json_e:
-                logging.error(f"Failed to parse AI response as JSON: {json_e}")
-                logging.error(f"Problematic JSON string received from AI: '{json_str}'")
+                logging.error(f"Failed to parse AI response as JSON: {json_e}. String: '{json_str}'")
                 return None
             except Exception as parse_err:
-                logging.error(f"Error during JSON processing or validation: {parse_err}", exc_info=True)
+                logging.error(f"Error during JSON processing/validation: {parse_err}", exc_info=True)
                 return None
 
         except Exception as e:
-            logging.error(f"Unhandled error during AI interaction or response processing: {e}", exc_info=True)
+            logging.error(f"Unhandled error during AI interaction: {e}", exc_info=True)
+            # Check for specific API errors if possible (e.g., quota, auth)
+            # This might depend on the structure of exceptions from google.generativeai
+            if "API key not valid" in str(e):
+                logging.critical("Gemini API key is invalid. Please check configuration.")
             return None

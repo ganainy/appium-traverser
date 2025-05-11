@@ -5,9 +5,25 @@
             "name": "Run Appium Traverser",
             "type": "python",
             "request": "launch",
-            "program": "${workspaceFolder}/traverser-ai-api/main.py",
+            "program": "${workspaceFolder}/traverser_ai_api/main.py",
             "console": "integratedTerminal",
             "justMyCode": true
+        },
+        {
+            "name": "Python: Attach to ui_controller.py (debugpy)",
+            "type": "debugpy",
+            "request": "attach",
+            "connect": {
+                "host": "localhost",
+                "port": 5679
+            },
+            "pathMappings": [
+                {
+                    "localRoot": "${workspaceFolder}",
+                    "remoteRoot": "${workspaceFolder}"
+                }
+            ],
+            "justMyCode": false
         }
     ]
 }
