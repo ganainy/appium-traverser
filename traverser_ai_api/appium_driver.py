@@ -199,10 +199,48 @@ class AppiumDriver:
             element_id_str = element.id if hasattr(element,'id') else 'Unknown ID'
             logging.error(f"Error clicking element {element_id_str}: {e}")
             return False
-        except Exception as e:
-            element_id_str = element.id if hasattr(element,'id') else 'Unknown ID'
-            logging.error(f"Unexpected error clicking element {element_id_str}: {e}", exc_info=True)
+
+    def tap_at_coordinates(self, x: int, y: int, duration: Optional[int] = None) -> bool:
+        """Performs a tap action at the specified screen coordinates."""
+        if not self.driver:
+            logging.error("Driver not available, cannot tap at coordinates.")
             return False
+        try:
+            logging.info(f"Attempting to tap at coordinates: ({x}, {y}), duration: {duration}ms")
+            # The tap method takes a list of (x,y) tuples and an optional duration in milliseconds.
+            self.driver.tap([(x, y)], duration)
+            logging.info(f"Successfully tapped at coordinates: ({x}, {y}).")
+            return True
+        except WebDriverException as e:
+            logging.error(f"WebDriverException during tap at ({x}, {y}): {e}", exc_info=True)
+            return False
+        except Exception as e:
+            logging.error(f"Unexpected error during tap at ({x}, {y}): {e}", exc_info=True)
+            return False
+
+    def get_active_element(self) -> Optional[WebElement]:
+        """Retrieves the currently active (focused) element on the screen."""
+        if not self.driver:
+            logging.warning("Driver not available, cannot get active element.")
+            return None
+        try:
+            # driver.switch_to.active_element is the standard way to get the focused element
+            active_el = self.driver.switch_to.active_element
+            if active_el:
+                logging.debug(f"Successfully retrieved active element. ID: {active_el.id if hasattr(active_el, 'id') else 'N/A'}")
+                return active_el
+            else:
+                logging.warning("No active element found by driver.switch_to.active_element.")
+                return None
+        except NoSuchElementException:
+            logging.warning("No active element is currently focused (NoSuchElementException).")
+            return None
+        except WebDriverException as e:
+            logging.error(f"WebDriverException while trying to get active element: {e}")
+            return None
+        except Exception as e:
+            logging.error(f"Unexpected error getting active element: {e}", exc_info=True)
+            return None
 
     def input_text_into_element(self, element: WebElement, text: str, click_first: bool = True) -> bool:
         """Inputs text into a WebElement, optionally clicking it first."""
@@ -212,12 +250,13 @@ class AppiumDriver:
 
         element_id_str = "Unknown ID" # Default if ID retrieval fails early
         try:
-            # Try to get ID early for better logging, handle potential immediate staleness
+            # Try to get ID and important attributes early for better logging
             try:
-                 element_id_str = element.id
+                element_id_str = element.id
+                initial_bounds = element.get_attribute('bounds')  # Get initial position
             except StaleElementReferenceException:
-                 logging.warning("Element was already stale before attempting input.")
-                 return False
+                logging.warning("Element was already stale before attempting input.")
+                return False
 
             logging.debug(f"Attempting to input '{text}' into element {element_id_str}")
 
@@ -225,33 +264,55 @@ class AppiumDriver:
             if click_first:
                 try:
                     logging.debug(f"Clicking element {element_id_str} before input.")
-                    # Use the robust click method
                     if not self.click_element(element):
                         logging.warning(f"Failed to click element {element_id_str} before input, but will still attempt input.")
-                        # Decide if you want to proceed or return False here. Proceeding might still work sometimes.
-                        # return False # Uncomment this line to be stricter: fail if click fails
 
-                    # Optional: Add a very small delay if clicking immediately followed by send_keys fails
-                    # time.sleep(0.2) # Start without this, add only if needed
+                    # Add a small delay to ensure focus is properly set
+                    time.sleep(0.3)
 
                 except StaleElementReferenceException:
-                     # This case should theoretically be caught by self.click_element, but double-check
-                     logging.warning(f"Element {element_id_str} became stale during the pre-input click phase.")
-                     return False # Can't proceed if element is stale
+                    logging.warning(f"Element {element_id_str} became stale during the pre-input click phase.")
+                    return False
                 except Exception as click_err:
-                    # Log warning but proceed, maybe click wasn't needed or possible,
-                    # but the element might still accept keys if already focused.
                     logging.warning(f"Unexpected error clicking element {element_id_str} before input, attempting input anyway: {click_err}")
 
-            # *** STEP 2: Attempt to send keys ***
+            # *** STEP 2: Verify we're still focused on the right element ***
+            try:
+                active_element = self.get_active_element()
+                if active_element:
+                    active_bounds = active_element.get_attribute('bounds')
+                    if active_bounds != initial_bounds:
+                        logging.warning(f"Active element changed! Expected bounds: {initial_bounds}, got: {active_bounds}")
+                        # Try to refocus on our target element
+                        element.click()
+                        time.sleep(0.2)
+            except Exception as focus_err:
+                logging.warning(f"Error checking focus state: {focus_err}")
+
+            # *** STEP 3: Clear existing text ***
+            try:
+                element.clear()  # Try native clear first
+                time.sleep(0.1)  # Small delay after clearing
+            except Exception as clear_err:
+                logging.warning(f"Could not clear element using native method: {clear_err}")
+                # Fallback: Send delete/backspace keys
+                try:
+                    current_text = element.get_attribute('text')
+                    if current_text:
+                        # Send enough backspace keys to clear the field
+                        for _ in range(len(current_text)):
+                            element.send_keys('\ue003')  # Unicode for Backspace
+                        time.sleep(0.1)
+                except Exception as backup_clear_err:
+                    logging.warning(f"Backup clear method also failed: {backup_clear_err}")
+
+            # *** STEP 4: Send the new text ***
             logging.debug(f"Sending keys '{text}' to element {element_id_str}")
-            # Consider using element.set_value(text) as an alternative if send_keys consistently fails
             element.send_keys(text)
-            # element.set_value(text) # Alternative approach
 
-            logging.info(f"Successfully sent keys '{text}' to element {element_id_str}") # Changed to INFO for successful action
+            logging.info(f"Successfully sent keys '{text}' to element {element_id_str}")
 
-            # Optional: Hide keyboard if it causes issues later (uncomment if necessary)
+            # Optional: Hide keyboard if it's shown
             try:
                 if self.driver.is_keyboard_shown():
                     logging.debug("Hiding keyboard after input.")
@@ -262,39 +323,36 @@ class AppiumDriver:
             return True
 
         except InvalidElementStateException as e:
-             # Specific logging for the error you encountered
-             logging.error(f"Error inputting text '{text}' into element {element_id_str}: {e}", exc_info=False) # Keep stack trace minimal for this specific error
-             # Log the element's state if possible to help diagnose
-             try:
-                 # Check important attributes at the time of failure
-                 is_enabled = element.is_enabled()
-                 is_displayed = element.is_displayed()
-                 # Use your existing get_element_attributes method if you have one, otherwise access directly
-                 attrs = {}
-                 try:
-                     attrs['class'] = element.get_attribute('class')
-                     attrs['text'] = element.get_attribute('text')
-                     attrs['content-desc'] = element.get_attribute('content-desc')
-                     attrs['resource-id'] = element.get_attribute('resource-id')
-                     attrs['bounds'] = element.get_attribute('bounds')
-                 except Exception as attr_err:
-                      logging.warning(f"Could not get all attributes for element {element_id_str} during error diagnosis: {attr_err}")
+            logging.error(f"Error inputting text '{text}' into element {element_id_str}: {e}", exc_info=False)
+            try:
+                is_enabled = element.is_enabled()
+                is_displayed = element.is_displayed()
+                attrs = {}
+                try:
+                    attrs['class'] = element.get_attribute('class')
+                    attrs['text'] = element.get_attribute('text')
+                    attrs['content-desc'] = element.get_attribute('content-desc')
+                    attrs['resource-id'] = element.get_attribute('resource-id')
+                    attrs['bounds'] = element.get_attribute('bounds')
+                except Exception as attr_err:
+                    logging.warning(f"Could not get all attributes for element {element_id_str} during error diagnosis: {attr_err}")
 
-                 logging.error(f"Element state at time of InvalidElementStateException: Enabled={is_enabled}, Displayed={is_displayed}, Attrs={attrs}")
-             except StaleElementReferenceException:
-                  logging.error(f"Element {element_id_str} became stale when trying to get state after input error.")
-             except Exception as state_err:
-                 logging.error(f"Could not retrieve element state for {element_id_str} after input error: {state_err}")
-             return False
+                logging.error(f"Element state at time of InvalidElementStateException: Enabled={is_enabled}, Displayed={is_displayed}, Attrs={attrs}")
+            except StaleElementReferenceException:
+                logging.error(f"Element {element_id_str} became stale when trying to get state after input error.")
+            except Exception as state_err:
+                logging.error(f"Could not retrieve element state for {element_id_str} after input error: {state_err}")
+            return False
+
         except StaleElementReferenceException:
-             logging.warning(f"Element {element_id_str} became stale before or during sending keys.")
-             return False # Can't proceed if element is stale
+            logging.warning(f"Element {element_id_str} became stale before or during sending keys.")
+            return False
+
         except WebDriverException as e:
-            # General error logging for other WebDriver issues
             logging.error(f"Generic WebDriverException inputting text '{text}' into element {element_id_str}: {e}", exc_info=True)
             return False
+
         except Exception as e:
-            # Catch any other unexpected errors
             logging.error(f"Unexpected error inputting text '{text}' into element {element_id_str}: {e}", exc_info=True)
             return False
 

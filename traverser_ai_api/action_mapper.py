@@ -9,10 +9,12 @@ from selenium.common.exceptions import NoSuchElementException, InvalidSelectorEx
 # from .appium_driver import AppiumDriver # This will be used if ActionMapper takes an AppiumDriver instance
 
 class ActionMapper:
-    def __init__(self, driver, element_finding_strategies): # driver is an instance of AppiumDriver
+    def __init__(self, driver, element_finding_strategies, config_dict: dict): # driver is an instance of AppiumDriver
         self.driver = driver
         self.element_finding_strategies = element_finding_strategies
         self.consecutive_map_failures = 0 # This might be better managed by the caller (AppCrawler)
+        self.use_coordinate_fallback = config_dict.get('USE_COORDINATE_FALLBACK', False)
+        logging.info(f"ActionMapper initialized. Coordinate fallback is {'ENABLED' if self.use_coordinate_fallback else 'DISABLED'}.")
 
     def _find_element_by_ai_identifier(self, identifier: str) -> Optional[WebElement]:
         """
@@ -96,22 +98,27 @@ class ActionMapper:
 
     def map_ai_to_action(self, ai_suggestion: dict) -> Optional[Tuple[str, Optional[Any], Optional[str]]]:
         """
-        Maps the AI's JSON suggestion (using 'target_identifier') to an executable action tuple.
-        Returns: (action_type, target_object_or_info, input_text_or_none)
-                 where target_object_or_info is WebElement for click/input, or string for scroll.
+        Maps the AI's JSON suggestion (using 'target_identifier' or 'target_bounding_box')
+        to an executable action tuple.
+        Returns: (action_type, target_object_or_info, input_text_or_none, Optional[action_mode])
+                 where target_object_or_info is WebElement for click/input, or string for scroll,
+                 or a dict with coordinates for coordinate-based actions.
+                 action_mode is "coordinate_action" if applicable.
         """
         action = ai_suggestion.get("action")
         target_identifier = ai_suggestion.get("target_identifier")
         input_text = ai_suggestion.get("input_text")
+        target_bounding_box = ai_suggestion.get("target_bounding_box") # Get potential bounding box
 
-        logging.info(f"Attempting to map AI suggestion: Action='{action}', Identifier='{target_identifier}', Input='{input_text}'")
+        logging.info(f"Attempting to map AI suggestion: Action='{action}', Identifier='{target_identifier}', Input='{input_text}', BBox='{target_bounding_box}'")
 
         if action in ["click", "input"]:
-            if not target_identifier:
-                logging.error(f"AI suggestion for '{action}' requires 'target_identifier', but it's missing. Cannot map.")
-                return None
-
-            target_element = self._find_element_by_ai_identifier(target_identifier)
+            # Try to find element by identifier first
+            target_element = None
+            if target_identifier:
+                target_element = self._find_element_by_ai_identifier(target_identifier)
+            else:
+                logging.info(f"No 'target_identifier' provided for action '{action}'. Will check for bounding box.")
 
             if target_element:
                 logging.info(f"Successfully mapped AI identifier '{target_identifier}' to initial WebElement.")
@@ -169,8 +176,43 @@ class ActionMapper:
                 logging.info(f"Mapping successful for CLICK. Using element ID: {target_element.id}")
                 return (action, target_element, None)
             else:
-                logging.error(f"Failed to find element using AI identifier: '{target_identifier}'. Cannot map action '{action}'.")
-                # self.consecutive_map_failures += 1 # Handled by AppCrawler
+                # Element not found by identifier, try bounding box fallback
+                if self.use_coordinate_fallback and target_bounding_box and isinstance(target_bounding_box, dict) and \
+                   'top_left' in target_bounding_box and 'bottom_right' in target_bounding_box and \
+                   isinstance(target_bounding_box['top_left'], list) and len(target_bounding_box['top_left']) == 2 and \
+                   isinstance(target_bounding_box['bottom_right'], list) and len(target_bounding_box['bottom_right']) == 2:
+                    
+                    try:
+                        tl_x, tl_y = target_bounding_box['top_left']
+                        br_x, br_y = target_bounding_box['bottom_right']
+                        
+                        # Ensure coordinates are numbers
+                        if not all(isinstance(coord, (int, float)) for coord in [tl_x, tl_y, br_x, br_y]):
+                            logging.warning(f"Invalid coordinate types in bounding box: {target_bounding_box}. Cannot use for coordinate action.")
+                        else:
+                            center_x = int((tl_x + br_x) / 2)
+                            center_y = int((tl_y + br_y) / 2)
+                            
+                            logging.info(f"Element not found by identifier \'{target_identifier}\'. Using bounding box fallback (config ENABLED) for action \'{action}\' at coordinates ({center_x}, {center_y}).")
+                            return (action, {"coordinates": (center_x, center_y), "original_bbox": target_bounding_box}, input_text, "coordinate_action")
+                    except Exception as e:
+                        logging.error(f"Error processing bounding box {target_bounding_box} for coordinate action: {e}", exc_info=True)
+                elif not self.use_coordinate_fallback:
+                    logging.info(f"Element not found by identifier \'{target_identifier}\'. Bounding box fallback is DISABLED by configuration. Skipping.")
+
+                # If no element and no (valid) bounding box fallback (or fallback disabled)
+                log_msg = f"Failed to find element using AI identifier: \'{target_identifier}\'"
+                if target_identifier and not target_bounding_box:
+                    log_msg += " and no bounding box provided."
+                elif not target_identifier and not target_bounding_box:
+                    log_msg = "No target_identifier or bounding_box provided."
+                elif target_bounding_box: # Implies bounding box was invalid or processed with error
+                    log_msg += " and bounding box fallback also failed or was invalid."
+                else: # Should not be reached if logic is correct
+                    log_msg += "."
+                
+                log_msg += f" Cannot map action '{action}'."
+                logging.error(log_msg)
                 return None
         elif action == "scroll_down":
             return ("scroll", "down", None)

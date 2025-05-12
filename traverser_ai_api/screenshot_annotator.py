@@ -36,7 +36,8 @@ class ScreenshotAnnotator:
             step: The current crawl step number.
             screen_id: The database ID of the current screen state.
             ai_suggestion: The dictionary returned by the AI assistant, which
-                           may contain 'target_bounding_box'.
+                           may contain 'target_bounding_box' with either normalized [0.0-1.0]
+                           or absolute pixel coordinates.
         """
         if not original_screenshot_bytes:
             self.logger.debug("Skipping annotated screenshot: No original image provided.")
@@ -55,37 +56,51 @@ class ScreenshotAnnotator:
         self.logger.debug(f"Attempting annotation using AI bbox: {bbox_data}")
 
         try:
-            tl_x_norm, tl_y_norm = bbox_data["top_left"]
-            br_x_norm, br_y_norm = bbox_data["bottom_right"]
-
-            if not all(isinstance(coord, (int, float)) and 0.0 <= coord <= 1.0 for coord in [tl_x_norm, tl_y_norm, br_x_norm, br_y_norm]):
-                 raise ValueError(f"Normalized coordinates invalid or out of range [0.0, 1.0]: {bbox_data}")
-
+            # Get screen dimensions first as we'll need them for both coordinate types
             window_size = self.driver.get_window_size()
             if window_size and window_size.get('width') > 0 and window_size.get('height') > 0:
-                 img_width = window_size['width']
-                 img_height = window_size['height']
-                 self.logger.debug(f"Using Appium window size for coord conversion: {img_width}x{img_height}")
+                img_width = window_size['width']
+                img_height = window_size['height']
+                self.logger.debug(f"Using Appium window size for coord conversion: {img_width}x{img_height}")
             else:
-                 self.logger.debug("Appium window size unavailable or invalid, loading image from bytes to get dimensions.")
-                 try:
-                     with Image.open(BytesIO(original_screenshot_bytes)) as img:
-                         img_width, img_height = img.size
-                     if img_width <= 0 or img_height <= 0:
-                          raise ValueError("Image dimensions from bytes are invalid.")
-                     self.logger.debug(f"Using image dimensions from bytes: {img_width}x{img_height}")
-                 except Exception as img_err:
-                     self.logger.error(f"Failed to get image dimensions from bytes: {img_err}. Cannot proceed with annotation.")
-                     return
+                self.logger.debug("Appium window size unavailable or invalid, loading image from bytes to get dimensions.")
+                try:
+                    with Image.open(BytesIO(original_screenshot_bytes)) as img:
+                        img_width, img_height = img.size
+                    if img_width <= 0 or img_height <= 0:
+                        raise ValueError("Image dimensions from bytes are invalid.")
+                    self.logger.debug(f"Using image dimensions from bytes: {img_width}x{img_height}")
+                except Exception as img_err:
+                    self.logger.error(f"Failed to get image dimensions from bytes: {img_err}. Cannot proceed with annotation.")
+                    return
 
-            x1 = int(tl_x_norm * img_width)
-            y1 = int(tl_y_norm * img_height)
-            x2 = int(br_x_norm * img_width)
-            y2 = int(br_y_norm * img_height)
+            # Extract coordinates
+            tl_x, tl_y = bbox_data["top_left"]
+            br_x, br_y = bbox_data["bottom_right"]
 
+            # Check if coordinates are already normalized (between 0 and 1)
+            coords_are_normalized = all(isinstance(coord, (int, float)) and 0.0 <= float(coord) <= 1.0 
+                                     for coord in [tl_x, tl_y, br_x, br_y])
+
+            if coords_are_normalized:
+                self.logger.debug("Processing normalized coordinates")
+                x1 = int(tl_x * img_width)
+                y1 = int(tl_y * img_height)
+                x2 = int(br_x * img_width)
+                y2 = int(br_y * img_height)
+            else:
+                self.logger.debug("Processing absolute pixel coordinates")
+                # Convert to int if they aren't already
+                x1 = int(tl_x)
+                y1 = int(tl_y)
+                x2 = int(br_x)
+                y2 = int(br_y)
+
+            # Ensure coordinates are in correct order
             if x1 > x2: x1, x2 = x2, x1
             if y1 > y2: y1, y2 = y2, y1
 
+            # Clip coordinates to image boundaries
             x1 = max(0, min(x1, img_width - 1))
             y1 = max(0, min(y1, img_height - 1))
             x2 = max(0, min(x2, img_width - 1))
@@ -105,8 +120,8 @@ class ScreenshotAnnotator:
             self.logger.error(f"Error processing AI bounding box {bbox_data}: {e}. Skipping annotation saving.")
             return
         except Exception as e:
-             self.logger.error(f"Unexpected error processing coordinates/dimensions: {e}", exc_info=True)
-             return
+            self.logger.error(f"Unexpected error processing coordinates/dimensions: {e}", exc_info=True)
+            return
 
         annotated_bytes = None
         try:

@@ -3,8 +3,8 @@
     "TARGET_DEVICE_UDID": "",
     "NEW_COMMAND_TIMEOUT": 300,
     "APPIUM_IMPLICIT_WAIT": 1,
-    "APP_PACKAGE": "de.deltacity.android.blutspende",
-    "APP_ACTIVITY": "de.deltacity.android.blutspende.activities.SplashScreenActivity",
+    "APP_PACKAGE": "com.myfitnesspal.android",
+    "APP_ACTIVITY": "com.myfitnesspal.android.splash.SplashActivity",
     "DEFAULT_MODEL_TYPE": "flash-latest-fast",
     "USE_CHAT_MEMORY": true,
     "MAX_CHAT_HISTORY": 10,
@@ -33,5 +33,10 @@
     "ENABLE_TRAFFIC_CAPTURE": true,
     "CLEANUP_DEVICE_PCAP_FILE": true,
     "CONTINUE_EXISTING_RUN": false,
-    "CURRENT_HEALTH_APP_LIST_FILE": "d:\\VS-projects\\appium-traverser\\output_data\\app_info\\279cb9b1_app_info_health_filtered.json"
+    "CURRENT_HEALTH_APP_LIST_FILE": "d:\\VS-projects\\appium-traverser\\output_data\\app_info\\279cb9b1_app_info_health_filtered.json",
+    "LAST_SELECTED_APP": {
+        "package_name": "com.myfitnesspal.android",
+        "activity_name": "com.myfitnesspal.android.splash.SplashActivity",
+        "app_name": "MyFitnessPal"
+    }
 }

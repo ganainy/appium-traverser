@@ -12,6 +12,9 @@ APP_ACTIVITY = "eu.smartpatient.mytherapy.feature.account.presentation.onboardin
 NEW_COMMAND_TIMEOUT = 300 # Seconds Appium waits for a new command before quitting session
 APPIUM_IMPLICIT_WAIT = 1 # Seconds Appium driver waits when trying to find elements before failing a strategy
 
+# --- Coordinate Fallback Settings ---
+USE_COORDINATE_FALLBACK = True # Whether to use bounding box coordinates if element identification fails
+
 # --- AI Settings ---
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") # Get API key from environment variable
 # Safety settings for Gemini - adjust as needed

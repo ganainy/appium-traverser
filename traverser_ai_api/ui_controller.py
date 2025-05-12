@@ -32,19 +32,27 @@ class CrawlerControllerWindow(QMainWindow):
         else:
             self.resize(1200, 800)
 
-        self.project_root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        # Set paths relative to the current script directory
+        self.api_dir = os.path.dirname(__file__)  # Directory containing this script
+        
+        # Use output_data directory inside traverser_ai_api
+        self.output_data_dir = os.path.join(self.api_dir, "output_data")
+        
+        # Ensure all required output directories exist
+        for subdir in ["app_info", "screenshots", "database_output", "traffic_captures"]:
+            os.makedirs(os.path.join(self.output_data_dir, subdir), exist_ok=True)
 
         # Initialize instance variables
         self.crawler_process: Optional[QProcess] = None
         self.user_config: Dict[str, Any] = {}
-        self.config_file_path = os.path.join(self.project_root_dir, "user_config.json")
+        self.config_file_path = os.path.join(self.api_dir, "user_config.json")
         self.current_screenshot: Optional[str] = None
         self.step_count = 0
         self.step_label: Optional[QLabel] = None
         self.last_action_label: Optional[QLabel] = None
 
         # --- Health App Discovery ---
-        self.find_app_info_script_path = os.path.join(self.project_root_dir, "traverser_ai_api", "find_app_info.py")
+        self.find_app_info_script_path = os.path.join(self.api_dir, "find_app_info.py")
         self.find_apps_process: Optional[QProcess] = None
         self.find_apps_stdout_buffer: str = ""
         self.health_apps_data: List[Dict[str, Any]] = []
@@ -348,25 +356,31 @@ class CrawlerControllerWindow(QMainWindow):
     def _create_right_panel(self) -> QWidget:
         panel = QWidget()
         layout = QVBoxLayout(panel)
+        
         status_layout = QHBoxLayout()
         self.status_label = QLabel("Status: Idle")
         self.progress_bar = QProgressBar()
         status_layout.addWidget(self.status_label)
         status_layout.addWidget(self.progress_bar)
+        
         step_action_layout = QHBoxLayout()
         self.step_label = QLabel("Step: 0")
         self.last_action_label = QLabel("Last Action: None")
         step_action_layout.addWidget(self.step_label)
         step_action_layout.addWidget(self.last_action_label)
+        
         self.screenshot_label = QLabel()
         self.screenshot_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.screenshot_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        
         self.log_output = QTextEdit()
         self.log_output.setReadOnly(True)
+        
         layout.addLayout(status_layout)
         layout.addLayout(step_action_layout)
         layout.addWidget(self.screenshot_label)
         layout.addWidget(self.log_output, 1)
+        
         return panel
 
     @Slot()
@@ -382,11 +396,21 @@ class CrawlerControllerWindow(QMainWindow):
         
         # Save health app list path
         config_data['CURRENT_HEALTH_APP_LIST_FILE'] = self.current_health_app_list_file
+        
+        # Save selected app info
+        selected_index = self.health_app_dropdown.currentIndex()
+        selected_data = self.health_app_dropdown.itemData(selected_index)
+        if selected_data and isinstance(selected_data, dict):
+            config_data['LAST_SELECTED_APP'] = {
+                'package_name': selected_data.get('package_name', ''),
+                'activity_name': selected_data.get('activity_name', ''),
+                'app_name': selected_data.get('app_name', '')
+            }
 
         try:
             with open(self.config_file_path, 'w') as f:
                 json.dump(config_data, f, indent=4)
-            self.log_output.append("Configuration saved successfully.")
+            self.log_output.append("Configuration and app selection saved successfully.")
         except Exception as e:
             self.log_output.append(f"Error saving configuration: {e}")
 
@@ -489,7 +513,7 @@ class CrawlerControllerWindow(QMainWindow):
 
         self.find_apps_process = QProcess()
         self.find_apps_process.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
-        self.find_apps_process.setWorkingDirectory(self.project_root_dir)
+        self.find_apps_process.setWorkingDirectory(self.api_dir)
 
         self.find_apps_process.readyReadStandardOutput.connect(self._on_find_apps_stdout_ready)
         self.find_apps_process.finished.connect(self._on_find_apps_finished)
@@ -556,32 +580,54 @@ class CrawlerControllerWindow(QMainWindow):
                 self.app_scan_status_label.setText("App Scan: No health apps found.")
                 return
 
-            for app_info in self.health_apps_data:
-                display_name = app_info.get('app_name') or app_info.get('package_name', 'Unknown App')
-                self.health_app_dropdown.addItem(display_name, app_info) # Store full dict as userData
+            last_selected_app = self.user_config.get('LAST_SELECTED_APP', {})
+            last_selected_package = last_selected_app.get('package_name')
+            selected_index = 0  # Default to 0 (Select target app...)
 
-            self.log_output.append(f"Successfully loaded {len(self.health_apps_data)} health apps into dropdown.")
-            self.app_scan_status_label.setText(f"App Scan: Loaded {len(self.health_apps_data)} apps.")
+            for i, app_info in enumerate(self.health_apps_data, start=1):
+                display_name = app_info.get('app_name') or app_info.get('package_name', 'Unknown App')
+                self.health_app_dropdown.addItem(display_name, app_info)
+                # If this is the last selected app, store its index
+                if last_selected_package and app_info.get('package_name') == last_selected_package:
+                    selected_index = i
+
+            # Set the current index to restore last selection
+            self.health_app_dropdown.setCurrentIndex(selected_index)
+            self.current_health_app_list_file = file_path
+            self.app_scan_status_label.setText(f"App Scan: Loaded {len(self.health_apps_data)} apps")
+            self.log_output.append(f"Successfully loaded {len(self.health_apps_data)} health apps.")
+
         except Exception as e:
             self.log_output.append(f"Error loading health apps from file {file_path}: {e}")
             self.app_scan_status_label.setText("App Scan: Error loading file.")
             self.health_app_dropdown.clear()
             self.health_app_dropdown.addItem("Select target app (Scan/Load Error)", None)
             self.health_apps_data = []
-
     @Slot(int)
     def _on_health_app_selected(self, index: int):
+        """Handle selection of an app from the dropdown."""
         selected_data = self.health_app_dropdown.itemData(index)
         if selected_data and isinstance(selected_data, dict):
             app_package = selected_data.get('package_name', '')
             app_activity = selected_data.get('activity_name', '')
-            self.config_widgets['APP_PACKAGE'].setText(app_package)
-            self.config_widgets['APP_ACTIVITY'].setText(app_activity)
-            self.log_output.append(f"Selected app: {selected_data.get('app_name', app_package)}. Package: {app_package}, Activity: {app_activity}")
+            app_name = selected_data.get('app_name', app_package)
+            
+            # Update the config widgets
+            if 'APP_PACKAGE' in self.config_widgets:
+                self.config_widgets['APP_PACKAGE'].setText(app_package)
+            if 'APP_ACTIVITY' in self.config_widgets:
+                self.config_widgets['APP_ACTIVITY'].setText(app_activity)
+            
+            # Save config immediately to ensure consistency
+            self.save_config()
+            self.log_output.append(f"Selected app: {app_name} ({app_package})")
         else:
-            # "Select target app..." or error item selected
-            self.config_widgets['APP_PACKAGE'].setText("")
-            self.config_widgets['APP_ACTIVITY'].setText("")
+            # Clear the fields if no valid selection
+            if 'APP_PACKAGE' in self.config_widgets:
+                self.config_widgets['APP_PACKAGE'].setText('')
+            if 'APP_ACTIVITY' in self.config_widgets:
+                self.config_widgets['APP_ACTIVITY'].setText('')
+            self.log_output.append("Cleared app selection.")
     # --- End Health App Discovery Methods ---
 
 
@@ -611,19 +657,18 @@ class CrawlerControllerWindow(QMainWindow):
                     self.log_output.append(error_msg)
                     self.status_label.setText(f"Status: Error - {error_msg}")
                     logging.error(error_msg)
-                    # Optionally, pop up a QMessageBox here
                     return # Prevent crawler start
-
+                    
             self.crawler_process = QProcess()
             self.crawler_process.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
             if hasattr(self, 'read_stdout'): self.crawler_process.readyReadStandardOutput.connect(self.read_stdout)
             self.crawler_process.finished.connect(self.handle_process_finished)
             if hasattr(self, 'handle_process_error'): self.crawler_process.errorOccurred.connect(self.handle_process_error)
-
+            
             python_executable = sys.executable
-            module_to_run = "traverser_ai_api.main"
-            self.crawler_process.setWorkingDirectory(self.project_root_dir) # Use project_root_dir
-            if hasattr(self, 'log_output'): self.log_output.append(f"Set working directory for subprocess to: {self.project_root_dir}")
+            module_to_run = "traverser_ai_api.main"  # Fixed module path to use proper Python package path
+            self.crawler_process.setWorkingDirectory(os.path.dirname(self.api_dir))  # Set working dir to parent of traverser_ai_api
+            if hasattr(self, 'log_output'): self.log_output.append(f"Set working directory for subprocess to: {os.path.dirname(self.api_dir)}")
             if hasattr(self, 'log_output'): self.log_output.append(f"Executing: {python_executable} -u -m {module_to_run}")
             self.crawler_process.start(python_executable, ['-u', '-m', module_to_run])
 
@@ -758,7 +803,7 @@ class CrawlerControllerWindow(QMainWindow):
         if hasattr(self, 'start_btn'): self.start_btn.setEnabled(True)
         if hasattr(self, 'stop_btn'): self.stop_btn.setEnabled(False)
         if hasattr(self, 'progress_bar'):
-            self.progress_bar.setRange(0,100)
+            self.progress_bar.setRange(0, 100)
             self.progress_bar.setValue(100 if exit_status == QProcess.ExitStatus.NormalExit and exit_code == 0 else 0)
         self.crawler_process = None
 

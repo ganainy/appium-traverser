@@ -3,8 +3,8 @@
     "TARGET_DEVICE_UDID": "",
     "NEW_COMMAND_TIMEOUT": 300,
     "APPIUM_IMPLICIT_WAIT": 1,
-    "APP_PACKAGE": "eu.smartpatient.mytherapy",
-    "APP_ACTIVITY": "eu.smartpatient.mytherapy.feature.account.presentation.onboarding.WelcomeActivity",
+    "APP_PACKAGE": "de.gesund.app",
+    "APP_ACTIVITY": "de.gesund.app.MainActivity",
     "DEFAULT_MODEL_TYPE": "flash-latest-fast",
     "USE_CHAT_MEMORY": true,
     "MAX_CHAT_HISTORY": 10,
@@ -17,7 +17,14 @@
     "APP_LAUNCH_WAIT_TIME": 5,
     "VISUAL_SIMILARITY_THRESHOLD": 5,
     "ALLOWED_EXTERNAL_PACKAGES": [
-        "com.google.android.gms\ncom.android.chrome\ncom.google.android.permissioncontroller\norg.mozilla.firefox\ncom.sec.android.app.sbrowser\ncom.microsoft.emmx\ncom.brave.browser\ncom.duckduckgo.mobile.android"
+        "com.google.android.gms",
+        "com.android.chrome",
+        "com.google.android.permissioncontroller",
+        "org.mozilla.firefox",
+        "com.sec.android.app.sbrowser",
+        "com.microsoft.emmx",
+        "com.brave.browser",
+        "com.duckduckgo.mobile.android"
     ],
     "MAX_CONSECUTIVE_AI_FAILURES": 3,
     "MAX_CONSECUTIVE_MAP_FAILURES": 3,
@@ -25,5 +32,11 @@
     "ENABLE_XML_CONTEXT": true,
     "ENABLE_TRAFFIC_CAPTURE": true,
     "CLEANUP_DEVICE_PCAP_FILE": true,
-    "CONTINUE_EXISTING_RUN": true
+    "CONTINUE_EXISTING_RUN": true,
+    "CURRENT_HEALTH_APP_LIST_FILE": "d:\\VS-projects\\appium-traverser\\output_data\\app_info\\279cb9b1_app_info_health_filtered.json",
+    "LAST_SELECTED_APP": {
+        "package_name": "de.gesund.app",
+        "activity_name": "de.gesund.app.MainActivity",
+        "app_name": "Gesund App"
+    }
 }

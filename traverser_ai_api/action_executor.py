@@ -18,35 +18,86 @@ class ActionExecutor:
 
     def execute_action(self, mapped_action: Tuple[str, Optional[Any], Optional[str]]) -> bool:
         """Executes the mapped Appium action."""
-        action_type, target, input_text = mapped_action
+        # Unpack the tuple, now potentially with a fourth element for action_mode
+        action_type, target_info, input_text, *action_mode_tuple = mapped_action
+        action_mode = action_mode_tuple[0] if action_mode_tuple else None
+
         success = False
-
         target_log_info = ""
-        if isinstance(target, WebElement):
-            try:
-                target_log_info = f"Element (ID: {target.id})"
-            except: # Handles potential StaleElementReferenceException if ID is accessed too late
-                target_log_info = "Element (Stale?)"
-        elif isinstance(target, str):  # For scroll direction
-            target_log_info = f"Direction: {target}"
-        
-        logging.info(f"Executing: {action_type.upper()} {target_log_info}")
 
-        try:
-            if action_type == "click" and isinstance(target, WebElement):
-                success = self.driver.click_element(target)
-            elif action_type == "input" and isinstance(target, WebElement) and isinstance(input_text, str):
-                success = self.driver.input_text_into_element(target, input_text)
-            elif action_type == "scroll" and isinstance(target, str):
-                success = self.driver.scroll(direction=target)
-            elif action_type == "back" and target is None:
-                success = self.driver.press_back_button()
+        if action_mode == "coordinate_action" and isinstance(target_info, dict) and "coordinates" in target_info:
+            coords = target_info["coordinates"]
+            target_log_info = f"Coordinates: {coords}"
+            logging.info(f"Executing coordinate-based: {action_type.upper()} at {target_log_info}")
+            if action_type == "click":
+                try:
+                    center_x, center_y = coords
+                    success = self.driver.tap_at_coordinates(center_x, center_y)
+                except Exception as e:
+                    logging.error(f"Exception during coordinate-based click at {coords}: {e}", exc_info=True)
+                    success = False
+            elif action_type == "input" and isinstance(input_text, str):
+                try:
+                    center_x, center_y = coords
+                    logging.info(f"Attempting coordinate-based INPUT. Tapping at ({center_x}, {center_y}) to focus.")
+                    tap_success = self.driver.tap_at_coordinates(center_x, center_y)
+                    if tap_success:
+                        logging.info(f"Tap successful for coordinate input. Attempting to send keys: '{input_text}'")
+                        active_element = self.driver.get_active_element()
+                        if active_element:
+                            success = self.driver.input_text_into_element(active_element, input_text, click_first=False) # click_first=False as we already tapped
+                            if not success:
+                                logging.warning(f"Failed to send keys to active element after coordinate tap. Trying ADB fallback if configured.")
+                                # Placeholder for potential ADB fallback in future
+                        else:
+                            logging.warning("No active element found after coordinate tap. Input via coordinates failed.")
+                            success = False
+                    else:
+                        logging.warning(f"Tap failed for coordinate-based INPUT at ({center_x}, {center_y}). Cannot proceed with input.")
+                        success = False
+                except Exception as e:
+                    logging.error(f"Exception during coordinate-based input at {coords} for text '{input_text}': {e}", exc_info=True)
+                    success = False
             else:
-                logging.error(f"Cannot execute unknown/invalid mapped action type or target combination: {action_type} with target: {target_log_info} (Type: {type(target)})Input: {input_text}")
-                success = False # Explicitly false for unknown actions
+                logging.error(f"Unknown coordinate-based action type: {action_type}")
+                success = False
 
-        except Exception as e:
-            logging.error(f"Exception during action execution ({action_type} on {target_log_info}): {e}", exc_info=True)
+        elif isinstance(target_info, WebElement):
+            try:
+                target_log_info = f"Element (ID: {target_info.id})"
+            except:
+                target_log_info = "Element (Stale?)"
+            logging.info(f"Executing element-based: {action_type.upper()} on {target_log_info}")
+            try:
+                if action_type == "click":
+                    success = self.driver.click_element(target_info)
+                elif action_type == "input" and isinstance(input_text, str):
+                    success = self.driver.input_text_into_element(target_info, input_text)
+                # ... (keep other element-based actions like scroll, back if they were here)
+                else:
+                    logging.error(f"Cannot execute unknown element-based action type: {action_type} on {target_log_info}")
+                    success = False
+            except Exception as e:
+                logging.error(f"Exception during element-based action ({action_type} on {target_log_info}): {e}", exc_info=True)
+                success = False
+
+        elif action_type == "scroll" and isinstance(target_info, str): # For scroll direction
+            target_log_info = f"Direction: {target_info}"
+            logging.info(f"Executing: {action_type.upper()} {target_log_info}")
+            try:
+                success = self.driver.scroll(direction=target_info)
+            except Exception as e:
+                logging.error(f"Exception during scroll action ({target_log_info}): {e}", exc_info=True)
+                success = False
+        elif action_type == "back" and target_info is None:
+            logging.info(f"Executing: {action_type.upper()}")
+            try:
+                success = self.driver.press_back_button()
+            except Exception as e:
+                logging.error(f"Exception during back action: {e}", exc_info=True)
+                success = False
+        else:
+            logging.error(f"Cannot execute unknown/invalid mapped action. Type: {action_type}, Target Info: {target_info} (Type: {type(target_info)}), Mode: {action_mode}")
             success = False
 
         if success:

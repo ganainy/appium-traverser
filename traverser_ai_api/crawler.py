@@ -70,7 +70,7 @@ class AppCrawler:
         logging.info(f"Initial element finding strategy order: {[s[2] for s in self.element_finding_strategies]}")
 
         # Initialize ActionMapper
-        self.action_mapper = ActionMapper(self.driver, self.element_finding_strategies)
+        self.action_mapper = ActionMapper(self.driver, self.element_finding_strategies, self.config_dict) # Pass config_dict
 
         # --- Traffic Capture Manager ---
         self.traffic_capture_enabled = getattr(config, 'ENABLE_TRAFFIC_CAPTURE', False)
@@ -463,7 +463,24 @@ class AppCrawler:
                     continue
                 self.consecutive_map_failures = 0 # Reset on success
 
-                action_type_sugg, target_obj_sugg, input_text_sugg = mapped_action
+                # Unpack mapped_action, now potentially with a fourth element (action_mode)
+                action_mode_sugg = None # Default to None
+                if len(mapped_action) == 4:
+                    action_type_sugg, target_obj_sugg, input_text_sugg, action_mode_sugg = mapped_action
+                    logging.info(f"Mapped action (with mode): Type='{action_type_sugg}', Target='{target_obj_sugg}', Input='{input_text_sugg}', Mode='{action_mode_sugg}'")
+                elif len(mapped_action) == 3:
+                    action_type_sugg, target_obj_sugg, input_text_sugg = mapped_action
+                    # action_mode_sugg remains None as set by default
+                    logging.info(f"Mapped action (no mode): Type='{action_type_sugg}', Target='{target_obj_sugg}', Input='{input_text_sugg}'")
+                else:
+                    logging.error(f"Unexpected number of values in mapped_action: {len(mapped_action)}. Expected 3 or 4. Value: {mapped_action}")
+                    # Fallback or error handling if mapped_action is not 3 or 4 elements
+                    self.driver.perform_action("back", None)
+                    self._last_action_description = "BACK (unexpected mapping result fallback)"
+                    self.screen_state_manager.increment_step(self._last_action_description, "auto_back_map_unpack_fail", None, None, None, None, None, None)
+                    steps_taken += 1
+                    continue
+                
                 # --- UI Update for Action ---
                 action_desc_for_ui = f"{action_type_sugg}"
                 if isinstance(target_obj_sugg, WebElement):
@@ -494,7 +511,14 @@ class AppCrawler:
                     action_desc_for_ui += f" with text '{input_text_sugg}'"
                 
                 logging.info(f"Preparing to print UI action update: {action_desc_for_ui}") # Added log
-                print(f"{UI_ACTION_PREFIX} {action_desc_for_ui}") # UI Update
+                try:
+                    # First try to encode as ASCII, replacing unsupported chars with '?'
+                    safe_desc = ''.join(char if ord(char) < 128 else '?' for char in action_desc_for_ui)
+                    print(f"{UI_ACTION_PREFIX} {safe_desc}")
+                except Exception as e:
+                    # If that fails, fall back to an even more basic representation
+                    logging.warning(f"Error printing action description: {e}")
+                    print(f"{UI_ACTION_PREFIX} [Action with unprintable characters]")
                 # ---
 
                 # --- Get element details *before* action for logging/DB ---

@@ -4,6 +4,7 @@ import sys
 import os
 import json
 import shutil # For rmtree
+import io # Added for TextIOWrapper
 from typing import Optional, Dict, Any
 
 # --- Global Script Start Time (defined once at the very top) ---
@@ -28,34 +29,63 @@ def setup_logging(log_level_str: str = "INFO", log_file: Optional[str] = None):
         numeric_level = logging.INFO
         log_level_str = "INFO"
 
-    log_formatter = ElapsedTimeFormatter("[%(levelname)s] (%(asctime)s) %(filename)s:%(lineno)d - %(message)s")
+    # Create root logger
     logger = logging.getLogger()
-    for handler in logger.handlers[:]:
-        logger.removeHandler(handler)
-        handler.close()
     logger.setLevel(numeric_level)
+    
+    # Store our handlers to prevent GC
+    if not hasattr(logger, '_our_handlers'):
+        logger._our_handlers = []
+    
+    # Remove existing handlers
+    for handler in list(logger.handlers):
+        logger.removeHandler(handler)
+        if isinstance(handler, logging.FileHandler):
+            try:
+                handler.close()
+            except Exception:
+                pass
 
-    console_handler_stdout = logging.StreamHandler(sys.stdout)
-    console_handler_stdout.setFormatter(log_formatter)
-    logger.addHandler(console_handler_stdout)
+    # Create formatter
+    log_formatter = ElapsedTimeFormatter("[%(levelname)s] (%(asctime)s) %(filename)s:%(lineno)d - %(message)s")
+    
+    # Console Handler - carefully handle UTF-8
+    try:
+        # Keep a reference to prevent GC of the TextIOWrapper
+        if not hasattr(sys.stdout, '_utf8_wrapper'):
+            sys.stdout._utf8_wrapper = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+        console_handler = logging.StreamHandler(sys.stdout._utf8_wrapper)
+    except Exception:
+        # Fallback to regular stdout
+        console_handler = logging.StreamHandler(sys.stdout)
+    
+    console_handler.setFormatter(log_formatter)
+    logger.addHandler(console_handler)
+    logger._our_handlers.append(console_handler)
 
+    # File Handler
     if log_file:
         try:
             log_file_dir = os.path.dirname(os.path.abspath(log_file))
-            if log_file_dir: os.makedirs(log_file_dir, exist_ok=True)
+            if log_file_dir:
+                os.makedirs(log_file_dir, exist_ok=True)
             file_handler = logging.FileHandler(log_file, mode='a', encoding='utf-8')
             file_handler.setFormatter(log_formatter)
             logger.addHandler(file_handler)
+            logger._our_handlers.append(file_handler)
         except Exception as e:
-            logging.error(f"Error setting up file logger for {log_file}: {e}. Continuing with console logging.", exc_info=True)
+            print(f"Error setting up file logger for {log_file}: {e}. Continuing with console logging.", file=sys.stderr)
 
+    # Set levels for noisy libraries
     if numeric_level > logging.DEBUG:
         for lib_name in ["appium.webdriver.webdriver", "urllib3.connectionpool", "selenium.webdriver.remote.remote_connection"]:
             logging.getLogger(lib_name).setLevel(logging.WARNING)
-    # Initial log message will be emitted by the caller of setup_logging
+    
+    return logger  # Return logger for reference
 
 # --- Initial (Basic) Logging Setup ---
-setup_logging("INFO") # Default to INFO, no file log initially
+root_logger = setup_logging("INFO") # Default to INFO, no file log initially
+root_logger.info("Initial logging setup complete")
 
 # --- Project Root and Configuration Paths ---
 # Assuming this main.py is in traverser_ai_api, and config.py is in the same directory.
@@ -157,16 +187,9 @@ _current_log_file_name = str(getattr(cfg, 'LOG_FILE_NAME', 'main_traverser_final
 _log_dir_final = os.path.join(PROJECT_ROOT_DIR, "output_data", "logs")
 _log_file_path_final = os.path.join(_log_dir_final, _current_log_file_name)
 
-# Re-setup logging only if level or file name changed from initial config.py defaults
-if _current_log_level.upper() != _initial_cfg_log_level.upper() or _current_log_file_name != _initial_cfg_log_file_name:
-    setup_logging(log_level_str=_current_log_level, log_file=_log_file_path_final)
-    logging.info(f"Logging re-initialized. Level: {_current_log_level.upper()}. File: {_log_file_path_final}")
-else:
-    # If only user_config existed but didn't change log settings, still ensure logging uses the correct path
-    # This handles the case where config.py might define a template for log file.
-    # For now, we assume LOG_FILE_NAME from config.py or user_config.json is the final name.
-    setup_logging(log_level_str=_initial_cfg_log_level, log_file=_log_file_path_final) # Use initial level, but potentially new path
-    logging.info(f"Logging setup confirmed. Level: {_initial_cfg_log_level.upper()}. File: {_log_file_path_final}")
+# Always re-setup logging with the final configuration
+root_logger = setup_logging(log_level_str=_current_log_level, log_file=_log_file_path_final)
+root_logger.info(f"Logging re-initialized. Level: {_current_log_level.upper()}. File: {_log_file_path_final}")
 
 
 # --- Log final determined APP_PACKAGE and APP_ACTIVITY ---

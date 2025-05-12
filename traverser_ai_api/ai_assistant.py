@@ -6,7 +6,11 @@ import io
 from typing import Optional, Dict, List, Any
 from . import config
 import time
-import re 
+import re
+import os # Added
+from dotenv import load_dotenv # Added
+
+load_dotenv() # Added: Load environment variables from .env file
 
 class AIAssistant:
     """Handles interactions with the Generative AI model."""
@@ -134,23 +138,98 @@ class AIAssistant:
     def _build_prompt(self, xml_context: str, previous_actions: List[str], available_actions: List[str], current_screen_visit_count: int, current_composite_hash: str) -> str:
         action_descriptions = {
             "click": "Visually identify and select an interactive element. Provide its best identifier (resource-id, content-desc, or text).",
-            "input": "Visually identify a text input field (e.g., class='android.widget.EditText'). Provide its best identifier AND the text to input. **CRITICAL: ONLY suggest 'input' for elements designed for text entry.**",
+            "input": "Visually identify a text input field (e.g., class=\'android.widget.EditText\'). Provide its best identifier AND the text to input. **CRITICAL: ONLY suggest \'input\' for elements designed for text entry.**",
             "scroll_down": "Scroll the view downwards.",
             "scroll_up": "Scroll the view upwards.",
             "back": "Navigate back using the system back button."
         }
-        action_list_str = "\n".join([f"- {a}: {action_descriptions.get(a, '')}" for a in available_actions])
-        history_str = "\n".join([f"- {pa}" for pa in previous_actions]) if previous_actions else "None"
+        action_list_str = "\\n".join([f"- {a}: {action_descriptions.get(a, '')}" for a in available_actions])
+        history_str = "\\n".join([f"- {pa}" for pa in previous_actions]) if previous_actions else "None"
 
-        visit_context = f"CURRENT SCREEN CONTEXT:\n- Hash: {current_composite_hash}\n- Visit Count (this session): {current_screen_visit_count}"
+        visit_context = f"CURRENT SCREEN CONTEXT:\\n- Hash: {current_composite_hash}\\n- Visit Count (this session): {current_screen_visit_count}"
         visit_instruction = ""
         loop_threshold = getattr(config, 'LOOP_DETECTION_VISIT_THRESHOLD', 3)
-        if current_screen_visit_count > loop_threshold:
+        
+        # Enhanced loop detection and avoidance logic
+        def analyze_action_history(actions: List[str]) -> dict:
+            if not actions:
+                return {"repeated_actions": [], "last_unique_actions": [], "is_looping": False}
+            
+            action_sequence = []
+            for action in actions:
+                if "input" in action.lower():
+                    action_sequence.append(("input", action))
+                elif "click" in action.lower():
+                    action_sequence.append(("click", action))
+            
+            # Look for repeating patterns in last 6 actions
+            last_actions = action_sequence[-6:]
+            is_looping = False
+            repeated_actions = []
+            
+            if len(last_actions) >= 4:
+                # Check if same action is being repeated
+                action_types = [a[0] for a in last_actions]
+                if action_types.count(action_types[-1]) > 2:
+                    is_looping = True
+                    repeated_actions.append(action_types[-1])
+                
+                # Check for input-click patterns
+                if len(last_actions) >= 4:
+                    if all(a == ("input", "click") for a in zip(action_types[::2], action_types[1::2])):
+                        is_looping = True
+                        repeated_actions.extend(["input-click pattern"])
+            
+            return {
+                "repeated_actions": repeated_actions,
+                "last_unique_actions": list(set(a[0] for a in last_actions)),
+                "is_looping": is_looping
+            }
+        
+        action_analysis = analyze_action_history(previous_actions)
+        if current_screen_visit_count > loop_threshold or action_analysis["is_looping"]:
             visit_instruction = f"""
-        **IMPORTANT LOOP PREVENTION:** This screen has been visited {current_screen_visit_count} times (more than threshold {loop_threshold}).
-        Strongly prioritize actions that explore *new* functionality or lead to a *different screen state*.
-        AVOID actions likely to return to the immediately preceding state unless necessary for progression.
-        Consider scrolling or interacting with less obvious elements.
+        **CRITICAL - LOOP DETECTED:**
+        - Screen visited {current_screen_visit_count} times
+        - Repeated actions detected: {', '.join(action_analysis['repeated_actions']) if action_analysis['repeated_actions'] else 'None'}
+        - Previous unique actions tried: {', '.join(action_analysis['last_unique_actions'])}
+        
+        REQUIRED ACTION CHANGES:
+        1. DO NOT repeat the same action sequence that failed before
+        2. If input-click pattern is failing, try:
+           - Different input values
+           - Alternative interactive elements
+           - Navigation options (back, menu)
+           - Scroll to find new elements
+        3. If on an error/validation screen:
+           - Look for error messages and adjust accordingly
+           - Consider alternative paths or return to previous screens
+           - Check for "skip" or "later" options
+        4. Prioritize actions that haven't been tried yet
+        """
+
+        test_email = os.environ.get("TEST_EMAIL")
+        test_password = os.environ.get("TEST_PASSWORD")
+        test_name = os.environ.get("TEST_NAME")
+
+        input_value_guidance = f"""
+        **CRUCIAL: Input Value Guidance:**
+        - For specific fields, use these exact values:
+            - Email/Username: "{test_email if test_email else ''}"
+            - Password: "{test_password if test_password else ''}"
+            - Name (First, Last, Full): "{test_name if test_name else ''}"
+        - For other fields, use realistic-looking, contextually appropriate test data
+        - For CAPTCHA/verification codes:
+           - ONLY use exactly what is visible in the image
+           - If multiple attempts fail, try alternative paths
+           - Look for refresh/regenerate options
+        - AVOID generic placeholders like "test", "input", "random string" unless no other context is available.
+        """
+
+        external_package_avoidance_guidance = """
+        **CRUCIAL: External Package Avoidance:**
+        - AVOID actions that navigate away from the current application to interact with other apps (e.g., opening a mail app to reset a password, opening a browser for help pages, or sharing content via external apps).
+        - Prioritize actions that keep the interaction within the current application\'s main package. If an action seems to lead outside the app, choose an alternative that explores more features *within* the app.
         """
 
         json_format_example = """
@@ -164,9 +243,9 @@ class AIAssistant:
         """
         prompt = f"""
         You are an expert Android app tester. Your goal is to explore systematically by performing ONE logical action.
-        You get a screenshot and XML layout. Prioritize PROGRESSION.
-        **IMPORTANT: For 'click'/'input', provide identifier (resource-id, content-desc, or text). ONLY the value.**
-        CORRECT: "Continue", INCORRECT: 'text="Continue"'.
+        You get a screenshot and XML layout. Prioritize PROGRESSION and IN-APP exploration.
+        **IMPORTANT: For \'click\'/\'input\', provide identifier (resource-id, content-desc, or text). ONLY the value.**
+        CORRECT: "Continue", INCORRECT: \'text="Continue"\'.
 
         {visit_context}
 
@@ -177,19 +256,23 @@ class AIAssistant:
         {history_str}
 
         TASK:
-        Analyze screenshot/XML. Identify BEST SINGLE action to progress/explore. Prioritize NEW screens.
+        Analyze screenshot/XML. Identify BEST SINGLE action to progress/explore **within the current application**. Prioritize NEW screens and features.
 
         {visit_instruction}
+
+        {external_package_avoidance_guidance}
 
         **CRUCIAL: Progression Buttons (Next, Continue, Save):**
         - CHECK PREREQUISITES: Check XML for identifier and `enabled="true"`. Visually verify.
         - IF DISABLED: Perform prerequisite action first.
         - PRIORITIZE PREREQUISITES.
 
-        **CRUCIAL: 'input' Action:**
+        {input_value_guidance}
+
+        **CRUCIAL: \\\'input\\\' Action:**
         - VERIFY ELEMENT TYPE: Ensure XML class is editable (e.g., `android.widget.EditText`).
-        - DO NOT suggest 'input' for non-editable elements (TextView, Button).
-        - PARENT ELEMENT: If a non-editable text element is part of an input field, use its editable parent's identifier.
+        - DO NOT suggest \\\'input\\\' for non-editable elements (TextView, Button).
+        - PARENT ELEMENT: If a non-editable text element is part of an input field, use its editable parent\\\'s identifier.
         - EDITABLE CLASSES: `android.widget.EditText`, `android.widget.AutoCompleteTextView`, `android.widget.TextInputEditText`, `android.widget.SearchView`.
 
         General Priorities:
@@ -197,9 +280,9 @@ class AIAssistant:
         2. Click enabled progression buttons.
         3. Explore elements related to: Privacy, Terms, Data Protection, Account, Profile, Register, Login, Consent.
         4. Explore other interactive elements likely leading to NEW areas (especially if visit count is high).
-        5. Input text if required/relevant.
+        5. Input text if required/relevant, following the Input Value Guidance.
         6. Scroll if more content seems available OR if stuck/looping.
-        7. Use 'back' if stuck or to return from detail view (avoid if it completes a loop).
+        7. Use \\\'back\\\' if stuck or to return from detail view (avoid if it completes a loop).
 
         Choose ONE action from:
         {action_list_str}
