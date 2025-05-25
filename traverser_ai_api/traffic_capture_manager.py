@@ -1,4 +1,3 @@
-
 import logging
 import os
 import re
@@ -9,17 +8,7 @@ from typing import List, Tuple, Optional
 from appium.webdriver.common.appiumby import AppiumBy
 from selenium.common.exceptions import NoSuchElementException
 
-# Assuming 'config' is a module or object accessible for path configurations
-# If not, these might need to be passed in or handled differently.
-# For now, we'll try to use a global 'config' if available, or default.
-try:
-    from traverser_ai_api import config # Or your actual config module
-except ImportError:
-    config = type('Config', (object,), {
-        'DEVICE_PCAP_DIR': '/sdcard/Download/PCAPdroid',
-        'TRAFFIC_CAPTURE_OUTPUT_DIR': 'traffic_captures',
-        'PCAPDROID_ACTIVITY': 'com.emanuelef.remote_capture/.activities.CaptureCtrl'
-    })
+from traverser_ai_api import config
 
 class TrafficCaptureManager:
     def __init__(self, driver, config_dict: dict, traffic_capture_enabled: bool):
@@ -65,18 +54,21 @@ class TrafficCaptureManager:
         if not driver_available_for_ui:
             logging.warning("Appium driver not connected at the start of start_traffic_capture. UI interaction for PCAPdroid dialogs will be skipped.")
 
-        target_app_package = self.config_dict.get('APP_PACKAGE')
-        if not target_app_package:
-            logging.error("TARGET_APP_PACKAGE not configured. Cannot start traffic capture.")
+        # Check all required config values upfront
+        try:
+            target_app_package = self.config_dict['APP_PACKAGE']
+            device_pcap_dir = self.config_dict['DEVICE_PCAP_DIR']
+            traffic_capture_output_dir = self.config_dict['TRAFFIC_CAPTURE_OUTPUT_DIR']
+            pcapdroid_activity = self.config_dict['PCAPDROID_ACTIVITY']
+            wait_after_action = self.config_dict['WAIT_AFTER_ACTION']
+        except KeyError as e:
+            logging.error(f"{str(e)} not configured. Cannot start traffic capture.")
             return False
 
         sanitized_package = re.sub(r'[^\w.-]+', '_', target_app_package)
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         self.pcap_filename_on_device = f"{sanitized_package}_{timestamp}.pcap"
         
-        device_pcap_dir = self.config_dict.get('DEVICE_PCAP_DIR', getattr(config, 'DEVICE_PCAP_DIR'))
-        traffic_capture_output_dir = self.config_dict.get('TRAFFIC_CAPTURE_OUTPUT_DIR', getattr(config, 'TRAFFIC_CAPTURE_OUTPUT_DIR'))
-
         device_pcap_full_path = os.path.join(device_pcap_dir, self.pcap_filename_on_device).replace("\\", "/")
 
         os.makedirs(traffic_capture_output_dir, exist_ok=True)
@@ -86,7 +78,15 @@ class TrafficCaptureManager:
         logging.info(f"Expected device save path: {device_pcap_full_path}")
         logging.info(f"Local save path: {self.local_pcap_file_path}")
 
-        pcapdroid_activity = self.config_dict.get('PCAPDROID_ACTIVITY', getattr(config, 'PCAPDROID_ACTIVITY'))
+        logging.info("\n" + "="*50)
+        logging.info("PCAPDROID TRAFFIC CAPTURE:")
+        logging.info(f"Ensure PCAPdroid is installed and has been granted remote control & VPN permissions.")
+        logging.info(f"Targeting app: {target_app_package}")
+        logging.info("If this is the first time or permissions were reset, you MAY need to:")
+        logging.info("  1. Approve 'shell'/'remote control' permission for PCAPdroid on the device.")
+        logging.info("  2. Approve VPN connection request from PCAPdroid on the device.")
+        logging.info("Check PCAPdroid notifications on device if capture doesn't start.")
+        logging.info("="*50 + "\n")
 
         start_command = [
             'shell', 'am', 'start',
@@ -97,16 +97,6 @@ class TrafficCaptureManager:
             '-e', 'pcap_name', self.pcap_filename_on_device,
             '-e', 'tls_decryption', 'true'
         ]
-        
-        logging.info("\n" + "="*50)
-        logging.info("PCAPDROID TRAFFIC CAPTURE:")
-        logging.info(f"Ensure PCAPdroid is installed and has been granted remote control & VPN permissions.")
-        logging.info(f"Targeting app: {target_app_package}")
-        logging.info("If this is the first time or permissions were reset, you MAY need to:")
-        logging.info("  1. Approve 'shell'/'remote control' permission for PCAPdroid on the device.")
-        logging.info("  2. Approve VPN connection request from PCAPdroid on the device.")
-        logging.info("Check PCAPdroid notifications on device if capture doesn't start.")
-        logging.info("="*50 + "\n")
 
         stdout, retcode = self._run_adb_command_for_capture(start_command)
 
@@ -150,7 +140,7 @@ class TrafficCaptureManager:
         else:
             logging.warning("Appium driver not available for PCAPdroid 'ALLOW' button interaction. Skipping.")
 
-        time.sleep(self.config_dict.get('WAIT_AFTER_ACTION', 2.0))
+        time.sleep(wait_after_action)
         return True
 
     def stop_traffic_capture(self) -> bool:
@@ -163,8 +153,14 @@ class TrafficCaptureManager:
         if not driver_available_for_ui:
             logging.warning("Appium driver not connected at the start of stop_traffic_capture. UI interaction for PCAPdroid dialogs will be skipped.")
 
+        try:
+            pcapdroid_activity = self.config_dict['PCAPDROID_ACTIVITY']
+            wait_after_action = self.config_dict['WAIT_AFTER_ACTION']
+        except KeyError as e:
+            logging.error(f"{str(e)} not configured. Cannot stop traffic capture.")
+            return False
+
         logging.info("Attempting to stop PCAPdroid traffic capture...")
-        pcapdroid_activity = self.config_dict.get('PCAPDROID_ACTIVITY', getattr(config, 'PCAPDROID_ACTIVITY'))
         stop_command = [
             'shell', 'am', 'start',
             '-n', pcapdroid_activity,
@@ -235,7 +231,7 @@ class TrafficCaptureManager:
             return False # Return False if ADB command failed, regardless of UI interaction outcome
 
         logging.info("PCAPdroid 'stop' sequence completed. Waiting for file finalization...")
-        time.sleep(self.config_dict.get('WAIT_AFTER_ACTION', 2.0))
+        time.sleep(wait_after_action)
         return True
 
     def pull_traffic_capture_file(self) -> bool:
@@ -244,7 +240,12 @@ class TrafficCaptureManager:
             logging.debug("Cannot pull PCAP file: capture not enabled, filename not set, or local path not set.")
             return False
 
-        device_pcap_dir = self.config_dict.get('DEVICE_PCAP_DIR', getattr(config, 'DEVICE_PCAP_DIR'))
+        try:
+            device_pcap_dir = self.config_dict['DEVICE_PCAP_DIR']
+        except KeyError:
+            logging.error("DEVICE_PCAP_DIR not configured. Cannot pull traffic capture file.")
+            return False
+
         device_pcap_full_path = os.path.join(device_pcap_dir, self.pcap_filename_on_device).replace("\\", "/")
         logging.info(f"Attempting to pull PCAP file: {device_pcap_full_path} to {self.local_pcap_file_path}")
 
@@ -270,10 +271,21 @@ class TrafficCaptureManager:
             
     def cleanup_device_pcap_file(self):
         """Deletes the PCAP file from the device if configured."""
-        if not self.traffic_capture_enabled or not self.pcap_filename_on_device or not self.config_dict.get('CLEANUP_DEVICE_PCAP_FILE', False):
+        try:
+            cleanup_enabled = self.config_dict['CLEANUP_DEVICE_PCAP_FILE']
+        except KeyError:
+            logging.info("CLEANUP_DEVICE_PCAP_FILE not configured. Skipping cleanup.")
             return
 
-        device_pcap_dir = self.config_dict.get('DEVICE_PCAP_DIR', getattr(config, 'DEVICE_PCAP_DIR'))
+        if not self.traffic_capture_enabled or not self.pcap_filename_on_device or not cleanup_enabled:
+            return
+
+        try:
+            device_pcap_dir = self.config_dict['DEVICE_PCAP_DIR']
+        except KeyError:
+            logging.error("DEVICE_PCAP_DIR not configured. Cannot cleanup device PCAP file.")
+            return
+
         device_pcap_full_path = os.path.join(device_pcap_dir, self.pcap_filename_on_device).replace("\\", "/")
         logging.info(f"Cleaning up device PCAP file: {device_pcap_full_path}")
         rm_command = ['shell', 'rm', device_pcap_full_path]

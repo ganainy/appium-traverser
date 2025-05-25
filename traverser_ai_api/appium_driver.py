@@ -1,14 +1,14 @@
 import logging
-import shlex # Added shlex
-from appium import webdriver
-from appium.options.android import UiAutomator2Options
+import shlex
+from typing import Optional, List, Dict, Any, Tuple
+from appium.webdriver.webdriver import WebDriver as AppiumRemote
+from appium.options.android.uiautomator2.base import UiAutomator2Options
 from appium.webdriver.common.appiumby import AppiumBy
 from selenium.common.exceptions import StaleElementReferenceException, WebDriverException, NoSuchElementException, InvalidElementStateException
 from selenium.webdriver.remote.webelement import WebElement
 from selenium.webdriver.common.by import By
-from typing import Optional, List, Dict, Any, Tuple # Added Tuple
 
-from . import config # Changed to relative import
+from . import config  # Changed to relative import
 import time
 
 class AppiumDriver:
@@ -17,7 +17,16 @@ class AppiumDriver:
     def __init__(self, server_url: str, config: dict):
         self.server_url = server_url
         self.config = config
-        self.driver: Optional[webdriver.Remote] = None
+        
+        # Validate required configuration values
+        required_configs = ['APP_PACKAGE', 'APP_ACTIVITY', 'NEW_COMMAND_TIMEOUT', 
+                          'APPIUM_IMPLICIT_WAIT', 'APP_LAUNCH_WAIT_TIME', 
+                          'WAIT_AFTER_ACTION', 'ALLOWED_EXTERNAL_PACKAGES']
+        missing_configs = [cfg for cfg in required_configs if cfg not in config]
+        if missing_configs:
+            raise ValueError(f"Missing required configurations: {', '.join(missing_configs)}")
+
+        self.driver: Optional[AppiumRemote] = None
 
     def connect(self) -> bool:
         """Establishes connection to the Appium server."""
@@ -27,35 +36,36 @@ class AppiumDriver:
             "appium:automationName": "UiAutomator2",
             "appium:appPackage": self.config['APP_PACKAGE'],
             "appium:appActivity": self.config['APP_ACTIVITY'],
-            "appium:noReset": True, # Keep app data between sessions
+            "appium:noReset": True,  # Keep app data between sessions
             "appium:autoGrantPermissions": True,
             "appium:newCommandTimeout": self.config['NEW_COMMAND_TIMEOUT'],
             "appium:ensureWebviewsHavePages": True,
             "appium:nativeWebScreenshot": True,
             "appium:connectHardwareKeyboard": True,
         }
-        if self.config.get('TARGET_DEVICE_UDID'):
-            caps["appium:udid"] = self.config['TARGET_DEVICE_UDID']
+        if udid := self.config.get('TARGET_DEVICE_UDID'):
+            caps["appium:udid"] = udid
 
         options.load_capabilities(caps)
 
         try:
             logging.info(f"Connecting to Appium server at {self.server_url}...")
-            self.driver = webdriver.Remote(self.server_url, options=options)
+            self.driver = AppiumRemote(command_executor=self.server_url, options=options)
 
-            # --- Set Implicit Wait ---
-            implicit_wait_time = getattr(config, 'APPIUM_IMPLICIT_WAIT', 5) # Default to 5 if not in config
-            logging.info(f"Setting Appium implicit wait to {implicit_wait_time} seconds.")
-            self.driver.implicitly_wait(implicit_wait_time)
+            # Set Implicit Wait
+            implicit_wait_time = self.config['APPIUM_IMPLICIT_WAIT']
+            if self.driver:
+                self.driver.implicitly_wait(implicit_wait_time)
+                logging.info(f"Set Appium implicit wait to {implicit_wait_time} seconds")
 
             logging.info("Appium session established successfully.")
-
             return True
+            
         except WebDriverException as e:
             logging.error(f"Failed to connect to Appium server or start session: {e}")
             self.driver = None
             return False
-        except Exception as e: # Catch other potential errors like config issues
+        except Exception as e:
             logging.error(f"An unexpected error occurred during Appium connection: {e}", exc_info=True)
             self.driver = None
             return False
@@ -143,9 +153,10 @@ class AppiumDriver:
                     "command": "am",
                     "args": ["start", "-n", f"{app_package}/{app_activity}"],
                 },
-            )
-            # Add a short delay to allow the app to launch and stabilize
-            time.sleep(getattr(self.config, 'APP_LAUNCH_WAIT_TIME', 3)) # Use configured or default
+            )            # Add a delay to allow the app to launch and stabilize
+            if 'APP_LAUNCH_WAIT_TIME' not in self.config:
+                raise ValueError("APP_LAUNCH_WAIT_TIME must be defined in config")
+            time.sleep(self.config['APP_LAUNCH_WAIT_TIME'])
             
             # Verification step (optional but recommended)
             current_pkg = self.get_current_package()
@@ -407,19 +418,16 @@ class AppiumDriver:
             return False
 
     def relaunch_app(self):
-         """Attempts to relaunch the target application activity."""
-         if not self.driver: return
-         try:
-             # Construct the intent string for the main activity
-             intent = f"{self.config['APP_PACKAGE']}/{self.config['APP_ACTIVITY']}"
-             logging.info(f"Attempting to relaunch app via intent: {intent}")
-             # Use the execute_script method to start the activity
-             # This is often more reliable than driver.launch_app() if already running
-             self.driver.execute_script("mobile: startActivity", {"intent": intent})
-             time.sleep(3) # Allow time for app to restart/come to foreground
-             logging.info("Relaunch command sent.")
-         except WebDriverException as e:
-             logging.error(f"Error relaunching app: {e}", exc_info=True)
+        """Attempts to relaunch the target application activity."""
+        if not self.driver: return
+        try:
+            intent = f"{self.config['APP_PACKAGE']}/{self.config['APP_ACTIVITY']}"
+            logging.info(f"Attempting to relaunch app via intent: {intent}")
+            self.driver.execute_script("mobile: startActivity", {"intent": intent})
+            time.sleep(self.config['WAIT_AFTER_ACTION'])  # Use configured wait time
+            logging.info("Relaunch command sent.")
+        except WebDriverException as e:
+            logging.error(f"Error relaunching app: {e}", exc_info=True)
 
     def get_all_elements(self) -> List[WebElement]:
         """Gets all elements on the current screen."""

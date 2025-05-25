@@ -3,11 +3,29 @@ from dotenv import load_dotenv
 
 load_dotenv() # Load environment variables from .env file
 
+# --- Required Environment Variables & Config Settings ---
+# Logging configuration
+LOG_LEVEL = 'INFO'  # Valid values: DEBUG, INFO, WARNING, ERROR, CRITICAL
+LOG_FILE_NAME = os.environ.get('LOG_FILE_NAME', 'main_traverser_final.log')
+
+# --- Database Settings ---
+DB_CONNECT_TIMEOUT = int(os.environ.get('DB_CONNECT_TIMEOUT', '10'))  # Seconds for sqlite3.connect() timeout
+DB_BUSY_TIMEOUT = int(os.environ.get('DB_BUSY_TIMEOUT', '5000'))  # Milliseconds for PRAGMA busy_timeout
+
+# --- App Discovery Settings ---
+# Override with environment variables if provided
+MAX_APPS_TO_SEND_TO_AI = int(os.environ.get('MAX_APPS_TO_SEND_TO_AI', '200'))
+THIRD_PARTY_APPS_ONLY = os.environ.get('THIRD_PARTY_APPS_ONLY', 'true').lower() == 'true'
+
+# --- AI Memory Settings (moved from hardcoded) ---
+USE_CHAT_MEMORY = os.environ.get('USE_CHAT_MEMORY', 'true').lower() == 'true'
+MAX_CHAT_HISTORY = int(os.environ.get('MAX_CHAT_HISTORY', '10'))
+
 # --- Appium Settings ---
 APPIUM_SERVER_URL = "http://127.0.0.1:4723"
 TARGET_DEVICE_UDID = None # Optional: Specify UDID, e.g., "emulator-5554" or real device ID
-APP_PACKAGE = "eu.smartpatient.mytherapy" # CHANGE TO YOUR TARGET APP
-APP_ACTIVITY = "eu.smartpatient.mytherapy.feature.account.presentation.onboarding.WelcomeActivity" # CHANGE TO YOUR TARGET APP's LAUNCH ACTIVITY
+APP_PACKAGE = "de.deltacity.android.blutspende" # Updated to match Blutspende app
+APP_ACTIVITY = "de.deltacity.android.blutspende.activities.SplashScreenActivity" # Updated to match Blutspende app launch activity
 # Find these using `adb shell dumpsys window | grep -E 'mCurrentFocus|mFocusedApp'` while app is open
 NEW_COMMAND_TIMEOUT = 300 # Seconds Appium waits for a new command before quitting session
 APPIUM_IMPLICIT_WAIT = 1 # Seconds Appium driver waits when trying to find elements before failing a strategy
@@ -42,10 +60,13 @@ ALLOWED_EXTERNAL_PACKAGES = [
 ]
 
 
+# --- Base Output Directory ---
+OUTPUT_DATA_DIR = "output_data"  # Base directory for all output data
+
 # --- App Information Discovery ---
 # Directory for caching discovered app information (package name, activity, category)
 # Used by app_info_manager.py when integrated into main.py
-APP_INFO_OUTPUT_DIR = "../output_data/app_info" # Changed to be relative to project root
+APP_INFO_OUTPUT_DIR = f"{OUTPUT_DATA_DIR}/app_info" # Changed to use base output directory
 # When discovering the TARGET_APP_PACKAGE_NAME, should we look for it
 # only among AI-filtered (e.g., health) apps?
 # False: Search for TARGET_APP_PACKAGE_NAME in all discovered apps.
@@ -60,10 +81,10 @@ CRAWL_MODE = 'steps'  # Options: 'steps' or 'time'
 MAX_CRAWL_STEPS = 100  # Max steps if CRAWL_MODE is 'steps'
 MAX_CRAWL_DURATION_SECONDS = 600  # Max duration in seconds (e.g., 600 for 10 mins) if CRAWL_MODE is 'time'
 # Screenshot directories
-SCREENSHOTS_DIR = f"output_data/screenshots/crawl_screenshots_{APP_PACKAGE}"
-ANNOTATED_SCREENSHOTS_DIR = f"output_data/screenshots/annotated_crawl_screenshots_{APP_PACKAGE}"
+SCREENSHOTS_DIR = f"{OUTPUT_DATA_DIR}/screenshots/crawl_screenshots_{APP_PACKAGE}"
+ANNOTATED_SCREENSHOTS_DIR = f"{OUTPUT_DATA_DIR}/screenshots/annotated_crawl_screenshots_{APP_PACKAGE}"
 # Database settings
-DB_NAME = f"output_data/database_output/{APP_PACKAGE}_crawl_data.db"
+DB_NAME = f"{OUTPUT_DATA_DIR}/database_output/{APP_PACKAGE}_crawl_data.db"
 WAIT_AFTER_ACTION = 2.0 # Seconds to wait for UI to potentially change after an action
 STABILITY_WAIT = 1.0 # Seconds to wait before getting state (screenshot/XML)
 VISUAL_SIMILARITY_THRESHOLD = 5 # Perceptual hash distance threshold (lower means more similar)
@@ -95,27 +116,23 @@ DEFAULT_MODEL_TYPE = 'flash-latest-fast' # Specify the default model to use
 # Gemini Model Configurations
 GEMINI_MODELS = {
     'flash-latest': {  # Default: Fast, cost-effective, multimodal
-        'name': 'gemini-2.5-flash-preview-04-17',
-        'description': 'Latest Flash model: Optimized for speed, cost, and multimodal tasks.'
-    },
-    'flash-latest-fast': { # Optimized for speed using generation config
-        'name': 'gemini-2.5-flash-preview-04-17',
-        'description': 'Latest Flash model with settings optimized for faster responses.',
-        'generation_config': {
-            'temperature': 0.3,
-            'top_p': 0.8,
-            'top_k': 20,
-            'max_output_tokens': 65536  
-        }
-    },
-    'pro-latest-accurate': { # Optimized for accuracy using Pro model and generation config
-        'name': 'gemini-2.5-pro-exp-03-25',
-        'description': 'Latest Pro model with settings optimized for higher accuracy and complex reasoning.',
+        'name': 'gemini-2.5-flash-preview-05-20',
+        'description': 'Latest Flash model (2.5): Optimized for speed, cost, and multimodal tasks with built-in thinking capabilities.',
         'generation_config': {
             'temperature': 0.7,
             'top_p': 0.95,
             'top_k': 40,
-            'max_output_tokens': 65536, 
+            'max_output_tokens': 4096
+        }
+    },
+    'flash-latest-fast': { # Optimized for speed using generation config
+        'name': 'gemini-2.5-flash-preview-05-20',
+        'description': 'Latest Flash model (2.5) with settings optimized for faster responses.',
+        'generation_config': {
+            'temperature': 0.3,
+            'top_p': 0.8,
+            'top_k': 20,
+            'max_output_tokens': 2048
         }
     }
 }
@@ -126,6 +143,6 @@ PCAPDROID_PACKAGE = "com.emanuelef.remote_capture"
 PCAPDROID_ACTIVITY = f"{PCAPDROID_PACKAGE}/.activities.CaptureCtrl"
 DEVICE_PCAP_DIR = "/sdcard/Download/PCAPdroid" # Default PCAPdroid save directory
 # Output directory for PCAP files, relative to the main project or traverser-ai-api
-TRAFFIC_CAPTURE_OUTPUT_DIR = "output_data/traffic_captures"
+TRAFFIC_CAPTURE_OUTPUT_DIR = f"{OUTPUT_DATA_DIR}/traffic_captures"
 CLEANUP_DEVICE_PCAP_FILE = True # Delete PCAP file from device after successful pull
 

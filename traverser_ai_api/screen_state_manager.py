@@ -34,9 +34,16 @@ class ScreenStateManager:
     Also handles fetching the current screen state (screenshot and XML).
     """
 
-    def __init__(self, db_manager: DatabaseManager, driver: 'AppiumDriver', config_dict: dict): # Added driver and config_dict
+    def __init__(self, db_manager: DatabaseManager, driver: 'AppiumDriver', config_dict: dict):
         self.db_manager = db_manager
         self.driver = driver # Added driver instance
+        
+        # Validate config_dict
+        if config_dict is None:
+            raise ValueError("config_dict cannot be None. Expected a dictionary.")
+        if not isinstance(config_dict, dict):
+            raise ValueError(f"config_dict must be a dictionary. Got {type(config_dict)} instead.")
+        
         self.config_dict = config_dict # Added config_dict instance
 
         # --- Run-specific Info ---
@@ -49,12 +56,23 @@ class ScreenStateManager:
         self.action_history_per_screen: Dict[str, List[str]] = {}
         self.current_run_visit_counts: Dict[str, int] = {}
         self.visited_screen_hashes: Set[str] = set()
-        self._next_screen_id = 1
-
-    def get_current_state(self) -> Optional[Tuple[bytes, str]]: # Moved from AppCrawler
+        self._next_screen_id = 1    
+        
+    def get_current_state(self) -> Optional[Tuple[bytes, str]]:
+            
         """Gets the current screenshot bytes and page source."""
         # Add stability wait *before* getting state
-        time.sleep(self.config_dict.get('STABILITY_WAIT', 1.0)) # Use self.config_dict
+        stability_wait = self.config_dict.get('STABILITY_WAIT')
+        if stability_wait is None:
+            logging.error("Configuration error: 'STABILITY_WAIT' not defined in config")
+            return None
+        try:
+            stability_wait_float = float(stability_wait)
+            time.sleep(stability_wait_float)
+        except (ValueError, TypeError):
+            logging.error(f"Invalid STABILITY_WAIT value in config: {stability_wait}")
+            return None
+
         try:
             screenshot_bytes = self.driver.get_screenshot_bytes() # Use self.driver
             page_source = self.driver.get_page_source() # Use self.driver
@@ -153,21 +171,28 @@ class ScreenStateManager:
             logging.info("No screens found in DB to load state from.")
             return False
 
-    def add_or_get_screen_representation(self, xml_hash: str, visual_hash: str, screenshot_bytes: bytes) -> Tuple[ScreenRepresentation, bool]:
+    def add_or_get_screen_representation(self, xml_hash: str, visual_hash: str, screenshot_bytes: bytes) -> Tuple[Optional[ScreenRepresentation], bool]:
         """
         Adds a new screen if not seen (or visually similar), saves screenshot,
         increments current run visit count for the *actual* state being used,
         and returns the correct ScreenRepresentation and a boolean indicating if it was a new screen.
         Handles visual similarity checks properly.
-        """
+        """       
         exact_composite_hash = self._get_composite_hash(xml_hash, visual_hash)
         target_composite_hash = exact_composite_hash
         screen_to_return: Optional[ScreenRepresentation] = None
         found_similar = False
         is_new_screen = False
+        
+        similarity_threshold = self.config_dict.get('VISUAL_SIMILARITY_THRESHOLD')
+        try:
+            similarity_threshold = int(similarity_threshold) if similarity_threshold is not None else None
+        except (ValueError, TypeError):
+            logging.error(f"Invalid VISUAL_SIMILARITY_THRESHOLD in config: {similarity_threshold}")
+            similarity_threshold = None
 
-        similarity_threshold = self.config_dict.get('VISUAL_SIMILARITY_THRESHOLD', getattr(config, 'VISUAL_SIMILARITY_THRESHOLD', 5))
-        if similarity_threshold >= 0:
+        # Only check for visual similarity if we have a valid threshold
+        if similarity_threshold is not None and similarity_threshold >= 0:
             for existing_hash, existing_screen_repr in self.screens.items():
                 try:
                     if visual_hash and existing_screen_repr.visual_hash and \
@@ -180,30 +205,35 @@ class ScreenStateManager:
                             target_composite_hash = existing_hash
                             screen_to_return = existing_screen_repr
                             found_similar = True
-                            break 
+                            break
                 except Exception as e:
                     logging.warning(f"Error during visual hash comparison for {visual_hash} and {existing_screen_repr.visual_hash}: {e}")
 
+        # Increment visit count for the target state
         self.current_run_visit_counts[target_composite_hash] = self.current_run_visit_counts.get(target_composite_hash, 0) + 1
-        logging.debug(f"Visit count for hash \'{target_composite_hash}\' updated to: {self.current_run_visit_counts[target_composite_hash]}")
-
+        logging.debug(f"Visit count for hash '{target_composite_hash}' updated to: {self.current_run_visit_counts[target_composite_hash]}")
+        
         if screen_to_return:
-            is_new_screen = False
-            return screen_to_return, is_new_screen
+            return screen_to_return, False
         elif exact_composite_hash in self.screens:
-            is_new_screen = False
-            return self.screens[exact_composite_hash], is_new_screen
+            return self.screens[exact_composite_hash], False
         else:
+            # Create new screen
             is_new_screen = True
             new_id = self._next_screen_id
             self._next_screen_id += 1
+              # Save screenshot
+            screenshot_dir = self.config_dict.get('SCREENSHOTS_DIR')
+            if screenshot_dir is None:
+                logging.error("Configuration error: 'SCREENSHOTS_DIR' not defined in config")
+                return None, False  # Cannot proceed without a valid screenshots directory
 
-            screenshot_dir = self.config_dict.get('SCREENSHOTS_DIR', getattr(config, 'SCREENSHOTS_DIR', 'screenshots'))
             os.makedirs(screenshot_dir, exist_ok=True)
             screenshot_filename = f"screen_{new_id}_{visual_hash}.png"
             screenshot_path = os.path.join(screenshot_dir, screenshot_filename)
             try:
-                with open(screenshot_path, "wb") as f: f.write(screenshot_bytes)
+                with open(screenshot_path, "wb") as f:
+                    f.write(screenshot_bytes)
                 logging.info(f"Saved new screen screenshot: {screenshot_path}")
             except Exception as e:
                 logging.error(f"Failed to save screenshot {screenshot_path}: {e}", exc_info=True)
@@ -211,21 +241,27 @@ class ScreenStateManager:
 
             new_screen_repr = ScreenRepresentation(new_id, xml_hash, visual_hash, screenshot_path)
             self.screens[exact_composite_hash] = new_screen_repr
+
+            # Update tracking sets/dicts
             self.visited_screen_hashes.add(exact_composite_hash)
             if exact_composite_hash not in self.action_history_per_screen:
                 self.action_history_per_screen[exact_composite_hash] = []
 
+            # Save to DB if available
             if self.db_manager:
                 try:
                     db_result_hash = self.db_manager.insert_screen(
-                        screen_id=new_id, xml_hash=xml_hash, visual_hash=visual_hash, screenshot_path=screenshot_path
+                        screen_id=new_id,
+                        xml_hash=xml_hash,
+                        visual_hash=visual_hash,
+                        screenshot_path=screenshot_path
                     )
                     if db_result_hash != exact_composite_hash:
-                        logging.warning(f"DB insert/ignore hash \'{db_result_hash}\' differs from expected \'{exact_composite_hash}\'.")
+                        logging.warning(f"DB insert/ignore hash '{db_result_hash}' differs from expected '{exact_composite_hash}'.")
                 except Exception as db_err:
-                     logging.error(f"Database error adding screen ID {new_id}: {db_err}", exc_info=True)
+                    logging.error(f"Database error adding screen ID {new_id}: {db_err}", exc_info=True)
 
-            logging.info(f"Added new screen state (ID: {new_id}, Exact Hash: {exact_composite_hash}).")
+            logging.info(f"Added new screen state (ID: {new_id}, Hash: {exact_composite_hash}).")
             return new_screen_repr, is_new_screen
 
     def increment_step(self, 
@@ -275,15 +311,34 @@ class ScreenStateManager:
         return self.current_run_visit_counts.get(screen_hash, 0)
 
     def get_total_screens(self) -> int:
-        return len(self.screens)
-
+        return len(self.screens)    
+    
     def get_total_transitions(self) -> int:
+        """Gets the total number of transitions recorded in the database.
+        
+        Returns:
+            int: The number of transitions, or -1 if there was an error, or 0 if no database.
+        """
         if self.db_manager:
             try:
-                # Ensure TRANSITIONS_TABLE is accessible; might need self.db_manager.TRANSITIONS_TABLE
+                # Ensure TRANSITIONS_TABLE is accessible
                 sql = f"SELECT COUNT(*) FROM {getattr(self.db_manager, 'TRANSITIONS_TABLE', 'transitions')}"
-                result = self.db_manager._execute_sql(sql, fetch_one=True) # type: ignore
-                return result[0] if result else 0
+                result = self.db_manager._execute_sql(sql, fetch_one=True)
+                
+                # Handle the various possible return types
+                if result is None:
+                    return 0
+                if isinstance(result, tuple) and len(result) > 0:
+                    count = result[0]
+                    return count if isinstance(count, int) else 0
+                if isinstance(result, list) and len(result) > 0:
+                    count = result[0]
+                    return count if isinstance(count, int) else 0
+                if isinstance(result, int):
+                    return result
+                    
+                logging.warning(f"Unexpected result type from database query: {type(result)}")
+                return 0
             except Exception as e:
                 logging.error(f"Failed to get total transitions count from DB: {e}")
                 return -1 

@@ -37,18 +37,67 @@ UI_END_PREFIX = "UI_END:"
 
 class AppCrawler:
     """Orchestrates the AI-driven app crawling process."""
+    def __init__(self, config_dict: dict):
+        """Initialize the AppCrawler with configuration.
+        Args:
+            config_dict (dict): Configuration dictionary with all necessary settings.
+        """
+        self.config_dict = config_dict
 
-    def __init__(self, config_dict: dict): # Added config_dict parameter
-        self.config_dict = config_dict # Use passed config_dict
-        self.driver = AppiumDriver(self.config_dict.get('APPIUM_SERVER_URL'), self.config_dict) # Use .get for safety
-        # Update AI Assistant initialization to use default model type
+        # Store original config values in an instance variable instead of module level
+        self._original_config_values = {}
+        
+        # Update the local config module with values from config_dict
+        # This ensures all imported modules use the same config values
+        for key, value in config_dict.items():
+            current_value = getattr(config, key, None)
+            if current_value is not None:  # Only store and update if the attribute exists
+                self._original_config_values[key] = current_value
+                if value is not None:  # Only set if the new value is not None
+                    setattr(config, key, value)
+        
+        # Get required Appium configuration
+        appium_url = config_dict.get('APPIUM_SERVER_URL')
+        if not appium_url:
+            raise ValueError("APPIUM_SERVER_URL is required in configuration")
+        
+        new_command_timeout = config_dict.get('NEW_COMMAND_TIMEOUT')
+        if new_command_timeout is None: # Check for None as 0 is a valid timeout
+            raise ValueError("NEW_COMMAND_TIMEOUT is required in configuration")
+        self.config_dict['NEW_COMMAND_TIMEOUT'] = new_command_timeout
+
+        appium_implicit_wait = config_dict.get('APPIUM_IMPLICIT_WAIT')
+        if appium_implicit_wait is None: # Check for None as 0 is a valid wait
+            raise ValueError("APPIUM_IMPLICIT_WAIT is required in configuration")
+        self.config_dict['APPIUM_IMPLICIT_WAIT'] = appium_implicit_wait
+        
+        # Get required values for AI and state management
+        gemini_api_key = config_dict.get('GEMINI_API_KEY')
+        if not gemini_api_key:
+            raise ValueError("GEMINI_API_KEY is required in configuration")
+
+        model_type = config_dict.get('DEFAULT_MODEL_TYPE')
+        if not model_type:
+            raise ValueError("DEFAULT_MODEL_TYPE is required in configuration")
+
+        # Safety settings can be None, but must be explicitly in config if used
+        safety_settings = config_dict.get('AI_SAFETY_SETTINGS')
+        if safety_settings is None:
+            raise ValueError("AI_SAFETY_SETTINGS is required in configuration")
+
+        # Ensure required values for database and state management
+        db_name = str(config_dict.get('DB_NAME', ''))
+        if not db_name:
+            raise ValueError("DB_NAME is required in configuration")
+
+        self.driver = AppiumDriver(appium_url, config_dict)
+        # Update AI Assistant initialization with proper type handling
         self.ai_assistant = AIAssistant(
-            api_key=self.config_dict.get('GEMINI_API_KEY'), # Use .get
-            model_name=self.config_dict.get('DEFAULT_MODEL_TYPE', 'pro-vision'), # Use .get
-            safety_settings=self.config_dict.get('AI_SAFETY_SETTINGS') # Use .get
+            api_key=gemini_api_key,
+            model_name=model_type,
+            safety_settings=safety_settings
         )
-        self.db_manager = DatabaseManager(self.config_dict.get('DB_NAME')) # Use .get
-
+        self.db_manager = DatabaseManager(db_name)
         self.screen_state_manager = ScreenStateManager(self.db_manager, self.driver, self.config_dict)
 
         # Failure counters
@@ -207,111 +256,69 @@ class AppCrawler:
     def run(self):
         """Main crawling loop."""
         logging.info("Starting crawler run...")
-        print(f"{UI_STATUS_PREFIX} INITIALIZING") # UI Update
+        print(f"{UI_STATUS_PREFIX} INITIALIZING")
 
         try:
-            # Connect to Appium FIRST to make self.driver.driver available
+            # Connect to Appium first
             self.driver.connect()
             logging.info("Appium driver connected successfully before traffic capture initiation.")
 
             # Ensure database is connected
-            if self.db_manager:
-                try:
-                    logging.info("Attempting to connect to the database...")
-                    # Assuming connect() is idempotent or handles already connected state
-                    self.db_manager.connect() 
-                    logging.info("Database connection successful or already established.")
-                except Exception as e_db_connect:
-                    logging.critical(f"Failed to connect to the database: {e_db_connect}. Stopping crawler.", exc_info=True)
-                    print(f"{UI_END_PREFIX} FAILURE_DB_CONNECT: {str(e_db_connect)}")
-                    # perform_full_cleanup will be called in the outer finally block
-                    return 
-            else:
-                logging.critical("Database manager (self.db_manager) is not initialized. Stopping crawler.")
+            if not self.db_manager:
+                logging.critical("Database manager not initialized. Stopping crawler.")
                 print(f"{UI_END_PREFIX} FAILURE_DB_MANAGER_MISSING")
-                # perform_full_cleanup will be called in the outer finally block
                 return
 
-            # --- Start Traffic Capture (if enabled) ---
+            try:
+                self.db_manager.connect()
+                logging.info("Database connection successful.")
+            except Exception as e_db_connect:
+                logging.critical(f"Failed to connect to database: {e_db_connect}.", exc_info=True)
+                print(f"{UI_END_PREFIX} FAILURE_DB_CONNECT: {str(e_db_connect)}")
+                return
+
+            # Start Traffic Capture if enabled
             if self.traffic_capture_enabled:
-                if not self.traffic_capture_manager.start_traffic_capture(): # Updated to use TrafficCaptureManager
+                if not self.traffic_capture_manager.start_traffic_capture():
                     logging.warning("Failed to start traffic capture. Continuing without it.")
-                    # Optionally, decide if this is a critical failure
                 else:
                     logging.info("Traffic capture started successfully.")
-            # --- End Start Traffic Capture ---
 
-
-            # --- Ensure Target App is Launched using AppContextManager ---
+            # Launch and verify target app
             if not self.app_context_manager.launch_and_verify_app():
-                logging.critical("App context manager failed to launch and verify the target application. Stopping.")
+                logging.critical("Failed to launch and verify target application.")
                 print(f"{UI_END_PREFIX} FAILURE_APP_LAUNCH_CONTEXT_MANAGER")
-                # Attempt to stop traffic capture before exiting
                 if self.traffic_capture_enabled:
                     self.traffic_capture_manager.stop_traffic_capture()
                 return
-            logging.info("Target application launched and verified by AppContextManager.")
-            # --- End Ensure Target App is Launched ---
 
-            # Corrected: Removed self.config_dict from ScreenStateManager constructor call
-            
-            # --- Load or Initialize Run ---
-            if config.CONTINUE_EXISTING_RUN:
-                logging.info("Attempting to continue existing run...")
-                if not self.screen_state_manager.load_from_db():
-                    logging.warning("Failed to load existing run data from DB, starting fresh. Will use current foreground app state.")
-                    # Initialize with the (now confirmed) target app's activity and package
-                    current_activity = self.driver.get_current_activity()
-                    current_package = self.driver.get_current_package()
-                    if current_package != self.config_dict.get("APP_PACKAGE"):
-                        logging.warning(f"Current foreground app ({current_package}/{current_activity}) does not match target ({self.config_dict.get('APP_PACKAGE')}). Will initialize SSM with target config.")
-                        current_activity = self.config_dict.get("APP_ACTIVITY")
-                        current_package = self.config_dict.get("APP_PACKAGE")
-                    self.screen_state_manager.initialize_run(current_activity, current_package)
-                else:
-                    logging.info(f"Successfully loaded some data from DB. Current step from DB: {self.screen_state_manager.current_step_number}")
-                    # Check if the loaded run's package information is valid, if not, re-initialize with current target.
-                    if not self.screen_state_manager.app_package or not self.screen_state_manager.start_activity:
-                        logging.warning(f"Loaded run from DB but app_package ('{self.screen_state_manager.app_package}') or start_activity ('{self.screen_state_manager.start_activity}') is missing. Re-initializing SSM with current target app details.")
-                        current_activity = self.config_dict.get("APP_ACTIVITY")
-                        current_package = self.config_dict.get("APP_PACKAGE")
-                        self.screen_state_manager.initialize_run(current_activity, current_package)
-                        logging.info("Step number reset to 0 due to re-initialization of SSM with current target app details.")
-                    elif self.screen_state_manager.app_package != self.config_dict.get("APP_PACKAGE"):
-                        logging.warning(f"Loaded run's package ({self.screen_state_manager.app_package}) does not match current target ({self.config_dict.get('APP_PACKAGE')}). Re-initializing SSM with current target app details.")
-                        current_activity = self.config_dict.get("APP_ACTIVITY")
-                        current_package = self.config_dict.get("APP_PACKAGE")
-                        self.screen_state_manager.initialize_run(current_activity, current_package)
-                        logging.info("Step number reset to 0 due to mismatch with current target app.")
-                    else:
-                        logging.info(f"SSM retains loaded app_package='{self.screen_state_manager.app_package}' and start_activity='{self.screen_state_manager.start_activity}'.")
+            logging.info("Target application launched and verified.")
 
-            else: # Starting a fresh run
-                logging.info("Starting a fresh run (CONTINUE_EXISTING_RUN is False).")
+            # Load or Initialize Run State
+            if config.CONTINUE_EXISTING_RUN and self.screen_state_manager.load_from_db():
+                logging.info(f"Loaded existing run. Current step: {self.screen_state_manager.current_step_number}")
+                # Validate loaded state matches current target
+                if not (self.screen_state_manager.app_package and self.screen_state_manager.start_activity):
+                    self._reinitialize_state_with_target()
+                elif self.screen_state_manager.app_package != str(self.config_dict.get("APP_PACKAGE", "")):
+                    self._reinitialize_state_with_target()
+            else:
+                # Start fresh run
+                logging.info("Starting fresh run.")
                 if self.db_manager:
-                    self.db_manager.initialize_db() # Clear and init DB for a fresh run
-                else:
-                    logging.warning("DB Manager not available, cannot initialize DB for fresh run.")
-                # Initialize with the (now confirmed) target app's activity and package
-                current_activity = self.driver.get_current_activity()
-                current_package = self.driver.get_current_package()
-                if current_package != self.config_dict.get("APP_PACKAGE"):
-                    logging.warning(f"Current foreground app ({current_package}/{current_activity}) does not match target ({self.config_dict.get('APP_PACKAGE')}). Initializing SSM with target config.")
-                    current_activity = self.config_dict.get("APP_ACTIVITY")
-                    current_package = self.config_dict.get("APP_PACKAGE")
-                self.screen_state_manager.initialize_run(current_activity, current_package)
-            # ---
-            # Ensure app_package and start_activity in screen_state_manager are now correctly set from target config if they were None
+                    self.db_manager.initialize_db()
+                self._reinitialize_state_with_target()
+
+            # Ensure state manager has required values
             if not self.screen_state_manager.app_package:
-                self.screen_state_manager.app_package = self.config_dict.get("APP_PACKAGE")
-                logging.info(f"SSM app_package was None, set to target: {self.screen_state_manager.app_package}")
-            if not self.screen_state_manager.start_activity: # start_activity can be tricky if not well-defined for target
-                self.screen_state_manager.start_activity = self.config_dict.get("APP_ACTIVITY")
-                logging.info(f"SSM start_activity was None, set to target: {self.screen_state_manager.start_activity}")
+                self.screen_state_manager.app_package = str(self.config_dict.get("APP_PACKAGE", ""))
+            if not self.screen_state_manager.start_activity:
+                self.screen_state_manager.start_activity = str(self.config_dict.get("APP_ACTIVITY", ""))
 
-            logging.info(f"Crawler initialized. Using Start Activity: '{self.screen_state_manager.start_activity}', App Package: '{self.screen_state_manager.app_package}' for the run.")
-            print(f"{UI_STATUS_PREFIX} RUNNING") # UI Update
+            logging.info(f"Using Activity: '{self.screen_state_manager.start_activity}', Package: '{self.screen_state_manager.app_package}'")
+            print(f"{UI_STATUS_PREFIX} RUNNING")
 
+            # Main crawl loop
             start_time = time.time()
             steps_taken = 0
 
@@ -388,99 +395,103 @@ class AppCrawler:
                 # ---
 
                 # --- AI Interaction ---
-                logging.info(f"Getting AI suggestion for screen: {screen_rep.id} (Composite Hash: {screen_rep.get_composite_hash()})")
-                # Prepare XML snippet if enabled
+                logging.info(f"Getting AI suggestion for screen: {screen_rep.id} (Hash: {screen_rep.get_composite_hash()})")
+                
+                # Get screen context and history
                 xml_snippet = None
                 if getattr(config, 'ENABLE_XML_CONTEXT', False) and page_source:
                     max_len = getattr(config, 'XML_SNIPPET_MAX_LEN', 30000)
-                    xml_snippet = utils.simplify_xml_for_ai(page_source, max_len=max_len) 
-                
-                current_screen_hash = screen_rep.get_composite_hash() # Get hash for use below
-                
-                history_for_screen = self.screen_state_manager.get_action_history(current_screen_hash) # Correct method & arg
-                max_prompt_history = getattr(config, 'MAX_CHAT_HISTORY', 10) # Length for prompt history
-                previous_actions_for_prompt = history_for_screen[-max_prompt_history:]
-                
-                current_visit_count = self.screen_state_manager.get_visit_count(current_screen_hash) # Correct way to get visit count
+                    xml_snippet = utils.simplify_xml_for_ai(page_source, max_len=max_len)
 
-                # Use the new method in AIAssistant that handles model selection
-                ai_suggestion_json = self.ai_assistant.get_next_action(
-                    screenshot_bytes=screenshot_bytes, 
-                    xml_context=xml_snippet,
-                    previous_actions=previous_actions_for_prompt, # Use the prepared list
-                    available_actions=config.AVAILABLE_ACTIONS,                    
-                    current_screen_visit_count=current_visit_count, # Use correct visit count
-                    current_composite_hash=current_screen_hash # Use the hash variable
+                current_screen_hash = screen_rep.get_composite_hash()
+                history_for_screen = self.screen_state_manager.get_action_history(current_screen_hash)
+                max_prompt_history = getattr(config, 'MAX_CHAT_HISTORY', 10)
+                previous_actions = history_for_screen[-max_prompt_history:]
+                current_visit_count = self.screen_state_manager.get_visit_count(current_screen_hash)
+
+                # Get AI suggestion using type-safe helper
+                ai_suggestion_json = self.get_ai_next_action(
+                    screenshot_bytes=screenshot_bytes,
+                    xml_snippet=xml_snippet,
+                    previous_actions=previous_actions,
+                    visit_count=current_visit_count,
+                    screen_hash=current_screen_hash
                 )
 
-                # --- Shutdown Flag Check (After AI Interaction) ---
+                # --- Handle shutdown flag
                 if shutdown_flag_path and os.path.exists(shutdown_flag_path):
-                    logging.info(f"Shutdown flag detected at path '{shutdown_flag_path}' after AI interaction. Stopping crawl.")
+                    logging.info("Shutdown flag detected after AI interaction.")
                     print(f"{UI_END_PREFIX} SHUTDOWN_FLAG_DETECTED_POST_AI")
                     break
-                # ---
 
+                # Handle AI failure
                 if not ai_suggestion_json:
-                    logging.error("AI failed to provide a suggestion.")
+                    logging.error("AI failed to provide suggestion.")
                     self.consecutive_ai_failures += 1
                     if self.consecutive_ai_failures >= config.MAX_CONSECUTIVE_AI_FAILURES:
-                        logging.critical("Max consecutive AI failures reached. Stopping crawl.")
-                        print(f"{UI_END_PREFIX} FAILURE_MAX_AI_FAIL") # UI Update
+                        logging.critical("Max consecutive AI failures reached.")
+                        print(f"{UI_END_PREFIX} FAILURE_MAX_AI_FAIL")
                         break
-                    # Simple fallback: try to go back or pick a default action
+
+                    # Fallback: go back
                     self.driver.perform_action("back", None)
                     self._last_action_description = "BACK (AI failure fallback)"
-                    self.screen_state_manager.increment_step(self._last_action_description, "auto_back_ai_fail", None, None, None, None, None, None)
+                    self.screen_state_manager.increment_step(
+                        self._last_action_description, "auto_back_ai_fail",
+                        None, None, None, None, None, None
+                    )
                     steps_taken += 1
                     continue
-                self.consecutive_ai_failures = 0 # Reset on success
+
+                self.consecutive_ai_failures = 0  # Reset on success
                 logging.info(f"AI Suggestion: {ai_suggestion_json}")
 
-                # --- Save Annotated Screenshot using ScreenshotAnnotator ---
-                if screenshot_bytes and screen_rep and ai_suggestion_json:
+                # Update screenshot with AI suggestion
+                if screenshot_bytes and screen_rep:
                     self.screenshot_annotator.save_annotated_screenshot(
                         original_screenshot_bytes=screenshot_bytes,
                         step=self.screen_state_manager.current_step_number,
                         screen_id=screen_rep.id,
                         ai_suggestion=ai_suggestion_json
                     )
-                # ---
 
-                # --- Map AI suggestion to executable action ---
-                mapped_action = self.action_mapper.map_ai_to_action(ai_suggestion_json) # Use ActionMapper instance
+                # Map AI suggestion to action
+                mapped_action = self.action_mapper.map_ai_to_action(ai_suggestion_json)
                 if not mapped_action:
-                    logging.error("Failed to map AI suggestion to an executable action.")
+                    logging.error("Failed to map AI suggestion to executable action.")
                     self.consecutive_map_failures += 1
                     if self.consecutive_map_failures >= config.MAX_CONSECUTIVE_MAP_FAILURES:
-                        logging.critical("Max consecutive mapping failures reached. Stopping crawl.")
-                        print(f"{UI_END_PREFIX} FAILURE_MAX_MAP_FAIL") # UI Update
+                        logging.critical("Max consecutive mapping failures reached.")
+                        print(f"{UI_END_PREFIX} FAILURE_MAX_MAP_FAIL")
                         break
-                    # Fallback for mapping failure
+
+                    # Fallback: go back
                     self.driver.perform_action("back", None)
                     self._last_action_description = "BACK (mapping failure fallback)"
-                    self.screen_state_manager.increment_step(self._last_action_description, "auto_back_map_fail", None, None, None, None, None, None)
+                    self.screen_state_manager.increment_step(
+                        self._last_action_description, "auto_back_map_fail",
+                        None, None, None, None, None, None
+                    )
                     steps_taken += 1
                     continue
-                self.consecutive_map_failures = 0 # Reset on success
 
-                # Unpack mapped_action, now potentially with a fourth element (action_mode)
-                action_mode_sugg = None # Default to None
-                if len(mapped_action) == 4:
-                    action_type_sugg, target_obj_sugg, input_text_sugg, action_mode_sugg = mapped_action
-                    logging.info(f"Mapped action (with mode): Type='{action_type_sugg}', Target='{target_obj_sugg}', Input='{input_text_sugg}', Mode='{action_mode_sugg}'")
-                elif len(mapped_action) == 3:
-                    action_type_sugg, target_obj_sugg, input_text_sugg = mapped_action
-                    # action_mode_sugg remains None as set by default
-                    logging.info(f"Mapped action (no mode): Type='{action_type_sugg}', Target='{target_obj_sugg}', Input='{input_text_sugg}'")
-                else:
-                    logging.error(f"Unexpected number of values in mapped_action: {len(mapped_action)}. Expected 3 or 4. Value: {mapped_action}")
-                    # Fallback or error handling if mapped_action is not 3 or 4 elements
+                self.consecutive_map_failures = 0  # Reset on success
+
+                # Unpack mapped action using type-safe helper
+                action_type_sugg, target_obj_sugg, input_text_sugg, action_mode_sugg = \
+                    self.handle_mapped_action(mapped_action)
+                
+                if not action_type_sugg:  # Invalid mapped action
+                    logging.error("Invalid mapped action structure")
                     self.driver.perform_action("back", None)
-                    self._last_action_description = "BACK (unexpected mapping result fallback)"
-                    self.screen_state_manager.increment_step(self._last_action_description, "auto_back_map_unpack_fail", None, None, None, None, None, None)
+                    self._last_action_description = "BACK (invalid mapping structure)"
+                    self.screen_state_manager.increment_step(
+                        self._last_action_description, "auto_back_map_invalid",
+                        None, None, None, None, None, None
+                    )
                     steps_taken += 1
                     continue
-                
+
                 # --- UI Update for Action ---
                 action_desc_for_ui = f"{action_type_sugg}"
                 if isinstance(target_obj_sugg, WebElement):
@@ -541,6 +552,7 @@ class AppCrawler:
                 logging.info(f"Executing action: {action_type_sugg}, Target: {target_obj_sugg}, Input: {input_text_sugg}")
                 action_successful = self.action_executor.execute_action(mapped_action)
 
+                # Handle execution failure with config-based fallback
                 if not action_successful:
                     logging.error(f"Failed to execute action: {action_type_sugg}")
                     if self._check_termination():
@@ -559,17 +571,13 @@ class AppCrawler:
                             target_center_x=None, target_center_y=None, 
                             input_text=None, ai_raw_output=None
                         )
-                    else: 
-                        self._last_action_description = "NO_ACTION (execution failure, already off-app)"
-                        self.screen_state_manager.increment_step(
-                            action_description=self._last_action_description,
-                            action_type="no_action_exec_fail_off_app",
-                            target_identifier=None, target_element_id=None,
-                            target_center_x=None, target_center_y=None,
-                            input_text=None, ai_raw_output=None
-                        )
-                    steps_taken +=1 
-                    continue 
+                    steps_taken += 1
+                    # Get wait time from config
+                    wait_time = getattr(config, 'WAIT_AFTER_ACTION')
+                    if wait_time is None:
+                        raise ValueError("WAIT_AFTER_ACTION must be defined in config")
+                    time.sleep(wait_time)  # Wait before retrying
+                    continue
                 
                 # If action was successful, use the pre-action gathered details for DB
                 self._last_action_description = _last_action_description_for_db 
@@ -587,7 +595,10 @@ class AppCrawler:
                 # ---
 
                 steps_taken += 1
-                time.sleep(config.WAIT_AFTER_ACTION) # Wait for UI to settle
+                wait_time = getattr(config, 'WAIT_AFTER_ACTION')
+                if wait_time is None:
+                    raise ValueError("WAIT_AFTER_ACTION must be defined in config")
+                time.sleep(wait_time)  # Wait for UI to settle
 
             # --- End of main loop ---
             logging.info("Crawling loop finished.")
@@ -606,3 +617,69 @@ class AppCrawler:
         finally:
             logging.info("Crawler.run() is now in its finally block.")
             self.perform_full_cleanup()
+
+    def initialize_state_manager(self, activity: Optional[str], package: Optional[str]) -> None:
+        """Helper to safely initialize state manager with type checking."""
+        if not activity or not package:
+            raise ValueError("Both activity and package must be provided")
+        self.screen_state_manager.initialize_run(str(activity), str(package))    
+    
+    def get_ai_next_action(self, screenshot_bytes: bytes, xml_snippet: Optional[str], 
+                        previous_actions: List[str], visit_count: int, screen_hash: str) -> Optional[Dict[str, Any]]:
+        """Helper to safely get AI next action with type checking.
+        
+        Returns:
+            Optional[Dict[str, Any]]: The AI suggestion as a dictionary, or None if the AI assistant fails to provide a suggestion.
+        """
+        try:
+            suggestion = self.ai_assistant.get_next_action(
+                screenshot_bytes=screenshot_bytes, 
+                xml_context=xml_snippet or "",
+                previous_actions=previous_actions,
+                available_actions=config.AVAILABLE_ACTIONS,
+                current_screen_visit_count=visit_count,
+                current_composite_hash=screen_hash
+            )
+            return suggestion
+        except Exception as e:
+            logging.error(f"Error getting AI next action: {e}", exc_info=True)
+            return None
+
+    def handle_mapped_action(self, mapped_action: Any) -> Tuple[Optional[str], Optional[Any], Optional[str], Optional[str]]:
+        """Helper to safely handle mapped action with type checking."""
+        if not mapped_action:
+            logging.warning("Received empty mapped action")
+            return None, None, None, None
+        
+        action_mode_sugg = None
+        if isinstance(mapped_action, (list, tuple)):
+            if len(mapped_action) >= 3:
+                action_type_sugg = mapped_action[0]
+                target_obj_sugg = mapped_action[1]
+                input_text_sugg = mapped_action[2]
+                if len(mapped_action) > 3:
+                    action_mode_sugg = mapped_action[3]
+                return action_type_sugg, target_obj_sugg, input_text_sugg, action_mode_sugg
+            else:
+                logging.error(f"Mapped action has wrong number of elements: {len(mapped_action)}")
+                return None, None, None, None
+        else:
+            logging.error(f"Mapped action is not list/tuple: {type(mapped_action)}")
+            return None, None, None, None
+
+    def _reinitialize_state_with_target(self) -> None:
+        """Helper method to reinitialize state manager with current target app details."""
+        current_activity = self.driver.get_current_activity()
+        current_package = self.driver.get_current_package()
+        
+        if not current_activity or not current_package:
+            raise ValueError("Could not get current activity and package from driver")
+        
+        # If current app doesn't match target, use configured values
+        if current_package != str(self.config_dict.get("APP_PACKAGE", "")):
+            current_activity = str(self.config_dict.get("APP_ACTIVITY", ""))
+            current_package = str(self.config_dict.get("APP_PACKAGE", ""))
+        
+        logging.info(f"Reinitializing state with activity='{current_activity}', package='{current_package}'")
+        self.initialize_state_manager(current_activity, current_package)
+        logging.info("State reinitialized with current target app details")

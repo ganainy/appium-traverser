@@ -1,5 +1,5 @@
 import logging
-from typing import Tuple, Optional, Any, TYPE_CHECKING
+from typing import Tuple, Optional, Any, Union, TYPE_CHECKING
 
 from selenium.webdriver.remote.webelement import WebElement
 # Import AppiumDriver if type hinting for self.driver is needed and it's not too complex
@@ -13,14 +13,31 @@ class ActionExecutor:
 
     def __init__(self, driver: 'AppiumDriver', config_dict: dict):
         self.driver = driver
-        self.config_dict = config_dict # May be used for action-specific configs in future
-        self.consecutive_exec_failures = 0
+        self.config_dict = config_dict
 
-    def execute_action(self, mapped_action: Tuple[str, Optional[Any], Optional[str]]) -> bool:
-        """Executes the mapped Appium action."""
-        # Unpack the tuple, now potentially with a fourth element for action_mode
-        action_type, target_info, input_text, *action_mode_tuple = mapped_action
-        action_mode = action_mode_tuple[0] if action_mode_tuple else None
+        # Verify required configuration values
+        if 'MAX_CONSECUTIVE_EXEC_FAILURES' not in config_dict:
+            raise ValueError("MAX_CONSECUTIVE_EXEC_FAILURES not configured")
+
+        self.consecutive_exec_failures = 0  # Initialize to 0 but fail based on MAX_CONSECUTIVE_EXEC_FAILURES from config
+        
+    def execute_action(self, mapped_action: Tuple[str, Union[WebElement, dict[str, Any], str, None], Optional[str], Optional[str]]) -> bool:
+        """Executes the mapped Appium action.
+        Args:
+            mapped_action: A 4-tuple containing (action_type, target_info, input_text, action_mode)
+                where:
+                - action_type: The type of action to perform (e.g., click, input, scroll)
+                - target_info: WebElement for element actions, dict for coordinates, str for scroll direction, or None
+                - input_text: Text to input for input actions, or None
+                - action_mode: Special handling mode (e.g., "coordinate_action") or None
+        Returns:
+            bool: True if action was successful, False otherwise
+        """
+        if not isinstance(mapped_action, tuple) or len(mapped_action) != 4:
+            logging.error(f"Invalid mapped_action: expected 4-tuple, got {type(mapped_action)}")
+            return False
+        
+        action_type, target_info, input_text, action_mode = mapped_action
 
         success = False
         target_log_info = ""
@@ -73,7 +90,8 @@ class ActionExecutor:
                     success = self.driver.click_element(target_info)
                 elif action_type == "input" and isinstance(input_text, str):
                     success = self.driver.input_text_into_element(target_info, input_text)
-                # ... (keep other element-based actions like scroll, back if they were here)
+                elif action_type == "scroll":
+                    success = self.driver.scroll(direction=str(input_text), element=target_info)
                 else:
                     logging.error(f"Cannot execute unknown element-based action type: {action_type} on {target_log_info}")
                     success = False
@@ -105,5 +123,6 @@ class ActionExecutor:
             logging.info(f"Action {action_type.upper()} successful.")
         else:
             self.consecutive_exec_failures += 1
-            logging.warning(f"Action {action_type.upper()} execution failed ({self.consecutive_exec_failures} consecutive). Target: {target_log_info}")
+            max_failures = self.config_dict['MAX_CONSECUTIVE_EXEC_FAILURES']
+            logging.warning(f"Action {action_type.upper()} execution failed ({self.consecutive_exec_failures}/{max_failures} consecutive). Target: {target_log_info}")
         return success

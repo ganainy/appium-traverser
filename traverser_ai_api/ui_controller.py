@@ -10,7 +10,8 @@ from PySide6.QtWidgets import (
     QTextEdit, QFormLayout, QFrame, QComboBox, QGroupBox,
     QScrollArea, QSizePolicy, QProgressBar
 )
-from PySide6.QtCore import Qt, QProcess, Signal, Slot, QTimer, QIODevice
+from PySide6.QtCore import Qt, QProcess, QTimer, QIODevice
+from PySide6.QtCore import Signal, Slot as slot  # Import Slot as slot to avoid decorator conflicts
 from PySide6.QtGui import QPixmap
 
 import config # This existing import will be used
@@ -38,9 +39,14 @@ class CrawlerControllerWindow(QMainWindow):
         # Use output_data directory inside traverser_ai_api
         self.output_data_dir = os.path.join(self.api_dir, "output_data")
         
-        # Ensure all required output directories exist
-        for subdir in ["app_info", "screenshots", "database_output", "traffic_captures"]:
-            os.makedirs(os.path.join(self.output_data_dir, subdir), exist_ok=True)
+        # Ensure all required directories exist
+        required_dirs = {"app_info", "screenshots", "database_output", "traffic_captures"}
+        for subdir in required_dirs:
+            dir_path = os.path.join(self.output_data_dir, subdir)
+            try:
+                os.makedirs(dir_path, exist_ok=True)
+            except OSError as e:
+                raise RuntimeError(f"Failed to create required directory {dir_path}: {e}")
 
         # Initialize instance variables
         self.crawler_process: Optional[QProcess] = None
@@ -275,11 +281,14 @@ class CrawlerControllerWindow(QMainWindow):
         label_app_launch_wait_time = QLabel("App Launch Wait Time (s): ❔")
         label_app_launch_wait_time.setToolTip(tooltips['APP_LAUNCH_WAIT_TIME'])
         crawler_layout.addRow(label_app_launch_wait_time, self.config_widgets['APP_LAUNCH_WAIT_TIME'])
+
+        # Visual Similarity Threshold setup
         self.config_widgets['VISUAL_SIMILARITY_THRESHOLD'] = QSpinBox()
         self.config_widgets['VISUAL_SIMILARITY_THRESHOLD'].setRange(0, 100)
         label_visual_similarity = QLabel("Visual Similarity Threshold: ❔")
         label_visual_similarity.setToolTip(tooltips['VISUAL_SIMILARITY_THRESHOLD'])
         crawler_layout.addRow(label_visual_similarity, self.config_widgets['VISUAL_SIMILARITY_THRESHOLD'])
+
         self.config_widgets['ALLOWED_EXTERNAL_PACKAGES'] = QTextEdit()
         self.config_widgets['ALLOWED_EXTERNAL_PACKAGES'].setPlaceholderText("com.example.package1\\ncom.example.package2")
         self.config_widgets['ALLOWED_EXTERNAL_PACKAGES'].setFixedHeight(80)
@@ -383,7 +392,7 @@ class CrawlerControllerWindow(QMainWindow):
         
         return panel
 
-    @Slot()
+    @slot()
     def save_config(self):
         config_data = {}
         for key, widget in self.config_widgets.items():
@@ -418,24 +427,46 @@ class CrawlerControllerWindow(QMainWindow):
         if not os.path.exists(self.config_file_path):
             self._load_defaults_from_config()
             return
+
         try:
             with open(self.config_file_path, 'r') as f:
                 self.user_config = json.load(f)
+            
             for key, value in self.user_config.items():
                 if key == 'CURRENT_HEALTH_APP_LIST_FILE':
                     self.current_health_app_list_file = value
-                    continue # Handled separately by _attempt_load_cached_health_apps
+                    continue
+                
+                if key not in self.config_widgets:
+                    logging.error(f"Configuration key '{key}' not found in UI widgets")
+                    continue
 
-                if key in self.config_widgets:
-                    widget = self.config_widgets[key]
-                    if isinstance(widget, QLineEdit): widget.setText(str(value))
-                    elif isinstance(widget, QSpinBox): widget.setValue(int(value))
-                    elif isinstance(widget, QCheckBox): widget.setChecked(bool(value))
+                widget = self.config_widgets[key]
+                if value is None:
+                    logging.error(f"Configuration value for '{key}' is None, must be explicitly defined")
+                    continue
+
+                try:
+                    if isinstance(widget, QLineEdit):
+                        widget.setText(str(value))
+                    elif isinstance(widget, QSpinBox):
+                        widget.setValue(int(value))
+                    elif isinstance(widget, QCheckBox):
+                        widget.setChecked(bool(value))
                     elif isinstance(widget, QComboBox):
                         index = widget.findText(str(value))
-                        if index >= 0: widget.setCurrentIndex(index)
+                        if index >= 0:
+                            widget.setCurrentIndex(index)
+                        else:
+                            logging.error(f"Value '{value}' for QComboBox '{key}' not found in available options")
                     elif isinstance(widget, QTextEdit):
-                        if isinstance(value, list): widget.setPlainText('\n'.join(value))
+                        if isinstance(value, list):
+                            widget.setPlainText('\n'.join(value))
+                        else:
+                            widget.setPlainText(str(value))
+                except (ValueError, TypeError) as e:
+                    logging.error(f"Error setting value for '{key}': {e}")
+            
             self._update_crawl_mode_inputs_state()
             self.log_output.append("Configuration loaded successfully.")
         except Exception as e:
@@ -444,29 +475,73 @@ class CrawlerControllerWindow(QMainWindow):
 
     def _apply_defaults_from_config_to_widgets(self):
         for key, widget in self.config_widgets.items():
-            if hasattr(config, key):
-                value = getattr(config, key)
-                if isinstance(widget, QLineEdit): widget.setText(str(value if value is not None else ""))
+            if not hasattr(config, key):
+                logging.error(f"Required config key '{key}' not found in config.py module.")
+                continue
+                
+            value = getattr(config, key)
+            if value is None:
+                logging.error(f"Config value for '{key}' is None, must be explicitly defined in config.py.")
+                continue
+                
+            try:
+                if isinstance(widget, QLineEdit):
+                    widget.setText(str(value))
                 elif isinstance(widget, QSpinBox):
-                    try: widget.setValue(int(value))
-                    except (ValueError, TypeError) as e:
-                        logging.warning(f"Could not set QSpinBox '{key}' from config value: '{value}'. Error: {e}.")
-                        widget.setValue(widget.minimum())
-                elif isinstance(widget, QCheckBox): widget.setChecked(bool(value))
+                    widget.setValue(int(value))
+                elif isinstance(widget, QCheckBox):
+                    widget.setChecked(bool(value))
                 elif isinstance(widget, QComboBox):
                     index = widget.findText(str(value))
-                    if index >= 0: widget.setCurrentIndex(index)
-                    else: logging.warning(f"Default value '{value}' for QComboBox '{key}' not found.")
+                    if index >= 0:
+                        widget.setCurrentIndex(index)
+                    else:
+                        logging.error(f"Value '{value}' for QComboBox '{key}' not found in available options.")
                 elif isinstance(widget, QTextEdit):
-                    text_to_set = '\n'.join(value) if isinstance(value, list) else str(value if value is not None else "")
+                    text_to_set = '\n'.join(value) if isinstance(value, list) else str(value)
                     widget.setPlainText(text_to_set)
-            else:
-                logging.warning(f"Config key '{key}' not found in config.py module.")
+            except (ValueError, TypeError) as e:
+                logging.error(f"Error setting widget value for '{key}': {e}")
+                continue
 
     def _load_defaults_from_config(self):
-        self._apply_defaults_from_config_to_widgets()
-        if hasattr(self, 'log_output') and self.log_output:
-            self.log_output.append("Loaded default values from config.py into UI.")
+        """Load configuration values from config.py module."""
+        missing_configs = []
+        for key, widget in self.config_widgets.items():
+            if not hasattr(config, key):
+                missing_configs.append(key)
+                continue
+
+            value = getattr(config, key)
+            if value is None:
+                missing_configs.append(key)
+                continue
+
+            try:
+                if isinstance(widget, QLineEdit):
+                    widget.setText(str(value))
+                elif isinstance(widget, QSpinBox):
+                    widget.setValue(int(value))
+                elif isinstance(widget, QCheckBox):
+                    widget.setChecked(bool(value))
+                elif isinstance(widget, QComboBox):
+                    index = widget.findText(str(value))
+                    if index >= 0:
+                        widget.setCurrentIndex(index)
+                    else:
+                        missing_configs.append(f"{key} (invalid value: {value})")
+                elif isinstance(widget, QTextEdit):
+                    text_to_set = '\n'.join(value) if isinstance(value, list) else str(value)
+                    widget.setPlainText(text_to_set)
+            except (ValueError, TypeError) as e:
+                missing_configs.append(f"{key} (error: {e})")
+
+        if missing_configs:
+            error_msg = "The following required configurations are missing or invalid:\n" + "\n".join(missing_configs)
+            logging.error(error_msg)
+            if hasattr(self, 'log_output') and self.log_output:
+                self.log_output.append(error_msg)
+            raise ValueError(error_msg)
 
     # --- Health App Discovery Methods ---
     def _attempt_load_cached_health_apps(self):
@@ -482,7 +557,7 @@ class CrawlerControllerWindow(QMainWindow):
             self.health_apps_data = []
 
 
-    @Slot()
+    @slot()
     def trigger_scan_for_health_apps(self):
         """Starts the process of scanning for health apps, forcing a rescan."""
         self._execute_scan_for_health_apps(force_rescan=True)
@@ -521,81 +596,119 @@ class CrawlerControllerWindow(QMainWindow):
         python_executable = sys.executable
         # Run find_app_info.py as a script. It uses argparse for --mode.
         # Ensure find_app_info.py has ENABLE_AI_FILTERING=True and GEMINI_API_KEY is in .env
-        self.find_apps_process.start(python_executable, ['-u', self.find_app_info_script_path, '--mode', 'discover'])
-
-    @Slot()
-    def _on_find_apps_stdout_ready(self):
-        if not self.find_apps_process: return
-        data = self.find_apps_process.readAllStandardOutput().data().decode(errors='ignore')
-        self.find_apps_stdout_buffer += data
-        # Optionally, could also append to self.log_output for live script output,
-        # but it might be noisy. Let's log key messages.
-        # For now, just buffer it for final parsing.
-
-    @Slot(int, QProcess.ExitStatus)
+        self.find_apps_process.start(python_executable, ['-u', self.find_app_info_script_path, '--mode', 'discover'])   
+        
+    @slot()
+    def _on_find_apps_stdout_ready(self) -> None:
+        """Handle stdout data from the app scanning process."""
+        if not self.find_apps_process: 
+            logging.error("Find apps process is None in stdout handler")
+            return
+            
+        # Convert QProcess output to bytes first to handle raw data properly
+        raw_data = bytes(self.find_apps_process.readAllStandardOutput().data())
+        if not raw_data:
+            return
+            
+        try:
+            # Decode and accumulate output
+            output = raw_data.decode('utf-8', errors='replace')
+            self.find_apps_stdout_buffer += output
+            self.log_output.append(output.rstrip())
+        except Exception as e:
+            logging.error(f"Error processing find apps stdout: {e}")
+            self.log_output.append(f"Error processing app scan output: {e}")    
+            
+    @slot(int, QProcess.ExitStatus)
     def _on_find_apps_finished(self, exit_code: int, exit_status: QProcess.ExitStatus):
-        self.log_output.append(f"App scan process finished. Exit code: {exit_code}, Status: {exit_status.name}")
-        self.app_scan_status_label.setText(f"App Scan: Finished (Code: {exit_code})")
+        """Handle completion of the app scanning process."""
+        # Re-enable UI controls
         self.refresh_apps_btn.setEnabled(True)
         self.health_app_dropdown.setEnabled(True)
 
-        if exit_code == 0 and exit_status == QProcess.ExitStatus.NormalExit:
-            # Try to parse the output file path from stdout
-            match = re.search(r"Cache file generated at: (.*)", self.find_apps_stdout_buffer)
-            if match:
-                file_path = match.group(1).strip()
-                self.log_output.append(f"App scan successful. Health app data file: {file_path}")
-                if os.path.exists(file_path):
-                    self.current_health_app_list_file = file_path
-                    self._load_health_apps_from_file(file_path)
-                    self.save_config() # Save the new path
-                else:
-                    self.log_output.append(f"Error: App scan reported success, but file not found: {file_path}")
-                    self.app_scan_status_label.setText("App Scan: File not found after scan.")
-            else:
-                self.log_output.append("Error: App scan finished, but could not find generated file path in output.")
-                self.log_output.append("--- Script Output ---")
-                self.log_output.append(self.find_apps_stdout_buffer)
-                self.log_output.append("--- End Script Output ---")
-                self.app_scan_status_label.setText("App Scan: Output path parse error.")
-        else:
-            self.log_output.append(f"Error: App scan process failed.")
-            self.log_output.append("--- Script Output ---")
-            self.log_output.append(self.find_apps_stdout_buffer)
-            self.log_output.append("--- End Script Output ---")
-            self.app_scan_status_label.setText(f"App Scan: Failed (Code: {exit_code})")
+        try:
+            # Check for process exit status
+            if exit_code != 0 or exit_status != QProcess.ExitStatus.NormalExit:
+                error_msg = f"App scan failed with exit code {exit_code}"
+                self.log_output.append(error_msg)
+                self.app_scan_status_label.setText("App Scan: Failed!")
+                return
 
-        self.find_apps_process = None # Clear process reference
+            # Look for the cache file path in the output
+            cache_file_line = next(
+                (line for line in self.find_apps_stdout_buffer.split('\n')
+                 if "Cache file generated at:" in line),
+                None
+            )
+
+            if not cache_file_line:
+                raise ValueError("Could not find cache file path in output")
+
+            # Extract and validate cache file path
+            cache_file_path = cache_file_line.split("Cache file generated at:", 1)[1].strip()
+            if not os.path.exists(cache_file_path):
+                raise ValueError(f"Cache file not found: {cache_file_path}")
+
+            # Load and process the JSON data
+            with open(cache_file_path, 'r', encoding='utf-8') as f:
+                self.health_apps_data = json.load(f)
+                self.current_health_app_list_file = cache_file_path
+
+            # Update the UI with the loaded data
+            self.health_app_dropdown.clear()
+            self.health_app_dropdown.addItem("Select target app", None)
+
+            for app in self.health_apps_data:
+                display_text = f"{app['app_name']} ({app['package_name']})"
+                self.health_app_dropdown.addItem(display_text, app)
+
+            count = len(self.health_apps_data)
+            self.log_output.append(f"Found {count} health-related apps")
+            self.app_scan_status_label.setText(f"App Scan: Found {count} apps")
+
+        except json.JSONDecodeError as e:
+            self.log_output.append(f"Error parsing app scan results: {e}")
+            self.app_scan_status_label.setText("App Scan: Parse Error!")
+        except Exception as e:
+            self.log_output.append(f"Error processing app scan completion: {e}")
+            self.app_scan_status_label.setText("App Scan: Error!")
 
     def _load_health_apps_from_file(self, file_path: str):
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
-                self.health_apps_data = json.load(f)
+                data = json.load(f)
+                # Check if we got a dict with 'apps' key or direct list
+                self.health_apps_data = data.get('apps', []) if isinstance(data, dict) else data
 
             self.health_app_dropdown.clear()
-            self.health_app_dropdown.addItem("Select target app...", None) # Default item
+            self.health_app_dropdown.addItem("Select target app...", None)  # Default item
 
             if not self.health_apps_data:
                 self.log_output.append("No health-related apps found or list is empty.")
                 self.app_scan_status_label.setText("App Scan: No health apps found.")
                 return
 
+            # Try to restore last selected app if it exists
             last_selected_app = self.user_config.get('LAST_SELECTED_APP', {})
             last_selected_package = last_selected_app.get('package_name')
             selected_index = 0  # Default to 0 (Select target app...)
 
             for i, app_info in enumerate(self.health_apps_data, start=1):
-                display_name = app_info.get('app_name') or app_info.get('package_name', 'Unknown App')
+                # Create display name from app info
+                display_name = f"{app_info.get('app_name', 'Unknown')} ({app_info.get('package_name', 'Unknown')})"
                 self.health_app_dropdown.addItem(display_name, app_info)
+                
                 # If this is the last selected app, store its index
                 if last_selected_package and app_info.get('package_name') == last_selected_package:
-                    selected_index = i
+                    selected_index = i  # Add 1 because index 0 is "Select target app..."
 
             # Set the current index to restore last selection
             self.health_app_dropdown.setCurrentIndex(selected_index)
             self.current_health_app_list_file = file_path
+            
+            # Update status
             self.app_scan_status_label.setText(f"App Scan: Loaded {len(self.health_apps_data)} apps")
-            self.log_output.append(f"Successfully loaded {len(self.health_apps_data)} health apps.")
+            self.log_output.append(f"Successfully loaded {len(self.health_apps_data)} health apps from {file_path}")
 
         except Exception as e:
             self.log_output.append(f"Error loading health apps from file {file_path}: {e}")
@@ -603,24 +716,35 @@ class CrawlerControllerWindow(QMainWindow):
             self.health_app_dropdown.clear()
             self.health_app_dropdown.addItem("Select target app (Scan/Load Error)", None)
             self.health_apps_data = []
-    @Slot(int)
+            # Clear the package and activity fields
+            if 'APP_PACKAGE' in self.config_widgets:
+                self.config_widgets['APP_PACKAGE'].setText('')
+            if 'APP_ACTIVITY' in self.config_widgets:
+                self.config_widgets['APP_ACTIVITY'].setText('')
+
+    @slot(int)
     def _on_health_app_selected(self, index: int):
         """Handle selection of an app from the dropdown."""
         selected_data = self.health_app_dropdown.itemData(index)
         if selected_data and isinstance(selected_data, dict):
+            # Get package and activity from selected app data
             app_package = selected_data.get('package_name', '')
             app_activity = selected_data.get('activity_name', '')
             app_name = selected_data.get('app_name', app_package)
             
-            # Update the config widgets
+            # Update the package and activity fields
             if 'APP_PACKAGE' in self.config_widgets:
                 self.config_widgets['APP_PACKAGE'].setText(app_package)
             if 'APP_ACTIVITY' in self.config_widgets:
                 self.config_widgets['APP_ACTIVITY'].setText(app_activity)
             
-            # Save config immediately to ensure consistency
-            self.save_config()
-            self.log_output.append(f"Selected app: {app_name} ({app_package})")
+            # Log the selection
+            if app_package and app_activity:
+                self.log_output.append(f"Selected app: {app_name} ({app_package})")
+                # Save config immediately to ensure values are preserved
+                self.save_config()
+            else:
+                self.log_output.append(f"Warning: Selected app {app_name} is missing package or activity information")
         else:
             # Clear the fields if no valid selection
             if 'APP_PACKAGE' in self.config_widgets:
@@ -631,7 +755,7 @@ class CrawlerControllerWindow(QMainWindow):
     # --- End Health App Discovery Methods ---
 
 
-    @Slot()
+    @slot()
     def start_crawler(self):
         if self._shutdown_flag_file_path and os.path.exists(self._shutdown_flag_file_path):
             log_msg = f"Found existing shutdown flag: {self._shutdown_flag_file_path}. Removing."
@@ -679,109 +803,93 @@ class CrawlerControllerWindow(QMainWindow):
         else:
             if hasattr(self, 'log_output'): self.log_output.append("Crawler process already active.")
             else: logging.info("Crawler process already active.")
-
-    @Slot()
-    def stop_crawler(self):
+            
+    @slot()
+    def stop_crawler(self) -> None:
+        """Stop the crawler process, trying graceful shutdown first."""
         if self.crawler_process and self.crawler_process.state() == QProcess.ProcessState.Running:
-            if hasattr(self, 'stop_btn'): self.stop_btn.setEnabled(False)
+            if hasattr(self, 'stop_btn'): 
+                self.stop_btn.setEnabled(False)
             if self._shutdown_flag_file_path:
                 try:
-                    with open(self._shutdown_flag_file_path, 'w') as f: f.write("stop")
+                    with open(self._shutdown_flag_file_path, 'w') as f: 
+                        f.write("stop")
                     msg = "Shutdown signal sent via flag. Waiting (15s)..."
-                    if hasattr(self, 'log_output'): self.log_output.append(msg)
-                    else: logging.info(msg)
-                    if hasattr(self, 'status_label'): self.status_label.setText("Status: Stopping (graceful)...")
+                    if hasattr(self, 'log_output'): 
+                        self.log_output.append(msg)
+                    else: 
+                        logging.info(msg)
+                    if hasattr(self, 'status_label'): 
+                        self.status_label.setText("Status: Stopping (graceful)...")
                     self.shutdown_timer.start(15000)
                     return
                 except Exception as e:
                     msg_err = f"Error creating shutdown flag: {e}. Terminating."
-                    if hasattr(self, 'log_output'): self.log_output.append(msg_err)
-                    else: logging.error(msg_err)
+                    if hasattr(self, 'log_output'): 
+                        self.log_output.append(msg_err)
+                    else: 
+                        logging.error(msg_err)
             msg_term = "Attempting direct termination (7s timeout)..."
-            if hasattr(self, 'log_output'): self.log_output.append(msg_term)
-            else: logging.info(msg_term)
-            if hasattr(self, 'status_label'): self.status_label.setText("Status: Terminating...")
+            if hasattr(self, 'log_output'): 
+                self.log_output.append(msg_term)
+            else: 
+                logging.info(msg_term)
+            if hasattr(self, 'status_label'): 
+                self.status_label.setText("Status: Terminating...")
             self.crawler_process.terminate()
             self.shutdown_timer.start(7000)
         else:
             msg_ign = "Stop ignored: Crawler not running."
-            if hasattr(self, 'log_output'): self.log_output.append(msg_ign)
-            else: logging.info(msg_ign)
+            if hasattr(self, 'log_output'): 
+                self.log_output.append(msg_ign)
+            else: 
+                logging.info(msg_ign)
             if not (self.crawler_process and self.crawler_process.state() == QProcess.ProcessState.Running):
-                if hasattr(self, 'stop_btn'): self.stop_btn.setEnabled(False)
-                if hasattr(self, 'start_btn'): self.start_btn.setEnabled(True)
-                if hasattr(self, 'status_label'): self.status_label.setText("Status: Idle/Stopped")
-
-    @Slot()
-    def force_stop_crawler_on_timeout(self):
+                if hasattr(self, 'stop_btn'): 
+                    self.stop_btn.setEnabled(False)
+                if hasattr(self, 'start_btn'): 
+                    self.start_btn.setEnabled(True)
+                if hasattr(self, 'status_label'): 
+                    self.status_label.setText("Status: Idle/Stopped")
+                    
+    @slot()
+    def force_stop_crawler_on_timeout(self) -> None:
+        """Force stop the crawler process if it doesn't respond to graceful shutdown."""
         if self.crawler_process and self.crawler_process.state() == QProcess.ProcessState.Running:
             msg_timeout = "Previous stop timed out. Terminating..."
-            if hasattr(self, 'log_output'): self.log_output.append(msg_timeout)
-            else: logging.warning(msg_timeout)
-            if hasattr(self, 'status_label'): self.status_label.setText("Status: Terminating (timeout)...")
+            if hasattr(self, 'log_output'): 
+                self.log_output.append(msg_timeout)
+            else: 
+                logging.warning(msg_timeout)
+            if hasattr(self, 'status_label'): 
+                self.status_label.setText("Status: Terminating (timeout)...")
+            
+            # Try to clean up any existing shutdown flag first
+            if self._shutdown_flag_file_path and os.path.exists(self._shutdown_flag_file_path):
+                try:
+                    os.remove(self._shutdown_flag_file_path)
+                except Exception as e:
+                    logging.warning(f"Could not remove shutdown flag during force stop: {e}")
+            
+            # Attempt termination
             self.crawler_process.terminate()
-            if not self.crawler_process.waitForFinished(30000):
+            if not self.crawler_process.waitForFinished(30000):  # 30 second timeout
                 msg_kill = "Process still running after terminate. Killing."
-                if hasattr(self, 'log_output'): self.log_output.append(msg_kill)
-                else: logging.warning(msg_kill)
-                if hasattr(self, 'status_label'): self.status_label.setText("Status: Killing (timeout)...")
+                if hasattr(self, 'log_output'): 
+                    self.log_output.append(msg_kill)
+                else: 
+                    logging.warning(msg_kill)
+                if hasattr(self, 'status_label'): 
+                    self.status_label.setText("Status: Killing (timeout)...")
                 self.crawler_process.kill()
         else:
             msg_not_run = "Force stop timeout, but process not running."
-            if hasattr(self, 'log_output'): self.log_output.append(msg_not_run)
-            else: logging.info(msg_not_run)
+            if hasattr(self, 'log_output'): 
+                self.log_output.append(msg_not_run)
+            else: 
+                logging.info(msg_not_run)
 
-    def read_stdout(self):
-        if not self.crawler_process: return
-        data = self.crawler_process.readAllStandardOutput().data().decode(errors='ignore')
-        lines = data.strip().split('\n')
-        processed_once = False
-        for line in lines:
-            if not line.strip(): continue
-            print(line)
-            if line.startswith("UI_STATUS:"):
-                status = line.replace("UI_STATUS:", "").strip()
-                self.status_label.setText(f"Status: {status}")
-                self.progress_bar.setRange(0, 0 if status in ["RUNNING", "INITIALIZING"] else 100)
-                if status not in ["RUNNING", "INITIALIZING"]: self.progress_bar.setValue(100 if status in ["SUCCESS", "FAILURE_UNHANDLED_EXCEPTION"] else 0)
-                processed_once = True
-            elif line.startswith("UI_STEP:"):
-                try:
-                    self.step_count = int(line.replace("UI_STEP:", "").strip())
-                    if self.step_label: self.step_label.setText(f"Step: {self.step_count}")
-                except ValueError: self.log_output.append(f"Warning: Bad step count: {line}")
-                except Exception as e: self.log_output.append(f"Error updating step: {e}")
-                processed_once = True
-            elif line.startswith("UI_ACTION:"):
-                action_desc = line.replace("UI_ACTION:", "").strip()
-                if self.last_action_label: self.last_action_label.setText(f"Last Action: {action_desc}")
-                processed_once = True
-            elif line.startswith("UI_SCREENSHOT:"):
-                self.current_screenshot = line.replace("UI_SCREENSHOT:", "").strip()
-                if os.path.exists(self.current_screenshot):
-                    try:
-                        pixmap = QPixmap(self.current_screenshot)
-                        scaled = pixmap.scaled(self.screenshot_label.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-                        self.screenshot_label.setPixmap(scaled)
-                    except Exception as e:
-                        self.log_output.append(f"Error loading screenshot {self.current_screenshot}: {e}")
-                        self.screenshot_label.setText("Error loading screenshot.")
-                else:
-                    self.screenshot_label.setText(f"Screenshot not found: {os.path.basename(self.current_screenshot)}")
-                processed_once = True
-            elif line.startswith("UI_END:"):
-                end_msg = line.replace("UI_END:", "").strip()
-                self.status_label.setText(f"Status: Ended ({end_msg})")
-                self.progress_bar.setRange(0, 100); self.progress_bar.setValue(100)
-                processed_once = True
-            else:
-                self.log_output.append(line)
-                processed_once = True
-        if not processed_once and data.strip(): self.log_output.append(data.strip())
-        QApplication.processEvents()
-
-    @Slot(int, QProcess.ExitStatus)
-    @Slot(int, QProcess.ExitStatus)
+    @slot(int, QProcess.ExitStatus)
     def handle_process_finished(self, exit_code: int, exit_status: QProcess.ExitStatus):
         self.shutdown_timer.stop()
         if self._shutdown_flag_file_path and os.path.exists(self._shutdown_flag_file_path):
@@ -807,35 +915,53 @@ class CrawlerControllerWindow(QMainWindow):
             self.progress_bar.setValue(100 if exit_status == QProcess.ExitStatus.NormalExit and exit_code == 0 else 0)
         self.crawler_process = None
 
-    @Slot(QProcess.ProcessError)
+    @slot(QProcess.ProcessError)
     def handle_process_error(self, error: QProcess.ProcessError):
-        try: error_name = QProcess.ProcessError(error).name
-        except Exception: error_name = f"Unknown Error ({error})"
+        try: 
+            error_name = QProcess.ProcessError(error).name
+        except Exception: 
+            error_name = f"Unknown Error ({error})"
+        
         error_message = f"Crawler process error: {error_name}"
         output_details = ""
-        if self.crawler_process and self.crawler_process.isOpen():
-            # Simplified output reading attempt
-            if self.crawler_process.bytesAvailable() > 0:
-                output_details = self.crawler_process.readAll().data().decode(errors='ignore').strip()
-        if output_details: error_message += f"\nLast output: {output_details}"
+        
+        try:
+            if self.crawler_process and self.crawler_process.isOpen():
+                if hasattr(self.crawler_process, 'bytesAvailable') and self.crawler_process.bytesAvailable() > 0:
+                    raw_data = self.crawler_process.readAll().data()
+                    if raw_data:
+                        output_details = bytes(raw_data).decode(errors='ignore').strip()
+        except Exception as e:
+            logging.warning(f"Failed to read process output: {e}")
+            
+        if output_details:
+            error_message += f"\nLast output: {output_details}"
         self.log_output.append(error_message)
         logging.error(error_message)
-        # Simplified cleanup
+        
+        # Cleanup
         if self.crawler_process:
             for signal_name in ['finished', 'errorOccurred', 'readyReadStandardOutput']:
-                try: getattr(self.crawler_process, signal_name).disconnect()
-                except (TypeError, RuntimeError): pass
+                try: 
+                    getattr(self.crawler_process, signal_name).disconnect()
+                except (TypeError, RuntimeError): 
+                    pass
+        
         self.crawler_process = None
-        self.start_btn.setEnabled(True); self.stop_btn.setEnabled(False)
+        self.start_btn.setEnabled(True)
+        self.stop_btn.setEnabled(False)
         self.status_label.setText(f"Status: Error ({error_name})")
-        self.progress_bar.setRange(0, 100); self.progress_bar.setValue(0)
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
 
     def update_progress(self):
         if self.config_widgets['CRAWL_MODE'].currentText() == 'steps':
             max_steps = self.config_widgets['MAX_CRAWL_STEPS'].value()
             self.progress_bar.setRange(0, max_steps if max_steps > 0 else 0)
-            if max_steps > 0: self.progress_bar.setValue(self.step_count)
-        else: self.progress_bar.setRange(0,0)
+            if max_steps > 0: 
+                self.progress_bar.setValue(self.step_count)
+        else: 
+            self.progress_bar.setRange(0,0)
 
     def closeEvent(self, event):
         self.stop_crawler()
@@ -846,6 +972,75 @@ class CrawlerControllerWindow(QMainWindow):
             if not self.find_apps_process.waitForFinished(5000): # 5 sec timeout
                 self.find_apps_process.kill()
         super().closeEvent(event)
+
+    @slot()
+    def read_stdout(self) -> None:
+        """Handle stdout from the crawler process."""
+        if not self.crawler_process:
+            return
+        
+        raw_data = self.crawler_process.readAllStandardOutput().data()
+        if not raw_data:
+            return
+            
+        try:
+            data = bytes(raw_data).decode(errors='ignore')
+            if not data.strip():
+                return
+                
+            for line in data.strip().split('\n'):
+                line = line.strip()
+                if not line:
+                    continue
+                    
+                # Log all output
+                self.log_output.append(line)
+                  # Check for UI update markers and handle accordingly
+                if line.startswith("UI_STEP:"):
+                    step_num = line.split(":", 1)[1].strip()
+                    self.step_count = int(step_num)
+                    if hasattr(self, 'step_label') and self.step_label:
+                        self.step_label.setText(f"Step: {step_num}")
+                    self.update_progress()
+                elif line.startswith("UI_STATUS:"):
+                    status = line.split(":", 1)[1].strip()
+                    if hasattr(self, 'status_label') and self.status_label:
+                        self.status_label.setText(f"Status: {status}")
+                elif line.startswith("UI_ACTION:"):
+                    action = line.split(":", 1)[1].strip()
+                    if hasattr(self, 'last_action_label') and self.last_action_label:
+                        self.last_action_label.setText(f"Last Action: {action}")
+                elif line.startswith("UI_SCREENSHOT:"):
+                    screenshot_path = line.split(":", 1)[1].strip()
+                    self.update_screenshot(screenshot_path)
+                elif line.startswith("UI_END:"):
+                    end_reason = line.split(":", 1)[1].strip()
+                    if hasattr(self, 'status_label') and self.status_label:
+                        self.status_label.setText(f"Status: Ended ({end_reason})")
+                    if hasattr(self, 'progress_bar') and self.progress_bar:
+                        self.progress_bar.setRange(0, 100)
+                        self.progress_bar.setValue(100)
+        except Exception as e:
+            logging.error(f"Error processing crawler output: {e}")
+
+    def update_screenshot(self, file_path: str) -> None:
+        """Update the screenshot displayed in the UI."""
+        if not file_path or not os.path.exists(file_path):
+            logging.error(f"Screenshot file not found: {file_path}")
+            return
+            
+        try:
+            pixmap = QPixmap(file_path)
+            if not pixmap.isNull():
+                # Calculate dimensions to maintain aspect ratio but fit in label
+                label_size = self.screenshot_label.size()
+                scaled_pixmap = pixmap.scaled(label_size, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                self.screenshot_label.setPixmap(scaled_pixmap)
+                self.current_screenshot = file_path
+            else:
+                logging.error(f"Failed to load screenshot from {file_path}")
+        except Exception as e:
+            logging.error(f"Error updating screenshot: {e}")
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')

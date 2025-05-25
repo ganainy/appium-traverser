@@ -12,8 +12,17 @@ class ActionMapper:
     def __init__(self, driver, element_finding_strategies, config_dict: dict): # driver is an instance of AppiumDriver
         self.driver = driver
         self.element_finding_strategies = element_finding_strategies
-        self.consecutive_map_failures = 0 # This might be better managed by the caller (AppCrawler)
-        self.use_coordinate_fallback = config_dict.get('USE_COORDINATE_FALLBACK', False)
+        
+        # Validate required configuration values
+        if 'USE_COORDINATE_FALLBACK' not in config_dict:
+            raise ValueError("USE_COORDINATE_FALLBACK is required in configuration")
+        if 'MAX_CONSECUTIVE_MAP_FAILURES' not in config_dict:
+            raise ValueError("MAX_CONSECUTIVE_MAP_FAILURES not configured")
+            
+        self.use_coordinate_fallback = config_dict['USE_COORDINATE_FALLBACK']
+        self.consecutive_map_failures = 0  # Initialize to 0 but fail based on config
+        self.config_dict = config_dict
+        
         logging.info(f"ActionMapper initialized. Coordinate fallback is {'ENABLED' if self.use_coordinate_fallback else 'DISABLED'}.")
 
     def _find_element_by_ai_identifier(self, identifier: str) -> Optional[WebElement]:
@@ -86,31 +95,58 @@ class ActionMapper:
                 duration = time.perf_counter() - start_time
                 logging.debug(f"Not found by {log_name} (took {duration:.4f}s).")
             except InvalidSelectorException as e:
-                 duration = time.perf_counter() - start_time
-                 logging.warning(f"Invalid Selector Exception finding by {log_name} '{identifier}' (XPath: {xpath_generated}). Error: {e} (took {duration:.4f}s)")
+                duration = time.perf_counter() - start_time
+                logging.warning(f"Invalid Selector Exception finding by {log_name} '{identifier}' (XPath: {xpath_generated}). Error: {e} (took {duration:.4f}s)")
             except Exception as e:
                 duration = time.perf_counter() - start_time
                 logging.warning(f"Error finding by {log_name} '{identifier}' (took {duration:.4f}s): {e}")
 
         total_duration = time.perf_counter() - total_start_time
         logging.warning(f"Could not find suitable element using identifier '{identifier}' with any strategy (total search time {total_duration:.4f}s). Current strategy order: {[s[2] for s in self.element_finding_strategies]}")
+        return None    
+    
+    def _track_map_failure(self, reason: str) -> None:
+        """Helper method to track and log mapping failures."""
+        self.consecutive_map_failures += 1
+        max_failures = self.config_dict['MAX_CONSECUTIVE_MAP_FAILURES']
+        logging.warning(f"Action mapping failed ({self.consecutive_map_failures}/{max_failures} consecutive): {reason}")
         return None
 
-    def map_ai_to_action(self, ai_suggestion: dict) -> Optional[Tuple[str, Optional[Any], Optional[str]]]:
+    def map_ai_to_action(self, ai_suggestion: dict) -> Optional[Tuple[str, Any, Optional[str], Optional[str]]]:
         """
         Maps the AI's JSON suggestion (using 'target_identifier' or 'target_bounding_box')
         to an executable action tuple.
-        Returns: (action_type, target_object_or_info, input_text_or_none, Optional[action_mode])
-                 where target_object_or_info is WebElement for click/input, or string for scroll,
-                 or a dict with coordinates for coordinate-based actions.
-                 action_mode is "coordinate_action" if applicable.
+        Returns: (action_type, target_object_or_info, input_text_or_none, action_mode_or_none)
+                where:
+                - action_type: The type of action to perform (click, input, scroll, back)
+                - target_object_or_info: WebElement for click/input, string for scroll,
+                                    or dict with coordinates for coordinate-based actions
+                - input_text_or_none: Text to input for input actions, None otherwise
+                - action_mode_or_none: "coordinate_action" for coordinate-based actions, None otherwise
         """
         action = ai_suggestion.get("action")
         target_identifier = ai_suggestion.get("target_identifier")
         input_text = ai_suggestion.get("input_text")
-        target_bounding_box = ai_suggestion.get("target_bounding_box") # Get potential bounding box
+        target_bounding_box = ai_suggestion.get("target_bounding_box")
 
         logging.info(f"Attempting to map AI suggestion: Action='{action}', Identifier='{target_identifier}', Input='{input_text}', BBox='{target_bounding_box}'")
+
+        if action not in ["click", "input", "scroll_down", "scroll_up", "back"]:
+            logging.error(f"Unknown action type from AI: {action}")
+            self._track_map_failure("unknown action type")
+            return None
+
+        if action == "scroll_down":
+            self.consecutive_map_failures = 0  # Success
+            return ("scroll", "down", None, None)
+        
+        if action == "scroll_up":
+            self.consecutive_map_failures = 0  # Success 
+            return ("scroll", "up", None, None)
+        
+        if action == "back":
+            self.consecutive_map_failures = 0  # Success
+            return ("back", None, None, None)
 
         if action in ["click", "input"]:
             # Try to find element by identifier first
@@ -122,22 +158,25 @@ class ActionMapper:
 
             if target_element:
                 logging.info(f"Successfully mapped AI identifier '{target_identifier}' to initial WebElement.")
+                
                 if action == "input":
                     original_element = target_element
                     is_editable = False
                     element_class = None
                     final_target_element = original_element
+                    
                     try:
-                        element_class = original_element.get_attribute('class')
+                        element_class: str | Dict[str, Any] | None = original_element.get_attribute('class')
                         logging.debug(f"Initial element found for INPUT: ID='{original_element.id}', Class='{element_class}', Identifier='{target_identifier}'")
                         editable_classes = ['edittext', 'textfield', 'input', 'autocomplete', 'searchview']
-                        if element_class and any(editable_tag in element_class.lower() for editable_tag in editable_classes):
+                        max_levels_to_check = 3
+
+                        if isinstance(element_class, str) and any(editable_tag in element_class.lower() for editable_tag in editable_classes):
                             is_editable = True
                             logging.info(f"Initial element (Class: {element_class}) is directly editable. Using it for INPUT.")
                         else:
                             logging.info(f"Initial element (Class: {element_class}) is NOT directly editable. Searching upwards for an editable ancestor...")
                             current_ancestor = original_element
-                            max_levels_to_check = 3
                             for level in range(1, max_levels_to_check + 1):
                                 try:
                                     parent_element = current_ancestor.find_element(AppiumBy.XPATH, "..")
@@ -160,67 +199,68 @@ class ActionMapper:
                                 except Exception as parent_err:
                                     logging.error(f"Error finding or checking ancestor element at level {level}: {parent_err}", exc_info=True)
                                     break
-                            if not is_editable:
-                                logging.warning(f"No editable ancestor found within {max_levels_to_check} levels for initial element (Class: {element_class}). Cannot perform INPUT.")
+                        
                         if not is_editable:
                             logging.error(f"AI suggested INPUT for identifier '{target_identifier}', but neither the initially found element (Class: {element_class}) nor its ancestors (up to {max_levels_to_check} levels) were suitable/editable. Mapping failed.")
-                            # self.consecutive_map_failures += 1 # Handled by AppCrawler
+                            self._track_map_failure("no editable element found")
                             return None
+                            
                     except Exception as e:
                         logging.error(f"Error during element class validation/ancestor check for INPUT action (Identifier: '{target_identifier}'): {e}", exc_info=True)
-                        # self.consecutive_map_failures += 1 # Handled by AppCrawler
+                        self._track_map_failure(str(e))
                         return None
+
+                    self.consecutive_map_failures = 0  # Success
                     logging.info(f"Mapping successful for INPUT. Using element ID: {final_target_element.id}")
-                    return (action, final_target_element, input_text)
+                    return (action, final_target_element, input_text, None)
                 
+                # For click action
+                self.consecutive_map_failures = 0  # Success
                 logging.info(f"Mapping successful for CLICK. Using element ID: {target_element.id}")
-                return (action, target_element, None)
-            else:
-                # Element not found by identifier, try bounding box fallback
-                if self.use_coordinate_fallback and target_bounding_box and isinstance(target_bounding_box, dict) and \
-                   'top_left' in target_bounding_box and 'bottom_right' in target_bounding_box and \
-                   isinstance(target_bounding_box['top_left'], list) and len(target_bounding_box['top_left']) == 2 and \
-                   isinstance(target_bounding_box['bottom_right'], list) and len(target_bounding_box['bottom_right']) == 2:
+                return (action, target_element, None, None)
+
+            # Element not found by identifier, try bounding box fallback
+            if self.use_coordinate_fallback and target_bounding_box and isinstance(target_bounding_box, dict):
+                if ('top_left' in target_bounding_box and 'bottom_right' in target_bounding_box and 
+                    isinstance(target_bounding_box['top_left'], list) and len(target_bounding_box['top_left']) == 2 and 
+                    isinstance(target_bounding_box['bottom_right'], list) and len(target_bounding_box['bottom_right']) == 2):
                     
                     try:
                         tl_x, tl_y = target_bounding_box['top_left']
                         br_x, br_y = target_bounding_box['bottom_right']
                         
-                        # Ensure coordinates are numbers
                         if not all(isinstance(coord, (int, float)) for coord in [tl_x, tl_y, br_x, br_y]):
                             logging.warning(f"Invalid coordinate types in bounding box: {target_bounding_box}. Cannot use for coordinate action.")
-                        else:
-                            center_x = int((tl_x + br_x) / 2)
-                            center_y = int((tl_y + br_y) / 2)
-                            
-                            logging.info(f"Element not found by identifier \'{target_identifier}\'. Using bounding box fallback (config ENABLED) for action \'{action}\' at coordinates ({center_x}, {center_y}).")
-                            return (action, {"coordinates": (center_x, center_y), "original_bbox": target_bounding_box}, input_text, "coordinate_action")
+                            self._track_map_failure("invalid coordinate types")
+                            return None
+                        
+                        center_x = int((tl_x + br_x) / 2)
+                        center_y = int((tl_y + br_y) / 2)
+                        
+                        self.consecutive_map_failures = 0  # Success
+                        logging.info(f"Element not found by identifier '{target_identifier}'. Using bounding box fallback (config ENABLED) for action '{action}' at coordinates ({center_x}, {center_y}).")
+                        return (action, {"coordinates": (center_x, center_y), "original_bbox": target_bounding_box}, input_text, "coordinate_action")
+
                     except Exception as e:
                         logging.error(f"Error processing bounding box {target_bounding_box} for coordinate action: {e}", exc_info=True)
-                elif not self.use_coordinate_fallback:
-                    logging.info(f"Element not found by identifier \'{target_identifier}\'. Bounding box fallback is DISABLED by configuration. Skipping.")
+                        self._track_map_failure(str(e))
+                        return None
 
-                # If no element and no (valid) bounding box fallback (or fallback disabled)
-                log_msg = f"Failed to find element using AI identifier: \'{target_identifier}\'"
-                if target_identifier and not target_bounding_box:
-                    log_msg += " and no bounding box provided."
-                elif not target_identifier and not target_bounding_box:
-                    log_msg = "No target_identifier or bounding_box provided."
-                elif target_bounding_box: # Implies bounding box was invalid or processed with error
-                    log_msg += " and bounding box fallback also failed or was invalid."
-                else: # Should not be reached if logic is correct
-                    log_msg += "."
-                
-                log_msg += f" Cannot map action '{action}'."
-                logging.error(log_msg)
-                return None
-        elif action == "scroll_down":
-            return ("scroll", "down", None)
-        elif action == "scroll_up":
-            return ("scroll", "up", None)
-        elif action == "back":
-            return ("back", None, None)
-        else:
-            logging.error(f"Unknown action type from AI: {action}")
-            return None
+            if not self.use_coordinate_fallback:
+                logging.info(f"Element not found by identifier '{target_identifier}'. Bounding box fallback is DISABLED by configuration. Skipping.")
+
+            # If no element and no (valid) bounding box fallback (or fallback disabled)
+            log_msg = f"Failed to find element using AI identifier: '{target_identifier}'"
+            if target_identifier and not target_bounding_box:
+                log_msg += " and no bounding box provided."
+            elif not target_identifier and not target_bounding_box:
+                log_msg = "No target_identifier or bounding_box provided."
+            elif target_bounding_box:  # Implies bounding box was invalid or processed with error
+                log_msg += " and bounding box fallback also failed or was invalid."
+            else:
+                log_msg += " (unknown reason)."
+            logging.warning(log_msg)
+            self._track_map_failure("no element found and no valid fallback")
+
+        return None
 

@@ -1,5 +1,5 @@
 import hashlib
-from typing import Tuple, Optional, Any
+from typing import Tuple, Optional, Any, cast
 
 import imagehash
 from PIL import Image
@@ -108,8 +108,8 @@ def simplify_xml_for_ai(xml_string: str, max_len: int) -> str:
                 if attr_name in BOOLEAN_ATTRS_TRUE_ONLY:
                     attr_value = element.attrib[attr_name]
                     if isinstance(attr_value, str) and attr_value.lower() == 'false':
-                         del element.attrib[attr_name]
-                         continue
+                        del element.attrib[attr_name]
+                        continue
 
                 # 3. Optional: Shorten potentially long 'resource-id' (keep only last part)
                 # if attr_name == 'resource-id':
@@ -124,9 +124,9 @@ def simplify_xml_for_ai(xml_string: str, max_len: int) -> str:
             #    if parent is not None:
             #        parent.remove(element)
 
-        # Convert the modified tree back to a string
-        # Use compact encoding, no pretty print to save space
-        simplified_xml = etree.tostring(root, encoding='unicode', method='xml', xml_declaration=False)
+        # Convert the modified tree back to a string, with minimal parameters for type checking
+        xml_bytes = etree.tostring(root)  
+        simplified_xml = xml_bytes.decode('utf-8')
 
         logging.debug(f"XML simplification processed {elements_processed} elements. Original len: {len(xml_string)}, Simplified len: {len(simplified_xml)}")
 
@@ -139,11 +139,11 @@ def simplify_xml_for_ai(xml_string: str, max_len: int) -> str:
                 # Find the closing '>' for that tag
                 end_tag_point = simplified_xml.find('>', trunc_point, max_len + 20) # Search a bit beyond max_len
                 if end_tag_point != -1:
-                     simplified_xml = simplified_xml[:end_tag_point+1] + "\n... (truncated)"
+                    simplified_xml = simplified_xml[:end_tag_point+1] + "\n... (truncated)"
                 else: # Couldn't find closing '>', just truncate hard
-                     simplified_xml = simplified_xml[:max_len] + "... (truncated)"
+                    simplified_xml = simplified_xml[:max_len] + "... (truncated)"
             else: # No closing tag found before max_len, hard truncate
-                 simplified_xml = simplified_xml[:max_len] + "... (truncated)"
+                simplified_xml = simplified_xml[:max_len] + "... (truncated)"
 
         # Optional: Final regex cleanup for extra whitespace if needed
         simplified_xml = re.sub(r'>\s+<', '><', simplified_xml)

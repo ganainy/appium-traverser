@@ -23,10 +23,10 @@ class ScreenshotAnnotator:
         self.logger = logging.getLogger(__name__)
 
     def save_annotated_screenshot(self,
-                                   original_screenshot_bytes: bytes,
-                                   step: int,
-                                   screen_id: int,
-                                   ai_suggestion: Optional[Dict[str, Any]]):
+                                original_screenshot_bytes: bytes,
+                                step: int,
+                                screen_id: int,
+                                ai_suggestion: Optional[Dict[str, Any]]):
         """
         Takes the original screenshot, draws indicator based on AI's bbox center,
         and saves it WITH absolute bbox coordinates in the filename.
@@ -36,8 +36,8 @@ class ScreenshotAnnotator:
             step: The current crawl step number.
             screen_id: The database ID of the current screen state.
             ai_suggestion: The dictionary returned by the AI assistant, which
-                           may contain 'target_bounding_box' with either normalized [0.0-1.0]
-                           or absolute pixel coordinates.
+            may contain 'target_bounding_box' with either normalized [0.0-1.0]
+            or absolute pixel coordinates.
         """
         if not original_screenshot_bytes:
             self.logger.debug("Skipping annotated screenshot: No original image provided.")
@@ -57,22 +57,40 @@ class ScreenshotAnnotator:
 
         try:
             # Get screen dimensions first as we'll need them for both coordinate types
-            window_size = self.driver.get_window_size()
-            if window_size and window_size.get('width') > 0 and window_size.get('height') > 0:
-                img_width = window_size['width']
-                img_height = window_size['height']
-                self.logger.debug(f"Using Appium window size for coord conversion: {img_width}x{img_height}")
-            else:
-                self.logger.debug("Appium window size unavailable or invalid, loading image from bytes to get dimensions.")
+            img_width = img_height = None
+            
+            # Try to get dimensions from Appium first
+            try:
+                window_size = self.driver.get_window_size()
+                if isinstance(window_size, dict):
+                    width = window_size.get('width')
+                    height = window_size.get('height')
+                    if isinstance(width, (int, float)) and isinstance(height, (int, float)) and width > 0 and height > 0:
+                        img_width = int(width)
+                        img_height = int(height)
+                        self.logger.debug(f"Using Appium window size for coord conversion: {img_width}x{img_height}")
+                    else:
+                        self.logger.debug("Invalid window dimensions from Appium")
+            except Exception as e:
+                self.logger.debug(f"Error getting window size from Appium: {e}")
+
+            # If Appium dimensions are not available, try getting them from the image
+            if img_width is None or img_height is None:
+                self.logger.debug("Appium window size unavailable, loading image from bytes to get dimensions.")
                 try:
                     with Image.open(BytesIO(original_screenshot_bytes)) as img:
                         img_width, img_height = img.size
-                    if img_width <= 0 or img_height <= 0:
-                        raise ValueError("Image dimensions from bytes are invalid.")
+                        if not (isinstance(img_width, int) and isinstance(img_height, int) and img_width > 0 and img_height > 0):
+                            raise ValueError("Invalid image dimensions")
                     self.logger.debug(f"Using image dimensions from bytes: {img_width}x{img_height}")
                 except Exception as img_err:
                     self.logger.error(f"Failed to get image dimensions from bytes: {img_err}. Cannot proceed with annotation.")
                     return
+
+            # Ensure we have valid dimensions at this point
+            if img_width is None or img_height is None or img_width <= 0 or img_height <= 0:
+                self.logger.error("Failed to obtain valid image dimensions. Cannot proceed with annotation.")
+                return
 
             # Extract coordinates
             tl_x, tl_y = bbox_data["top_left"]
@@ -80,7 +98,7 @@ class ScreenshotAnnotator:
 
             # Check if coordinates are already normalized (between 0 and 1)
             coords_are_normalized = all(isinstance(coord, (int, float)) and 0.0 <= float(coord) <= 1.0 
-                                     for coord in [tl_x, tl_y, br_x, br_y])
+                                    for coord in [tl_x, tl_y, br_x, br_y])
 
             if coords_are_normalized:
                 self.logger.debug("Processing normalized coordinates")
@@ -123,39 +141,42 @@ class ScreenshotAnnotator:
             self.logger.error(f"Unexpected error processing coordinates/dimensions: {e}", exc_info=True)
             return
 
-        annotated_bytes = None
+        # Draw the indicator
         try:
             self.logger.debug(f"Drawing indicator at center: {draw_coords}")
-            annotated_bytes = utils.draw_indicator_on_image(
-                original_screenshot_bytes,
-                draw_coords
-            )
-            if not annotated_bytes:
-                 raise ValueError("draw_indicator_on_image returned None")
+            annotated_bytes = utils.draw_indicator_on_image(original_screenshot_bytes, draw_coords)
+            if not isinstance(annotated_bytes, bytes):
+                raise ValueError("draw_indicator_on_image did not return valid bytes")
         except Exception as draw_err:
-             self.logger.error(f"Error drawing indicator on image: {draw_err}", exc_info=True)
+            self.logger.error(f"Error drawing indicator on image: {draw_err}", exc_info=True)
+            return
 
-        if annotated_bytes:
-            try:
-                # Assuming ANNOTATED_SCREENSHOTS_DIR is an attribute of the config object
-                annotated_dir_path = getattr(self.config, 'ANNOTATED_SCREENSHOTS_DIR', None)
-                if not annotated_dir_path:
-                    self.logger.error("Configuration error: 'ANNOTATED_SCREENSHOTS_DIR' not defined or empty in config.")
-                    return
+        # Get the output directory from config
+        annotated_dir_path = getattr(self.config, 'ANNOTATED_SCREENSHOTS_DIR', None)
+        if not annotated_dir_path:
+            self.logger.error("Configuration error: 'ANNOTATED_SCREENSHOTS_DIR' not defined or empty in config.")
+            return
 
-                os.makedirs(annotated_dir_path, exist_ok=True)
-                filename = f"annotated_step_{step}_screen_{screen_id}{filename_suffix}"
-                filepath = os.path.join(annotated_dir_path, filename)
+        # Initialize filepath to None
+        filepath = None
 
-                with open(filepath, "wb") as f:
-                    f.write(annotated_bytes)
-                self.logger.info(f"Saved annotated screenshot: {filepath} ({target_log_info})")
+        try:
+            # Prepare the output directory and file path
+            os.makedirs(annotated_dir_path, exist_ok=True)
+            filename = f"annotated_step_{step}_screen_{screen_id}{filename_suffix}"
+            filepath = os.path.join(annotated_dir_path, filename)
 
-            except IOError as io_err:
-                 self.logger.error(f"Failed to save annotated screenshot to {filepath}: {io_err}", exc_info=True)
-            except Exception as e:
-                 filepath_str = filepath if 'filepath' in locals() else f"in {str(annotated_dir_path)}"
-                 self.logger.error(f"Unexpected error saving annotated screenshot {filepath_str}: {e}", exc_info=True)
-        else:
-            self.logger.warning("Skipping saving annotated screenshot because indicator drawing failed.")
+            # Save the annotated image
+            with open(filepath, "wb") as f:
+                f.write(annotated_bytes)
+            self.logger.info(f"Saved annotated screenshot: {filepath} ({target_log_info})")
+            
+        except IOError as io_err:
+            # Handle file I/O errors
+            error_path = filepath if filepath else f"in directory {annotated_dir_path}"
+            self.logger.error(f"Failed to save annotated screenshot to {error_path}: {io_err}", exc_info=True)
+        except Exception as e:
+            # Handle any other unexpected errors
+            error_location = filepath if filepath else f"in directory {annotated_dir_path}"
+            self.logger.error(f"Unexpected error saving annotated screenshot {error_location}: {e}", exc_info=True)
 

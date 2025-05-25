@@ -11,16 +11,20 @@ class AppContextManager:
     def __init__(self, driver: 'AppiumDriver', config_dict: dict):
         self.driver = driver
         self.config_dict = config_dict
+
+        # Validate required configuration
+        required_configs = ['APP_PACKAGE', 'APP_ACTIVITY', 'APP_LAUNCH_WAIT_TIME', 
+                        'WAIT_AFTER_ACTION', 'ALLOWED_EXTERNAL_PACKAGES']
+        missing_configs = [cfg for cfg in required_configs if cfg not in config_dict]
+        if missing_configs:
+            raise ValueError(f"Missing required configurations: {', '.join(missing_configs)}")
+        
         self.logger = logging.getLogger(__name__)
 
     def launch_and_verify_app(self) -> bool:
         """Launches the target application and verifies it is active."""
-        target_pkg = self.config_dict.get('APP_PACKAGE')
-        target_activity = self.config_dict.get('APP_ACTIVITY')
-
-        if not target_pkg:
-            self.logger.critical("Target app package name (APP_PACKAGE) not found in configuration.")
-            return False
+        target_pkg = self.config_dict['APP_PACKAGE']
+        target_activity = self.config_dict['APP_ACTIVITY']
 
         self.logger.info(f"Attempting to launch app: {target_pkg}/{target_activity}")
         
@@ -28,13 +32,12 @@ class AppContextManager:
         current_pkg = self.driver.get_current_package()
         if current_pkg == target_pkg:
             self.logger.info(f"Target app {target_pkg} is already active.")
-            return True
-
-        # If not running, launch it
+            return True        
+            
         self.driver.launch_app(target_pkg, target_activity)
         
         # Wait for app to launch and stabilize
-        app_launch_wait_time = self.config_dict.get('APP_LAUNCH_WAIT_TIME', 5)
+        app_launch_wait_time = self.config_dict['APP_LAUNCH_WAIT_TIME']
         self.logger.debug(f"Waiting {app_launch_wait_time}s for app to stabilize after launch.")
         time.sleep(app_launch_wait_time)
         
@@ -59,16 +62,15 @@ class AppContextManager:
         if not context:
             self.logger.error("Could not get current app context. Attempting relaunch as fallback.")
             self.driver.relaunch_app() 
-            time.sleep(self.config_dict.get('WAIT_AFTER_ACTION', 2))
+            time.sleep(self.config_dict['WAIT_AFTER_ACTION'])
             context = self.driver.get_current_app_context()
             if not context:
                 self.logger.critical("Failed to get app context even after relaunch attempt.")
                 return False
 
         current_package, current_activity = context
-        target_package = self.config_dict.get('APP_PACKAGE')
-        
-        allowed_external_packages = self.config_dict.get('ALLOWED_EXTERNAL_PACKAGES', [])
+        target_package = self.config_dict['APP_PACKAGE']
+        allowed_external_packages = self.config_dict['ALLOWED_EXTERNAL_PACKAGES']
         allowed_packages = [target_package] + (allowed_external_packages if isinstance(allowed_external_packages, list) else [])
 
         self.logger.debug(f"Current app context: {current_package} / {current_activity}. Allowed: {allowed_packages}")
@@ -81,7 +83,7 @@ class AppContextManager:
             
             # Try pressing back first
             self.driver.press_back_button()
-            time.sleep(self.config_dict.get('WAIT_AFTER_ACTION', 2) / 2)
+            time.sleep(self.config_dict['WAIT_AFTER_ACTION'] / 2)
 
             context_after_back = self.driver.get_current_app_context()
             if context_after_back and context_after_back[0] in allowed_packages:
@@ -90,7 +92,7 @@ class AppContextManager:
             else:
                 self.logger.warning("Recovery failed after back press. Relaunching target application.")
                 self.driver.relaunch_app() 
-                time.sleep(self.config_dict.get('WAIT_AFTER_ACTION', 5))
+                time.sleep(self.config_dict['WAIT_AFTER_ACTION'])
 
                 context_after_relaunch = self.driver.get_current_app_context()
                 if context_after_relaunch and context_after_relaunch[0] in allowed_packages:

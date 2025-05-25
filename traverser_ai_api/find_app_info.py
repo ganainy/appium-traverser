@@ -13,11 +13,11 @@ medication management, or mental health categories.
 
 Output:
 - A JSON file named `<device_id>_app_info_<all|health_filtered>.json` will be created
-  in an 'output' subdirectory, containing a list of app information dictionaries.
+in an 'output' subdirectory, containing a list of app information dictionaries.
 
 Environment Variables:
-    FILTER_HEALTH_APPS=true   : Enable AI filtering. Defaults to false if not set.
-    GEMINI_API_KEY=<your_key> : Your Google Gemini API key. Required if filtering.
+FILTER_HEALTH_APPS=true   : Enable AI filtering. Defaults to false if not set.
+GEMINI_API_KEY=<your_key> : Your Google Gemini API key. Required if filtering.
 """
 
 import subprocess
@@ -26,72 +26,103 @@ import re
 import json
 import os
 import traceback
-from PIL.Image import Image # Assuming this is used elsewhere, keeping it. If not, it could be removed.
-from dotenv import load_dotenv
-import argparse # Added for command line arguments
-import time # Added: Missing import for time.time()
+from PIL.Image import Image
+import argparse
+import time
 
 # --- Try importing Google AI Library (required only for filtering) ---
 try:
+    # Import the minimal needed components, deferring full imports until needed
     import google.generativeai as genai
     GENAI_AVAILABLE = True
 except ImportError:
     GENAI_AVAILABLE = False
+    genai = None
 # -------------------------------------------------------------------
 
+# Get script directory for path resolution
+CURRENT_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT_DIR = os.path.abspath(os.path.join(CURRENT_SCRIPT_DIR, ".."))
+
 # --- Load Environment Variables ---
-# Specify the exact path to the .env file
-# Use raw string for Windows paths or forward slashes
-# Determine project root assuming this script is in project_root/traverser_ai_api/
-project_root_env = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-dotenv_path = os.path.join(project_root_env, '.env')
-
-
-# Check if the specified .env file exists
+from dotenv import load_dotenv
+# Try loading .env from project root (same approach as main.py)
+dotenv_path = os.path.join(PROJECT_ROOT_DIR, '.env')
 if os.path.exists(dotenv_path):
     print(f"Loading environment variables from: {dotenv_path}")
-    load_dotenv(dotenv_path=dotenv_path, override=True) # override=True ensures .env takes precedence
+    load_dotenv(dotenv_path=dotenv_path, override=True)
 else:
-    # Optionally, load from the current directory or default locations
-    print(f"Warning: Specified .env path not found: {dotenv_path}")
-    print("Attempting to load .env from default locations (e.g., script directory).")
-    load_dotenv(override=True) # Fallback to default behavior
+    print(f"Warning: .env not found in project root: {dotenv_path}")
+    print("Attempting to load .env from default locations.")
+    load_dotenv(override=True)
+
+# Get configs with validation
+import config 
+
+if not hasattr(config, 'MAX_APPS_TO_SEND_TO_AI'):
+    raise ValueError("MAX_APPS_TO_SEND_TO_AI must be defined in config")
+
+if not hasattr(config, 'THIRD_PARTY_APPS_ONLY'):
+    raise ValueError("THIRD_PARTY_APPS_ONLY must be defined in config")
 
 # CHANGED: Default to True for AI filtering when called from UI.
 # UI controller expects health-filtered list by default.
 ENABLE_AI_FILTERING = True
+
 # Read the API key after loading
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 
 # --- Configuration ---
-DEFAULT_AI_MODEL_NAME = 'gemini-1.5-flash-latest' # Or 'gemini-pro'
-AI_SAFETY_SETTINGS = {
-    "HARM_CATEGORY_HARASSMENT": "BLOCK_MEDIUM_AND_ABOVE",
-    "HARM_CATEGORY_HATE_SPEECH": "BLOCK_MEDIUM_AND_ABOVE",
-    "HARM_CATEGORY_SEXUALLY_EXPLICIT": "BLOCK_MEDIUM_AND_ABOVE",
-    "HARM_CATEGORY_DANGEROUS_CONTENT": "BLOCK_MEDIUM_AND_ABOVE",
-}
-OUTPUT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "output_data", "app_info"))
-MAX_APPS_TO_SEND_TO_AI = 200 # Adjust based on model limits and typical response sizes
-THIRD_PARTY_APPS_ONLY = True # Set to False to include system apps
+# These will be populated from environment variables if AI filtering is active and valid.
+DEFAULT_AI_MODEL_NAME = None
+AI_SAFETY_SETTINGS = None
 
-# --- Validate AI Prerequisites if Filtering Enabled ---
+# Use config's OUTPUT_DATA_DIR for app info directory
+APP_INFO_DIR = os.path.join(CURRENT_SCRIPT_DIR, config.OUTPUT_DATA_DIR, "app_info")
+
+# --- Validate AI Prerequisites and Load AI Config if Filtering Enabled ---
 if ENABLE_AI_FILTERING:
-    print("AI Filtering is ENABLED (default or by script setting).")
+    print("AI Filtering is INITIALLY ENABLED. Validating prerequisites and loading AI config...")
     if not GENAI_AVAILABLE:
         print("Error: AI Filtering enabled, but the 'google-generativeai' library is not installed.", file=sys.stderr)
         print("       Please install it: pip install google-generativeai", file=sys.stderr)
         ENABLE_AI_FILTERING = False # Can't filter without library
-        print("Warning: Disabling AI filtering due to missing library.", file=sys.stderr)
-    elif not GEMINI_API_KEY:
-        print("Error: AI Filtering enabled, but the GEMINI_API_KEY environment variable is not set.", file=sys.stderr)
+    
+    if ENABLE_AI_FILTERING and not GEMINI_API_KEY: # Check if still enabled
+        print("Error: AI Filtering enabled, but GEMINI_API_KEY environment variable is not set.", file=sys.stderr)
         print("       Please set it in your environment or in the .env file.", file=sys.stderr)
         ENABLE_AI_FILTERING = False # Can't filter without key
-        print("Warning: Disabling AI filtering due to missing API key.", file=sys.stderr)
-    else:
-        print(f"Using AI Model: {DEFAULT_AI_MODEL_NAME}")
+
+    if ENABLE_AI_FILTERING: # Check if still enabled
+        if not hasattr(config, 'DEFAULT_MODEL_TYPE') or not hasattr(config, 'GEMINI_MODELS'):
+            print("Error: AI Filtering enabled, but DEFAULT_MODEL_TYPE or GEMINI_MODELS not defined in config.", file=sys.stderr)
+            ENABLE_AI_FILTERING = False
+        else:
+            model_type = config.DEFAULT_MODEL_TYPE
+            if model_type not in config.GEMINI_MODELS:
+                print(f"Error: Model type '{model_type}' not found in GEMINI_MODELS config.", file=sys.stderr)
+                ENABLE_AI_FILTERING = False
+            else:
+                DEFAULT_AI_MODEL_NAME = config.GEMINI_MODELS[model_type]['name']
+                print(f"Using AI Model from config: {DEFAULT_AI_MODEL_NAME} (type: {model_type})")
+
+    if ENABLE_AI_FILTERING: # Check if still enabled
+        if not hasattr(config, 'AI_SAFETY_SETTINGS'):
+            print("Error: AI Filtering enabled, but AI_SAFETY_SETTINGS not defined in config.", file=sys.stderr)
+            ENABLE_AI_FILTERING = False
+        else:
+            AI_SAFETY_SETTINGS = config.AI_SAFETY_SETTINGS  # Set the global from config
+            print("Using AI Safety Settings from config.")
+    
+    if not ENABLE_AI_FILTERING: # If any check above failed
+        print("Warning: AI filtering has been DISABLED due to missing prerequisites or configuration.", file=sys.stderr)
+        # Ensure these are None if filtering got disabled during the checks
+        DEFAULT_AI_MODEL_NAME = None 
+        AI_SAFETY_SETTINGS = None
 else:
-    print("AI Filtering is DISABLED (either by script setting or missing prerequisites).")
+    print("AI Filtering is DISABLED by script setting (ENABLE_AI_FILTERING=False initial value).")
+    DEFAULT_AI_MODEL_NAME = None
+    AI_SAFETY_SETTINGS = None
 # --- End Configuration and Checks ---
 
 
@@ -108,7 +139,7 @@ def run_adb_command(command_list):
         if result.stderr:
             clean_stderr = "\n".join(line for line in result.stderr.splitlines() if not line.strip().startswith("Warning:"))
             if clean_stderr:
-                 print(f"--- ADB STDERR:\n{clean_stderr.strip()}", file=sys.stderr)
+                print(f"--- ADB STDERR:\n{clean_stderr.strip()}", file=sys.stderr)
         return result.stdout.strip()
 
     except FileNotFoundError:
@@ -117,11 +148,11 @@ def run_adb_command(command_list):
     except subprocess.CalledProcessError as e:
         stderr_lower = e.stderr.lower() if e.stderr else ""
         if "device unauthorized" in stderr_lower:
-             print("\nFatal Error: Device unauthorized. Please check your device and allow USB debugging. ***", file=sys.stderr)
-             sys.exit(1) # Exit on critical device errors
+            print("\nFatal Error: Device unauthorized. Please check your device and allow USB debugging. ***", file=sys.stderr)
+            sys.exit(1) # Exit on critical device errors
         elif "device" in stderr_lower and ("not found" in stderr_lower or "offline" in stderr_lower):
-             print("\nFatal Error: Device not found or offline. Ensure device is connected and USB debugging is enabled. Check 'adb devices'.", file=sys.stderr)
-             sys.exit(1) # Exit on critical device errors
+            print("\nFatal Error: Device not found or offline. Ensure device is connected and USB debugging is enabled. Check 'adb devices'.", file=sys.stderr)
+            sys.exit(1) # Exit on critical device errors
         
         # Don't print warnings for expected failures like 'activity not found'
         # Check if it's a relevant error or just noise
@@ -134,10 +165,10 @@ def run_adb_command(command_list):
 
 
         if is_relevant_error:
-             relevant_stderr = "\n".join(line for line in e.stderr.splitlines() if not line.strip().startswith("Warning:")) if e.stderr else ""
-             if relevant_stderr:
-                  print(f"Warning: ADB command {' '.join(e.cmd)} failed.", file=sys.stderr)
-                  print(f"Stderr: {relevant_stderr.strip()}", file=sys.stderr)
+            relevant_stderr = "\n".join(line for line in e.stderr.splitlines() if not line.strip().startswith("Warning:")) if e.stderr else ""
+            if relevant_stderr:
+                print(f"Warning: ADB command {' '.join(e.cmd)} failed.", file=sys.stderr)
+                print(f"Stderr: {relevant_stderr.strip()}", file=sys.stderr)
 
         return None # Indicate command failure
 
@@ -286,37 +317,55 @@ def find_main_activity(package_name):
 def filter_apps_with_ai(app_data_list: list):
     """Uses Google Gemini AI to filter apps for health/fitness categories."""
     print("\n--- Filtering apps using AI ---")
+    
+    # Check the global ENABLE_AI_FILTERING flag which incorporates all prerequisite checks
+    if not ENABLE_AI_FILTERING:
+        print("AI Filtering is disabled (globally or due to missing prerequisites/config). Skipping AI-based filtering.", file=sys.stderr)
+        return app_data_list # Return original list if filtering is off
+
     if not app_data_list:
         print("No app data to filter.")
         return []
-    if not GENAI_AVAILABLE or not GEMINI_API_KEY: # Re-check here as it's critical
-        print("AI prerequisites not met (GenAI lib or API Key missing). Skipping AI filtering.", file=sys.stderr)
-        return app_data_list # Return original list if AI cannot be used
+    
+    # GENAI_AVAILABLE, GEMINI_API_KEY, DEFAULT_AI_MODEL_NAME, AI_SAFETY_SETTINGS 
+    # are expected to be valid and set if ENABLE_AI_FILTERING is True here.
+    if not genai:
+        print("Error: google.generativeai module (aliased as 'genai') not available. Cannot proceed with AI filtering.", file=sys.stderr)
+        return app_data_list
+
+    # Explicitly check that model name and safety settings are available if filtering is enabled.
+    if not DEFAULT_AI_MODEL_NAME or not AI_SAFETY_SETTINGS:
+        print("Error: AI Model Name or Safety Settings are missing even though AI filtering is enabled. This indicates an issue in the configuration loading logic.", file=sys.stderr)
+        print("Warning: AI filtering will be skipped.", file=sys.stderr)
+        return app_data_list
 
     try:
-        genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel(
-            model_name=DEFAULT_AI_MODEL_NAME,
-            safety_settings=AI_SAFETY_SETTINGS
-        )
-    except Exception as e:
-        print(f"Error configuring Google AI SDK: {e}", file=sys.stderr)
+        from google.generativeai.client import configure as genai_configure
+        from google.generativeai.generative_models import GenerativeModel as GenAIModel
+
+        genai_configure(api_key=GEMINI_API_KEY)
+        model = GenAIModel(model_name=DEFAULT_AI_MODEL_NAME, safety_settings=AI_SAFETY_SETTINGS)
+    except (ImportError, AttributeError, Exception) as e:
+        print(f"Error configuring Google AI SDK or initializing model: {e}", file=sys.stderr)
         traceback.print_exc()
-        return app_data_list 
+        print("Warning: AI filtering will be skipped due to SDK/model initialization error.", file=sys.stderr)
+        return app_data_list
 
     filtered_results = []
-    for i in range(0, len(app_data_list), MAX_APPS_TO_SEND_TO_AI):
-        chunk = app_data_list[i : i + MAX_APPS_TO_SEND_TO_AI]
-        print(f"Processing chunk {i//MAX_APPS_TO_SEND_TO_AI + 1}/{(len(app_data_list) + MAX_APPS_TO_SEND_TO_AI - 1)//MAX_APPS_TO_SEND_TO_AI} ({len(chunk)} apps)...")
+    for i in range(0, len(app_data_list), config.MAX_APPS_TO_SEND_TO_AI):
+        chunk = app_data_list[i : i + config.MAX_APPS_TO_SEND_TO_AI]
+        print(f"Processing chunk {i//config.MAX_APPS_TO_SEND_TO_AI + 1}/{(len(app_data_list) + config.MAX_APPS_TO_SEND_TO_AI - 1)//config.MAX_APPS_TO_SEND_TO_AI} ({len(chunk)} apps)...")
 
         try:
-            app_data_json_str = json.dumps(chunk, indent=2) # Renamed to avoid conflict
+            app_data_json_str = json.dumps(chunk, indent=2)
         except Exception as e:
             print(f"Error encoding chunk to JSON: {e}", file=sys.stderr)
-            continue 
+            continue
+
+        print(f"Sending {len(chunk)} apps to AI model {DEFAULT_AI_MODEL_NAME}...")
 
         prompt = f"""
-                Analyze the following list of Android applications provided in JSON format. Each entry includes the application's package name (`package_name`), its user-facing label (`app_name`, which *might be null* if the retrieval script failed), and its main activity (`activity_name`).
+Analyze the following list of Android applications provided in JSON format. Each entry includes the application's package name (`package_name`), its user-facing label (`app_name`, which *might be null* if the retrieval script failed), and its main activity (`activity_name`).
 
 Your tasks are:
 
@@ -333,16 +382,28 @@ Your tasks are:
 Output ONLY a valid JSON array containing the entries for the health-related applications identified in step 1. Each object in the output array MUST have the `package_name`, `app_name` (non-null, populated as per step 2), `activity_name` (preserved from input), and `app_category` (inferred as per step 2) fields.
 
 Do not include any explanatory text, comments, markdown formatting like ```json ... ``` around the JSON array, or any text other than the final JSON array itself. The output must be directly parseable as a JSON list of objects. If no apps in the input match the health criteria, output an empty JSON array `[]`.
-                Input JSON:
-                ```json
-                {app_data_json_str} 
-                ```
-                Output ONLY a valid JSON array containing the entries from the input JSON that match the health-related criteria. Do not include any explanatory text, comments, or markdown formatting like json ... around the JSON array in your response. The output must be parseable directly as a JSON list of objects. If no apps in the input match the criteria, output an empty JSON array [].
-                """
-        print(f"Sending {len(chunk)} apps to AI model {DEFAULT_AI_MODEL_NAME}...")
+
+Input JSON:
+```json
+{app_data_json_str}
+```
+Output ONLY a valid JSON array containing the entries from the input JSON that match the health-related criteria. Do not include any explanatory text, comments, or markdown formatting like json ... around the JSON array in your response. The output must be parseable directly as a JSON list of objects. If no apps in the input match the criteria, output an empty JSON array [].
+"""
+
         try:
             response = model.generate_content(prompt)
-            response_text = response.text.strip()
+            if response is None:
+                print("Error: AI returned None response", file=sys.stderr)
+                continue
+
+            response_text = response.text.strip() if hasattr(response, 'text') else ""
+            if not response_text:
+                print("Warning: Empty response from AI", file=sys.stderr)
+                if hasattr(response, 'prompt_feedback'):
+                    print(f"Prompt Feedback: {response.prompt_feedback}", file=sys.stderr)
+                continue
+
+            # Clean up JSON formatting if present
             if response_text.startswith("```json"):
                 response_text = response_text[7:]
             if response_text.endswith("```"):
@@ -353,23 +414,21 @@ Do not include any explanatory text, comments, markdown formatting like ```json 
                 print("AI identified 0 relevant apps in this chunk.")
                 continue
 
-            chunk_filtered_list = json.loads(response_text)
-            if isinstance(chunk_filtered_list, list):
-                print(f"AI identified {len(chunk_filtered_list)} relevant apps in this chunk.")
-                filtered_results.extend(chunk_filtered_list)
-            else:
-                print(f"Warning: AI response for chunk was not a JSON list. Snippet: {response.text[:200]}...", file=sys.stderr)
+            try:
+                chunk_filtered_list = json.loads(response_text)
+                if isinstance(chunk_filtered_list, list):
+                    print(f"AI identified {len(chunk_filtered_list)} relevant apps in this chunk.")
+                    filtered_results.extend(chunk_filtered_list)
+                else:
+                    print(f"Warning: AI response was not a JSON list. Snippet: {response_text[:200]}...", file=sys.stderr)
+            except json.JSONDecodeError as e:
+                print(f"Error: Could not parse AI response as JSON: {e}", file=sys.stderr)
+                print(f"Response text snippet: {response_text[:500]}...", file=sys.stderr)
 
-        except json.JSONDecodeError as e:
-            print(f"Error: Could not parse AI response for chunk as JSON: {e}", file=sys.stderr)
-            print(f"AI Response snippet: {response.text[:500]}...", file=sys.stderr)
-        except AttributeError: # Handle cases where response.text might not exist (e.g. blocked content)
-            print("Error: AI response object issue (no '.text' attribute, possibly blocked).", file=sys.stderr)
-            if hasattr(response, 'prompt_feedback'): print(f"Prompt Feedback: {response.prompt_feedback}", file=sys.stderr)
-        except Exception as e: # Catch other errors during AI call or processing
+        except Exception as e:
             print(f"Error during AI API call or processing for chunk: {e}", file=sys.stderr)
-            if hasattr(response, 'prompt_feedback'): print(f"Prompt Feedback: {response.prompt_feedback}", file=sys.stderr)
-            else: traceback.print_exc()
+            traceback.print_exc()
+
     print(f"\n--- AI Filtering Finished. Total relevant apps identified: {len(filtered_results)} ---")
     return filtered_results
 
@@ -385,11 +444,11 @@ def generate_app_info_cache(target_package_name_filter=None, target_app_label_fi
         return None, [] 
 
     print(f"Device ID: {device_id}")
-    print(f"\n--- Discovering installed packages (Third-party only: {THIRD_PARTY_APPS_ONLY}) ---")
-    packages = get_installed_packages(third_party_only=THIRD_PARTY_APPS_ONLY)
+    print(f"\n--- Discovering installed packages (Third-party only: {config.THIRD_PARTY_APPS_ONLY}) ---")
+    packages = get_installed_packages(third_party_only=config.THIRD_PARTY_APPS_ONLY)
     if not packages:
         print("No packages found. Ensure device is connected and has third-party apps if filter is on.", file=sys.stderr)
-        return None, [] 
+        return None, []
     print(f"Found {len(packages)} packages.")
 
     all_apps_info = []
@@ -409,27 +468,27 @@ def generate_app_info_cache(target_package_name_filter=None, target_app_label_fi
         if not ENABLE_AI_FILTERING: # This check is now somewhat redundant but good for clarity
             print("Warning: AI Filtering requested for cache, but globally disabled. Skipping.", file=sys.stderr)
         elif not GENAI_AVAILABLE or not GEMINI_API_KEY:
-             print("Warning: AI Filtering requested for cache, but AI prerequisites not met. Skipping.", file=sys.stderr)
+            print("Warning: AI Filtering requested for cache, but AI prerequisites not met. Skipping.", file=sys.stderr)
         else:
             print("Attempting AI filtering for this cache generation...")
             filtered_apps = filter_apps_with_ai(list(all_apps_info)) 
             if filtered_apps is not None:
                 apps_to_save = filtered_apps
                 if len(apps_to_save) != len(all_apps_info) or any(app not in all_apps_info for app in apps_to_save):
-                     ai_filter_was_applied_successfully = True
+                    ai_filter_was_applied_successfully = True
                 print(f"AI filtering for cache resulted in {len(apps_to_save)} apps. Filter effectively applied: {ai_filter_was_applied_successfully}")
             else:
                 print("AI filtering for cache returned None. Using all apps.", file=sys.stderr)
     else:
         print("AI Filtering not requested/applicable for this cache generation. Using all discovered apps.")
 
-    if not os.path.exists(OUTPUT_DIR):
-        os.makedirs(OUTPUT_DIR)
-        print(f"Created output directory: {OUTPUT_DIR}")
+    # Create output directory 
+    os.makedirs(APP_INFO_DIR, exist_ok=True)
+    print(f"Ensuring app info output directory exists: {APP_INFO_DIR}")
 
     file_suffix = "health_filtered" if use_ai_filtering_for_this_cache and ai_filter_was_applied_successfully else "all"
     output_filename = f"{device_id}_app_info_{file_suffix}.json"
-    output_path = os.path.join(OUTPUT_DIR, output_filename)
+    output_path = os.path.join(APP_INFO_DIR, output_filename)
 
     print(f"\n--- Saving app info to: {output_path} (Suffix: {file_suffix}) ---")
     try:
@@ -478,7 +537,10 @@ def filter_existing_app_info_file(input_filepath: str):
     # Ensure output has a distinct name if input was already filtered or "all"
     new_suffix = "health_filtered_again" if "health_filtered" in base else "health_filtered"
     output_filename = f"{base.replace('_all', '').replace('_health_filtered', '')}_{new_suffix}{ext}"
-    output_filepath = os.path.join(os.path.dirname(input_filepath), output_filename)
+    output_filepath = os.path.join(APP_INFO_DIR, output_filename)
+
+    # Ensure the output directory exists
+    os.makedirs(APP_INFO_DIR, exist_ok=True)
 
     print(f"--- Saving filtered app info to: {output_filepath} ---")
     try:

@@ -5,12 +5,12 @@ import os
 import json
 import shutil # For rmtree
 import io # Added for TextIOWrapper
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 # --- Global Script Start Time (defined once at the very top) ---
 SCRIPT_START_TIME = time.time()
 
-# --- Custom Log Formatter ---
+# --- Custom Log Formatter and Handler Manager ---
 class ElapsedTimeFormatter(logging.Formatter):
     """Custom formatter to log elapsed time since script start."""
     def formatTime(self, record, datefmt=None):
@@ -21,70 +21,181 @@ class ElapsedTimeFormatter(logging.Formatter):
         ms = int((elapsed_seconds - (h * 3600 + m * 60 + s)) * 1000)
         return f"{h:02d}:{m:02d}:{s:02d}.{ms:03d}"
 
-# --- Logging Setup Function ---
-def setup_logging(log_level_str: str = "INFO", log_file: Optional[str] = None):
-    numeric_level = getattr(logging, log_level_str.upper(), logging.INFO)
-    if not isinstance(numeric_level, int) or numeric_level == logging.INFO and log_level_str.upper() != "INFO":
-        print(f"Warning: Invalid log level string: '{log_level_str}'. Defaulting to INFO.", file=sys.stderr)
-        numeric_level = logging.INFO
-        log_level_str = "INFO"
+class LoggerManager:
+    """Manages logging setup and persistence of handlers"""
+    def __init__(self):
+        # Keep references to prevent garbage collection
+        self.handlers = []
+        self.stdout_wrapper = None
 
-    # Create root logger
-    logger = logging.getLogger()
-    logger.setLevel(numeric_level)
-    
-    # Store our handlers to prevent GC
-    if not hasattr(logger, '_our_handlers'):
-        logger._our_handlers = []
-    
-    # Remove existing handlers
-    for handler in list(logger.handlers):
-        logger.removeHandler(handler)
-        if isinstance(handler, logging.FileHandler):
-            try:
-                handler.close()
-            except Exception:
-                pass
+    def setup_logging(self, log_level_str: str, log_file: Optional[str] = None) -> logging.Logger:
+        numeric_level = getattr(logging, log_level_str.upper())
+        if not isinstance(numeric_level, int):
+            raise ValueError(f"Invalid log level string: {log_level_str}")
 
-    # Create formatter
-    log_formatter = ElapsedTimeFormatter("[%(levelname)s] (%(asctime)s) %(filename)s:%(lineno)d - %(message)s")
+        # Create root logger
+        logger = logging.getLogger()
+        logger.setLevel(numeric_level)
     
-    # Console Handler - carefully handle UTF-8
-    try:
-        # Keep a reference to prevent GC of the TextIOWrapper
-        if not hasattr(sys.stdout, '_utf8_wrapper'):
-            sys.stdout._utf8_wrapper = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-        console_handler = logging.StreamHandler(sys.stdout._utf8_wrapper)
-    except Exception:
-        # Fallback to regular stdout
-        console_handler = logging.StreamHandler(sys.stdout)
-    
-    console_handler.setFormatter(log_formatter)
-    logger.addHandler(console_handler)
-    logger._our_handlers.append(console_handler)
+        # Remove existing handlers
+        for handler in list(logger.handlers):
+            logger.removeHandler(handler)
+            if isinstance(handler, logging.FileHandler):
+                try:
+                    handler.close()
+                except Exception:
+                    pass
 
-    # File Handler
-    if log_file:
+        # Create formatter
+        log_formatter = ElapsedTimeFormatter("[%(levelname)s] (%(asctime)s) %(filename)s:%(lineno)d - %(message)s")
+    
+        # Console Handler - carefully handle UTF-8
         try:
-            log_file_dir = os.path.dirname(os.path.abspath(log_file))
-            if log_file_dir:
-                os.makedirs(log_file_dir, exist_ok=True)
-            file_handler = logging.FileHandler(log_file, mode='a', encoding='utf-8')
-            file_handler.setFormatter(log_formatter)
-            logger.addHandler(file_handler)
-            logger._our_handlers.append(file_handler)
-        except Exception as e:
-            print(f"Error setting up file logger for {log_file}: {e}. Continuing with console logging.", file=sys.stderr)
-
-    # Set levels for noisy libraries
-    if numeric_level > logging.DEBUG:
-        for lib_name in ["appium.webdriver.webdriver", "urllib3.connectionpool", "selenium.webdriver.remote.remote_connection"]:
-            logging.getLogger(lib_name).setLevel(logging.WARNING)
+            # Create a persistent wrapper
+            if not self.stdout_wrapper:
+                self.stdout_wrapper = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+            console_handler = logging.StreamHandler(self.stdout_wrapper)
+        except Exception:
+            # Fallback to regular stdout
+            console_handler = logging.StreamHandler(sys.stdout)
     
-    return logger  # Return logger for reference
+        console_handler.setFormatter(log_formatter)
+        logger.addHandler(console_handler)
+        self.handlers.append(console_handler)
+
+        # File Handler
+        if log_file:
+            try:
+                log_file_dir = os.path.dirname(os.path.abspath(log_file))
+                if log_file_dir:
+                    os.makedirs(log_file_dir, exist_ok=True)
+                file_handler = logging.FileHandler(log_file, mode='a', encoding='utf-8')
+                file_handler.setFormatter(log_formatter)
+                logger.addHandler(file_handler)
+                self.handlers.append(file_handler)
+            except Exception as e:
+                raise RuntimeError(f"Error setting up file logger for {log_file}: {e}")
+
+        # Set levels for noisy libraries
+        if numeric_level > logging.DEBUG:
+            for lib_name in ["appium.webdriver.webdriver", "urllib3.connectionpool", "selenium.webdriver.remote.remote_connection"]:
+                logging.getLogger(lib_name).setLevel(logging.WARNING)
+        
+        return logger
+
+class Config:
+    """Configuration class with type hints for IntelliSense support"""
+    def __init__(self):
+        # App settings
+        self.APP_PACKAGE: str = ""
+        self.APP_ACTIVITY: str = ""
+        
+        # Directory paths
+        self.DB_NAME: str = ""
+        self.SCREENSHOTS_DIR: str = ""
+        self.ANNOTATED_SCREENSHOTS_DIR: str = ""
+        self.TRAFFIC_CAPTURE_OUTPUT_DIR: str = ""
+        self.APP_INFO_OUTPUT_DIR: str = ""
+        
+        # Logging settings
+        self.LOG_LEVEL: Optional[str] = None
+        self.LOG_FILE_NAME: Optional[str] = None
+
+        # AI Settings
+        self.DEFAULT_MODEL_TYPE: Optional[str] = None
+        self.AI_SAFETY_SETTINGS: Optional[Dict[str, str]] = None
+
+        # Other settings to be added as needed
+        self.CONTINUE_EXISTING_RUN: Optional[bool] = None
+        self.GEMINI_API_KEY: Optional[str] = None
+        self.APPIUM_SERVER_URL: Optional[str] = None
+        self.TARGET_DEVICE_UDID: Optional[str] = None
+        self.NEW_COMMAND_TIMEOUT: Optional[int] = None
+        self.APPIUM_IMPLICIT_WAIT: Optional[int] = None
+        self.MAX_CONSECUTIVE_AI_FAILURES: Optional[int] = None
+        self.MAX_CONSECUTIVE_MAP_FAILURES: Optional[int] = None
+        self.MAX_CONSECUTIVE_EXEC_FAILURES: Optional[int] = None
+        self.APP_LAUNCH_WAIT_TIME: Optional[int] = None
+        self.WAIT_AFTER_ACTION: Optional[float] = None
+        self.STABILITY_WAIT: Optional[float] = None
+        self.ALLOWED_EXTERNAL_PACKAGES: Optional[List[str]] = None
+        self.USE_COORDINATE_FALLBACK: Optional[bool] = None
+        self.XML_SNIPPET_MAX_LEN: Optional[int] = None
+        self.VISUAL_SIMILARITY_THRESHOLD: Optional[int] = None
+        self.ENABLE_XML_CONTEXT: Optional[bool] = None
+        self.CRAWL_MODE: Optional[str] = None
+        self.MAX_CRAWL_STEPS: Optional[int] = None
+        self.MAX_CRAWL_DURATION_SECONDS: Optional[int] = None
+        self.ENABLE_TRAFFIC_CAPTURE: Optional[bool] = None
+        self.PCAPDROID_PACKAGE: Optional[str] = None
+        self.PCAPDROID_ACTIVITY: Optional[str] = None
+        self.DEVICE_PCAP_DIR: Optional[str] = None
+        self.CLEANUP_DEVICE_PCAP_FILE: Optional[bool] = None
+        self.USE_CHAT_MEMORY: Optional[bool] = None
+        self.MAX_CHAT_HISTORY: Optional[int] = None
+        self.GEMINI_MODELS: Optional[Dict[str, Any]] = None # For AI Assistant, though it reads from global config
+        self.AVAILABLE_ACTIONS: Optional[List[str]] = None # For AI Assistant prompt building
+
+    def update_from_dict(self, data: Dict[str, Any]) -> None:
+        """Update config from a dictionary, with type validation"""
+        for key, value in data.items():
+            if hasattr(self, key):
+                current_value = getattr(self, key)
+                try:
+                    # Convert value to the same type as the current attribute
+                    if isinstance(current_value, bool) and not isinstance(value, bool):
+                        converted_value = str(value).lower() in ['true', '1', 'yes']
+                    elif isinstance(current_value, int) and not isinstance(value, int):
+                        converted_value = int(value)
+                    elif isinstance(current_value, float) and not isinstance(value, float):
+                        converted_value = float(value)
+                    elif isinstance(current_value, list):
+                        if isinstance(value, str):
+                            converted_value = [item.strip() for item in value.split('\n') if item.strip()]
+                        else:
+                            converted_value = value
+                    else:
+                        converted_value = value
+
+                    if current_value != converted_value:
+                        setattr(self, key, converted_value)
+                        logging.info(f"Config updated: {key} = {converted_value} (was: {current_value})")
+                except (ValueError, TypeError) as e:
+                    logging.warning(f"Type conversion error for config key '{key}': {e}")
+
+    def load_from_file(self, path: str) -> None:
+        """Load configuration from a Python file"""
+        try:
+            with open(path, 'r') as f:
+                # Create a new dict with a clean global namespace
+                global_dict = {}
+                # Execute the file content in the new namespace
+                exec(f.read(), global_dict)
+                # Update config from the new namespace
+                self.update_from_dict({k: v for k, v in global_dict.items() 
+                                    if not k.startswith('__') and not callable(v)})
+                logging.info(f"Successfully loaded config from: {path}")
+        except Exception as e:
+            logging.critical(f"Failed to load config from '{path}': {e}", exc_info=True)
+            raise
+
+# Create single instances of managers
+logger_manager = LoggerManager()
+cfg = Config()
+
+# Load config file first
+CONFIG_MODULE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.py')
+try:
+    cfg.load_from_file(CONFIG_MODULE_PATH)
+except Exception as e:
+    logging.critical(f"CRITICAL: Failed to load 'config.py'. Error: {e}", exc_info=True)
+    sys.exit(1)
 
 # --- Initial (Basic) Logging Setup ---
-root_logger = setup_logging("INFO") # Default to INFO, no file log initially
+cfg_log_level = getattr(cfg, 'LOG_LEVEL')
+if cfg_log_level is None:
+    raise ValueError("LOG_LEVEL must be defined in config")
+root_logger = logger_manager.setup_logging(cfg_log_level)
 root_logger.info("Initial logging setup complete")
 
 # --- Project Root and Configuration Paths ---
@@ -92,21 +203,11 @@ root_logger.info("Initial logging setup complete")
 # The project root is one level up from traverser_ai_api.
 CURRENT_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT_DIR = os.path.abspath(os.path.join(CURRENT_SCRIPT_DIR, ".."))
+# Changed: Use config from traverser_ai_api directory instead of root
 USER_CONFIG_FILENAME = "user_config.json"
-USER_CONFIG_FILE_PATH = os.path.join(PROJECT_ROOT_DIR, USER_CONFIG_FILENAME)
+USER_CONFIG_FILE_PATH = os.path.join(CURRENT_SCRIPT_DIR, USER_CONFIG_FILENAME)  # Use CURRENT_SCRIPT_DIR instead of PROJECT_ROOT_DIR
 
-# --- Configuration Loading from config.py (defaults) ---
-try:
-    from . import config as cfg # cfg is the alias for the config.py module
-    CONFIG_MODULE_PATH = os.path.abspath(cfg.__file__) # Path to the loaded config.py
-    CONFIG_DIR = os.path.dirname(CONFIG_MODULE_PATH) # Directory of config.py
-    logging.info(f"Successfully imported default config module from: {CONFIG_MODULE_PATH}")
-except ImportError as e:
-    logging.critical(f"CRITICAL: Failed to import 'config' module. Ensure 'config.py' exists. Error: {e}", exc_info=True)
-    sys.exit(1)
-except Exception as e:
-    logging.critical(f"CRITICAL: Unexpected error during 'config' module import. Error: {e}", exc_info=True)
-    sys.exit(1)
+CONFIG_DIR = CURRENT_SCRIPT_DIR
 
 # --- Define Shutdown Flag (relative to config.py's location) ---
 SHUTDOWN_FLAG_FILENAME = "crawler_shutdown.flag"
@@ -131,9 +232,13 @@ def resolve_config_path(path_template_or_direct: str, app_package_name: Optional
 # This must happen BEFORE re-initializing logging with potentially overridden values
 # and before resolving package-dependent paths.
 
-# Store initial log settings from cfg before they are potentially overridden
-_initial_cfg_log_level = str(getattr(cfg, 'LOG_LEVEL', 'INFO'))
-_initial_cfg_log_file_name = str(getattr(cfg, 'LOG_FILE_NAME', 'main_traverser.log')) # Default if not in config.py
+# Get required log settings from config
+_initial_cfg_log_level = getattr(cfg, 'LOG_LEVEL')
+if _initial_cfg_log_level is None:
+    raise ValueError("LOG_LEVEL must be defined in config")
+_initial_cfg_log_file_name = getattr(cfg, 'LOG_FILE_NAME')
+if _initial_cfg_log_file_name is None:
+    raise ValueError("LOG_FILE_NAME must be defined in config")
 
 if os.path.exists(USER_CONFIG_FILE_PATH):
     try:
@@ -179,16 +284,20 @@ else:
 
 # --- Re-initialize logging with potentially overridden settings ---
 # Paths in config.py are relative to config.py itself (CONFIG_DIR)
-# LOG_FILE_NAME and LOG_LEVEL are now sourced from the (potentially updated) cfg object
-_current_log_level = str(getattr(cfg, 'LOG_LEVEL', 'INFO'))
-_current_log_file_name = str(getattr(cfg, 'LOG_FILE_NAME', 'main_traverser_final.log')) # Default name
+# Get required log settings from config with validation
+_current_log_level = getattr(cfg, 'LOG_LEVEL')
+if _current_log_level is None:
+    raise ValueError("LOG_LEVEL must be defined in config")
+_current_log_file_name = getattr(cfg, 'LOG_FILE_NAME')
+if _current_log_file_name is None:
+    raise ValueError("LOG_FILE_NAME must be defined in config")
 
 # Construct log file path relative to project root's output_data/logs
 _log_dir_final = os.path.join(PROJECT_ROOT_DIR, "output_data", "logs")
 _log_file_path_final = os.path.join(_log_dir_final, _current_log_file_name)
 
 # Always re-setup logging with the final configuration
-root_logger = setup_logging(log_level_str=_current_log_level, log_file=_log_file_path_final)
+root_logger = logger_manager.setup_logging(log_level_str=_current_log_level, log_file=_log_file_path_final)
 root_logger.info(f"Logging re-initialized. Level: {_current_log_level.upper()}. File: {_log_file_path_final}")
 
 
@@ -199,15 +308,32 @@ logging.info(f"Effective APP_ACTIVITY for crawl: {cfg.APP_ACTIVITY}")
 
 
 # --- Resolve package-dependent paths AFTER APP_PACKAGE is finalized ---
-# Ensure these attribute names match what's in your config.py
-# Example: DB_NAME_TEMPLATE = "../output_data/database_output/{package}_crawl_data.db"
-cfg.DB_NAME = resolve_config_path(getattr(cfg, 'DB_NAME', '../output_data/database_output/{package}_crawl_data.db').format(package=cfg.APP_PACKAGE))
-cfg.SCREENSHOTS_DIR = resolve_config_path(getattr(cfg, 'SCREENSHOTS_DIR', '../output_data/screenshots/crawl_screenshots_{package}').format(package=cfg.APP_PACKAGE))
-cfg.ANNOTATED_SCREENSHOTS_DIR = resolve_config_path(getattr(cfg, 'ANNOTATED_SCREENSHOTS_DIR', '../output_data/screenshots/annotated_crawl_screenshots_{package}').format(package=cfg.APP_PACKAGE))
-cfg.TRAFFIC_CAPTURE_OUTPUT_DIR = resolve_config_path(getattr(cfg, 'TRAFFIC_CAPTURE_OUTPUT_DIR', '../output_data/traffic_captures/{package}').format(package=cfg.APP_PACKAGE))
+db_name_template = getattr(cfg, 'DB_NAME')
+if db_name_template is None:
+    raise ValueError("DB_NAME must be defined in config")
+cfg.DB_NAME = resolve_config_path(db_name_template.format(package=cfg.APP_PACKAGE))
+
+screenshots_dir_template = getattr(cfg, 'SCREENSHOTS_DIR')
+if screenshots_dir_template is None:
+    raise ValueError("SCREENSHOTS_DIR must be defined in config")
+cfg.SCREENSHOTS_DIR = resolve_config_path(screenshots_dir_template.format(package=cfg.APP_PACKAGE))
+
+annotated_screenshots_dir_template = getattr(cfg, 'ANNOTATED_SCREENSHOTS_DIR')
+if annotated_screenshots_dir_template is None:
+    raise ValueError("ANNOTATED_SCREENSHOTS_DIR must be defined in config")
+cfg.ANNOTATED_SCREENSHOTS_DIR = resolve_config_path(annotated_screenshots_dir_template.format(package=cfg.APP_PACKAGE))
+
+traffic_capture_dir_template = getattr(cfg, 'TRAFFIC_CAPTURE_OUTPUT_DIR')
+if traffic_capture_dir_template is None:
+    raise ValueError("TRAFFIC_CAPTURE_OUTPUT_DIR must be defined in config")
+cfg.TRAFFIC_CAPTURE_OUTPUT_DIR = resolve_config_path(traffic_capture_dir_template.format(package=cfg.APP_PACKAGE))
 
 # --- APP_INFO_OUTPUT_DIR (usually not package-dependent, but resolve it) ---
-cfg.APP_INFO_OUTPUT_DIR = resolve_config_path(getattr(cfg, 'APP_INFO_OUTPUT_DIR', '../output_data/app_info'))
+app_info_dir = getattr(cfg, 'APP_INFO_OUTPUT_DIR')
+if app_info_dir is None:
+    raise ValueError("APP_INFO_OUTPUT_DIR must be defined in config")
+cfg.APP_INFO_OUTPUT_DIR = resolve_config_path(app_info_dir)
+
 try:
     os.makedirs(cfg.APP_INFO_OUTPUT_DIR, exist_ok=True)
 except OSError as e:
@@ -344,12 +470,12 @@ if __name__ == "__main__":
         logging.critical(f"Unexpected error running AppCrawler: {e_crawler}", exc_info=True)
         exit_code = 1
     finally:
-        if crawler_instance and hasattr(crawler_instance, 'quit_driver') and callable(crawler_instance.quit_driver):
-            logging.info("Main.py finally: Calling crawler_instance.quit_driver() as fallback.")
+        if crawler_instance and hasattr(crawler_instance, 'perform_full_cleanup') and callable(crawler_instance.perform_full_cleanup):
+            logging.info("Main.py finally: Calling crawler_instance.perform_full_cleanup() for final cleanup.")
             try:
-                crawler_instance.quit_driver()
-            except Exception as e_quit:
-                logging.error(f"Main.py finally: Error during fallback driver quit: {e_quit}", exc_info=True)
+                crawler_instance.perform_full_cleanup()
+            except Exception as e_cleanup:
+                logging.error(f"Main.py finally: Error during final cleanup: {e_cleanup}", exc_info=True)
         
         if os.path.exists(_shutdown_flag_file_path):
             logging.warning(f"Main.py finally: Shutdown flag file still exists. Removing.")
