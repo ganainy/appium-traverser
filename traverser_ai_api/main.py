@@ -125,10 +125,11 @@ class Config:
         self.ENABLE_XML_CONTEXT: Optional[bool] = None
         self.CRAWL_MODE: Optional[str] = None
         self.MAX_CRAWL_STEPS: Optional[int] = None
-        self.MAX_CRAWL_DURATION_SECONDS: Optional[int] = None
+        self.MAX_CRAWL_DURATION_SECONDS: Optional[int] = None  
         self.ENABLE_TRAFFIC_CAPTURE: Optional[bool] = None
         self.PCAPDROID_PACKAGE: Optional[str] = None
         self.PCAPDROID_ACTIVITY: Optional[str] = None
+        self.PCAPDROID_API_KEY: Optional[str] = None
         self.DEVICE_PCAP_DIR: Optional[str] = None
         self.CLEANUP_DEVICE_PCAP_FILE: Optional[bool] = None
         self.USE_CHAT_MEMORY: Optional[bool] = None

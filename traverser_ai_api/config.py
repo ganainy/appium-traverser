@@ -141,6 +141,7 @@ GEMINI_MODELS = {
 ENABLE_TRAFFIC_CAPTURE = True # Set to True to enable traffic capture during crawl
 PCAPDROID_PACKAGE = "com.emanuelef.remote_capture"
 PCAPDROID_ACTIVITY = f"{PCAPDROID_PACKAGE}/.activities.CaptureCtrl"
+PCAPDROID_API_KEY = os.getenv("PCAPDROID_API_KEY")  # API key for automated control
 DEVICE_PCAP_DIR = "/sdcard/Download/PCAPdroid" # Default PCAPdroid save directory
 # Output directory for PCAP files, relative to the main project or traverser-ai-api
 TRAFFIC_CAPTURE_OUTPUT_DIR = f"{OUTPUT_DATA_DIR}/traffic_captures"
