@@ -16,7 +16,8 @@ import re
 KEEP_ATTRS = {
     'class', 'resource-id', 'text', 'content-desc', 'hint', # Identification
     'clickable', 'focusable', 'enabled', 'checkable', 'checked', # Interaction state
-    'selected', 'editable', 'long-clickable', 'password' # Other important states
+    'selected', 'editable', 'long-clickable', 'password', # Other important states
+    'bounds'  #BOUNDING BOX ATTRIBUTE
 }
 
 # Boolean attributes where we only care if they are "true"
@@ -85,12 +86,14 @@ def simplify_xml_for_ai(xml_string: str, max_len: int) -> str:
     if not xml_string:
         return ""
 
+    logging.info(f"Original XML length: {len(xml_string)}")
+
     try:
         # Parse the XML string. Requires bytes. Handle potential encoding issues.
         parser = etree.XMLParser(recover=True, remove_blank_text=True) # recover helps with slightly malformed XML
         root = etree.fromstring(xml_string.encode('utf-8'), parser=parser)
         if root is None: # Parsing failed completely despite recovery
-             raise ValueError("Failed to parse XML root.")
+            raise ValueError("Failed to parse XML root.")
 
         elements_processed = 0
         # Iterate through all elements in the tree
@@ -128,8 +131,6 @@ def simplify_xml_for_ai(xml_string: str, max_len: int) -> str:
         xml_bytes = etree.tostring(root)  
         simplified_xml = xml_bytes.decode('utf-8')
 
-        logging.debug(f"XML simplification processed {elements_processed} elements. Original len: {len(xml_string)}, Simplified len: {len(simplified_xml)}")
-
         # Final Check: If still too long, perform a slightly smarter truncation
         if len(simplified_xml) > max_len:
             logging.warning(f"Simplified XML still exceeds max_len ({len(simplified_xml)} > {max_len}). Performing final smart truncation.")
@@ -149,8 +150,8 @@ def simplify_xml_for_ai(xml_string: str, max_len: int) -> str:
         simplified_xml = re.sub(r'>\s+<', '><', simplified_xml)
         simplified_xml = simplified_xml.strip()
 
-        logging.debug(f"Final simplified XML : {simplified_xml}")
-        logging.debug(f"Final simplified XML length: {len(simplified_xml)}")
+        logging.info(f"Simplified XML length: {len(simplified_xml)}")
+
 
         return simplified_xml
 
@@ -161,10 +162,10 @@ def simplify_xml_for_ai(xml_string: str, max_len: int) -> str:
             return xml_string[:max_len] + "\n... (fallback truncation)"
         return xml_string
     except Exception as e:
-         logging.error(f"Unexpected error during XML simplification: {e}. Falling back to basic truncation.", exc_info=True)
-         if len(xml_string) > max_len:
-             return xml_string[:max_len] + "\n... (fallback truncation)"
-         return xml_string
+        logging.error(f"Unexpected error during XML simplification: {e}. Falling back to basic truncation.", exc_info=True)
+        if len(xml_string) > max_len:
+            return xml_string[:max_len] + "\n... (fallback truncation)"
+        return xml_string
 
 def draw_indicator_on_image(image_bytes: bytes, coordinates: Tuple[int, int], color="red", radius=15) -> Optional[bytes]:
     """Draws a circle indicator at the given coordinates on an image."""
@@ -192,6 +193,7 @@ def draw_indicator_on_image(image_bytes: bytes, coordinates: Tuple[int, int], co
         return None # Return None if drawing fails
 
 def generate_action_description(action_type: str, target_obj: Optional[Any], input_text: Optional[str], ai_target_identifier: Optional[str]) -> str:
+
     """Generates a human-readable description of an action."""
     description = f"{action_type.upper()}"
 
@@ -206,3 +208,79 @@ def generate_action_description(action_type: str, target_obj: Optional[Any], inp
         description += f" with text '{input_text}'"
     
     return description
+
+def draw_rectangle_on_image(
+    image_bytes: bytes,
+    box_coords: Tuple[int, int, int, int],  # (x1, y1, x2, y2)
+    primary_color: str = "red",            # The main color of the line
+    border_color: str = "black",           # Contrasting border color
+    line_thickness: int = 1,               # Thickness of the primary_color line
+    border_size: int = 1                   # Thickness of the border_color on each side of the primary line
+) -> Optional[bytes]:
+    """
+    Draws a rectangle (bounding box) with a contrasting border on an image
+    for better visibility.
+
+    Args:
+        image_bytes: The raw bytes of the image.
+        box_coords: A tuple (x1, y1, x2, y2) representing the top-left
+                    and bottom-right coordinates of the rectangle.
+        primary_color: The main color for the rectangle's center line.
+        border_color: The color for the border around the primary line.
+        line_thickness: The thickness of the primary color line.
+        border_size: The thickness of the border on each side of the primary line.
+                    The total visual thickness of the border color part will be
+                     line_thickness + 2 * border_size.
+
+    Returns:
+        Bytes of the annotated image, or None if an error occurs.
+    """
+    if not image_bytes or not box_coords:
+        logging.warning("draw_rectangle_on_image: Missing image_bytes or box_coords.")
+        return None
+    if line_thickness <= 0:
+        logging.warning("draw_rectangle_on_image: line_thickness must be positive.")
+        return image_bytes # Or None if error
+    if border_size < 0: # border_size can be 0 for no border
+        logging.warning("draw_rectangle_on_image: border_size cannot be negative.")
+        return image_bytes # Or None
+
+    try:
+        img = Image.open(io.BytesIO(image_bytes)).convert("RGB")  # Ensure RGB for color drawing
+        draw = ImageDraw.Draw(img)
+
+        x1, y1, x2, y2 = box_coords
+
+        # Basic validation (already done more thoroughly in ScreenshotAnnotator before calling)
+        if not (0 <= x1 < img.width and 0 <= y1 < img.height and \
+                x1 < x2 <= img.width and y1 < y2 <= img.height):
+            logging.warning(
+                f"draw_rectangle_on_image: Invalid or out-of-bounds box_coords ({x1},{y1},{x2},{y2}) "
+                f"for image size ({img.width}x{img.height}). Skipping drawing."
+            )
+            return image_bytes # Return original image if coords are bad
+
+        # Calculate the total width for the border rectangle
+        # This is the width of the line drawn by PIL, centered on the coordinates.
+        border_rect_line_width = line_thickness + (2 * border_size)
+
+        if border_size > 0 and border_rect_line_width > 0:
+            # Draw the thicker border rectangle first
+            draw.rectangle([x1, y1, x2, y2], outline=border_color, width=border_rect_line_width)
+        
+        # Draw the thinner primary color rectangle on top
+        # If border_size is 0, border_rect_line_width will equal line_thickness,
+        # so the first draw (if border_size > 0 was false) would be skipped,
+        # and this one will draw the primary line with its specified thickness.
+        # If border_size > 0, this will draw the primary line centered within the border.
+        if line_thickness > 0 : # Ensure we draw something if border_size was 0
+            draw.rectangle([x1, y1, x2, y2], outline=primary_color, width=line_thickness)
+
+
+        output_buffer = io.BytesIO()
+        img.save(output_buffer, format="PNG")
+        return output_buffer.getvalue()
+
+    except Exception as e:
+        logging.error(f"Error in draw_rectangle_on_image with box {box_coords}: {e}", exc_info=True)
+        return None

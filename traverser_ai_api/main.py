@@ -293,8 +293,8 @@ _current_log_file_name = getattr(cfg, 'LOG_FILE_NAME')
 if _current_log_file_name is None:
     raise ValueError("LOG_FILE_NAME must be defined in config")
 
-# Construct log file path relative to project root's output_data/logs
-_log_dir_final = os.path.join(PROJECT_ROOT_DIR, "output_data", "logs")
+# Construct log file path relative to traverser_ai_api/output_data/logs
+_log_dir_final = os.path.join(CURRENT_SCRIPT_DIR, "output_data", "logs")
 _log_file_path_final = os.path.join(_log_dir_final, _current_log_file_name)
 
 # Always re-setup logging with the final configuration

@@ -102,59 +102,22 @@ class TrafficCaptureManager:
             '-e', 'pcap_name', self.pcap_filename_on_device,
             '-e', 'tls_decryption', 'true' #
         ]
-
-        api_key = self.config_dict.get('PCAPDROID_API_KEY') #
+        api_key = self.config_dict.get('PCAPDROID_API_KEY')
         if api_key:
-            start_command.extend(['-e', 'api_key', api_key]) #
-            logging.info("Using API key for PCAPdroid authentication.") #
+            start_command.extend(['-e', 'api_key', api_key])
+            logging.info("Using API key for PCAPdroid authentication.")
         else:
-            logging.info("No API key configured. User consent may be required.") #
+            logging.info("No API key configured. User consent may be required.")
 
         stdout, retcode = self._run_adb_command_for_capture(start_command)
 
         if retcode != 0:
-            logging.error(f"Failed to send PCAPdroid 'start' command. ADB retcode: {retcode}. Output: {stdout}") #
+            logging.error(f"Failed to send PCAPdroid 'start' command. ADB retcode: {retcode}. Output: {stdout}")
             return False
 
-        logging.info(f"PCAPdroid 'start' command sent successfully. Capture should be initializing for {target_app_package}.") #
-
-        if driver_available_for_ui:
-            time.sleep(2)
-            try:
-                logging.info("Checking for PCAPdroid VPN confirmation dialog to click 'ALLOW'...") #
-                allow_button = None
-                try:
-                    logging.debug("Attempting to find 'ALLOW' button by exact text (uppercase)...") #
-                    allow_button = self.driver.driver.find_element(AppiumBy.XPATH, "//*[@text='ALLOW']") #
-                except NoSuchElementException:
-                    logging.debug("'ALLOW' (uppercase) button not found. Trying 'Allow' (title case)...") #
-                    try:
-                        allow_button = self.driver.driver.find_element(AppiumBy.XPATH, "//*[@text='Allow']") #
-                    except NoSuchElementException:
-                        logging.debug("'Allow' (title case) button not found. Trying by common Android ID 'android:id/button1'...") #
-                        try:
-                            allow_button = self.driver.driver.find_element(AppiumBy.ID, "android:id/button1") #
-                        except NoSuchElementException:
-                            logging.info("PCAPdroid 'ALLOW' button not found by text or common ID. Assuming already permitted or dialog not present.") #
-
-                if allow_button and allow_button.is_displayed():
-                    logging.info("PCAPdroid 'ALLOW' button found. Attempting to click...") #
-                    allow_button.click() #
-                    logging.info("Clicked PCAPdroid 'ALLOW' button successfully.") #
-                    time.sleep(1.5) #
-                elif allow_button:
-                    logging.info("PCAPdroid 'ALLOW' button was found but is not currently displayed. Proceeding...") #
-                else:
-                    # This log was "PCAPdroid 'ALLOW' button was not found. Proceeding, assuming it's not needed or already handled."
-                    # The more specific one from the try-except is better if it reached there.
-                    pass # Already logged if not found by any means
-
-            except Exception as e:
-                logging.warning(f"An error occurred while trying to find and click the PCAPdroid 'ALLOW' button: {e}. Capture might fail if permission is required and was not granted.") #
-        else:
-            logging.warning("Appium driver not available for PCAPdroid 'ALLOW' button interaction. Skipping.") #
-
-        time.sleep(wait_after_action) #
+        logging.info(f"PCAPdroid 'start' command sent successfully. Capture should be initializing for {target_app_package}.")
+        
+        time.sleep(wait_after_action)
         return True
 
     def stop_traffic_capture(self) -> bool:
@@ -192,61 +155,8 @@ class TrafficCaptureManager:
         if retcode != 0:
             logging.warning(f"Failed to send 'stop' command to PCAPdroid. ADB retcode: {retcode}. Output: {stdout}. Will attempt to pull file anyway.") #
 
-        logging.info("PCAPdroid 'stop' command sent. Checking for confirmation dialog...") #
+        logging.info("PCAPdroid 'stop' command sent.")
 
-        if driver_available_for_ui:
-            time.sleep(1.5) #
-            try:
-                logging.info("Checking for PCAPdroid VPN disconnect confirmation dialog...") #
-                confirm_button = None
-                button_texts_to_try = ["OK", "DISCONNECT", "ALLOW", "Allow", "Ok"] #
-
-                for btn_text in button_texts_to_try:
-                    try:
-                        logging.debug(f"Attempting to find disconnect confirmation button by text: '{btn_text}'") #
-                        confirm_button = self.driver.driver.find_element(AppiumBy.XPATH, f"//*[@text='{btn_text}']") #
-                        if confirm_button and confirm_button.is_displayed():
-                            logging.info(f"Found disconnect confirmation button with text: '{btn_text}'") #
-                            break
-                        else:
-                            confirm_button = None
-                    except NoSuchElementException:
-                        logging.debug(f"Disconnect confirmation button with text '{btn_text}' not found.") #
-                        continue
-                
-                if not confirm_button:
-                    logging.debug("Disconnect confirmation button not found by text. Trying by common Android ID 'android:id/button1'...") #
-                    try:
-                        confirm_button = self.driver.driver.find_element(AppiumBy.ID, "android:id/button1") #
-                        if not (confirm_button and confirm_button.is_displayed()): #
-                            confirm_button = None
-                    except NoSuchElementException:
-                        logging.debug("Disconnect confirmation button not found by 'android:id/button1'.") #
-                
-                if not confirm_button:
-                    logging.debug("Trying by common Android ID 'android:id/button2'...") #
-                    try:
-                        confirm_button = self.driver.driver.find_element(AppiumBy.ID, "android:id/button2") #
-                        if not (confirm_button and confirm_button.is_displayed()): #
-                            confirm_button = None
-                    except NoSuchElementException:
-                        logging.debug("Disconnect confirmation button not found by 'android:id/button2'.") #
-
-                if confirm_button and confirm_button.is_displayed():
-                    logging.info(f"Disconnect confirmation button found (text: '{confirm_button.text if hasattr(confirm_button, 'text') else 'N/A'}', id: '{confirm_button.id}'). Attempting to click...") #
-                    confirm_button.click() #
-                    logging.info("Clicked PCAPdroid disconnect confirmation button successfully.") #
-                    time.sleep(1.0) #
-                elif confirm_button:
-                    logging.info("Disconnect confirmation button was found but is not currently displayed. Proceeding...") #
-                else:
-                    logging.info("PCAPdroid disconnect confirmation button was not found. Proceeding, assuming it's not needed or already handled.") #
-
-            except Exception as e:
-                logging.warning(f"An error occurred while trying to find and click the PCAPdroid disconnect confirmation button: {e}.") #
-        else:
-            logging.warning("Appium driver not available for PCAPdroid disconnect confirmation. Skipping UI interaction.") #
-        
         if retcode != 0:
             logging.warning(f"Original ADB 'stop' command had failed (retcode: {retcode}). Traffic capture might not have stopped cleanly on device.") #
             return False # Return False if ADB command failed, regardless of UI interaction outcome

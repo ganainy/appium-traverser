@@ -400,7 +400,9 @@ class AppCrawler:
                 # Get screen context and history
                 xml_snippet = None
                 if getattr(config, 'ENABLE_XML_CONTEXT', False) and page_source:
-                    max_len = getattr(config, 'XML_SNIPPET_MAX_LEN', 30000)
+                    if not hasattr(config, 'XML_SNIPPET_MAX_LEN'):
+                        raise AttributeError("XML_SNIPPET_MAX_LEN is required in config but not found.")
+                    max_len = getattr(config, 'XML_SNIPPET_MAX_LEN')
                     xml_snippet = utils.simplify_xml_for_ai(page_source, max_len=max_len)
 
                 current_screen_hash = screen_rep.get_composite_hash()
