@@ -11,7 +11,8 @@ Write-Host "Working directory: $apiPath" -ForegroundColor Gray
 Set-Location $apiPath
 
 # Run the CLI controller with all passed arguments
-python cli_controller.py $args
+# Use -m flag to run as module, this ensures Python path is set correctly 
+python -m cli_controller $args
 
 # Return to original directory
 Set-Location $scriptPath

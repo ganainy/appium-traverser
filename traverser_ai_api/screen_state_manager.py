@@ -1,349 +1,312 @@
 import logging
 import os
-import time # Added for _get_current_state
-from typing import Optional, Dict, List, Tuple, Set, TYPE_CHECKING
+import time
+from typing import Optional, Dict, List, Tuple, Set, Any, TYPE_CHECKING
 
-from . import config # Assuming config.py and utils.py exist and are relevant
-from . import utils
-from .database import DatabaseManager
+import utils
+from database import DatabaseManager
+
+# Import your main Config class
+from config import Config # Assuming config.py (with Config class) is in the same package
 
 if TYPE_CHECKING:
-    from .appium_driver import AppiumDriver # For type hinting
+    from appium_driver import AppiumDriver
 
 class ScreenRepresentation:
-    """Minimal representation of a discovered screen state (in-memory structure)."""
-    def __init__(self, screen_id: int, xml_hash: str, visual_hash: str, screenshot_path: str):
+    """Minimal representation of a discovered screen state."""
+    def __init__(self,
+                 screen_id: int,
+                 composite_hash: str,
+                 xml_hash: str,
+                 visual_hash: str,
+                 screenshot_path: Optional[str],
+                 activity_name: Optional[str] = None,
+                 xml_content: Optional[str] = None,
+                 screenshot_bytes: Optional[bytes] = None,
+                 first_seen_run_id: Optional[int] = None,
+                 first_seen_step_number: Optional[int] = None):
         self.id = screen_id
+        self.composite_hash = composite_hash
         self.xml_hash = xml_hash
         self.visual_hash = visual_hash
-        self.screenshot_path = screenshot_path # Path to the original screenshot
-        self.annotated_screenshot_path: Optional[str] = None # Path to the annotated screenshot
-
-    def get_composite_hash(self) -> str:
-        """Helper to get the standard composite hash."""
-        return f"{self.xml_hash}_{self.visual_hash}"
+        self.screenshot_path = screenshot_path
+        self.annotated_screenshot_path: Optional[str] = None
+        self.activity_name = activity_name
+        self.xml_content = xml_content
+        self.screenshot_bytes = screenshot_bytes
+        self.first_seen_run_id = first_seen_run_id
+        self.first_seen_step_number = first_seen_step_number
+        self.xml_root_for_mapping: Optional[Any] = None
 
     def __repr__(self):
-        return f"Screen(id={self.id}, xml_hash=\'{self.xml_hash[:8]}...\', vhash=\'{self.visual_hash}\', path=\'{self.screenshot_path}\')"
+        return (f"Screen(id={self.id}, hash='{self.composite_hash[:12]}...', "
+                f"activity='{self.activity_name}', path='{os.path.basename(self.screenshot_path) if self.screenshot_path else 'N/A'}')")
 
 class ScreenStateManager:
     """
-    Manages the state of the crawling process, including visited screens,
-    transitions, and visit counts for loop detection within the current run.
-    Uses ScreenRepresentation for in-memory objects.
-    Also handles fetching the current screen state (screenshot and XML).
+    Manages screen states, visit counts, and action history for the current crawl run.
+    Interacts with DatabaseManager for persistence and AppiumDriver for state capture.
+    Uses the centralized Config object for settings.
     """
-
-    def __init__(self, db_manager: DatabaseManager, driver: 'AppiumDriver', config_dict: dict):
+    def __init__(self, db_manager: DatabaseManager, driver: 'AppiumDriver', app_config: Config):
         self.db_manager = db_manager
-        self.driver = driver # Added driver instance
-        
-        # Validate config_dict
-        if config_dict is None:
-            raise ValueError("config_dict cannot be None. Expected a dictionary.")
-        if not isinstance(config_dict, dict):
-            raise ValueError(f"config_dict must be a dictionary. Got {type(config_dict)} instead.")
-        
-        self.config_dict = config_dict # Added config_dict instance
+        self.driver = driver
+        self.cfg = app_config
 
-        # --- Run-specific Info ---
-        self.start_activity: Optional[str] = None
-        self.app_package: Optional[str] = None
-        self.current_step_number: int = 0
-        # --- Data Structures ---
-        self.screens: Dict[str, ScreenRepresentation] = {}
-        self.transitions_loaded: List[Tuple[str, str, Optional[str]]] = []
-        self.action_history_per_screen: Dict[str, List[str]] = {}
+        required_cfg_attrs = [
+            'STABILITY_WAIT', 'VISUAL_SIMILARITY_THRESHOLD',
+            'SCREENSHOTS_DIR', 'ANNOTATED_SCREENSHOTS_DIR',
+            'APP_PACKAGE', 'APP_ACTIVITY'
+        ]
+        for attr in required_cfg_attrs:
+            val = getattr(self.cfg, attr, None)
+            if val is None:
+                if attr == 'VISUAL_SIMILARITY_THRESHOLD' and val == 0: continue # 0 is valid
+                if attr == 'ALLOWED_EXTERNAL_PACKAGES' and isinstance(val, list): continue # Empty list is fine
+                raise ValueError(f"ScreenStateManager: Config missing or '{attr}' is None.")
+
+        self.current_run_id: Optional[int] = None
+        self.current_app_package: str = str(self.cfg.APP_PACKAGE)
+        self.current_start_activity: str = str(self.cfg.APP_ACTIVITY)
+        self.current_run_latest_step_number: int = 0 # Added attribute
+
+        self.known_screens_cache: Dict[str, ScreenRepresentation] = {}
         self.current_run_visit_counts: Dict[str, int] = {}
-        self.visited_screen_hashes: Set[str] = set()
-        self._next_screen_id = 1    
-        
-    def get_current_state(self) -> Optional[Tuple[bytes, str]]:
-            
-        """Gets the current screenshot bytes and page source."""
-        # Add stability wait *before* getting state
-        stability_wait = self.config_dict.get('STABILITY_WAIT')
-        if stability_wait is None:
-            logging.error("Configuration error: 'STABILITY_WAIT' not defined in config")
-            return None
-        try:
-            stability_wait_float = float(stability_wait)
-            time.sleep(stability_wait_float)
-        except (ValueError, TypeError):
-            logging.error(f"Invalid STABILITY_WAIT value in config: {stability_wait}")
-            return None
+        self.current_run_action_history: Dict[str, List[str]] = {}
+        self._next_screen_db_id_counter: int = 1
+        logging.info("ScreenStateManager initialized.")
 
-        try:
-            screenshot_bytes = self.driver.get_screenshot_bytes() # Use self.driver
-            page_source = self.driver.get_page_source() # Use self.driver
-
-            if screenshot_bytes is None or page_source is None:
-                logging.error("Failed to get current screen state (screenshot or XML is None).")
-                return None
-            return screenshot_bytes, page_source
-        except Exception as e:
-            logging.error(f"Exception getting current state: {e}", exc_info=True)
-            return None
-
-    def initialize_run(self, start_activity: str, app_package: str):
-        """Initializes state for a new crawling run."""
-        self.start_activity = start_activity
-        self.app_package = app_package
-        self.current_step_number = 0
-        self.screens.clear()
-        self.transitions_loaded.clear()
-        self.action_history_per_screen.clear()
+    def initialize_for_run(self, run_id: int, app_package: str, start_activity: str, is_continuation: bool):
+        self.current_run_id = run_id
+        self.current_app_package = app_package
+        self.current_start_activity = start_activity
         self.current_run_visit_counts.clear()
-        self.visited_screen_hashes.clear()
-        self._next_screen_id = 1
-        logging.info(f"ScreenStateManager initialized for a new run. Start activity: {self.start_activity}, App: {self.app_package}")
+        self.current_run_action_history.clear()
+        self.current_run_latest_step_number = 0 # Reset for the run
+
+        self._load_all_known_screens_from_db()
+        if is_continuation:
+            self._populate_run_specific_history(run_id) # This will set current_run_latest_step_number
+            logging.info(f"ScreenStateManager initialized for CONTINUED Run ID: {run_id}. Known screens: {len(self.known_screens_cache)}. Latest step from history: {self.current_run_latest_step_number}. History for this run populated.")
+        else:
+            logging.info(f"ScreenStateManager initialized for NEW Run ID: {run_id}. Known screens: {len(self.known_screens_cache)}. Visit counts/history reset for this run. Latest step set to 0.")
+
+    def _load_all_known_screens_from_db(self):
+        self.known_screens_cache.clear()
+        max_db_id = 0
+        db_screen_rows = self.db_manager.get_all_screens()
+        for row_index, row_data in enumerate(db_screen_rows):
+            try:
+                # Expected: (screen_id, composite_hash, xml_hash, visual_hash, screenshot_path,
+                # activity_name, xml_content, first_seen_run_id, first_seen_step_number)
+                if len(row_data) < 9:
+                    logging.warning(f"Skipping DB screen row due to insufficient columns: {row_data}")
+                    continue
+
+                screen_id = int(row_data[0]) if row_data[0] is not None else -1 # Should always be int
+                composite_hash = str(row_data[1]) if row_data[1] is not None else ""
+                xml_hash = str(row_data[2]) if row_data[2] is not None else ""
+                visual_hash = str(row_data[3]) if row_data[3] is not None else ""
+                screenshot_path = str(row_data[4]) if row_data[4] is not None else None
+                activity_name = str(row_data[5]) if row_data[5] is not None else None
+                xml_content = str(row_data[6]) if row_data[6] is not None else None
+                first_seen_run_id = int(row_data[7]) if row_data[7] is not None else None
+                first_seen_step_number = int(row_data[8]) if row_data[8] is not None else None
+
+                if not composite_hash or screen_id == -1:
+                    logging.warning(f"Skipping DB screen row due to missing critical data (ID or composite_hash): {row_data}")
+                    continue
+
+                screen = ScreenRepresentation(
+                    screen_id=screen_id, composite_hash=composite_hash, xml_hash=xml_hash,
+                    visual_hash=visual_hash, screenshot_path=screenshot_path,
+                    activity_name=activity_name, xml_content=xml_content,
+                    first_seen_run_id=first_seen_run_id,
+                    first_seen_step_number=first_seen_step_number
+                )
+                self.known_screens_cache[screen.composite_hash] = screen
+                if screen.id > max_db_id:
+                    max_db_id = screen.id
+            except (IndexError, ValueError, TypeError) as e:
+                logging.error(f"Error processing screen row {row_index} from DB: {row_data}. Error: {e}", exc_info=True)
+
+        self._next_screen_db_id_counter = max_db_id + 1
+        logging.debug(f"Loaded {len(self.known_screens_cache)} known screens. Next screen DB ID: {self._next_screen_db_id_counter}")
+
+    def _populate_run_specific_history(self, run_id: int):
+        self.current_run_visit_counts.clear()
+        self.current_run_action_history.clear()
+        steps = self.db_manager.get_steps_for_run(run_id) # Assumes get_steps_for_run exists
+        
+        max_step_num_for_run = 0
+        for step_data in steps:
+            # Assuming step_data format from DatabaseManager includes:
+            # (step_log_id, run_id, step_number, from_screen_id, to_screen_id, action_description, ...)
+            try:
+                current_step_number_from_db = step_data[2] if len(step_data) > 2 and step_data[2] is not None else 0
+                if current_step_number_from_db > max_step_num_for_run:
+                    max_step_num_for_run = current_step_number_from_db
+
+                from_screen_id = step_data[3] if len(step_data) > 3 and step_data[3] is not None else None
+                action_desc = step_data[5] if len(step_data) > 5 and step_data[5] is not None else None
+
+                if from_screen_id is not None:
+                    from_screen_repr = self.get_screen_by_db_id(from_screen_id)
+                    if from_screen_repr and from_screen_repr.composite_hash:
+                        from_hash = from_screen_repr.composite_hash
+                        self.current_run_visit_counts[from_hash] = self.current_run_visit_counts.get(from_hash, 0) + 1
+                        if action_desc:
+                            if from_hash not in self.current_run_action_history:
+                                self.current_run_action_history[from_hash] = []
+                            if action_desc not in self.current_run_action_history[from_hash]:
+                                self.current_run_action_history[from_hash].append(action_desc)
+            except IndexError as e:
+                logging.warning(f"Error processing step data for run history (IndexError): {step_data}. Error: {e}")
+            except Exception as e:
+                logging.warning(f"Unexpected error processing step data for run history: {step_data}. Error: {e}", exc_info=True)
+        
+        self.current_run_latest_step_number = max_step_num_for_run # Set the latest step number
+        logging.debug(f"Populated visit counts ({len(self.current_run_visit_counts)}) and action history ({len(self.current_run_action_history)}) for Run ID {run_id}. Max step number found: {max_step_num_for_run}.")
+
+
+    def _get_current_raw_state_from_driver(self) -> Optional[Tuple[bytes, str, str, str]]:
+        stability_wait = float(self.cfg.STABILITY_WAIT) # type: ignore
+        if stability_wait > 0: time.sleep(stability_wait)
+        try:
+            screenshot_bytes = self.driver.get_screenshot_bytes()
+            page_source = self.driver.get_page_source() or ""
+            current_package = self.driver.get_current_package() or "UnknownPackage"
+            current_activity = self.driver.get_current_activity() or "UnknownActivity"
+            if not screenshot_bytes: logging.error("Failed to get screenshot (None)."); return None
+            return screenshot_bytes, page_source, current_package, current_activity
+        except Exception as e:
+            logging.error(f"Exception getting current raw state from driver: {e}", exc_info=True)
+            return None
 
     def _get_composite_hash(self, xml_hash: str, visual_hash: str) -> str:
-         """Combines XML and visual hash for a screen identifier."""
-         return f"{xml_hash}_{visual_hash}"
+        return f"{xml_hash}_{visual_hash}"
 
-    def load_from_db(self) -> bool:
-        """Loads existing screens and transitions from the database to populate internal state.
-        Returns True if any screens were loaded, False otherwise.
-        """
-        if not self.db_manager:
-            logging.warning("No database manager provided, cannot load state.")
-            return False
+    def get_current_screen_representation(self, run_id: int, step_number: int) -> Optional[ScreenRepresentation]:
+        raw_state = self._get_current_raw_state_from_driver()
+        if not raw_state: return None
 
-        logging.info("Loading previous state from database for ScreenStateManager...")
-        self.screens.clear()
-        self.transitions_loaded.clear()
-        self.action_history_per_screen.clear()
-        self.visited_screen_hashes.clear()
-        self.current_run_visit_counts.clear() 
+        screenshot_bytes, xml_str, pkg, act = raw_state
+        xml_hash = utils.calculate_xml_hash(xml_str)
+        visual_hash = utils.calculate_visual_hash(screenshot_bytes)
+        composite_hash = self._get_composite_hash(xml_hash, visual_hash)
 
-        db_screens_data = self.db_manager.get_all_screens()
-        max_id_loaded = 0
-        loaded_screen_count = 0
-        for screen_data_tuple in db_screens_data:
-            if len(screen_data_tuple) == 4:
-                db_id, xml_h, visual_h, path = screen_data_tuple
-            else:
-                logging.error(f"Unexpected data format from get_all_screens(): {screen_data_tuple}. Skipping.")
-                continue
+        temp_id = -step_number
+        ss_filename = f"screen_run{run_id}_step{step_number}_{visual_hash[:8]}.png"
+        ss_path = os.path.join(str(self.cfg.SCREENSHOTS_DIR), ss_filename)
 
-            screen_repr_obj = ScreenRepresentation(db_id, xml_h, visual_h, path)
-            comp_hash = screen_repr_obj.get_composite_hash()
+        os.makedirs(str(self.cfg.SCREENSHOTS_DIR), exist_ok=True)
 
-            self.screens[comp_hash] = screen_repr_obj
-            self.visited_screen_hashes.add(comp_hash)
-            loaded_screen_count += 1
+        return ScreenRepresentation(
+            screen_id=temp_id, composite_hash=composite_hash, xml_hash=xml_hash, visual_hash=visual_hash,
+            screenshot_path=ss_path, activity_name=act, xml_content=xml_str,
+            screenshot_bytes=screenshot_bytes, first_seen_run_id=run_id, first_seen_step_number=step_number
+        )
 
-            if db_id > max_id_loaded:
-                max_id_loaded = db_id
+    def process_and_record_state(self, candidate_screen: ScreenRepresentation, run_id: int, step_number: int) -> Tuple[ScreenRepresentation, Dict[str, Any]]:
+        final_screen_to_use: Optional[ScreenRepresentation] = None
+        is_new_discovery_for_system = False
 
-        self._next_screen_id = max_id_loaded + 1
-        logging.info(f"Loaded {loaded_screen_count} screens from DB. Next available Screen ID for *new* screens: {self._next_screen_id}")
-
-        db_transitions_data = self.db_manager.get_all_transitions()
-        loaded_transition_count = 0
-        for trans_data_tuple in db_transitions_data:
-             if len(trans_data_tuple) == 3:
-                 src_h, act_desc, dest_h = trans_data_tuple
-             else:
-                 logging.error(f"Unexpected data format from get_all_transitions(): {trans_data_tuple}. Skipping.")
-                 continue
-
-             self.transitions_loaded.append((src_h, act_desc, dest_h))
-             loaded_transition_count += 1
-
-             if src_h in self.screens: 
-                 if src_h not in self.action_history_per_screen:
-                      self.action_history_per_screen[src_h] = []
-                 if act_desc not in self.action_history_per_screen[src_h]:
-                      self.action_history_per_screen[src_h].append(act_desc)
-             else:
-                  logging.warning(f"Transition loaded with source hash \'{src_h}\' which doesn\'t match any loaded screen. History for this transition ignored.")
-
-        logging.info(f"Loaded {loaded_transition_count} transitions from DB and populated action history.")
-
-        if loaded_screen_count > 0:
-            self.current_step_number = max_id_loaded 
-            logging.info(f"State loaded. Current step number estimated to: {self.current_step_number}")
-            return True
+        if candidate_screen.composite_hash in self.known_screens_cache:
+            final_screen_to_use = self.known_screens_cache[candidate_screen.composite_hash]
+            logging.debug(f"Exact screen match found in cache: ID {final_screen_to_use.id} (Hash: {final_screen_to_use.composite_hash})")
         else:
-            self.current_step_number = 0
-            logging.info("No screens found in DB to load state from.")
-            return False
-
-    def add_or_get_screen_representation(self, xml_hash: str, visual_hash: str, screenshot_bytes: bytes) -> Tuple[Optional[ScreenRepresentation], bool]:
-        """
-        Adds a new screen if not seen (or visually similar), saves screenshot,
-        increments current run visit count for the *actual* state being used,
-        and returns the correct ScreenRepresentation and a boolean indicating if it was a new screen.
-        Handles visual similarity checks properly.
-        """       
-        exact_composite_hash = self._get_composite_hash(xml_hash, visual_hash)
-        target_composite_hash = exact_composite_hash
-        screen_to_return: Optional[ScreenRepresentation] = None
-        found_similar = False
-        is_new_screen = False
-        
-        similarity_threshold = self.config_dict.get('VISUAL_SIMILARITY_THRESHOLD')
-        try:
-            similarity_threshold = int(similarity_threshold) if similarity_threshold is not None else None
-        except (ValueError, TypeError):
-            logging.error(f"Invalid VISUAL_SIMILARITY_THRESHOLD in config: {similarity_threshold}")
-            similarity_threshold = None
-
-        # Only check for visual similarity if we have a valid threshold
-        if similarity_threshold is not None and similarity_threshold >= 0:
-            for existing_hash, existing_screen_repr in self.screens.items():
-                try:
-                    if visual_hash and existing_screen_repr.visual_hash and \
-                       "error" not in visual_hash and "error" not in existing_screen_repr.visual_hash and \
-                       "no_image" not in visual_hash and "no_image" not in existing_screen_repr.visual_hash:
-
-                        dist = utils.visual_hash_distance(visual_hash, existing_screen_repr.visual_hash)
+            found_similar_screen = None
+            similarity_threshold = int(self.cfg.VISUAL_SIMILARITY_THRESHOLD) # type: ignore
+            if similarity_threshold >= 0:
+                for existing_screen in self.known_screens_cache.values():
+                    if utils.are_visual_hashes_valid(candidate_screen.visual_hash, existing_screen.visual_hash):
+                        dist = utils.visual_hash_distance(candidate_screen.visual_hash, existing_screen.visual_hash)
                         if dist <= similarity_threshold:
-                            logging.info(f"Screen visually similar (dist={dist} <= {similarity_threshold}) to existing Screen ID {existing_screen_repr.id} (Hash: {existing_hash}). Using existing state.")
-                            target_composite_hash = existing_hash
-                            screen_to_return = existing_screen_repr
-                            found_similar = True
+                            logging.info(f"Screen visually similar (dist={dist}<={similarity_threshold}) to existing Screen ID {existing_screen.id}. Using existing state.")
+                            found_similar_screen = existing_screen
                             break
-                except Exception as e:
-                    logging.warning(f"Error during visual hash comparison for {visual_hash} and {existing_screen_repr.visual_hash}: {e}")
 
-        # Increment visit count for the target state
-        self.current_run_visit_counts[target_composite_hash] = self.current_run_visit_counts.get(target_composite_hash, 0) + 1
-        logging.debug(f"Visit count for hash '{target_composite_hash}' updated to: {self.current_run_visit_counts[target_composite_hash]}")
-        
-        if screen_to_return:
-            return screen_to_return, False
-        elif exact_composite_hash in self.screens:
-            return self.screens[exact_composite_hash], False
-        else:
-            # Create new screen
-            is_new_screen = True
-            new_id = self._next_screen_id
-            self._next_screen_id += 1
-              # Save screenshot
-            screenshot_dir = self.config_dict.get('SCREENSHOTS_DIR')
-            if screenshot_dir is None:
-                logging.error("Configuration error: 'SCREENSHOTS_DIR' not defined in config")
-                return None, False  # Cannot proceed without a valid screenshots directory
+            if found_similar_screen:
+                final_screen_to_use = found_similar_screen
+            else:
+                is_new_discovery_for_system = True
+                candidate_screen.id = self._next_screen_db_id_counter
 
-            os.makedirs(screenshot_dir, exist_ok=True)
-            screenshot_filename = f"screen_{new_id}_{visual_hash}.png"
-            screenshot_path = os.path.join(screenshot_dir, screenshot_filename)
-            try:
-                with open(screenshot_path, "wb") as f:
-                    f.write(screenshot_bytes)
-                logging.info(f"Saved new screen screenshot: {screenshot_path}")
-            except Exception as e:
-                logging.error(f"Failed to save screenshot {screenshot_path}: {e}", exc_info=True)
-                screenshot_path = "save_error"
+                ss_filename = f"screen_{candidate_screen.id}_{candidate_screen.visual_hash[:8]}.png"
+                candidate_screen.screenshot_path = os.path.join(str(self.cfg.SCREENSHOTS_DIR), ss_filename)
 
-            new_screen_repr = ScreenRepresentation(new_id, xml_hash, visual_hash, screenshot_path)
-            self.screens[exact_composite_hash] = new_screen_repr
-
-            # Update tracking sets/dicts
-            self.visited_screen_hashes.add(exact_composite_hash)
-            if exact_composite_hash not in self.action_history_per_screen:
-                self.action_history_per_screen[exact_composite_hash] = []
-
-            # Save to DB if available
-            if self.db_manager:
                 try:
-                    db_result_hash = self.db_manager.insert_screen(
-                        screen_id=new_id,
-                        xml_hash=xml_hash,
-                        visual_hash=visual_hash,
-                        screenshot_path=screenshot_path
-                    )
-                    if db_result_hash != exact_composite_hash:
-                        logging.warning(f"DB insert/ignore hash '{db_result_hash}' differs from expected '{exact_composite_hash}'.")
-                except Exception as db_err:
-                    logging.error(f"Database error adding screen ID {new_id}: {db_err}", exc_info=True)
+                    if candidate_screen.screenshot_bytes:
+                        with open(candidate_screen.screenshot_path, "wb") as f: f.write(candidate_screen.screenshot_bytes)
+                        logging.info(f"Saved new screen screenshot: {candidate_screen.screenshot_path}")
+                    else: raise IOError("Screenshot bytes missing for new screen.")
+                except Exception as e:
+                    logging.error(f"Failed to save screenshot {candidate_screen.screenshot_path}: {e}", exc_info=True)
+                    candidate_screen.screenshot_path = None
 
-            logging.info(f"Added new screen state (ID: {new_id}, Hash: {exact_composite_hash}).")
-            return new_screen_repr, is_new_screen
+                db_id = self.db_manager.insert_screen(
+                    composite_hash=candidate_screen.composite_hash, xml_hash=candidate_screen.xml_hash,
+                    visual_hash=candidate_screen.visual_hash, screenshot_path=candidate_screen.screenshot_path,
+                    activity_name=candidate_screen.activity_name, xml_content=candidate_screen.xml_content,
+                    run_id=run_id, step_number=step_number # This step_number is first_seen_step_number
+                )
+                if db_id is None or db_id != candidate_screen.id :
+                    logging.error(f"Failed to insert new screen into DB or ID mismatch. Expected: {candidate_screen.id}, Got from DB: {db_id}")
+                    if db_id is not None: candidate_screen.id = db_id
+                else: # Success
+                    candidate_screen.id = db_id
 
-    def increment_step(self, 
-                         action_description: str, 
-                         action_type: str, 
-                         target_identifier: Optional[str], 
-                         target_element_id: Optional[str], 
-                         target_center_x: Optional[int], 
-                         target_center_y: Optional[int], 
-                         input_text: Optional[str], 
-                         ai_raw_output: Optional[str]):
-        self.current_step_number += 1
-        logging.info(f"Step: {self.current_step_number} | Action: {action_description} | Type: {action_type} | Target: {target_identifier or target_element_id or 'N/A'}")
+                self.known_screens_cache[candidate_screen.composite_hash] = candidate_screen
+                self._next_screen_db_id_counter = max(self._next_screen_db_id_counter, candidate_screen.id + 1)
+                logging.info(f"Recorded new screen to DB & cache: ID {candidate_screen.id} (Hash: {candidate_screen.composite_hash})")
+                final_screen_to_use = candidate_screen
 
-    def add_transition(self, source_hash: str, action_desc: str, dest_hash: Optional[str]):
-        if not source_hash:
-             logging.warning("Attempted to add transition with no source_hash.")
-             return
+        if not final_screen_to_use:
+            logging.critical("CRITICAL: final_screen_to_use was not set. Using candidate as fallback. This indicates a logic flaw.")
+            final_screen_to_use = candidate_screen
+            if final_screen_to_use.id < 0: # If it's still the temporary ID
+                final_screen_to_use.id = self._next_screen_db_id_counter
+                self._next_screen_db_id_counter += 1
+                logging.warning(f"Assigned emergency ID {final_screen_to_use.id} to fallback screen.")
 
-        dest_hash_str = dest_hash if dest_hash is not None else "UNKNOWN_DEST"
 
-        if source_hash not in self.action_history_per_screen:
-            self.action_history_per_screen[source_hash] = []
-        
-        if action_desc not in self.action_history_per_screen[source_hash]:
-             self.action_history_per_screen[source_hash].append(action_desc)
-             logging.debug(f"Added \'{action_desc}\' to action history for {source_hash}")
-        
-        if self.db_manager:
-            try:
-                 transition_id = self.db_manager.insert_transition(
-                    source_hash=source_hash,
-                    action_desc=action_desc,
-                    dest_hash=dest_hash_str
-                 )
-                 if transition_id is not None:
-                     logging.debug(f"Saved transition to DB (ID: {transition_id}): {source_hash} --[{action_desc}]--> {dest_hash_str}")
-                 else:
-                     logging.error(f"Database manager failed to add transition: {source_hash} -> {dest_hash_str}")
-            except Exception as db_err:
-                logging.error(f"Database error adding transition {source_hash} -> {dest_hash_str}: {db_err}", exc_info=True)
+        hash_for_visit_count = final_screen_to_use.composite_hash
+        self.current_run_visit_counts[hash_for_visit_count] = self.current_run_visit_counts.get(hash_for_visit_count, 0) + 1
 
-    def get_action_history(self, screen_hash: str) -> List[str]:
-        return self.action_history_per_screen.get(screen_hash, [])
+        historical_actions = self.db_manager.get_action_history_for_screen(final_screen_to_use.id)
 
-    def get_visit_count(self, screen_hash: str) -> int:
-        return self.current_run_visit_counts.get(screen_hash, 0)
+        visit_info = {
+            "screen_representation": final_screen_to_use,
+            "is_new_discovery": is_new_discovery_for_system,
+            "visit_count_this_run": self.current_run_visit_counts[hash_for_visit_count],
+            "previous_actions_on_this_state": historical_actions
+        }
+        logging.debug(f"Processed state for hash {hash_for_visit_count}: ID {final_screen_to_use.id}, NewSystemDiscovery={is_new_discovery_for_system}, RunVisits={visit_info['visit_count_this_run']}")
+        return final_screen_to_use, visit_info
 
-    def get_total_screens(self) -> int:
-        return len(self.screens)    
-    
-    def get_total_transitions(self) -> int:
-        """Gets the total number of transitions recorded in the database.
-        
-        Returns:
-            int: The number of transitions, or -1 if there was an error, or 0 if no database.
-        """
-        if self.db_manager:
-            try:
-                # Ensure TRANSITIONS_TABLE is accessible
-                sql = f"SELECT COUNT(*) FROM {getattr(self.db_manager, 'TRANSITIONS_TABLE', 'transitions')}"
-                result = self.db_manager._execute_sql(sql, fetch_one=True)
-                
-                # Handle the various possible return types
-                if result is None:
-                    return 0
-                if isinstance(result, tuple) and len(result) > 0:
-                    count = result[0]
-                    return count if isinstance(count, int) else 0
-                if isinstance(result, list) and len(result) > 0:
-                    count = result[0]
-                    return count if isinstance(count, int) else 0
-                if isinstance(result, int):
-                    return result
-                    
-                logging.warning(f"Unexpected result type from database query: {type(result)}")
-                return 0
-            except Exception as e:
-                logging.error(f"Failed to get total transitions count from DB: {e}")
-                return -1 
-        return 0
+    def record_action_taken_from_screen(self, from_screen_composite_hash: str, action_description: str):
+        if from_screen_composite_hash not in self.current_run_action_history:
+            self.current_run_action_history[from_screen_composite_hash] = []
+        if action_description not in self.current_run_action_history[from_screen_composite_hash]:
+            self.current_run_action_history[from_screen_composite_hash].append(action_description)
+        logging.debug(f"Recorded action '{action_description}' for screen hash '{from_screen_composite_hash}' in current run history.")
 
-    def get_screen_by_hash(self, composite_hash: str) -> Optional[ScreenRepresentation]:
-        return self.screens.get(composite_hash)
+    def get_action_history_for_run(self, screen_composite_hash: str) -> List[str]:
+        return self.current_run_action_history.get(screen_composite_hash, [])
 
+    def get_visit_count_for_run(self, screen_composite_hash: str) -> int:
+        return self.current_run_visit_counts.get(screen_composite_hash, 0)
+
+    def get_total_unique_screens_in_cache(self) -> int:
+        return len(self.known_screens_cache)
+
+    def get_screen_by_composite_hash(self, composite_hash: str) -> Optional[ScreenRepresentation]:
+        return self.known_screens_cache.get(composite_hash)
+
+    def get_screen_by_db_id(self, screen_id: Optional[int]) -> Optional[ScreenRepresentation]:
+        if screen_id is None: return None
+        for screen in self.known_screens_cache.values():
+            if screen.id == screen_id:
+                return screen
+        logging.warning(f"Screen with DB ID {screen_id} not found in current cache. Consider reloading cache or checking data integrity.")
+        return None

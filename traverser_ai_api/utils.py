@@ -1,35 +1,101 @@
-import hashlib
-from typing import Tuple, Optional, Any, cast
-
-import imagehash
-from PIL import Image
-import io
+#!/usr/bin/env python3
 import logging
-from PIL import Image, ImageDraw
-from lxml import etree 
-import re
+import time
+import sys
+import os
+import io # For LoggerManager's TextIOWrapper and image operations
+import json # Not directly used by provided utils, but often useful
+from config import Config # For configuration values
+import shutil # Not directly used by provided utils
+from typing import Tuple, Optional, Any, cast, List, Dict # Added List, Dict for type hints
+
+import hashlib
+import imagehash # For visual hashing
+from PIL import Image, ImageDraw # For image manipulation
+from lxml import etree # For XML processing
+import re # For regex operations in XML simplification
+
+# --- Global Script Start Time (for ElapsedTimeFormatter) ---
+SCRIPT_START_TIME = time.time()
+
+# --- Custom Log Formatter and Handler Manager (Moved from main.py) ---
+class ElapsedTimeFormatter(logging.Formatter):
+    def formatTime(self, record, datefmt=None):
+        elapsed_seconds = record.created - SCRIPT_START_TIME
+        h = int(elapsed_seconds // 3600)
+        m = int((elapsed_seconds % 3600) // 60)
+        s = int(elapsed_seconds % 60)
+        ms = int((elapsed_seconds - (h * 3600 + m * 60 + s)) * 1000)
+        return f"{h:02d}:{m:02d}:{s:02d}.{ms:03d}"
+
+class LoggerManager:
+    def __init__(self):
+        self.handlers: List[logging.Handler] = []
+        self.stdout_wrapper: Optional[io.TextIOWrapper] = None
+
+    def setup_logging(self, log_level_str: str, log_file: Optional[str] = None) -> logging.Logger:
+        numeric_level = getattr(logging, log_level_str.upper(), None)
+        if not isinstance(numeric_level, int):
+            raise ValueError(f"Invalid log level string: {log_level_str}")
+
+        logger = logging.getLogger() # Get the root logger
+        logger.setLevel(numeric_level)
+
+        # Remove existing handlers from the root logger to avoid duplication
+        for handler in list(logger.handlers):
+            logger.removeHandler(handler)
+            if isinstance(handler, logging.FileHandler):
+                try:
+                    handler.close()
+                except Exception: # nosemgrep: arbitrary-except
+                    pass 
+        self.handlers.clear()
+
+        log_formatter = ElapsedTimeFormatter(
+            "[%(levelname)s] (%(asctime)s) %(filename)s:%(lineno)d - %(message)s"
+        )
+
+        try:
+            if not self.stdout_wrapper: # Create wrapper only once
+                self.stdout_wrapper = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+            console_handler = logging.StreamHandler(self.stdout_wrapper)
+        except Exception: # nosemgrep: arbitrary-except
+            console_handler = logging.StreamHandler(sys.stdout)
+
+        console_handler.setFormatter(log_formatter)
+        logger.addHandler(console_handler)
+        self.handlers.append(console_handler)
+
+        if log_file:
+            try:
+                log_file_dir = os.path.dirname(os.path.abspath(log_file))
+                if log_file_dir: 
+                    os.makedirs(log_file_dir, exist_ok=True)
+                
+                file_handler = logging.FileHandler(log_file, mode='a', encoding='utf-8')
+                file_handler.setFormatter(log_formatter)
+                logger.addHandler(file_handler)
+                self.handlers.append(file_handler)
+            except Exception as e: # nosemgrep: arbitrary-except
+                print(f"Error setting up file logger for {log_file}: {e}", file=sys.stderr)
+
+        if numeric_level > logging.DEBUG:
+            for lib_name in ["appium.webdriver.webdriver", "urllib3.connectionpool", "selenium.webdriver.remote.remote_connection"]:
+                logging.getLogger(lib_name).setLevel(logging.WARNING)
+        
+        return logger
 
 # --- Constants for XML Simplification ---
-
-# Attributes considered essential for identification or interaction state
-# We keep 'class' as it helps identify the type of widget (Button, EditText, etc.)
 KEEP_ATTRS = {
-    'class', 'resource-id', 'text', 'content-desc', 'hint', # Identification
-    'clickable', 'focusable', 'enabled', 'checkable', 'checked', # Interaction state
-    'selected', 'editable', 'long-clickable', 'password', # Other important states
-    'bounds'  #BOUNDING BOX ATTRIBUTE
+    'class', 'resource-id', 'text', 'content-desc', 'hint', 
+    'clickable', 'focusable', 'enabled', 'checkable', 'checked', 
+    'selected', 'editable', 'long-clickable', 'password', 
+    'bounds' 
 }
-
-# Boolean attributes where we only care if they are "true"
-# We can remove them if they are "false" to save space
 BOOLEAN_ATTRS_TRUE_ONLY = {
-    'clickable', 'focusable', 'enabled', 'checkable', # Keep 'checked' always
+    'clickable', 'focusable', 'enabled', 'checkable', 
     'selected', 'editable', 'long-clickable', 'password'
 }
-
-# --- Loop Detection ---
-LOOP_DETECTION_VISIT_THRESHOLD = 1 #  Max visits before AI is told to prioritize breaking loops.
-
 
 def calculate_xml_hash(xml_string: str) -> str:
     """Calculates SHA256 hash of the XML string."""
@@ -43,9 +109,6 @@ def calculate_visual_hash(screenshot_bytes: bytes) -> str:
         return "no_image"
     try:
         img = Image.open(io.BytesIO(screenshot_bytes))
-        # Use average hash (aHash) or perceptual hash (pHash)
-        # pHash is generally better for similarity
-        # dHash (difference hash) is also an option
         v_hash = str(imagehash.phash(img))
         return v_hash
     except Exception as e:
@@ -60,109 +123,73 @@ def visual_hash_distance(hash1: str, hash2: str) -> int:
         return 1000 # Indicate invalid comparison
 
     try:
-        # Imagehash library allows comparing hash objects directly,
-        # need to convert hex strings back if stored
         h1 = imagehash.hex_to_hash(hash1)
         h2 = imagehash.hex_to_hash(hash2)
         return h1 - h2 # Hamming distance
     except Exception as e:
         logging.error(f"Error calculating hash distance between {hash1} and {hash2}: {e}")
-        return 1000 # Indicate invalid comparison
+        return 1000 
 
 def simplify_xml_for_ai(xml_string: str, max_len: int) -> str:
     """
     Simplifies XML by removing non-essential attributes and potentially empty nodes,
     aiming to stay under max_len without arbitrary truncation.
-
-    Args:
-        xml_string: The raw XML string from Appium.
-        max_len: The target maximum length for the simplified XML.
-
-    Returns:
-        A simplified XML string, hopefully under max_len. If processing fails
-        or it's still too long after simplification, it might perform
-        a final smart truncation.
     """
     if not xml_string:
         return ""
 
-    logging.info(f"Original XML length: {len(xml_string)}")
+    original_len = len(xml_string)
+    # Log only if XML length is significant to avoid flooding logs for tiny XMLs.
+    if original_len > 200: # Arbitrary threshold for "significant"
+        logging.debug(f"Original XML length: {original_len}")
 
     try:
-        # Parse the XML string. Requires bytes. Handle potential encoding issues.
-        parser = etree.XMLParser(recover=True, remove_blank_text=True) # recover helps with slightly malformed XML
+        parser = etree.XMLParser(recover=True, remove_blank_text=True)
         root = etree.fromstring(xml_string.encode('utf-8'), parser=parser)
-        if root is None: # Parsing failed completely despite recovery
+        if root is None:
             raise ValueError("Failed to parse XML root.")
 
-        elements_processed = 0
-        # Iterate through all elements in the tree
-        for element in root.iter('*'): # '*' iterates over all tags
-            elements_processed += 1
-            current_attrs = list(element.attrib.keys()) # Get keys before modifying
-
+        for element in root.iter('*'):
+            current_attrs = list(element.attrib.keys())
             for attr_name in current_attrs:
-                # 1. Remove attributes not in our essential list
                 if attr_name not in KEEP_ATTRS:
                     del element.attrib[attr_name]
-                    continue # Go to next attribute
-
-                # 2. Remove boolean attributes that are "false" (unless always kept like 'checked')
+                    continue
                 if attr_name in BOOLEAN_ATTRS_TRUE_ONLY:
                     attr_value = element.attrib[attr_name]
                     if isinstance(attr_value, str) and attr_value.lower() == 'false':
                         del element.attrib[attr_name]
                         continue
-
-                # 3. Optional: Shorten potentially long 'resource-id' (keep only last part)
-                # if attr_name == 'resource-id':
-                #     parts = element.attrib[attr_name].split('/')
-                #     if len(parts) > 1:
-                #         element.attrib[attr_name] = parts[-1]
-
-            # 4. Optional: Remove elements that become completely empty *after* attribute pruning
-            # (Be careful with this - might remove structure. Let's skip for now unless necessary)
-            # if not element.attrib and not element.text and not len(element):
-            #    parent = element.getparent()
-            #    if parent is not None:
-            #        parent.remove(element)
-
-        # Convert the modified tree back to a string, with minimal parameters for type checking
-        xml_bytes = etree.tostring(root)  
+        
+        xml_bytes = etree.tostring(root) 
         simplified_xml = xml_bytes.decode('utf-8')
 
-        # Final Check: If still too long, perform a slightly smarter truncation
         if len(simplified_xml) > max_len:
             logging.warning(f"Simplified XML still exceeds max_len ({len(simplified_xml)} > {max_len}). Performing final smart truncation.")
-            # Try to truncate at the end of the last complete tag
             trunc_point = simplified_xml.rfind('</', 0, max_len)
             if trunc_point != -1:
-                # Find the closing '>' for that tag
-                end_tag_point = simplified_xml.find('>', trunc_point, max_len + 20) # Search a bit beyond max_len
+                end_tag_point = simplified_xml.find('>', trunc_point, max_len + 30) 
                 if end_tag_point != -1:
                     simplified_xml = simplified_xml[:end_tag_point+1] + "\n... (truncated)"
-                else: # Couldn't find closing '>', just truncate hard
+                else: 
                     simplified_xml = simplified_xml[:max_len] + "... (truncated)"
-            else: # No closing tag found before max_len, hard truncate
+            else: 
                 simplified_xml = simplified_xml[:max_len] + "... (truncated)"
-
-        # Optional: Final regex cleanup for extra whitespace if needed
-        simplified_xml = re.sub(r'>\s+<', '><', simplified_xml)
-        simplified_xml = simplified_xml.strip()
-
-        logging.info(f"Simplified XML length: {len(simplified_xml)}")
-
-
+        
+        simplified_xml = re.sub(r'>\s+<', '><', simplified_xml).strip()
+        
+        final_len = len(simplified_xml)
+        if original_len > 200: # Only log if original was significant
+            logging.debug(f"Simplified XML length: {final_len} (from {original_len})")
         return simplified_xml
 
     except (etree.XMLSyntaxError, ValueError, TypeError) as e:
         logging.error(f"Failed to parse or simplify XML: {e}. Falling back to basic truncation.")
-        # Fallback to original basic truncation if parsing/simplification fails
         if len(xml_string) > max_len:
             return xml_string[:max_len] + "\n... (fallback truncation)"
         return xml_string
     except Exception as e:
-        logging.error(f"Unexpected error during XML simplification: {e}. Falling back to basic truncation.", exc_info=True)
+        logging.error(f"Unexpected error during XML simplification: {e}. Falling back.", exc_info=True)
         if len(xml_string) > max_len:
             return xml_string[:max_len] + "\n... (fallback truncation)"
         return xml_string
@@ -172,115 +199,106 @@ def draw_indicator_on_image(image_bytes: bytes, coordinates: Tuple[int, int], co
     if not image_bytes or not coordinates:
         return None
     try:
-        img = Image.open(io.BytesIO(image_bytes)).convert("RGB") # Ensure RGB for color drawing
+        img = Image.open(io.BytesIO(image_bytes)).convert("RGB") 
         draw = ImageDraw.Draw(img)
-
-        # Calculate bounding box for the circle
         x, y = coordinates
         left_up_point = (x - radius, y - radius)
         right_down_point = (x + radius, y + radius)
-
-        # Draw a filled red circle
         draw.ellipse([left_up_point, right_down_point], fill=color, outline=color)
-
-        # Save the modified image back to bytes
         output_buffer = io.BytesIO()
         img.save(output_buffer, format="PNG")
         return output_buffer.getvalue()
-
     except Exception as e:
         logging.error(f"Error drawing indicator at {coordinates}: {e}")
-        return None # Return None if drawing fails
+        return None
 
 def generate_action_description(action_type: str, target_obj: Optional[Any], input_text: Optional[str], ai_target_identifier: Optional[str]) -> str:
-
     """Generates a human-readable description of an action."""
     description = f"{action_type.upper()}"
-
     if ai_target_identifier:
         description += f" on '{ai_target_identifier}'"
-    elif isinstance(target_obj, str): # e.g., for scroll direction
+    elif isinstance(target_obj, str): 
         description += f" {target_obj}"
-    # Add more specific details if target_obj is a WebElement, but be careful with stale elements
-    # For now, ai_target_identifier is preferred for UI display if available.
-
     if input_text:
         description += f" with text '{input_text}'"
-    
     return description
 
 def draw_rectangle_on_image(
     image_bytes: bytes,
-    box_coords: Tuple[int, int, int, int],  # (x1, y1, x2, y2)
-    primary_color: str = "red",            # The main color of the line
-    border_color: str = "black",           # Contrasting border color
-    line_thickness: int = 1,               # Thickness of the primary_color line
-    border_size: int = 1                   # Thickness of the border_color on each side of the primary line
+    box_coords: Tuple[int, int, int, int], 
+    primary_color: str = "red", 
+    border_color: str = "black", 
+    line_thickness: int = 1, 
+    border_size: int = 1 
 ) -> Optional[bytes]:
-    """
-    Draws a rectangle (bounding box) with a contrasting border on an image
-    for better visibility.
-
-    Args:
-        image_bytes: The raw bytes of the image.
-        box_coords: A tuple (x1, y1, x2, y2) representing the top-left
-                    and bottom-right coordinates of the rectangle.
-        primary_color: The main color for the rectangle's center line.
-        border_color: The color for the border around the primary line.
-        line_thickness: The thickness of the primary color line.
-        border_size: The thickness of the border on each side of the primary line.
-                    The total visual thickness of the border color part will be
-                     line_thickness + 2 * border_size.
-
-    Returns:
-        Bytes of the annotated image, or None if an error occurs.
-    """
+    """Draws a rectangle (bounding box) with a contrasting border on an image."""
     if not image_bytes or not box_coords:
         logging.warning("draw_rectangle_on_image: Missing image_bytes or box_coords.")
         return None
     if line_thickness <= 0:
         logging.warning("draw_rectangle_on_image: line_thickness must be positive.")
-        return image_bytes # Or None if error
-    if border_size < 0: # border_size can be 0 for no border
+        return image_bytes 
+    if border_size < 0:
         logging.warning("draw_rectangle_on_image: border_size cannot be negative.")
-        return image_bytes # Or None
+        return image_bytes 
 
     try:
-        img = Image.open(io.BytesIO(image_bytes)).convert("RGB")  # Ensure RGB for color drawing
+        img = Image.open(io.BytesIO(image_bytes)).convert("RGB") 
         draw = ImageDraw.Draw(img)
-
         x1, y1, x2, y2 = box_coords
 
-        # Basic validation (already done more thoroughly in ScreenshotAnnotator before calling)
         if not (0 <= x1 < img.width and 0 <= y1 < img.height and \
-                x1 < x2 <= img.width and y1 < y2 <= img.height):
+                  x1 < x2 <= img.width and y1 < y2 <= img.height):
             logging.warning(
                 f"draw_rectangle_on_image: Invalid or out-of-bounds box_coords ({x1},{y1},{x2},{y2}) "
                 f"for image size ({img.width}x{img.height}). Skipping drawing."
             )
-            return image_bytes # Return original image if coords are bad
+            return image_bytes
 
-        # Calculate the total width for the border rectangle
-        # This is the width of the line drawn by PIL, centered on the coordinates.
         border_rect_line_width = line_thickness + (2 * border_size)
-
         if border_size > 0 and border_rect_line_width > 0:
-            # Draw the thicker border rectangle first
             draw.rectangle([x1, y1, x2, y2], outline=border_color, width=border_rect_line_width)
         
-        # Draw the thinner primary color rectangle on top
-        # If border_size is 0, border_rect_line_width will equal line_thickness,
-        # so the first draw (if border_size > 0 was false) would be skipped,
-        # and this one will draw the primary line with its specified thickness.
-        # If border_size > 0, this will draw the primary line centered within the border.
-        if line_thickness > 0 : # Ensure we draw something if border_size was 0
+        if line_thickness > 0 : 
             draw.rectangle([x1, y1, x2, y2], outline=primary_color, width=line_thickness)
-
 
         output_buffer = io.BytesIO()
         img.save(output_buffer, format="PNG")
         return output_buffer.getvalue()
-
     except Exception as e:
         logging.error(f"Error in draw_rectangle_on_image with box {box_coords}: {e}", exc_info=True)
         return None
+
+def are_visual_hashes_valid(hash1: Optional[str], hash2: Optional[str]) -> bool:
+    """
+    Checks if two visual hash strings are valid for comparison (i.e., not error strings).
+    """
+    if not hash1 or not hash2:
+        return False
+    error_strings = ["no_image", "hash_error"]
+    if hash1 in error_strings or hash2 in error_strings:
+        return False
+    return True
+
+if __name__ == '__main__':
+    # Example usage or tests for utils can go here
+    print(f"Utils module loaded. SCRIPT_START_TIME: {SCRIPT_START_TIME}")
+    
+    # Basic test for LoggerManager
+    test_logger_manager = LoggerManager()
+    test_logger = test_logger_manager.setup_logging(log_level_str='DEBUG', log_file='test_utils.log')
+    test_logger.info("This is an info message from utils.py test.")
+    test_logger.debug("This is a debug message from utils.py test.")
+    print("Check test_utils.log for output.")
+
+    # Clean up test log file
+    if os.path.exists('test_utils.log'):
+        try:
+            # Close handlers if any are still open by the root logger for this file
+            for handler in test_logger.handlers:
+                if isinstance(handler, logging.FileHandler) and handler.baseFilename == os.path.abspath('test_utils.log'):
+                    handler.close()
+            os.remove('test_utils.log')
+            print("Cleaned up test_utils.log.")
+        except Exception as e:
+            print(f"Could not remove test_utils.log: {e}")

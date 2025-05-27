@@ -1,104 +1,155 @@
+# app_context_manager.py
 import logging
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional, List
 
+# Import your main Config class and AppiumDriver
+# Adjust paths based on your project structure
 if TYPE_CHECKING:
-    from .appium_driver import AppiumDriver # To avoid circular import
+    from appium_driver import AppiumDriver # For type hinting
+from config import Config # Assuming Config class is in config.py in the same package
 
 class AppContextManager:
-    """Manages the application context, including launching and ensuring the app is in focus."""
+    """Manages the application context, including launching and ensuring the app is in focus,
+    using a centralized Config object."""
 
-    def __init__(self, driver: 'AppiumDriver', config_dict: dict):
+    def __init__(self, driver: 'AppiumDriver', app_config: Config): # Changed signature
+        """
+        Initialize the AppContextManager.
+
+        Args:
+            driver (AppiumDriver): An instance of the refactored AppiumDriver.
+            app_config (Config): The main application Config object instance.
+        """
         self.driver = driver
-        self.config_dict = config_dict
-
-        # Validate required configuration
-        required_configs = ['APP_PACKAGE', 'APP_ACTIVITY', 'APP_LAUNCH_WAIT_TIME', 
-                        'WAIT_AFTER_ACTION', 'ALLOWED_EXTERNAL_PACKAGES']
-        missing_configs = [cfg for cfg in required_configs if cfg not in config_dict]
-        if missing_configs:
-            raise ValueError(f"Missing required configurations: {', '.join(missing_configs)}")
-        
+        self.cfg = app_config # Store the Config object instance
         self.logger = logging.getLogger(__name__)
 
-    def launch_and_verify_app(self) -> bool:
-        """Launches the target application and verifies it is active."""
-        target_pkg = self.config_dict['APP_PACKAGE']
-        target_activity = self.config_dict['APP_ACTIVITY']
-
-        self.logger.info(f"Attempting to launch app: {target_pkg}/{target_activity}")
+        # Validate required configuration values from self.cfg
+        required_attrs = [
+            'APP_PACKAGE', 'APP_ACTIVITY', 'APP_LAUNCH_WAIT_TIME', 
+            'WAIT_AFTER_ACTION', 'ALLOWED_EXTERNAL_PACKAGES',
+            'MAX_CONSECUTIVE_CONTEXT_FAILURES' # For AppCrawler
+        ]
+        missing_attrs = []
+        for attr_name in required_attrs:
+            value = getattr(self.cfg, attr_name, None)
+            if value is None:
+                if attr_name == 'ALLOWED_EXTERNAL_PACKAGES' and isinstance(value, list):
+                    continue # Empty list is fine for ALLOWED_EXTERNAL_PACKAGES
+                missing_attrs.append(attr_name)
         
-        # Check if already running
+        if missing_attrs:
+            raise ValueError(f"AppContextManager: Missing required configurations in Config object: {', '.join(missing_attrs)}")
+
+        if not self.cfg.APP_PACKAGE or not self.cfg.APP_ACTIVITY: # Specific check
+             raise ValueError("AppContextManager: APP_PACKAGE and APP_ACTIVITY cannot be empty in Config.")
+
+        self.consecutive_context_failures: int = 0
+        logging.info(f"AppContextManager initialized for target: {self.cfg.APP_PACKAGE}")
+
+    def launch_and_verify_app(self) -> bool:
+        """Launches the target application (defined in self.cfg) and verifies it is active."""
+        target_pkg = str(self.cfg.APP_PACKAGE) 
+        # target_activity is used by driver.launch_app() internally from its own cfg
+
+        self.logger.info(f"Attempting to launch and verify app: {target_pkg}")
+        
+        # Check if already running and in foreground
         current_pkg = self.driver.get_current_package()
         if current_pkg == target_pkg:
-            self.logger.info(f"Target app {target_pkg} is already active.")
-            return True        
-            
-        self.driver.launch_app(target_pkg, target_activity)
+            self.logger.info(f"Target app {target_pkg} is already the active foreground package.")
+            self.consecutive_context_failures = 0 # Reset on success
+            return True
         
-        # Wait for app to launch and stabilize
-        app_launch_wait_time = self.config_dict['APP_LAUNCH_WAIT_TIME']
-        self.logger.debug(f"Waiting {app_launch_wait_time}s for app to stabilize after launch.")
-        time.sleep(app_launch_wait_time)
+        # If not, attempt to launch
+        if not self.driver.launch_app(): # launch_app in AppiumDriver now uses its self.cfg
+            self.logger.error(f"Call to driver.launch_app() for {target_pkg} failed.")
+            # No need to sleep here, AppiumDriver.launch_app() should handle its own wait time
+            return False 
         
-        # Verify again
+        # AppiumDriver.launch_app() already waits APP_LAUNCH_WAIT_TIME and verifies.
+        # We just need to check the result.
+        # The verification within AppiumDriver.launch_app() is now the primary check.
+        # However, an additional check here can confirm.
         current_pkg_after_launch = self.driver.get_current_package()
         current_activity_after_launch = self.driver.get_current_activity()
 
         if current_pkg_after_launch == target_pkg:
-            self.logger.info(f"Successfully launched target app: {target_pkg}/{current_activity_after_launch}")
+            self.logger.info(f"Successfully launched/focused target app: {target_pkg}/{current_activity_after_launch}")
+            self.consecutive_context_failures = 0 # Reset on success
             return True
         else:
-            self.logger.error(f"Failed to launch target app {target_pkg}. Current app is {current_pkg_after_launch}.")
+            self.logger.error(f"Failed to verify target app {target_pkg} after launch. Current app is {current_pkg_after_launch}.")
             return False
 
     def ensure_in_app(self) -> bool:
-        """Checks if the driver is focused on the target app or allowed external apps, and attempts recovery."""
-        if not self.driver.driver:
+        """
+        Checks if the driver is focused on the target app or an allowed external package.
+        Attempts recovery by pressing back or relaunching the target app if out of context.
+        Returns True if in expected context, False otherwise after recovery attempts.
+        """
+        if not self.driver.driver: # Check if raw driver is active
             self.logger.error("Driver not connected, cannot ensure app context.")
+            self.consecutive_context_failures += 1
             return False
 
         context = self.driver.get_current_app_context()
-        if not context:
-            self.logger.error("Could not get current app context. Attempting relaunch as fallback.")
-            self.driver.relaunch_app() 
-            time.sleep(self.config_dict['WAIT_AFTER_ACTION'])
-            context = self.driver.get_current_app_context()
-            if not context:
-                self.logger.critical("Failed to get app context even after relaunch attempt.")
-                return False
+        if not context or context[0] is None: # Package name is crucial
+            self.logger.warning("Could not reliably get current app context (package is None). Attempting recovery.")
+            # Directly try relaunching as the state is unknown
+            if self.driver.launch_app(): # Relaunches target app from cfg
+                time.sleep(float(self.cfg.WAIT_AFTER_ACTION)) # type: ignore
+                context_after_relaunch = self.driver.get_current_app_context()
+                if context_after_relaunch and context_after_relaunch[0] == self.cfg.APP_PACKAGE:
+                    self.logger.info("Recovery successful: Relaunched target application after unknown context.")
+                    self.consecutive_context_failures = 0
+                    return True
+            self.logger.error("Failed to recover context even after relaunch from unknown state.")
+            self.consecutive_context_failures += 1
+            return False
 
         current_package, current_activity = context
-        target_package = self.config_dict['APP_PACKAGE']
-        allowed_external_packages = self.config_dict['ALLOWED_EXTERNAL_PACKAGES']
-        allowed_packages = [target_package] + (allowed_external_packages if isinstance(allowed_external_packages, list) else [])
+        target_package = str(self.cfg.APP_PACKAGE)
+        # Ensure ALLOWED_EXTERNAL_PACKAGES is a list and handle if it's None from cfg
+        allowed_external_packages: List[str] = self.cfg.ALLOWED_EXTERNAL_PACKAGES or []
+        
+        allowed_packages_set = set([target_package] + allowed_external_packages)
 
-        self.logger.debug(f"Current app context: {current_package} / {current_activity}. Allowed: {allowed_packages}")
+        self.logger.debug(f"Current app context: {current_package}/{current_activity}. Allowed: {allowed_packages_set}")
 
-        if current_package in allowed_packages:
-            self.logger.debug(f"App context OK (In {current_package}).")
+        if current_package in allowed_packages_set:
+            self.logger.debug(f"App context OK (In '{current_package}').")
+            self.consecutive_context_failures = 0 # Reset on success
             return True
         else:
-            self.logger.warning(f"App context incorrect: In '{current_package}', expected one of {allowed_packages}. Attempting recovery.")
+            self.logger.warning(f"App context incorrect: In '{current_package}', expected one of {allowed_packages_set}.")
+            self.consecutive_context_failures += 1
             
-            # Try pressing back first
+            if self.consecutive_context_failures >= self.cfg.MAX_CONSECUTIVE_CONTEXT_FAILURES: # type: ignore
+                self.logger.error("Maximum consecutive context failures reached. No further recovery attempts this step.")
+                return False # Let AppCrawler decide termination
+
+            self.logger.info("Attempting recovery: Pressing back button...")
             self.driver.press_back_button()
-            time.sleep(self.config_dict['WAIT_AFTER_ACTION'] / 2)
+            time.sleep(float(self.cfg.WAIT_AFTER_ACTION) / 2) # Shorter wait after back press
 
             context_after_back = self.driver.get_current_app_context()
-            if context_after_back and context_after_back[0] in allowed_packages:
+            if context_after_back and context_after_back[0] in allowed_packages_set:
                 self.logger.info("Recovery successful: Returned to target/allowed package after back press.")
+                self.consecutive_context_failures = 0
                 return True
             else:
-                self.logger.warning("Recovery failed after back press. Relaunching target application.")
-                self.driver.relaunch_app() 
-                time.sleep(self.config_dict['WAIT_AFTER_ACTION'])
-
-                context_after_relaunch = self.driver.get_current_app_context()
-                if context_after_relaunch and context_after_relaunch[0] in allowed_packages:
-                    self.logger.info("Recovery successful: Relaunched target application.")
-                    return True
-                else:
-                    current_pkg_after_relaunch_fail = context_after_relaunch[0] if context_after_relaunch else "Unknown"
-                    self.logger.error(f"Recovery failed: Could not return to target/allowed application. Still in '{current_pkg_after_relaunch_fail}'.")
-                    return False
+                self.logger.warning(f"Recovery still not successful after back press (current: {context_after_back[0] if context_after_back else 'Unknown'}). Relaunching target application.")
+                if self.driver.launch_app(): # Relaunches target app from cfg
+                    time.sleep(float(self.cfg.WAIT_AFTER_ACTION)) # type: ignore
+                    context_after_relaunch = self.driver.get_current_app_context()
+                    if context_after_relaunch and context_after_relaunch[0] in allowed_packages_set:
+                        self.logger.info("Recovery successful: Relaunched target application.")
+                        self.consecutive_context_failures = 0
+                        return True
+                
+                current_pkg_after_all_attempts = self.driver.get_current_package() or "Unknown"
+                self.logger.error(f"All recovery attempts failed. Could not return to target/allowed application. Currently in '{current_pkg_after_all_attempts}'.")
+                # consecutive_context_failures already incremented
+                return False

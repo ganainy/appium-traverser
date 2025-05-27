@@ -6,6 +6,6 @@ echo Starting Appium Crawler CLI Controller...
 cd /d "%~dp0\traverser_ai_api"
 echo Working directory: %CD%
 
-python cli_controller.py %*
+python -m cli_controller %*
 
 cd /d "%~dp0"

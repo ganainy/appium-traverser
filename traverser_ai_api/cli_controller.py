@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
 CLI Controller for Appium Crawler
-Replaces the GUI with a command-line interface while maintaining full functionality.
+Uses the centralized Config class.
 """
 
 import sys
 import os
-import logging
+import logging # For bootstrap logging
 import json
 import argparse
 import subprocess
@@ -16,650 +16,587 @@ import threading
 from typing import Optional, Dict, Any, List
 from pathlib import Path
 
-# Import config module for defaults
-import config
+# --- Imports for Config and Logging Utilities ---
+try:
+    # Assuming Config class is in config.py (which also contains default values)
+    from config import Config
+except ImportError as e:
+    sys.stderr.write(f"FATAL: Could not import 'Config' class from config.py: {e}\n")
+    sys.stderr.write("Ensure config.py exists and contains the Config class definition.\n")
+    sys.exit(1)
+
+try:
+    # Assuming logging utilities and SCRIPT_START_TIME are in utils.py
+    from utils import SCRIPT_START_TIME, LoggerManager, ElapsedTimeFormatter
+except ImportError as e:
+    sys.stderr.write(f"FATAL: Could not import logging utilities from utils.py: {e}\n")
+    sys.stderr.write("Ensure utils.py exists and contains SCRIPT_START_TIME, LoggerManager, and ElapsedTimeFormatter.\n")
+    # Basic SCRIPT_START_TIME fallback if utils.py is missing, though logging will be unformatted.
+    if 'SCRIPT_START_TIME' not in globals():
+        SCRIPT_START_TIME = time.time() 
+    sys.exit(1)
 
 
 class CLIController:
     """Command-line controller for the Appium Crawler."""
 
-    def __init__(self):
-        """Initialize the CLI controller."""
-        self.api_dir = os.path.dirname(__file__)
-        self.output_data_dir = os.path.join(self.api_dir, "output_data")
-        self.config_file_path = os.path.join(self.api_dir, "user_config.json")
+    def __init__(self, app_config_instance: Config):
+        """Initialize the CLI controller with a Config instance."""
+        self.cfg = app_config_instance
+        self.api_dir = os.path.dirname(os.path.abspath(__file__)) # Directory of this cli_controller.py
+        
+        # Path to the find_app_info.py script, relative to this CLI controller script.
+        # Consider making this path configurable via cfg if its location varies.
         self.find_app_info_script_path = os.path.join(self.api_dir, "find_app_info.py")
-        
-        # Initialize configuration
-        self.user_config: Dict[str, Any] = {}
-        self.current_health_app_list_file: Optional[str] = None
+
         self.health_apps_data: List[Dict[str, Any]] = []
-        
+
+        # Module to run for the crawler
+        self.module_to_run = "traverser_ai_api.main"
+
         # Process management
         self.crawler_process: Optional[subprocess.Popen] = None
-        self.find_apps_process: Optional[subprocess.Popen] = None
-        self._shutdown_flag_file_path: Optional[str] = None
-        
-        # Setup directories
-        self._setup_directories()
-        
-        # Setup shutdown flag path
-        self._setup_shutdown_flag()
-        
+        # self.find_apps_process is not used in the provided code, can be removed if not needed.
+
+        self._setup_cli_specific_directories()
+
         # Setup signal handlers for graceful shutdown
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
 
-    def _setup_directories(self):
-        """Create required output directories."""
-        required_dirs = {"app_info", "screenshots", "database_output", "traffic_captures"}
-        for subdir in required_dirs:
-            dir_path = os.path.join(self.output_data_dir, subdir)
-            try:
-                os.makedirs(dir_path, exist_ok=True)
-            except OSError as e:
-                raise RuntimeError(f"Failed to create required directory {dir_path}: {e}")
-
-    def _setup_shutdown_flag(self):
-        """Setup the shutdown flag file path."""
-        if config and hasattr(config, '__file__') and config.__file__:
-            try:
-                config_module_dir_path = os.path.dirname(os.path.abspath(config.__file__))
-                self._shutdown_flag_file_path = os.path.join(config_module_dir_path, "crawler_shutdown.flag")
-                logging.info(f"Shutdown flag path configured: {self._shutdown_flag_file_path}")
-            except Exception as e:
-                logging.error(f"Error determining shutdown flag path: {e}")
-                self._shutdown_flag_file_path = None
+        # Auto-load health apps if a file path is available in config during initialization
+        if self.cfg.CURRENT_HEALTH_APP_LIST_FILE and os.path.exists(self.cfg.CURRENT_HEALTH_APP_LIST_FILE):
+            logging.info(f"Attempting to auto-load health apps from: {self.cfg.CURRENT_HEALTH_APP_LIST_FILE}")
+            self._load_health_apps_from_file(self.cfg.CURRENT_HEALTH_APP_LIST_FILE)
         else:
-            logging.warning("Config module not found. Graceful shutdown via flag disabled.")
-            self._shutdown_flag_file_path = None
+            logging.info("No pre-existing health app list file found in configuration or file does not exist.")
+
+    def _setup_cli_specific_directories(self):
+        """Create directories specifically needed by the CLI tool, if any,
+           that are not covered by the main application's output structure defined in Config."""
+        # Most output directories (logs, screenshots, db) are now resolved and created by 
+        # the Config class or the main script part that uses cfg.
+        # This method is for any directories *only* used by the CLI tool itself.
+        # For example, if find_app_info.py (when run by CLI) saves output to a location
+        # not managed by the main cfg.OUTPUT_DATA_DIR structure.
+        # If all outputs are within cfg.OUTPUT_DATA_DIR, this method might be minimal.
+        
+        # Example: If `find_app_info_script_path` generates temporary files in a specific subdir of `api_dir`
+        # scan_temp_dir = os.path.join(self.api_dir, "cli_scan_temp")
+        # try:
+        #     os.makedirs(scan_temp_dir, exist_ok=True)
+        #     logging.debug(f"Ensured CLI-specific temp directory exists: {scan_temp_dir}")
+        # except OSError as e:
+        #     logging.warning(f"Could not create CLI-specific temp directory {scan_temp_dir}: {e}")
+        pass # Currently, no CLI-specific directories seem explicitly needed beyond what cfg manages.
+
 
     def _signal_handler(self, signum, frame):
         """Handle SIGINT and SIGTERM signals."""
-        print(f"\n\nReceived signal {signum}. Shutting down gracefully...")
+        logging.warning(f"\nSignal {signal.Signals(signum).name} received. Initiating graceful shutdown...")
         self.stop_crawler()
+        # Perform any other CLI specific cleanup if necessary before exiting
+        logging.info("CLI shutdown complete.")
         sys.exit(0)
 
-    def load_config(self) -> bool:
-        """Load configuration from JSON file."""
-        if not os.path.exists(self.config_file_path):
-            print("No existing configuration found. Loading defaults from config.py")
-            self._load_defaults_from_config()
-            return False
-
+    def save_all_changes(self) -> bool:
+        """Explicitly save the current state of cfg to user_config.json."""
+        logging.info("Attempting to save all current configuration settings...")
         try:
-            with open(self.config_file_path, 'r') as f:
-                self.user_config = json.load(f)
-            
-            # Load health app list file path
-            self.current_health_app_list_file = self.user_config.get('CURRENT_HEALTH_APP_LIST_FILE')
-            
-            # Auto-load health apps if a file path is available
-            if self.current_health_app_list_file and os.path.exists(self.current_health_app_list_file):
-                self._load_health_apps_from_file(self.current_health_app_list_file)
-            
-            print("Configuration loaded successfully.")
-            return True
+            self.cfg.save_user_config() # This handles saving relevant parts of cfg
+            # No direct return value from save_user_config, success is logged by it.
+            return True # Assume success if no exception
         except Exception as e:
-            print(f"Error loading configuration: {e}")
-            self._load_defaults_from_config()
+            logging.error(f"Failed to save configuration via CLIController: {e}", exc_info=True)
             return False
 
-    def _load_defaults_from_config(self):
-        """Load default configuration values from config.py module."""
-        # Define all configuration keys that need to be managed
-        config_keys = [
-            'APPIUM_SERVER_URL', 'TARGET_DEVICE_UDID', 'NEW_COMMAND_TIMEOUT', 'APPIUM_IMPLICIT_WAIT',
-            'APP_PACKAGE', 'APP_ACTIVITY', 'DEFAULT_MODEL_TYPE', 'USE_CHAT_MEMORY', 'MAX_CHAT_HISTORY',
-            'XML_SNIPPET_MAX_LEN', 'CRAWL_MODE', 'MAX_CRAWL_STEPS', 'MAX_CRAWL_DURATION_SECONDS',
-            'WAIT_AFTER_ACTION', 'STABILITY_WAIT', 'APP_LAUNCH_WAIT_TIME', 'VISUAL_SIMILARITY_THRESHOLD',            'ALLOWED_EXTERNAL_PACKAGES', 'MAX_CONSECUTIVE_AI_FAILURES', 'MAX_CONSECUTIVE_MAP_FAILURES',
-            'MAX_CONSECUTIVE_EXEC_FAILURES', 'ENABLE_XML_CONTEXT', 'ENABLE_TRAFFIC_CAPTURE',
-            'PCAPDROID_API_KEY', 'CLEANUP_DEVICE_PCAP_FILE', 'CONTINUE_EXISTING_RUN'
-        ]
-        
-        missing_configs = []
-        self.user_config = {}
-        
-        for key in config_keys:
-            if hasattr(config, key):
-                value = getattr(config, key)
-                if value is not None:
-                    self.user_config[key] = value
-                else:
-                    missing_configs.append(f"{key} (None value)")
-            else:
-                missing_configs.append(key)
-
-        if missing_configs:
-            logging.warning(f"Missing or invalid config keys: {missing_configs}")
-
-    def save_config(self, config_updates: Optional[Dict[str, Any]] = None) -> bool:
-        """Save configuration to JSON file."""
-        if config_updates:
-            self.user_config.update(config_updates)
-        
-        # Save health app list path
-        self.user_config['CURRENT_HEALTH_APP_LIST_FILE'] = self.current_health_app_list_file
-        
-        try:
-            with open(self.config_file_path, 'w') as f:
-                json.dump(self.user_config, f, indent=4)
-            print("Configuration saved successfully.")
-            return True
-        except Exception as e:
-            print(f"Error saving configuration: {e}")
-            return False
 
     def show_config(self, filter_key: Optional[str] = None):
-        """Display current configuration."""
-        if not self.user_config:
-            print("No configuration loaded.")
-            return
+        """Display current configuration from the cfg object."""
+        config_to_display = self.cfg._get_user_savable_config() 
 
-        print("\n=== Current Configuration ===")
-        for key, value in sorted(self.user_config.items()):
+        print("\n=== Current Configuration (via CLIController) ===")
+        if not config_to_display:
+            print("No configuration settings available to display.")
+        for key, value in sorted(config_to_display.items()):
             if filter_key and filter_key.lower() not in key.lower():
                 continue
             if isinstance(value, list):
-                print(f"{key}: {', '.join(map(str, value))}")
+                print(f"  {key}: {', '.join(map(str, value))}")
             else:
-                print(f"{key}: {value}")
-        print("=" * 30)
+                print(f"  {key}: {value}")
+        print("===============================================")
 
-    def set_config(self, key: str, value: str) -> bool:
-        """Set a configuration value."""
-        original_value = value
-        parsed_value: Any = value
-        
-        # Check if key exists and try to parse value based on existing type
-        if key in self.user_config:
-            existing_value = self.user_config[key]
-            if isinstance(existing_value, bool):
-                parsed_value = original_value.lower() in ('true', '1', 'yes', 'on')
-            elif isinstance(existing_value, int):
-                try:
-                    parsed_value = int(original_value)
-                except ValueError:
-                    print(f"Error: '{original_value}' is not a valid integer for {key}")
-                    return False
-            elif isinstance(existing_value, list):
-                parsed_value = [item.strip() for item in original_value.split(',') if item.strip()]
-            else:
-                parsed_value = original_value
-        else:
-            # For new keys, try to infer type from the value
-            print(f"Warning: '{key}' is not a recognized configuration key. Adding as string.")
-            # Try to parse as boolean
-            if original_value.lower() in ('true', 'false', '1', '0', 'yes', 'no', 'on', 'off'):
-                parsed_value = original_value.lower() in ('true', '1', 'yes', 'on')
-            # Try to parse as integer
-            elif original_value.isdigit() or (original_value.startswith('-') and original_value[1:].isdigit()):
-                try:
-                    parsed_value = int(original_value)
-                except ValueError:
-                    parsed_value = original_value  # Keep as string
-            # Check if it looks like a list
-            elif ',' in original_value:
-                parsed_value = [item.strip() for item in original_value.split(',') if item.strip()]
-            else:
-                parsed_value = original_value
-        
-        self.user_config[key] = parsed_value
-        print(f"Set {key} = {parsed_value}")
-        return True
+    def set_config_value(self, key: str, value_str: str) -> bool:
+        """Set a configuration value using cfg.update_setting_and_save."""
+        logging.info(f"CLI attempting to set config: {key} = '{value_str}'")
+        try:
+            # update_setting_and_save within Config class handles type conversion and saving
+            self.cfg.update_setting_and_save(key, value_str) 
+            # Confirmation is logged by Config class's _update_attribute method
+            return True
+        except Exception as e:
+            logging.error(f"CLI failed to set config for {key}: {e}", exc_info=True)
+            return False
+
 
     def scan_apps(self, force_rescan: bool = False) -> bool:
         """Scan for health-related apps on the device."""
-        if not force_rescan and self.current_health_app_list_file and os.path.exists(self.current_health_app_list_file):
-            print(f"Using cached health app list: {self.current_health_app_list_file}")
-            return self._load_health_apps_from_file(self.current_health_app_list_file)
+        if not force_rescan and self.cfg.CURRENT_HEALTH_APP_LIST_FILE and os.path.exists(self.cfg.CURRENT_HEALTH_APP_LIST_FILE):
+            logging.info(f"Using cached health app list: {self.cfg.CURRENT_HEALTH_APP_LIST_FILE}")
+            return self._load_health_apps_from_file(self.cfg.CURRENT_HEALTH_APP_LIST_FILE)
 
         if not os.path.exists(self.find_app_info_script_path):
-            print(f"Error: find_app_info.py script not found at {self.find_app_info_script_path}")
+            logging.error(f"find_app_info.py script not found at {self.find_app_info_script_path}")
             return False
 
-        print("Starting health app scan...")
-        
+        logging.info("Starting health app scan via find_app_info.py...")
         try:
-            # Run the app discovery script
+            # Ensure the CWD for find_app_info.py is where it expects to be (e.g., its own directory or project root)
+            # self.api_dir is the directory of cli_controller.py
+            process_cwd = self.api_dir 
+            logging.debug(f"Running find_app_info.py from CWD: {process_cwd}")
+
             result = subprocess.run(
                 [sys.executable, '-u', self.find_app_info_script_path, '--mode', 'discover'],
-                cwd=self.api_dir,
-                capture_output=True,
-                text=True,
-                timeout=300  # 5 minute timeout
+                cwd=process_cwd, 
+                capture_output=True, text=True, timeout=300, check=False # check=False to handle non-zero exit manually
             )
-            
+            logging.debug(f"find_app_info.py stdout:\n{result.stdout}")
+            logging.debug(f"find_app_info.py stderr:\n{result.stderr}")
+
+
             if result.returncode != 0:
-                print(f"App scan failed with exit code {result.returncode}")
-                if result.stderr:
-                    print(f"Error output: {result.stderr}")
+                logging.error(f"App scan script failed with exit code {result.returncode}.\nStderr: {result.stderr}")
                 return False
             
-            # Look for the cache file path in the output
-            output_lines = result.stdout.split('\n')
-            cache_file_line = next(
-                (line for line in output_lines if "Cache file generated at:" in line),
-                None
-            )
-            
+            output_lines = result.stdout.splitlines()
+            cache_file_line = next((line for line in output_lines if "Cache file generated at:" in line), None)
             if not cache_file_line:
-                print("Error: Could not find cache file path in scan output")
+                logging.error(f"Could not find cache file path in scan output.\nStdout: {result.stdout}")
                 return False
             
-            # Extract cache file path
             cache_file_path = cache_file_line.split("Cache file generated at:", 1)[1].strip()
             if not os.path.exists(cache_file_path):
-                print(f"Error: Cache file not found at {cache_file_path}")
+                logging.error(f"Cache file reported by script not found at configured path: {cache_file_path}")
                 return False
             
-            # Load the results
-            self.current_health_app_list_file = cache_file_path
-            return self._load_health_apps_from_file(cache_file_path)
-            
+            # Update the config with the new cache file path and save it
+            self.cfg.update_setting_and_save('CURRENT_HEALTH_APP_LIST_FILE', cache_file_path)
+            return self._load_health_apps_from_file(cache_file_path) # Reloads data into self.health_apps_data
+
         except subprocess.TimeoutExpired:
-            print("App scan timed out after 5 minutes")
+            logging.error("App scan timed out after 5 minutes.")
             return False
         except Exception as e:
-            print(f"Error during app scan: {e}")
+            logging.error(f"An unexpected error occurred during app scan: {e}", exc_info=True)
             return False
 
     def _load_health_apps_from_file(self, file_path: str) -> bool:
-        """Load health apps from a JSON file."""
+        """Load health apps from a JSON file into self.health_apps_data."""
+        logging.debug(f"Loading health apps from file: {file_path}")
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-                self.health_apps_data = data.get('apps', []) if isinstance(data, dict) else data
-
-            if not self.health_apps_data:
-                print("No health-related apps found in the scan results.")
+            # Data can be a list of apps, or a dict with an 'apps' key
+            if isinstance(data, dict):
+                self.health_apps_data = data.get('apps', [])
+            elif isinstance(data, list):
+                self.health_apps_data = data
+            else:
+                logging.warning(f"Unexpected data structure in health app file: {file_path}. Expected list or dict with 'apps' key.")
+                self.health_apps_data = []
                 return False
 
-            print(f"Successfully loaded {len(self.health_apps_data)} health apps from {file_path}")
+            if not self.health_apps_data:
+                logging.info(f"No health-related apps found or loaded from {file_path}.")
+                # Not necessarily an error, could be an empty list
+            else:
+                logging.info(f"Successfully loaded {len(self.health_apps_data)} health apps from {file_path}")
             return True
-            
+        except json.JSONDecodeError as e:
+            logging.error(f"Invalid JSON in health app file {file_path}: {e}")
+            self.health_apps_data = []
+            return False
         except Exception as e:
-            print(f"Error loading health apps from file {file_path}: {e}")
+            logging.error(f"Error loading health apps from file {file_path}: {e}", exc_info=True)
+            self.health_apps_data = []
             return False
 
     def list_apps(self):
-        """List available health apps."""
+        """List available health apps from self.health_apps_data."""
         if not self.health_apps_data:
-            print("No health apps loaded. Run scan first.")
+            logging.info("No health apps loaded. Run 'scan-apps' or ensure 'CURRENT_HEALTH_APP_LIST_FILE' in config points to a valid file.")
             return
 
         print(f"\n=== Available Health Apps ({len(self.health_apps_data)}) ===")
         for i, app in enumerate(self.health_apps_data):
-            app_name = app.get('app_name', 'Unknown')
-            package_name = app.get('package_name', 'Unknown')
-            activity_name = app.get('activity_name', 'Unknown')
-            print(f"{i+1:2d}. {app_name}")
-            print(f"     Package: {package_name}")
-            print(f"     Activity: {activity_name}")
-            print()
+            app_name = app.get('app_name', 'N/A')
+            package_name = app.get('package_name', 'N/A')
+            activity_name = app.get('activity_name', 'N/A')
+            print(f"{i+1:2d}. App Name: {app_name}\n     Package:  {package_name}\n     Activity: {activity_name}\n")
+        print("===================================")
 
     def select_app(self, app_identifier: str) -> bool:
-        """Select an app by name or index."""
+        """Select an app by name or index, updating the central cfg."""
         if not self.health_apps_data:
-            print("No health apps loaded. Run scan first.")
+            logging.error("No health apps loaded. Run 'scan-apps' first.")
             return False
 
-        selected_app = None
-        
-        # Try to parse as index first
+        selected_app: Optional[Dict[str, Any]] = None
         try:
-            index = int(app_identifier) - 1  # Convert to 0-based index
+            index = int(app_identifier) - 1 # User provides 1-based index
             if 0 <= index < len(self.health_apps_data):
                 selected_app = self.health_apps_data[index]
-        except ValueError:
-            # Not an index, search by name or package
+        except ValueError: # Not an integer, try matching by name or package
+            app_identifier_lower = app_identifier.lower()
             for app in self.health_apps_data:
-                if (app_identifier.lower() in app.get('app_name', '').lower() or 
-                    app_identifier.lower() in app.get('package_name', '').lower()):
+                if (app_identifier_lower in app.get('app_name', '').lower() or
+                    app_identifier_lower == app.get('package_name', '').lower()):
                     selected_app = app
                     break
-
+        
         if not selected_app:
-            print(f"App '{app_identifier}' not found.")
+            logging.error(f"App '{app_identifier}' not found in the loaded list.")
             return False
 
-        # Update configuration
-        app_package = selected_app.get('package_name', '')
-        app_activity = selected_app.get('activity_name', '')
-        app_name = selected_app.get('app_name', app_package)
+        app_package = selected_app.get('package_name')
+        app_activity = selected_app.get('activity_name')
+        app_name = selected_app.get('app_name', app_package if app_package else "Unknown App")
 
         if not app_package or not app_activity:
-            print(f"Warning: Selected app {app_name} is missing package or activity information")
+            logging.error(f"Selected app '{app_name}' is missing required package_name or activity_name.")
             return False
 
-        self.user_config['APP_PACKAGE'] = app_package
-        self.user_config['APP_ACTIVITY'] = app_activity
-        
-        # Save the selected app info
-        self.user_config['LAST_SELECTED_APP'] = {
+        logging.info(f"Selecting app: '{app_name}' (Package: {app_package}, Activity: {app_activity})")
+        self.cfg.update_setting_and_save('APP_PACKAGE', app_package)
+        self.cfg.update_setting_and_save('APP_ACTIVITY', app_activity)
+        self.cfg.update_setting_and_save('LAST_SELECTED_APP', {
             'package_name': app_package,
             'activity_name': app_activity,
             'app_name': app_name
-        }
-
-        print(f"Selected app: {app_name} ({app_package})")
+        })
         return True
 
     def start_crawler(self) -> bool:
-        """Start the crawler process."""
-        # Clean up any existing shutdown flag
-        if self._shutdown_flag_file_path and os.path.exists(self._shutdown_flag_file_path):
-            try:
-                os.remove(self._shutdown_flag_file_path)
-                print("Removed existing shutdown flag.")
-            except OSError as e:
-                print(f"Warning: Could not remove existing shutdown flag: {e}")
+        """Start the main crawler process."""
+        if not self.cfg.SHUTDOWN_FLAG_PATH:
+            logging.error("Shutdown flag path is not configured in the Config object. Cannot start crawler.")
+            return False
+            
+        if os.path.exists(self.cfg.SHUTDOWN_FLAG_PATH):
+            logging.warning(f"Removing existing shutdown flag: {self.cfg.SHUTDOWN_FLAG_PATH}")
+            try: os.remove(self.cfg.SHUTDOWN_FLAG_PATH)
+            except OSError as e: logging.error(f"Could not remove existing shutdown flag: {e}")
 
-        # Validate configuration
-        if not self.user_config.get('APP_PACKAGE') or not self.user_config.get('APP_ACTIVITY'):
-            print("Error: APP_PACKAGE and APP_ACTIVITY must be set. Select an app first.")
+        if not self.cfg.APP_PACKAGE or not self.cfg.APP_ACTIVITY:
+            logging.error("APP_PACKAGE and APP_ACTIVITY must be set in config. Select an app first using 'select-app'.")
             return False
 
         if self.crawler_process and self.crawler_process.poll() is None:
-            print("Crawler is already running.")
-            return False
+            logging.warning("Crawler process appears to be already running.")
+            return False # Or return True if this is acceptable
 
-        # Save current configuration
-        self.save_config()
+        logging.info("Starting crawler process with current configuration...")
+        # All config changes should ideally be saved when they are made (e.g., via update_setting_and_save).
+        # If an explicit overall save is needed before starting, uncomment:
+        # self.cfg.save_user_config()
 
-        print("Starting crawler...")
-        
         try:
-            # Start the crawler process
-            module_to_run = "traverser_ai_api.main"
-            working_dir = os.path.dirname(self.api_dir)
-            
-            self.crawler_process = subprocess.Popen(
-                [sys.executable, '-u', '-m', module_to_run],
-                cwd=working_dir,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-                universal_newlines=True
-            )
+            # This assumes your main crawler logic is in 'traverser_ai_api.main'
+            # and can be run as a module.
+            module_to_run = "traverser_ai_api.main" 
+            # The CWD should be the project root directory, one level up from self.api_dir
+            # if self.api_dir is where cli_controller.py and find_app_info.py are.
+            project_root_dir = Path(self.api_dir).parent.resolve().as_posix()
+            logging.debug(f"Attempting to start crawler module '{module_to_run}' from CWD: '{project_root_dir}'")
 
-            print(f"Crawler started with PID {self.crawler_process.pid}")
-            print("Use Ctrl+C to stop the crawler gracefully.")
-            
-            # Start monitoring thread
-            monitor_thread = threading.Thread(target=self._monitor_crawler_output, daemon=True)
-            monitor_thread.start()
-            
+            # Using sys.executable ensures the same Python interpreter is used.
+            # -u for unbuffered output. -m to run library module as a script.            # Set PYTHONPATH environment variable to include the project root
+            env = os.environ.copy()
+            env['PYTHONPATH'] = project_root_dir
+            self.crawler_process = subprocess.Popen(
+                [sys.executable, '-u', self.api_dir + os.sep + 'main.py'],  # Run main.py directly
+                cwd=project_root_dir,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,  # Combine stdout and stderr
+                text=True, bufsize=1, universal_newlines=True,  # Line-buffered
+                encoding='utf-8', errors='replace',  # Explicit encoding
+                env=env  # Pass the modified environment
+            )
+            logging.info(f"Crawler process started with PID {self.crawler_process.pid}. Monitoring output...")
+            threading.Thread(target=self._monitor_crawler_output, daemon=True).start()
             return True
-            
+        except FileNotFoundError:
+            logging.error(f"Could not find Python interpreter '{sys.executable}' or module '{module_to_run}'. Ensure paths are correct.") # type: ignore
+            return False
         except Exception as e:
-            print(f"Error starting crawler: {e}")
+            logging.error(f"Failed to start crawler process: {e}", exc_info=True)
             return False
 
     def _monitor_crawler_output(self):
-        """Monitor crawler output in a separate thread."""
+        """Monitor and print crawler output in a separate thread."""
         if not self.crawler_process or not self.crawler_process.stdout:
+            logging.error("Crawler process or its stdout not available for monitoring.")
             return
-
-        step_count = 0
-        
         try:
-            for line in iter(self.crawler_process.stdout.readline, ''):
-                if not line:
-                    break
-                    
-                line = line.strip()
-                if not line:
-                    continue
-
-                # Print all output
-                print(line)
-                
-                # Parse special UI markers for status updates
-                if line.startswith("UI_STEP:"):
-                    step_num = line.split(":", 1)[1].strip()
-                    step_count = int(step_num)
-                    print(f">>> Step: {step_num}")
-                elif line.startswith("UI_STATUS:"):
-                    status = line.split(":", 1)[1].strip()
-                    print(f">>> Status: {status}")
-                elif line.startswith("UI_ACTION:"):
-                    action = line.split(":", 1)[1].strip()
-                    print(f">>> Last Action: {action}")
-                elif line.startswith("UI_SCREENSHOT:"):
-                    screenshot_path = line.split(":", 1)[1].strip()
-                    print(f">>> Screenshot saved: {screenshot_path}")
-                elif line.startswith("UI_END:"):
-                    end_reason = line.split(":", 1)[1].strip()
-                    print(f">>> Crawl ended: {end_reason}")
-                    
+            for line in iter(self.crawler_process.stdout.readline, ''): # Read line by line
+                if not line:  # EOF
+                    break 
+                print(line, end='') # Print the line, maintaining original newlines
+            self.crawler_process.stdout.close() # Close the stream
+            return_code = self.crawler_process.wait() # Wait for process to terminate
+            logging.info(f"Crawler process exited with code {return_code}.")
         except Exception as e:
-            print(f"Error monitoring crawler output: {e}")
+            logging.error(f"Error monitoring crawler output: {e}", exc_info=True)
+        finally:
+            logging.info("Crawler output monitoring thread finished.")
+
 
     def stop_crawler(self) -> bool:
-        """Stop the crawler process gracefully."""
+        """Stop the crawler process gracefully using the shutdown flag, then escalate if needed."""
         if not self.crawler_process or self.crawler_process.poll() is not None:
-            print("Crawler is not running.")
+            logging.info("Crawler is not currently running.")
+            # Clean up flag if it somehow exists and process is not running
+            if self.cfg.SHUTDOWN_FLAG_PATH and os.path.exists(self.cfg.SHUTDOWN_FLAG_PATH):
+                 try: os.remove(self.cfg.SHUTDOWN_FLAG_PATH); logging.debug("Cleaned up stale shutdown flag.")
+                 except OSError: pass
             return True
 
-        print("Stopping crawler...")
-        
-        # Try graceful shutdown first using flag
-        if self._shutdown_flag_file_path:
+        logging.info("Attempting to stop crawler...")
+        shutdown_flag_created = False
+        if self.cfg.SHUTDOWN_FLAG_PATH:
             try:
-                with open(self._shutdown_flag_file_path, 'w') as f:
-                    f.write("stop")
-                print("Shutdown signal sent via flag. Waiting for graceful shutdown...")
-                
-                # Wait up to 15 seconds for graceful shutdown
+                with open(self.cfg.SHUTDOWN_FLAG_PATH, 'w') as f: f.write("stop")
+                shutdown_flag_created = True
+                logging.info(f"Shutdown flag created at {self.cfg.SHUTDOWN_FLAG_PATH}. Waiting for graceful shutdown (timeout: 15s)...")
+                self.crawler_process.wait(timeout=15)
+                logging.info("Crawler process stopped gracefully via flag.")
+            except subprocess.TimeoutExpired:
+                logging.warning("Graceful shutdown via flag timed out. Escalating to SIGTERM...")
+                self.crawler_process.terminate() # Send SIGTERM
                 try:
-                    self.crawler_process.wait(timeout=15)
-                    print("Crawler stopped gracefully.")
-                    self._cleanup_after_stop()
-                    return True
+                    self.crawler_process.wait(timeout=7)
+                    logging.info("Crawler process terminated (SIGTERM).")
                 except subprocess.TimeoutExpired:
-                    print("Graceful shutdown timed out. Terminating...")
-                    
-            except Exception as e:
-                print(f"Error creating shutdown flag: {e}")
-
-        # Force termination
-        try:
+                    logging.warning("SIGTERM timed out. Escalating to SIGKILL...")
+                    self.crawler_process.kill() # Send SIGKILL
+                    self.crawler_process.wait() # Wait for kill to complete
+                    logging.info("Crawler process killed (SIGKILL).")
+            except Exception as e: # Catch errors related to flag creation or initial wait
+                logging.error(f"Error during shutdown flag handling or initial wait: {e}. Attempting direct termination.", exc_info=True)
+                if self.crawler_process.poll() is None: self.crawler_process.terminate() # Try SIGTERM
+        else: # No shutdown flag path configured
+            logging.warning("No SHUTDOWN_FLAG_PATH configured in cfg. Attempting direct SIGTERM.")
             self.crawler_process.terminate()
             try:
                 self.crawler_process.wait(timeout=7)
-                print("Crawler terminated.")
+                logging.info("Crawler process terminated (SIGTERM).")
             except subprocess.TimeoutExpired:
-                print("Termination timed out. Killing process...")
+                logging.warning("SIGTERM timed out. Escalating to SIGKILL...")
                 self.crawler_process.kill()
                 self.crawler_process.wait()
-                print("Crawler killed.")
-                
-            self._cleanup_after_stop()
-            return True
-            
-        except Exception as e:
-            print(f"Error stopping crawler: {e}")
-            return False
-
-    def _cleanup_after_stop(self):
-        """Clean up after stopping the crawler."""
-        if self._shutdown_flag_file_path and os.path.exists(self._shutdown_flag_file_path):
-            try:
-                os.remove(self._shutdown_flag_file_path)
-            except OSError as e:
-                print(f"Warning: Could not remove shutdown flag: {e}")
+                logging.info("Crawler process killed (SIGKILL).")
         
-        self.crawler_process = None
+        self._cleanup_after_stop(shutdown_flag_created)
+        return True
+
+    def _cleanup_after_stop(self, flag_was_created:bool):
+        """Clean up the shutdown flag file if it was created by this stop attempt."""
+        if flag_was_created and self.cfg.SHUTDOWN_FLAG_PATH and os.path.exists(self.cfg.SHUTDOWN_FLAG_PATH):
+            try:
+                os.remove(self.cfg.SHUTDOWN_FLAG_PATH)
+                logging.debug(f"Removed shutdown flag: {self.cfg.SHUTDOWN_FLAG_PATH}")
+            except OSError as e:
+                logging.warning(f"Could not remove shutdown flag {self.cfg.SHUTDOWN_FLAG_PATH}: {e}")
+        self.crawler_process = None # Clear the process reference
 
     def status(self):
-        """Show current status."""
-        print("\n=== Crawler Status ===")
-        
-        # Crawler process status
+        """Show current operational status."""
+        print("\n=== CLI Crawler Status ===")
         if self.crawler_process and self.crawler_process.poll() is None:
-            print(f"Crawler: Running (PID: {self.crawler_process.pid})")
+            print(f"  Crawler Process: Running (PID: {self.crawler_process.pid})")
         else:
-            print("Crawler: Stopped")
+            print("  Crawler Process: Stopped")
         
-        # Configuration status
-        if self.user_config.get('APP_PACKAGE') and self.user_config.get('APP_ACTIVITY'):
-            app_name = self.user_config.get('LAST_SELECTED_APP', {}).get('app_name', 'Unknown')
-            print(f"Target App: {app_name} ({self.user_config['APP_PACKAGE']})")
+        last_selected = self.cfg.LAST_SELECTED_APP
+        if self.cfg.APP_PACKAGE and self.cfg.APP_ACTIVITY:
+            app_name_display = last_selected.get('app_name', 'N/A') if isinstance(last_selected, dict) else 'N/A'
+            print(f"  Target App:      '{app_name_display}' ({self.cfg.APP_PACKAGE})")
         else:
-            print("Target App: Not selected")
+            print("  Target App:      Not Selected")
         
-        # Health apps status
         if self.health_apps_data:
-            print(f"Health Apps: {len(self.health_apps_data)} loaded")
+            print(f"  Health Apps:     {len(self.health_apps_data)} app(s) loaded from '{Path(self.cfg.CURRENT_HEALTH_APP_LIST_FILE).name if self.cfg.CURRENT_HEALTH_APP_LIST_FILE else 'N/A'}'")
         else:
-            print("Health Apps: None loaded")
-        
-        print("=" * 22)
+            print(f"  Health Apps:     None loaded (last checked file: '{self.cfg.CURRENT_HEALTH_APP_LIST_FILE or 'N/A'}')")
+        print(f"  Log Level:       {self.cfg.LOG_LEVEL}")
+        print(f"  Shutdown Flag:   {self.cfg.SHUTDOWN_FLAG_PATH or 'Not Configured'}")
+        print("========================")
 
 
-def create_parser():
-    """Create the argument parser."""
+def create_parser() -> argparse.ArgumentParser:
+    """Creates the argument parser for the CLI."""
     parser = argparse.ArgumentParser(
-        description="CLI Controller for Appium Crawler",
+        description="CLI Controller for Appium Crawler.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
+        epilog=textwrap.dedent("""
 Examples:
-  %(prog)s --scan-apps                    # Scan for health apps
-  %(prog)s --list-apps                    # List available apps
-  %(prog)s --select-app "Blood Donation"  # Select app by name
-  %(prog)s --select-app 1                 # Select app by index
-  %(prog)s --start                        # Start crawler
-  %(prog)s --stop                         # Stop crawler
-  %(prog)s --status                       # Show status
-  %(prog)s --show-config                  # Show configuration
-  %(prog)s --set-config CRAWL_MODE=time   # Set config value
-  %(prog)s --save-config                  # Save configuration
-        """
+  %(prog)s status
+  %(prog)s scan-apps
+  %(prog)s list-apps
+  %(prog)s select-app "Your App Name"  # Or use index: %(prog)s select-app 1
+  %(prog)s show-config
+  %(prog)s set-config MAX_CRAWL_STEPS=50
+  %(prog)s set-config ALLOWED_EXTERNAL_PACKAGES="com.example.one,com.example.two"
+  %(prog)s save-config                 # Explicitly save any pending changes to user_config.json
+  %(prog)s start
+  %(prog)s stop
+        """)
     )
+    # ... (rest of your create_parser function, ensure it's here) ...
+    # For brevity, I'll use a simplified version of your parser definition.
+    # Ensure you use your full parser definition.
+    app_group = parser.add_argument_group('App Management')
+    app_group.add_argument('--scan-apps', action='store_true', help='Scan device for health-related apps and update config.')
+    app_group.add_argument('--list-apps', action='store_true', help='List available health apps from the last scan.')
+    app_group.add_argument('--select-app', metavar='APP_NAME_OR_INDEX', help='Select app by name or 1-based index to set as target.')
 
-    # App management commands
-    app_group = parser.add_argument_group('app management')
-    app_group.add_argument('--scan-apps', action='store_true',
-                          help='Scan device for health-related apps')
-    app_group.add_argument('--list-apps', action='store_true',
-                          help='List available health apps')
-    app_group.add_argument('--select-app', metavar='NAME_OR_INDEX',
-                          help='Select app by name or index')
+    crawler_group = parser.add_argument_group('Crawler Control')
+    crawler_group.add_argument('--start', action='store_true', help='Start the crawler with current configuration.')
+    crawler_group.add_argument('--stop', action='store_true', help='Stop the running crawler.')
+    crawler_group.add_argument('--status', action='store_true', help='Show current status of the CLI controller and crawler.')
 
-    # Crawler control commands
-    crawler_group = parser.add_argument_group('crawler control')
-    crawler_group.add_argument('--start', action='store_true',
-                              help='Start the crawler')
-    crawler_group.add_argument('--stop', action='store_true',
-                              help='Stop the crawler')
-    crawler_group.add_argument('--status', action='store_true',
-                              help='Show current status')
-
-    # Configuration commands
-    config_group = parser.add_argument_group('configuration')
-    config_group.add_argument('--show-config', metavar='FILTER',
-                             nargs='?', const='',
-                             help='Show configuration (optionally filtered)')
-    config_group.add_argument('--set-config', metavar='KEY=VALUE',
-                             action='append',
-                             help='Set configuration value (can be used multiple times)')
-    config_group.add_argument('--save-config', action='store_true',
-                             help='Save current configuration')
-
-    # Global options
-    parser.add_argument('--force-rescan', action='store_true',
-                       help='Force rescan even if cached results exist')
-    parser.add_argument('--verbose', '-v', action='store_true',
-                       help='Enable verbose logging')
-
+    config_group = parser.add_argument_group('Configuration Management')
+    config_group.add_argument('--show-config', metavar='FILTER_KEY', nargs='?', const='', help='Show current configuration (optionally filter by key).')
+    config_group.add_argument('--set-config', metavar='KEY=VALUE', action='append', help='Set a configuration value (e.g., MAX_CRAWL_STEPS=100). For lists, use comma-separated values.')
+    config_group.add_argument('--save-config', action='store_true', help='Explicitly save all current config settings to user_config.json.')
+    
+    parser.add_argument('--force-rescan', action='store_true', help='Force app rescan even if a cached list exists.')
+    parser.add_argument('-v', '--verbose', action='store_true', help='Enable verbose DEBUG logging for the CLI session.')
     return parser
 
+# Need textwrap for the epilog in create_parser
+import textwrap
 
-def main():
-    """Main entry point for the CLI."""
+def main_cli():
+    """Main entry point for the CLI application."""
     parser = create_parser()
     args = parser.parse_args()
 
-    # Setup logging
-    log_level = logging.DEBUG if args.verbose else logging.INFO
+    # --- Bootstrap Logging (minimal, before full logger setup) ---
+    # SCRIPT_START_TIME is imported from utils
+    bootstrap_log_level = 'DEBUG' if args.verbose else 'INFO'
     logging.basicConfig(
-        level=log_level,
-        format='%(asctime)s - %(levelname)s - %(message)s'
+        level=bootstrap_log_level,
+        format=f"%(asctime)s [{SCRIPT_START_TIME:.0f}] [%(levelname)s] %(message)s (bootstrap)",
+        datefmt='%H:%M:%S'
     )
+    logging.info("CLI Bootstrap logging initialized.")
 
-    # Create controller
-    controller = CLIController()
-    
-    # Load configuration
-    controller.load_config()
+    # --- Configuration Setup ---
+    _cli_script_dir = os.path.dirname(os.path.abspath(__file__))
+    # Assumes config.py (with defaults and Config class) is in the same directory as cli_controller.py
+    DEFAULT_CONFIG_MODULE_PATH_CLI = os.path.join(_cli_script_dir, 'config.py') 
+    USER_CONFIG_JSON_PATH_CLI = os.path.join(_cli_script_dir, "user_config.json")
 
-    # Execute commands
     try:
-        # App management commands
+        cli_cfg = Config(
+            defaults_module_path=DEFAULT_CONFIG_MODULE_PATH_CLI,
+            user_config_json_path=USER_CONFIG_JSON_PATH_CLI
+        )
+        # Define and set the shutdown flag path on the cfg instance
+        # This path is relative to where config.py (defaults module) is located.
+        cli_cfg.SHUTDOWN_FLAG_PATH = os.path.join(cli_cfg.BASE_DIR, "crawler_shutdown.flag")
+        logging.debug(f"Config object initialized. Shutdown flag path: {cli_cfg.SHUTDOWN_FLAG_PATH}")
+
+    except Exception as e:
+        logging.critical(f"Failed to initialize Config object for CLI: {e}", exc_info=True)
+        sys.exit(100)
+
+    # --- Setup Full Application Logging ---
+    logger_manager_cli = LoggerManager()
+    # Determine final log directory (ensure cfg.OUTPUT_DATA_DIR is valid)
+    _log_base_dir_cli = cli_cfg.OUTPUT_DATA_DIR if cli_cfg.OUTPUT_DATA_DIR and os.path.isdir(os.path.dirname(cli_cfg.OUTPUT_DATA_DIR)) else _cli_script_dir
+    _final_log_dir_cli = os.path.join(_log_base_dir_cli, "logs", "cli") # Separate CLI logs
+    os.makedirs(_final_log_dir_cli, exist_ok=True)
+    _final_log_file_path_cli = os.path.join(_final_log_dir_cli, f"cli_{cli_cfg.LOG_FILE_NAME}")
+    
+    effective_log_level = 'DEBUG' if args.verbose else cli_cfg.LOG_LEVEL
+    
+    root_logger_cli = logger_manager_cli.setup_logging(
+        log_level_str=effective_log_level, 
+        log_file=_final_log_file_path_cli
+    )
+    root_logger_cli.info(f"CLI Application Logging Initialized. Level: {effective_log_level}. File: '{_final_log_file_path_cli}'")
+    if args.verbose and cli_cfg.LOG_LEVEL.upper() != 'DEBUG':
+        root_logger_cli.info(f"CLI session is verbose (DEBUG), but app default LOG_LEVEL is {cli_cfg.LOG_LEVEL}.")
+
+
+    # --- Initialize and Run CLIController ---
+    controller = CLIController(app_config_instance=cli_cfg)
+    
+    action_taken = False
+    exit_code = 0
+    try:
         if args.scan_apps:
-            if not controller.scan_apps(force_rescan=args.force_rescan):
-                sys.exit(1)
-
-        if args.list_apps:
+            action_taken = True
+            if not controller.scan_apps(force_rescan=args.force_rescan): exit_code = 1
+        if args.list_apps and exit_code == 0: # Proceed if previous actions succeeded
+            action_taken = True
             controller.list_apps()
-
-        if args.select_app:
-            if not controller.select_app(args.select_app):
-                sys.exit(1)
-
-        # Configuration commands
-        if args.show_config is not None:
+        if args.select_app and exit_code == 0:
+            action_taken = True
+            if not controller.select_app(args.select_app): exit_code = 1
+        if args.show_config is not None and exit_code == 0:
+            action_taken = True
             controller.show_config(args.show_config if args.show_config else None)
-
-        if args.set_config:
+        if args.set_config and exit_code == 0:
+            action_taken = True
             for config_item in args.set_config:
                 if '=' not in config_item:
-                    print(f"Error: Invalid config format '{config_item}'. Use KEY=VALUE")
-                    sys.exit(1)
-                key, value = config_item.split('=', 1)
-                if not controller.set_config(key, value):
-                    sys.exit(1)
-
-        if args.save_config:
-            if not controller.save_config():
-                sys.exit(1)
-
-        # Crawler control commands
-        if args.status:
+                    logging.error(f"Invalid config format '{config_item}'. Use KEY=VALUE"); exit_code = 1; break
+                key, value_str = config_item.split('=', 1)
+                if not controller.set_config_value(key, value_str): exit_code = 1; break
+        if args.save_config and exit_code == 0:
+            action_taken = True
+            if not controller.save_all_changes(): exit_code = 1
+        if args.status and exit_code == 0:
+            action_taken = True
             controller.status()
+        if args.start and exit_code == 0:
+            action_taken = True
+            if not controller.start_crawler(): 
+                exit_code = 1
+            else: # If crawler started, wait for it or interruption
+                try:
+                    if controller.crawler_process: controller.crawler_process.wait()
+                    logging.info("Crawler process finished.")
+                except KeyboardInterrupt:
+                    logging.info("User interrupted crawl. Stopping crawler...")
+                    controller.stop_crawler()
+                    exit_code = 130 # Interrupted
+        if args.stop: # Can be called independently
+            action_taken = True # Considered an action even if crawler wasn't running
+            if not controller.stop_crawler(): exit_code = 1
 
-        if args.start:
-            if not controller.start_crawler():
-                sys.exit(1)
-            # Wait for the process to complete
-            try:
-                if controller.crawler_process:
-                    controller.crawler_process.wait()
-            except KeyboardInterrupt:
-                print("\nInterrupted by user. Stopping crawler...")
-                controller.stop_crawler()
-
-        if args.stop:
-            if not controller.stop_crawler():
-                sys.exit(1)
-
-        # If no commands specified, show help
-        if not any([args.scan_apps, args.list_apps, args.select_app, args.start, 
-                   args.stop, args.status, args.show_config is not None, 
-                   args.set_config, args.save_config]):
+        if not action_taken and exit_code == 0: # No command was given
             parser.print_help()
+        
+        if exit_code != 0:
+             logging.error(f"CLI command failed with exit code {exit_code}.")
 
     except KeyboardInterrupt:
-        print("\nInterrupted by user.")
-        controller.stop_crawler()
-        sys.exit(1)
+        logging.info("CLI operation interrupted by user.")
+        if controller.crawler_process and controller.crawler_process.poll() is None:
+            controller.stop_crawler()
+        exit_code = 130 # Standard for SIGINT
     except Exception as e:
-        print(f"Error: {e}")
-        logging.exception("Unexpected error")
-        sys.exit(1)
-
+        logging.critical(f"An unexpected error occurred in CLI: {e}", exc_info=True)
+        exit_code = 1
+    finally:
+        logging.info(f"CLI session finished with exit_code: {exit_code}")
+        sys.exit(exit_code)
 
 if __name__ == '__main__':
-    main()
+    # SCRIPT_START_TIME is imported from utils and set when utils.py is loaded.
+    main_cli()

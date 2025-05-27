@@ -1,128 +1,167 @@
+# action_executor.py
 import logging
-from typing import Tuple, Optional, Any, Union, TYPE_CHECKING
+import time
+from typing import Tuple, Optional, Any, Union, TYPE_CHECKING, Dict # Added Dict
 
 from selenium.webdriver.remote.webelement import WebElement
-# Import AppiumDriver if type hinting for self.driver is needed and it's not too complex
-# from .appium_driver import AppiumDriver # Example
 
+# Import your main Config class and AppiumDriver
+# Adjust paths based on your project structure
 if TYPE_CHECKING:
-    from .appium_driver import AppiumDriver
+    from appium_driver import AppiumDriver # For type hinting
+from config import Config # Assuming Config class is in config.py in the same package
 
 class ActionExecutor:
-    """Handles the execution of mapped Appium actions."""
+    """Handles the execution of mapped Appium actions using a centralized Config object."""
 
-    def __init__(self, driver: 'AppiumDriver', config_dict: dict):
-        self.driver = driver
-        self.config_dict = config_dict
-
-        # Verify required configuration values
-        if 'MAX_CONSECUTIVE_EXEC_FAILURES' not in config_dict:
-            raise ValueError("MAX_CONSECUTIVE_EXEC_FAILURES not configured")
-
-        self.consecutive_exec_failures = 0  # Initialize to 0 but fail based on MAX_CONSECUTIVE_EXEC_FAILURES from config
-        
-    def execute_action(self, mapped_action: Tuple[str, Union[WebElement, dict[str, Any], str, None], Optional[str], Optional[str]]) -> bool:
-        """Executes the mapped Appium action.
-        Args:
-            mapped_action: A 4-tuple containing (action_type, target_info, input_text, action_mode)
-                where:
-                - action_type: The type of action to perform (e.g., click, input, scroll)
-                - target_info: WebElement for element actions, dict for coordinates, str for scroll direction, or None
-                - input_text: Text to input for input actions, or None
-                - action_mode: Special handling mode (e.g., "coordinate_action") or None
-        Returns:
-            bool: True if action was successful, False otherwise
+    def __init__(self, driver: 'AppiumDriver', app_config: Config): # Changed signature
         """
-        if not isinstance(mapped_action, tuple) or len(mapped_action) != 4:
-            logging.error(f"Invalid mapped_action: expected 4-tuple, got {type(mapped_action)}")
+        Initialize the ActionExecutor.
+
+        Args:
+            driver (AppiumDriver): An instance of the refactored AppiumDriver.
+            app_config (Config): The main application Config object instance.
+        """
+        self.driver = driver
+        self.cfg = app_config # Store the Config object instance
+
+        # Verify required configuration values from self.cfg
+        if not hasattr(self.cfg, 'MAX_CONSECUTIVE_EXEC_FAILURES') or self.cfg.MAX_CONSECUTIVE_EXEC_FAILURES is None:
+            logging.warning("MAX_CONSECUTIVE_EXEC_FAILURES not in config, defaulting to 3.")
+            self.max_exec_failures = 3
+        else:
+            self.max_exec_failures = int(self.cfg.MAX_CONSECUTIVE_EXEC_FAILURES)
+        
+        # For ADB input fallback
+        self.use_adb_input_fallback = getattr(self.cfg, 'USE_ADB_INPUT_FALLBACK', False)
+
+        self.consecutive_exec_failures = 0
+        logging.info(f"ActionExecutor initialized. Max exec failures: {self.max_exec_failures}. ADB input fallback: {self.use_adb_input_fallback}")
+
+    def execute_action(self, action_details: Dict[str, Any]) -> bool:
+        """
+        Executes the mapped Appium action.
+        ActionMapper now returns a Dict.
+
+        Args:
+            action_details (Dict[str, Any]): A dictionary from ActionMapper, e.g.,
+                {'type': 'click', 'element': WebElement, 'element_info': {...}}
+                {'type': 'input', 'element': WebElement, 'text': '...', 'element_info': {...}}
+                {'type': 'tap_coords', 'coordinates': (x,y), 'original_bbox': {...}, 'intended_input_text': '...'}
+                {'type': 'scroll', 'direction': 'down'}
+                {'type': 'back'}
+        Returns:
+            bool: True if action was successful, False otherwise.
+        """
+        if not isinstance(action_details, dict) or 'type' not in action_details:
+            logging.error(f"Invalid action_details: expected dict with 'type' key, got {action_details}")
+            self._track_failure("Invalid action details structure")
             return False
         
-        action_type, target_info, input_text, action_mode = mapped_action
+        action_type = action_details.get("type")
+        element: Optional[WebElement] = action_details.get("element") # type: ignore
+        target_info_dict: Optional[Dict[str, Any]] = action_details # For coordinate actions
+        input_text: Optional[str] = action_details.get("text")
+        scroll_direction: Optional[str] = action_details.get("direction")
+        
+        # For coordinate-based input, ActionMapper might add this
+        intended_input_text_for_coord_tap: Optional[str] = action_details.get("intended_input_text")
+
 
         success = False
-        target_log_info = ""
+        action_log_info = f"Action Type: {action_type}"
 
-        if action_mode == "coordinate_action" and isinstance(target_info, dict) and "coordinates" in target_info:
-            coords = target_info["coordinates"]
-            target_log_info = f"Coordinates: {coords}"
-            logging.info(f"Executing coordinate-based: {action_type.upper()} at {target_log_info}")
-            if action_type == "click":
-                try:
-                    center_x, center_y = coords
-                    success = self.driver.tap_at_coordinates(center_x, center_y)
-                except Exception as e:
-                    logging.error(f"Exception during coordinate-based click at {coords}: {e}", exc_info=True)
-                    success = False
-            elif action_type == "input" and isinstance(input_text, str):
-                try:
-                    center_x, center_y = coords
-                    logging.info(f"Attempting coordinate-based INPUT. Tapping at ({center_x}, {center_y}) to focus.")
-                    tap_success = self.driver.tap_at_coordinates(center_x, center_y)
-                    if tap_success:
-                        logging.info(f"Tap successful for coordinate input. Attempting to send keys: '{input_text}'")
-                        active_element = self.driver.get_active_element()
-                        if active_element:
-                            success = self.driver.input_text_into_element(active_element, input_text, click_first=False) # click_first=False as we already tapped
-                            if not success:
-                                logging.warning(f"Failed to send keys to active element after coordinate tap. Trying ADB fallback if configured.")
-                                # Placeholder for potential ADB fallback in future
+        try:
+            if action_type == "tap_coords":
+                coordinates = action_details.get("coordinates")
+                if isinstance(coordinates, tuple) and len(coordinates) == 2:
+                    action_log_info += f", Coords: {coordinates}"
+                    logging.info(f"Executing coordinate-based tap at {coordinates}")
+                    success = self.driver.tap_at_coordinates(coordinates[0], coordinates[1])
+                    if success and intended_input_text_for_coord_tap is not None:
+                        logging.info(f"Coordinate tap successful. Now attempting to input text: '{intended_input_text_for_coord_tap}'")
+                        time.sleep(0.5) # Brief pause for focus after tap
+                        # Try sending to active element first, if any
+                        active_el = self.driver.get_active_element()
+                        input_via_active_el = False
+                        if active_el:
+                            logging.debug(f"Found active element (ID: {active_el.id}) after coord tap, attempting input.")
+                            input_via_active_el = self.driver.input_text_into_element(active_el, intended_input_text_for_coord_tap, click_first=False, clear_first=True)
+                        
+                        if not input_via_active_el:
+                            if self.use_adb_input_fallback:
+                                logging.warning("Input to active element failed or no active element. Trying ADB input fallback.")
+                                success = self.driver.type_text_by_adb(intended_input_text_for_coord_tap)
+                            else:
+                                logging.warning("Input to active element failed and ADB fallback disabled. Input part of coordinate action failed.")
+                                success = False # Overall input action failed if text part fails
                         else:
-                            logging.warning("No active element found after coordinate tap. Input via coordinates failed.")
-                            success = False
-                    else:
-                        logging.warning(f"Tap failed for coordinate-based INPUT at ({center_x}, {center_y}). Cannot proceed with input.")
-                        success = False
-                except Exception as e:
-                    logging.error(f"Exception during coordinate-based input at {coords} for text '{input_text}': {e}", exc_info=True)
-                    success = False
-            else:
-                logging.error(f"Unknown coordinate-based action type: {action_type}")
-                success = False
-
-        elif isinstance(target_info, WebElement):
-            try:
-                target_log_info = f"Element (ID: {target_info.id})"
-            except:
-                target_log_info = "Element (Stale?)"
-            logging.info(f"Executing element-based: {action_type.upper()} on {target_log_info}")
-            try:
-                if action_type == "click":
-                    success = self.driver.click_element(target_info)
-                elif action_type == "input" and isinstance(input_text, str):
-                    success = self.driver.input_text_into_element(target_info, input_text)
-                elif action_type == "scroll":
-                    success = self.driver.scroll(direction=str(input_text), element=target_info)
+                            success = True # Input to active element succeeded
                 else:
-                    logging.error(f"Cannot execute unknown element-based action type: {action_type} on {target_log_info}")
+                    logging.error(f"Invalid 'coordinates' for tap_coords: {coordinates}")
                     success = False
-            except Exception as e:
-                logging.error(f"Exception during element-based action ({action_type} on {target_log_info}): {e}", exc_info=True)
+
+            elif action_type == "click":
+                if isinstance(element, WebElement):
+                    action_log_info += f", Element ID: {getattr(element, 'id', 'N/A')}"
+                    success = self.driver.click_element(element)
+                else:
+                    logging.error(f"Invalid element for click action: {element}")
+                    success = False
+            
+            elif action_type == "input":
+                if isinstance(element, WebElement) and input_text is not None:
+                    action_log_info += f", Element ID: {getattr(element, 'id', 'N/A')}, Text: '{input_text}'"
+                    success = self.driver.input_text_into_element(element, input_text)
+                elif not isinstance(element, WebElement):
+                    logging.error(f"Invalid element for input action: {element}")
+                    success = False
+                else: # input_text is None
+                    logging.warning(f"Input action called but input_text is None for Element ID: {getattr(element, 'id', 'N/A')}. Assuming clear or no-op.")
+                    # Attempting to clear the element if input_text is None
+                    if isinstance(element, WebElement):
+                        try:
+                            element.clear()
+                            success = True
+                            logging.info(f"Cleared element (ID: {getattr(element, 'id', 'N/A')}) as input_text was None.")
+                        except Exception as e_clear:
+                            logging.warning(f"Failed to clear element (ID: {getattr(element, 'id', 'N/A')}): {e_clear}")
+                            success = False # Clearing failed
+                    else:
+                        success = False # No element to clear
+            
+            elif action_type == "scroll":
+                if isinstance(scroll_direction, str):
+                    action_log_info += f", Direction: {scroll_direction}"
+                    success = self.driver.scroll(direction=scroll_direction) # element is optional in AppiumDriver.scroll
+                else:
+                    logging.error(f"Invalid direction for scroll action: {scroll_direction}")
+                    success = False
+            
+            elif action_type == "back":
+                success = self.driver.press_back_button()
+            
+            else:
+                logging.error(f"Unknown action type for execution: {action_type}")
                 success = False
 
-        elif action_type == "scroll" and isinstance(target_info, str): # For scroll direction
-            target_log_info = f"Direction: {target_info}"
-            logging.info(f"Executing: {action_type.upper()} {target_log_info}")
-            try:
-                success = self.driver.scroll(direction=target_info)
-            except Exception as e:
-                logging.error(f"Exception during scroll action ({target_log_info}): {e}", exc_info=True)
-                success = False
-        elif action_type == "back" and target_info is None:
-            logging.info(f"Executing: {action_type.upper()}")
-            try:
-                success = self.driver.press_back_button()
-            except Exception as e:
-                logging.error(f"Exception during back action: {e}", exc_info=True)
-                success = False
-        else:
-            logging.error(f"Cannot execute unknown/invalid mapped action. Type: {action_type}, Target Info: {target_info} (Type: {type(target_info)}), Mode: {action_mode}")
+        except Exception as e:
+            logging.error(f"Exception during action execution ({action_log_info}): {e}", exc_info=True)
             success = False
 
         if success:
             self.consecutive_exec_failures = 0
-            logging.info(f"Action {action_type.upper()} successful.")
+            logging.info(f"Action execution successful: {action_log_info}")
         else:
-            self.consecutive_exec_failures += 1
-            max_failures = self.config_dict['MAX_CONSECUTIVE_EXEC_FAILURES']
-            logging.warning(f"Action {action_type.upper()} execution failed ({self.consecutive_exec_failures}/{max_failures} consecutive). Target: {target_log_info}")
+            self._track_failure(f"Failed: {action_log_info}")
+        
         return success
+
+    def _track_failure(self, reason: str):
+        """Tracks execution failures."""
+        self.consecutive_exec_failures += 1
+        logging.warning(
+            f"Action execution failed: {reason}. Consecutive execution failures: "
+            f"{self.consecutive_exec_failures}/{self.max_exec_failures}"
+        )
+        # Termination logic is handled by AppCrawler using this counter.

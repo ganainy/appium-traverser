@@ -1,266 +1,325 @@
+# action_mapper.py
 import logging
 import time
-from typing import Optional, Tuple, Any, List, Dict
-from appium.webdriver.common.appiumby import AppiumBy
-from appium.webdriver.webelement import WebElement
-from selenium.common.exceptions import NoSuchElementException, InvalidSelectorException
+from typing import Optional, Tuple, Any, List, Dict, TYPE_CHECKING
 
-# Assuming AppiumDriver is in appium_driver.py and has a find_element and find_elements method
-# from .appium_driver import AppiumDriver # This will be used if ActionMapper takes an AppiumDriver instance
+from appium.webdriver.common.appiumby import AppiumBy
+# WebElement is imported via TYPE_CHECKING for AppiumDriver, but if used directly here, ensure it's available.
+# from selenium.webdriver.remote.webelement import WebElement 
+from selenium.common.exceptions import NoSuchElementException, InvalidSelectorException, StaleElementReferenceException
+
+# Import your main Config class and AppiumDriver
+# Adjust paths based on your project structure
+if TYPE_CHECKING: # For type hinting to avoid circular imports if AppiumDriver imports ActionMapper
+    from appium_driver import AppiumDriver 
+from config import Config # Assuming Config class is in config.py in the same package
+
 
 class ActionMapper:
-    def __init__(self, driver, element_finding_strategies, config_dict: dict): # driver is an instance of AppiumDriver
-        self.driver = driver
-        self.element_finding_strategies = element_finding_strategies
-        
-        # Validate required configuration values
-        if 'USE_COORDINATE_FALLBACK' not in config_dict:
-            raise ValueError("USE_COORDINATE_FALLBACK is required in configuration")
-        if 'MAX_CONSECUTIVE_MAP_FAILURES' not in config_dict:
-            raise ValueError("MAX_CONSECUTIVE_MAP_FAILURES not configured")
-            
-        self.use_coordinate_fallback = config_dict['USE_COORDINATE_FALLBACK']
-        self.consecutive_map_failures = 0  # Initialize to 0 but fail based on config
-        self.config_dict = config_dict
-        
-        logging.info(f"ActionMapper initialized. Coordinate fallback is {'ENABLED' if self.use_coordinate_fallback else 'DISABLED'}.")
+    def __init__(self, driver: 'AppiumDriver', element_finding_strategies: List[Tuple[str, Optional[str], str]], app_config: Config):
+        """
+        Initialize the ActionMapper.
 
-    def _find_element_by_ai_identifier(self, identifier: str) -> Optional[WebElement]:
+        Args:
+            driver (AppiumDriver): An instance of the refactored AppiumDriver.
+            element_finding_strategies (List[Tuple[str, Optional[str], str]]): 
+                List of strategies to find elements. Example: [('id', AppiumBy.ID, "ID"), ...].
+                The AppiumBy string itself is passed, not the direct AppiumBy member for flexibility if strategies evolve.
+            app_config (Config): The main application Config object instance.
+        """
+        self.driver = driver
+        self.element_finding_strategies = element_finding_strategies # Store as is
+        self.cfg = app_config # Store the Config object instance
+
+        # Validate required configuration values from self.cfg
+        if not hasattr(self.cfg, 'USE_COORDINATE_FALLBACK') or self.cfg.USE_COORDINATE_FALLBACK is None:
+            # Defaulting if not explicitly set, but better to ensure it's in Config class
+            logging.warning("USE_COORDINATE_FALLBACK not explicitly in config, defaulting to True for ActionMapper.")
+            self.use_coordinate_fallback = True 
+        else:
+            self.use_coordinate_fallback = bool(self.cfg.USE_COORDINATE_FALLBACK)
+
+        if not hasattr(self.cfg, 'MAX_CONSECUTIVE_MAP_FAILURES') or self.cfg.MAX_CONSECUTIVE_MAP_FAILURES is None:
+            logging.warning("MAX_CONSECUTIVE_MAP_FAILURES not explicitly in config, defaulting to 3 for ActionMapper.")
+            self.max_map_failures = 3
+        else:
+            self.max_map_failures = int(self.cfg.MAX_CONSECUTIVE_MAP_FAILURES)
+            
+        self.consecutive_map_failures = 0
+        
+        logging.info(
+            f"ActionMapper initialized. Coordinate fallback: {'ENABLED' if self.use_coordinate_fallback else 'DISABLED'}. "
+            f"Max map failures: {self.max_map_failures}"
+        )
+
+    def _find_element_by_ai_identifier(self, identifier: str) -> Optional[Any]: # Return type Any for WebElement
         """
         Attempts to find a WebElement using the identifier provided by the AI,
-        trying different strategies in a dynamically prioritized order.
-        Promotes successful strategies and returns immediately upon finding a suitable element.
+        trying different strategies. Promotes successful strategies.
         """
-        if not identifier or not self.driver or not self.driver.driver: # self.driver.driver refers to the actual appium webdriver
+        if not identifier or not self.driver:
             logging.warning("Cannot find element: Invalid identifier or driver not available.")
             return None
+        # self.driver.driver would refer to the raw Appium WebDriver instance if your AppiumDriver wrapper has such an attribute.
+        # Assuming self.driver (AppiumDriver instance) has a method like find_element and find_elements.
+        if not self.driver.driver: # Check if the raw driver is connected
+             logging.warning("Raw Appium WebDriver not available in AppiumDriver instance.")
+             return None
+
 
         logging.info(f"Attempting to find element using identifier: '{identifier}'")
         total_start_time = time.perf_counter()
 
-        for index, (strategy_key, appium_by, log_name) in enumerate(self.element_finding_strategies):
-            element: Optional[WebElement] = None
+        for index, (strategy_key, appium_by_strategy_str, log_name) in enumerate(self.element_finding_strategies):
+            element: Optional[Any] = None # WebElement
             start_time = time.perf_counter()
             xpath_generated = ""
 
             try:
-                if strategy_key in ['id', 'acc_id']:
-                    logging.debug(f"Trying {log_name}: '{identifier}'")
-                    element = self.driver.find_element(appium_by, identifier)
+                actual_appium_by: Optional[str] = None
+                if appium_by_strategy_str: # If an AppiumBy strategy string is provided
+                    actual_appium_by = appium_by_strategy_str # e.g., "id", "accessibility id"
+
+                if strategy_key in ['id', 'acc_id'] and actual_appium_by:
+                    logging.debug(f"Trying {log_name}: '{identifier}' using AppiumBy strategy '{actual_appium_by}'")
+                    element = self.driver.find_element(by=actual_appium_by, value=identifier) # Assumes AppiumDriver.find_element handles string 'by'
                 elif strategy_key == 'xpath_exact':
-                    if "'" in identifier and '"' in identifier:
+                    # Robust quote handling for XPath
+                    if "'" in identifier and '"' in identifier: # Contains both single and double
                         parts = []
-                        for i, part in enumerate(identifier.split("'")):
-                            if '"' in part: parts.append(f"'{part}'")
-                            elif part: parts.append(f'"{part}"')
-                            if i < len(identifier.split("'")) - 1: parts.append("\"'\"")
+                        split_by_single = identifier.split("'")
+                        for i, part in enumerate(split_by_single):
+                            if '"' in part: parts.append(f"'{part}'") # Part has double, enclose in single
+                            elif part: parts.append(f'"{part}"')      # Part safe for double, enclose in double
+                            if i < len(split_by_single) - 1: parts.append("\"'\"") # Add escaped single quote
                         xpath_text_expression = f"concat({','.join(filter(None, parts))})"
-                    elif "'" in identifier: xpath_text_expression = f'"{identifier}"'
-                    elif '"' in identifier: xpath_text_expression = f"'{identifier}'"
-                    else: xpath_text_expression = f"'{identifier}'"
-                    xpath_generated = f"//*[@text={xpath_text_expression}]"
+                    elif "'" in identifier: xpath_text_expression = f'"{identifier}"' # Contains single, use double
+                    elif '"' in identifier: xpath_text_expression = f"'{identifier}'" # Contains double, use single
+                    else: xpath_text_expression = f"'{identifier}'" # No quotes, use single
+                    
+                    xpath_generated = f"//*[@text={xpath_text_expression} or @content-desc={xpath_text_expression} or @resource-id='{identifier}']"
                     logging.debug(f"Trying {log_name} (Quote Safe): {xpath_generated}")
-                    element = self.driver.find_element(AppiumBy.XPATH, xpath_generated)
+                    element = self.driver.find_element(by=AppiumBy.XPATH, value=xpath_generated)
                 elif strategy_key == 'xpath_contains':
+                    # Simpler quote handling for contains, as exact match is less critical
                     if "'" in identifier: xpath_safe_identifier = f'"{identifier}"'
                     else: xpath_safe_identifier = f"'{identifier}'"
-                    xpath_generated = (f"//*[contains(@text, {xpath_safe_identifier}) or "
-                                       f"contains(@content-desc, {xpath_safe_identifier}) or "
-                                       f"contains(@resource-id, {xpath_safe_identifier})]")
-                    logging.debug(f"Trying {log_name} (Basic Quote Handling): {xpath_generated}")
-                    possible_elements = self.driver.driver.find_elements(AppiumBy.XPATH, xpath_generated) # Access raw driver for find_elements
+                    
+                    xpath_generated = (
+                        f"//*[contains(@text, {xpath_safe_identifier}) or "
+                        f"contains(@content-desc, {xpath_safe_identifier}) or "
+                        f"contains(@resource-id, {xpath_safe_identifier})]"
+                    )
+                    logging.debug(f"Trying {log_name} (Quote Safe Contains): {xpath_generated}")
+                    # Use driver.find_elements to get a list and then filter
+                    possible_elements = self.driver.driver.find_elements(AppiumBy.XPATH, xpath_generated)
                     found_count = len(possible_elements)
                     logging.debug(f"Found {found_count} potential elements via '{log_name}' XPath.")
                     for el in possible_elements:
                         try:
                             if el.is_displayed() and el.is_enabled():
                                 element = el
-                                break
-                        except Exception: continue
-                    if not element:
-                         logging.debug(f"No suitable element found by '{log_name}' XPath after filtering.")
+                                break 
+                        except StaleElementReferenceException: # Element might go stale during iteration
+                            logging.debug("Stale element encountered while filtering XPath contains results.")
+                            continue
+                        except Exception: continue # Ignore other errors for non-critical filtering
+                    if not element and found_count > 0:
+                        logging.debug(f"No suitable (displayed/enabled) element found by '{log_name}' XPath after filtering {found_count} candidates.")
+                    elif found_count == 0:
+                        logging.debug(f"No elements found by '{log_name}' XPath.")
+
 
                 duration = time.perf_counter() - start_time
 
-                if element and element.is_displayed() and element.is_enabled():
-                    logging.info(f"Found element by {log_name}: '{identifier}' (took {duration:.4f}s)")
-                    if index > 0:
-                        promoted_strategy = self.element_finding_strategies.pop(index)
-                        self.element_finding_strategies.insert(0, promoted_strategy)
-                        logging.info(f"Promoted strategy '{log_name}' to the front. New order: {[s[2] for s in self.element_finding_strategies]}")
-                    return element
-                elif element:
-                    logging.debug(f"Element found by {log_name} but not displayed/enabled (took {duration:.4f}s).")
+                if element:
+                    is_displayed = False
+                    is_enabled = False
+                    try:
+                        is_displayed = element.is_displayed()
+                        is_enabled = element.is_enabled()
+                    except StaleElementReferenceException:
+                        logging.warning(f"Element found by {log_name} became stale before display/enable check.")
+                        element = None # Treat as not found if stale immediately
+
+                    if element and is_displayed and is_enabled:
+                        logging.info(f"Found suitable element by {log_name}: '{identifier}' (took {duration:.4f}s)")
+                        if index > 0: # Promote successful strategy
+                            promoted_strategy = self.element_finding_strategies.pop(index)
+                            self.element_finding_strategies.insert(0, promoted_strategy)
+                            logging.info(f"Promoted strategy '{log_name}'. New order: {[s[2] for s in self.element_finding_strategies]}")
+                        return element
+                    elif element:
+                        logging.debug(f"Element found by {log_name} but not suitable (Displayed: {is_displayed}, Enabled: {is_enabled}). Took {duration:.4f}s.")
+                        element = None # Not suitable, continue to next strategy
+
             except NoSuchElementException:
                 duration = time.perf_counter() - start_time
                 logging.debug(f"Not found by {log_name} (took {duration:.4f}s).")
             except InvalidSelectorException as e:
                 duration = time.perf_counter() - start_time
-                logging.warning(f"Invalid Selector Exception finding by {log_name} '{identifier}' (XPath: {xpath_generated}). Error: {e} (took {duration:.4f}s)")
-            except Exception as e:
+                logging.warning(f"Invalid Selector for {log_name} (XPath: {xpath_generated}). Error: {e} (took {duration:.4f}s)")
+            except Exception as e: # Catch other potential errors from driver.find_element
                 duration = time.perf_counter() - start_time
-                logging.warning(f"Error finding by {log_name} '{identifier}' (took {duration:.4f}s): {e}")
+                logging.warning(f"Unexpected error finding by {log_name} with identifier '{identifier}' (XPath: {xpath_generated}). Error: {e} (took {duration:.4f}s)", exc_info=False) # exc_info=False to reduce noise
 
         total_duration = time.perf_counter() - total_start_time
-        logging.warning(f"Could not find suitable element using identifier '{identifier}' with any strategy (total search time {total_duration:.4f}s). Current strategy order: {[s[2] for s in self.element_finding_strategies]}")
+        logging.warning(
+            f"Could not find suitable element for identifier '{identifier}' using any strategy. "
+            f"Total search time: {total_duration:.4f}s. Current strategy order: {[s[2] for s in self.element_finding_strategies]}"
+        )
         return None    
     
-    def _track_map_failure(self, reason: str) -> None:
+    def _track_map_failure(self, reason: str):
         """Helper method to track and log mapping failures."""
         self.consecutive_map_failures += 1
-        max_failures = self.config_dict['MAX_CONSECUTIVE_MAP_FAILURES']
-        logging.warning(f"Action mapping failed ({self.consecutive_map_failures}/{max_failures} consecutive): {reason}")
-        return None
+        logging.warning(
+            f"Action mapping failed: {reason}. Consecutive failures: "
+            f"{self.consecutive_map_failures}/{self.max_map_failures}"
+        )
+        # Termination due to max failures is handled by AppCrawler's _should_terminate()
 
-    def map_ai_to_action(self, ai_suggestion: dict) -> Optional[Tuple[str, Any, Optional[str], Optional[str]]]:
-        """
-        Maps the AI's JSON suggestion (using 'target_identifier' or 'target_bounding_box')
-        to an executable action tuple.
-        Returns: (action_type, target_object_or_info, input_text_or_none, action_mode_or_none)
-                where:
-                - action_type: The type of action to perform (click, input, scroll, back)
-                - target_object_or_info: WebElement for click/input, string for scroll,
-                                    or dict with coordinates for coordinate-based actions
-                - input_text_or_none: Text to input for input actions, None otherwise
-                - action_mode_or_none: "coordinate_action" for coordinate-based actions, None otherwise
-        """
-        action = ai_suggestion.get("action")
-        target_identifier = ai_suggestion.get("target_identifier")
-        input_text = ai_suggestion.get("input_text")
-        target_bounding_box = ai_suggestion.get("target_bounding_box")
+    def _extract_coordinates_from_bbox(self, target_bounding_box: Dict[str, Any]) -> Optional[Tuple[int, int]]:
+        """Extracts and calculates center coordinates from a bounding box dictionary."""
+        try:
+            top_left = target_bounding_box.get('top_left')
+            bottom_right = target_bounding_box.get('bottom_right')
 
-        logging.info(f"Attempting to map AI suggestion: Action='{action}', Identifier='{target_identifier}', Input='{input_text}', BBox='{target_bounding_box}'")
+            if not (isinstance(top_left, list) and len(top_left) == 2 and
+                    isinstance(bottom_right, list) and len(bottom_right) == 2):
+                logging.warning(f"Invalid format for 'top_left' or 'bottom_right' in bounding box: {target_bounding_box}")
+                return None
 
-        if action not in ["click", "input", "scroll_down", "scroll_up", "back"]:
-            logging.error(f"Unknown action type from AI: {action}")
-            self._track_map_failure("unknown action type")
+            # AI schema uses [y1, x1], [y2, x2]
+            y1, x1 = top_left
+            y2, x2 = bottom_right
+
+            if not all(isinstance(coord, (int, float)) for coord in [y1, x1, y2, x2]):
+                logging.warning(f"Non-numeric coordinate types in bounding box: {target_bounding_box}")
+                return None
+            
+            # Ensure coordinates are valid (e.g., x1 < x2, y1 < y2)
+            if x1 > x2 or y1 > y2:
+                logging.warning(f"Invalid bounding box coordinates (x1>x2 or y1>y2): tl=({x1},{y1}), br=({x2},{y2}). Swapping.")
+                # Attempt to correct by swapping if order is simply reversed
+                if x1 > x2: x1, x2 = x2, x1
+                if y1 > y2: y1, y2 = y2, y1
+
+            center_x = int((x1 + x2) / 2)
+            center_y = int((y1 + y2) / 2)
+            return center_x, center_y
+        except Exception as e:
+            logging.error(f"Error processing bounding box {target_bounding_box} for coordinate action: {e}", exc_info=True)
             return None
 
-        if action == "scroll_down":
-            self.consecutive_map_failures = 0  # Success
-            return ("scroll", "down", None, None)
-        
-        if action == "scroll_up":
-            self.consecutive_map_failures = 0  # Success 
-            return ("scroll", "up", None, None)
-        
-        if action == "back":
-            self.consecutive_map_failures = 0  # Success
-            return ("back", None, None, None)
 
-        if action in ["click", "input"]:
-            # Try to find element by identifier first
-            target_element = None
-            if target_identifier:
-                target_element = self._find_element_by_ai_identifier(target_identifier)
-            else:
-                logging.info(f"No 'target_identifier' provided for action '{action}'. Will check for bounding box.")
+    def map_ai_action_to_appium(self, ai_response: Dict[str, Any], current_xml_string: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """
+        Maps the AI's JSON suggestion to an executable action dictionary for ActionExecutor.
 
+        Args:
+            ai_response (Dict[str, Any]): The structured JSON response from the AI.
+            current_xml_string (Optional[str]): Full XML of the current screen for detailed mapping if needed.
+        
+        Returns:
+            Optional[Dict[str, Any]]: Action details for ActionExecutor, or None if mapping fails.
+            Example: {'type': 'click', 'element': WebElement, 'element_info': {...}}
+                     {'type': 'input', 'element': WebElement, 'text': '...', 'element_info': {...}}
+                     {'type': 'tap_coords', 'coordinates': (x,y), 'original_bbox': {...}}
+                     {'type': 'scroll', 'direction': 'down'}
+                     {'type': 'back'}
+        """
+        action_type = ai_response.get("action")
+        target_identifier = ai_response.get("target_identifier") # String from AI (text, ID, content-desc)
+        input_text = ai_response.get("input_text")
+        target_bounding_box = ai_response.get("target_bounding_box") # Dict or None
+
+        logging.info(
+            f"Mapping AI suggestion: Action='{action_type}', Identifier='{target_identifier}', "
+            f"Input='{input_text}', BBox='{target_bounding_box is not None}'"
+        )
+
+        if not action_type or action_type not in self.cfg.AVAILABLE_ACTIONS: # Use cfg for available actions
+            self._track_map_failure(f"Unknown or unavailable action type from AI: {action_type}")
+            return None
+
+        action_details: Dict[str, Any] = {"type": action_type}
+
+        if action_type in ["scroll_down", "scroll_up"]:
+            self.consecutive_map_failures = 0
+            action_details["direction"] = action_type.split('_')[1] # "down" or "up"
+            return action_details
+        
+        if action_type == "back":
+            self.consecutive_map_failures = 0
+            return action_details # Type 'back' is sufficient
+
+        # For click and input, we need a target
+        target_element: Optional[Any] = None # WebElement
+        element_info: Dict[str, Any] = {} # To store how element was found
+
+        if target_identifier:
+            target_element = self._find_element_by_ai_identifier(str(target_identifier))
             if target_element:
-                logging.info(f"Successfully mapped AI identifier '{target_identifier}' to initial WebElement.")
+                element_info["method"] = "identifier"
+                element_info["identifier_used"] = str(target_identifier)
+                try:
+                    element_info["id"] = target_element.id
+                    element_info["class"] = target_element.get_attribute('class')
+                    element_info["text"] = target_element.text
+                    element_info["content-desc"] = target_element.get_attribute('content-desc')
+                    element_info["bounds"] = target_element.get_attribute('bounds')
+                except StaleElementReferenceException:
+                     logging.warning(f"Element found by '{target_identifier}' became stale when fetching attributes.")
+                     target_element = None # Treat as not found
+                except Exception as e_attr:
+                    logging.warning(f"Error fetching attributes for element found by '{target_identifier}': {e_attr}")
+
+
+        if target_element:
+            action_details["element"] = target_element
+            action_details["element_info"] = element_info
+            if action_type == "input":
+                if input_text is None: # Allow empty string for input
+                    logging.warning(f"AI suggested 'input' for '{target_identifier}' but 'input_text' is null. Will attempt to clear or input empty.")
+                    action_details["text"] = "" 
+                else:
+                    action_details["text"] = str(input_text) # Ensure string
+            self.consecutive_map_failures = 0
+            logging.info(f"Successfully mapped action '{action_type}' to element (ID: {element_info.get('id', 'N/A')}) found by identifier.")
+            return action_details
+        
+        # If element not found by identifier, or no identifier, try coordinate fallback
+        logging.info(f"Element not found by identifier '{target_identifier}'. Checking coordinate fallback (Enabled: {self.use_coordinate_fallback}).")
+        if self.use_coordinate_fallback and target_bounding_box and isinstance(target_bounding_box, dict):
+            coordinates = self._extract_coordinates_from_bbox(target_bounding_box)
+            if coordinates:
+                center_x, center_y = coordinates
+                action_details["type"] = "tap_coords" # Change action type for coordinate tap
+                action_details["coordinates"] = (center_x, center_y)
+                action_details["original_bbox"] = target_bounding_box # For annotation/logging
+                # If original action was "input", we need to decide how to handle it.
+                # For now, tap_coords won't carry input_text unless ActionExecutor handles it.
+                if action_type == "input" and input_text is not None:
+                    # ActionExecutor will need to know it should try ADB input after tap if this mode is used.
+                    action_details["intended_input_text"] = str(input_text)
+                    logging.info(f"Coordinate fallback for INPUT action: will tap at ({center_x},{center_y}), then try to input '{input_text}' (likely via ADB).")
+                else:
+                     logging.info(f"Coordinate fallback for {action_type}: will tap at ({center_x},{center_y}).")
                 
-                if action == "input":
-                    original_element = target_element
-                    is_editable = False
-                    element_class = None
-                    final_target_element = original_element
-                    
-                    try:
-                        element_class: str | Dict[str, Any] | None = original_element.get_attribute('class')
-                        logging.debug(f"Initial element found for INPUT: ID='{original_element.id}', Class='{element_class}', Identifier='{target_identifier}'")
-                        editable_classes = ['edittext', 'textfield', 'input', 'autocomplete', 'searchview']
-                        max_levels_to_check = 3
-
-                        if isinstance(element_class, str) and any(editable_tag in element_class.lower() for editable_tag in editable_classes):
-                            is_editable = True
-                            logging.info(f"Initial element (Class: {element_class}) is directly editable. Using it for INPUT.")
-                        else:
-                            logging.info(f"Initial element (Class: {element_class}) is NOT directly editable. Searching upwards for an editable ancestor...")
-                            current_ancestor = original_element
-                            for level in range(1, max_levels_to_check + 1):
-                                try:
-                                    parent_element = current_ancestor.find_element(AppiumBy.XPATH, "..")
-                                    if parent_element:
-                                        parent_class = parent_element.get_attribute('class')
-                                        logging.debug(f"Checking ancestor level {level}: ID='{parent_element.id}', Class='{parent_class}'")
-                                        if parent_class and any(editable_tag in parent_class.lower() for editable_tag in editable_classes):
-                                            logging.info(f"Found editable ancestor at level {level} (Class: {parent_class}). Switching target for INPUT action.")
-                                            final_target_element = parent_element
-                                            is_editable = True
-                                            break
-                                        else:
-                                            current_ancestor = parent_element
-                                    else:
-                                        logging.debug(f"Could not retrieve class attribute from ancestor at level {level}. Stopping upward search.")
-                                        break
-                                except NoSuchElementException:
-                                    logging.debug(f"No more parent elements found at level {level}. Stopping upward search.")
-                                    break
-                                except Exception as parent_err:
-                                    logging.error(f"Error finding or checking ancestor element at level {level}: {parent_err}", exc_info=True)
-                                    break
-                        
-                        if not is_editable:
-                            logging.error(f"AI suggested INPUT for identifier '{target_identifier}', but neither the initially found element (Class: {element_class}) nor its ancestors (up to {max_levels_to_check} levels) were suitable/editable. Mapping failed.")
-                            self._track_map_failure("no editable element found")
-                            return None
-                            
-                    except Exception as e:
-                        logging.error(f"Error during element class validation/ancestor check for INPUT action (Identifier: '{target_identifier}'): {e}", exc_info=True)
-                        self._track_map_failure(str(e))
-                        return None
-
-                    self.consecutive_map_failures = 0  # Success
-                    logging.info(f"Mapping successful for INPUT. Using element ID: {final_target_element.id}")
-                    return (action, final_target_element, input_text, None)
-                
-                # For click action
-                self.consecutive_map_failures = 0  # Success
-                logging.info(f"Mapping successful for CLICK. Using element ID: {target_element.id}")
-                return (action, target_element, None, None)
-
-            # Element not found by identifier, try bounding box fallback
-            if self.use_coordinate_fallback and target_bounding_box and isinstance(target_bounding_box, dict):
-                if ('top_left' in target_bounding_box and 'bottom_right' in target_bounding_box and 
-                    isinstance(target_bounding_box['top_left'], list) and len(target_bounding_box['top_left']) == 2 and 
-                    isinstance(target_bounding_box['bottom_right'], list) and len(target_bounding_box['bottom_right']) == 2):
-                    
-                    try:
-                        tl_x, tl_y = target_bounding_box['top_left']
-                        br_x, br_y = target_bounding_box['bottom_right']
-                        
-                        if not all(isinstance(coord, (int, float)) for coord in [tl_x, tl_y, br_x, br_y]):
-                            logging.warning(f"Invalid coordinate types in bounding box: {target_bounding_box}. Cannot use for coordinate action.")
-                            self._track_map_failure("invalid coordinate types")
-                            return None
-                        
-                        center_x = int((tl_x + br_x) / 2)
-                        center_y = int((tl_y + br_y) / 2)
-                        
-                        self.consecutive_map_failures = 0  # Success
-                        logging.info(f"Element not found by identifier '{target_identifier}'. Using bounding box fallback (config ENABLED) for action '{action}' at coordinates ({center_x}, {center_y}).")
-                        return (action, {"coordinates": (center_x, center_y), "original_bbox": target_bounding_box}, input_text, "coordinate_action")
-
-                    except Exception as e:
-                        logging.error(f"Error processing bounding box {target_bounding_box} for coordinate action: {e}", exc_info=True)
-                        self._track_map_failure(str(e))
-                        return None
-
-            if not self.use_coordinate_fallback:
-                logging.info(f"Element not found by identifier '{target_identifier}'. Bounding box fallback is DISABLED by configuration. Skipping.")
-
-            # If no element and no (valid) bounding box fallback (or fallback disabled)
-            log_msg = f"Failed to find element using AI identifier: '{target_identifier}'"
-            if target_identifier and not target_bounding_box:
-                log_msg += " and no bounding box provided."
-            elif not target_identifier and not target_bounding_box:
-                log_msg = "No target_identifier or bounding_box provided."
-            elif target_bounding_box:  # Implies bounding box was invalid or processed with error
-                log_msg += " and bounding box fallback also failed or was invalid."
+                self.consecutive_map_failures = 0
+                return action_details
             else:
-                log_msg += " (unknown reason)."
-            logging.warning(log_msg)
-            self._track_map_failure("no element found and no valid fallback")
-
+                logging.warning(f"Bounding box provided but could not extract valid coordinates: {target_bounding_box}")
+        
+        # If all methods fail
+        log_msg = f"Failed to map AI action. Element for identifier '{target_identifier}' not found."
+        if self.use_coordinate_fallback:
+            log_msg += " Coordinate fallback also failed or BBox not suitable."
+        else:
+            log_msg += " Coordinate fallback disabled."
+        if not target_identifier and not target_bounding_box:
+            log_msg = "Failed to map AI action: No target_identifier or target_bounding_box provided."
+            
+        self._track_map_failure(log_msg)
         return None
-
