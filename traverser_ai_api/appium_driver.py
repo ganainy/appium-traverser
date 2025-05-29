@@ -310,16 +310,39 @@ class AppiumDriver:
             return False
 
     def tap_at_coordinates(self, x: int, y: int, duration: Optional[int] = None) -> bool:
-        """Performs a tap action at the specified screen coordinates."""
+        """Performs a tap action at the specified screen coordinates using W3C Actions API."""
         if not self.driver:
             logging.error("Driver not available, cannot tap at coordinates.")
             return False
         try:
-            actual_duration = duration if duration is not None else 100 # Default tap duration
-            logging.info(f"Attempting to tap at coordinates: ({x}, {y}), duration: {actual_duration}ms")
-            self.driver.tap([(x, y)], actual_duration)
-            logging.info(f"Successfully tapped at coordinates: ({x}, {y}).")
+            from selenium.webdriver.common.actions import interaction
+            from selenium.webdriver.common.actions.action_builder import ActionBuilder
+            from selenium.webdriver.common.actions.pointer_input import PointerInput
+
+            actual_duration = duration if duration is not None else 100  # Default tap duration in milliseconds
+            logging.info(f"Attempting tap at coordinates: ({x}, {y}), duration: {actual_duration}ms")
+
+            # Create touch pointer action
+            actions = ActionBuilder(self.driver, mouse=PointerInput(interaction.POINTER_TOUCH, "touch"))
+            
+            # Move to the target coordinates
+            actions.pointer_action.move_to_location(x, y)
+            
+            # Perform tap (press and release)
+            actions.pointer_action.pointer_down()
+            if actual_duration > 0:
+                actions.pointer_action.pause(actual_duration / 1000)  # Convert ms to seconds
+            actions.pointer_action.release()
+            
+            # Execute the action sequence
+            actions.perform()
+            logging.info(f"Successfully tapped at coordinates: ({x}, {y})")
+            
+            # Add a small pause after tap to ensure it's registered
+            time.sleep(0.1)
+            
             return True
+
         except WebDriverException as e:
             logging.error(f"WebDriverException during tap at ({x}, {y}): {e}", exc_info=True)
             return False

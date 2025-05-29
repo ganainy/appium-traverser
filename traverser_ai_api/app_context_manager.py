@@ -34,9 +34,11 @@ class AppContextManager:
         missing_attrs = []
         for attr_name in required_attrs:
             value = getattr(self.cfg, attr_name, None)
-            if value is None:
-                if attr_name == 'ALLOWED_EXTERNAL_PACKAGES' and isinstance(value, list):
-                    continue # Empty list is fine for ALLOWED_EXTERNAL_PACKAGES
+            
+            if attr_name == 'ALLOWED_EXTERNAL_PACKAGES':
+                if not isinstance(value, list):
+                    missing_attrs.append(attr_name)  # Missing or wrong type
+            elif value is None:
                 missing_attrs.append(attr_name)
         
         if missing_attrs:
@@ -48,6 +50,12 @@ class AppContextManager:
         self.consecutive_context_failures: int = 0
         logging.info(f"AppContextManager initialized for target: {self.cfg.APP_PACKAGE}")
 
+    def reset_context_failures(self):
+        """Resets the consecutive context failure counter."""
+        if self.consecutive_context_failures > 0: # Only log if there were failures
+            self.logger.debug(f"Resetting consecutive context failures from {self.consecutive_context_failures} to 0.")
+        self.consecutive_context_failures = 0
+        
     def launch_and_verify_app(self) -> bool:
         """Launches the target application (defined in self.cfg) and verifies it is active."""
         target_pkg = str(self.cfg.APP_PACKAGE) 
