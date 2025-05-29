@@ -1,22 +1,16 @@
 {
-    "APP_PACKAGE": "eu.smartpatient.mytherapy",
-    "APP_ACTIVITY": "eu.smartpatient.mytherapy.feature.account.presentation.onboarding.WelcomeActivity",
+    "APP_PACKAGE": "shop.shop_apotheke.com.shopapotheke",
+    "APP_ACTIVITY": "com.shopapotheke.activities.splash.AliasSplashActivityDE",
     "ALLOWED_EXTERNAL_PACKAGES": [
         "com.google.android.gms",
-        "com.android.chrome",
-        "com.google.android.permissioncontroller",
-        "org.mozilla.firefox",
-        "com.sec.android.app.sbrowser",
-        "com.microsoft.emmx",
-        "com.brave.browser",
-        "com.duckduckgo.mobile.android"
+        "com.google.android.permissioncontroller"
     ],
     "LOG_LEVEL": "INFO",
     "DB_CONNECT_TIMEOUT": 10,
     "DB_BUSY_TIMEOUT": 5000,
     "WAIT_AFTER_ACTION": 2.0,
     "STABILITY_WAIT": 1.0,
-    "APP_LAUNCH_WAIT_TIME": 5,
+    "APP_LAUNCH_WAIT_TIME": 3,
     "NEW_COMMAND_TIMEOUT": 300,
     "APPIUM_IMPLICIT_WAIT": 1,
     "APPIUM_SERVER_URL": "http://127.0.0.1:4723",
@@ -30,7 +24,7 @@
     "MAX_APPS_TO_SEND_TO_AI": 200,
     "USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY": true,
     "AI_SAFETY_SETTINGS": {},
-    "CRAWL_MODE": "steps",
+    "CRAWL_MODE": "time",
     "MAX_CRAWL_STEPS": 5,
     "MAX_CRAWL_DURATION_SECONDS": 600,
     "CONTINUE_EXISTING_RUN": false,
@@ -45,9 +39,9 @@
     "CLEANUP_DEVICE_PCAP_FILE": true,
     "CURRENT_HEALTH_APP_LIST_FILE": "E:\\Vertiefung\\appium-traverser-vertiefung\\traverser_ai_api\\output_data\\app_info\\279cb9b1_app_info_health_filtered.json",
     "LAST_SELECTED_APP": {
-        "package_name": "eu.smartpatient.mytherapy",
-        "activity_name": "eu.smartpatient.mytherapy.feature.account.presentation.onboarding.WelcomeActivity",
-        "app_name": "MyTherapy"
+        "package_name": "shop.shop_apotheke.com.shopapotheke",
+        "activity_name": "com.shopapotheke.activities.splash.AliasSplashActivityDE",
+        "app_name": "Shop Apotheke"
     },
     "OUTPUT_DATA_DIR": "output_data"
 }

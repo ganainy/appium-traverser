@@ -115,16 +115,33 @@ class AppCrawler:
             self.is_shutting_down = True
             print(f"{UI_END_PREFIX}SHUTDOWN_FLAG_DETECTED")
             return True
-        if self.cfg.MAX_CRAWL_STEPS is not None and self.crawl_steps_taken >= self.cfg.MAX_CRAWL_STEPS:
-            logging.info(f"Termination check: Reached max steps ({self.cfg.MAX_CRAWL_STEPS}).")
-            if not self.is_shutting_down: print(f"{UI_END_PREFIX}MAX_STEPS_REACHED") 
-            self.is_shutting_down = True
-            return True
-        if self.cfg.MAX_CRAWL_DURATION_SECONDS is not None and (time.time() - self.crawl_start_time) >= self.cfg.MAX_CRAWL_DURATION_SECONDS:
-            logging.info(f"Termination check: Reached max duration ({self.cfg.MAX_CRAWL_DURATION_SECONDS}s).")
-            if not self.is_shutting_down: print(f"{UI_END_PREFIX}MAX_DURATION_REACHED") 
-            self.is_shutting_down = True
-            return True
+
+        # Check CRAWL_MODE and apply corresponding limit
+        if self.cfg.CRAWL_MODE == 'steps':
+            if self.cfg.MAX_CRAWL_STEPS is not None and self.crawl_steps_taken >= self.cfg.MAX_CRAWL_STEPS:
+                logging.info(f"Termination check: Reached max steps ({self.cfg.MAX_CRAWL_STEPS}) in 'steps' mode.")
+                if not self.is_shutting_down: print(f"{UI_END_PREFIX}MAX_STEPS_REACHED")
+                self.is_shutting_down = True
+                return True
+        elif self.cfg.CRAWL_MODE == 'time':
+            if self.cfg.MAX_CRAWL_DURATION_SECONDS is not None and (time.time() - self.crawl_start_time) >= self.cfg.MAX_CRAWL_DURATION_SECONDS:
+                logging.info(f"Termination check: Reached max duration ({self.cfg.MAX_CRAWL_DURATION_SECONDS}s) in 'time' mode.")
+                if not self.is_shutting_down: print(f"{UI_END_PREFIX}MAX_DURATION_REACHED")
+                self.is_shutting_down = True
+                return True
+        else:
+            logging.warning(f"Unknown CRAWL_MODE: '{self.cfg.CRAWL_MODE}'. Checking both step and time limits as a fallback.")
+            # Fallback to original behavior if mode is not 'steps' or 'time'
+            if self.cfg.MAX_CRAWL_STEPS is not None and self.crawl_steps_taken >= self.cfg.MAX_CRAWL_STEPS:
+                logging.info(f"Termination check (fallback): Reached max steps ({self.cfg.MAX_CRAWL_STEPS}).")
+                if not self.is_shutting_down: print(f"{UI_END_PREFIX}MAX_STEPS_REACHED")
+                self.is_shutting_down = True
+                return True
+            if self.cfg.MAX_CRAWL_DURATION_SECONDS is not None and (time.time() - self.crawl_start_time) >= self.cfg.MAX_CRAWL_DURATION_SECONDS:
+                logging.info(f"Termination check (fallback): Reached max duration ({self.cfg.MAX_CRAWL_DURATION_SECONDS}s).")
+                if not self.is_shutting_down: print(f"{UI_END_PREFIX}MAX_DURATION_REACHED")
+                self.is_shutting_down = True
+                return True
 
         if self.consecutive_ai_failures >= self.cfg.MAX_CONSECUTIVE_AI_FAILURES: 
             logging.error(f"Termination check: Exceeded max AI failures ({self.cfg.MAX_CONSECUTIVE_AI_FAILURES}).")

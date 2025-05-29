@@ -245,7 +245,10 @@ if __name__ == "__main__":
             root_logger.info("Main.py finally: Attempting to call crawler_instance.perform_full_cleanup().")
             try:
                 # perform_full_cleanup is an async method
-                asyncio.run(crawler_instance.perform_full_cleanup())
+                if asyncio.iscoroutinefunction(crawler_instance.perform_full_cleanup):
+                    asyncio.run(crawler_instance.perform_full_cleanup())
+                else:
+                    crawler_instance.perform_full_cleanup()
             except RuntimeError as re_err:
                 root_logger.error(f"Main.py finally: RuntimeError during asyncio.run(perform_full_cleanup): {re_err}. This might indicate an issue with event loop management.", exc_info=True)
             except Exception as e_cleanup:

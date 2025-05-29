@@ -43,11 +43,22 @@ class ActionExecutor:
         action_type = action_details.get("type")
         element: Optional[WebElement] = action_details.get("element")
         input_text: Optional[str] = action_details.get("text")
-        scroll_direction: Optional[str] = action_details.get("direction")
+        # scroll_direction: Optional[str] = action_details.get("direction") # Keep original for "scroll"
         intended_input_text_for_coord_tap: Optional[str] = action_details.get("intended_input_text")
         
+        # Map specific scroll actions to the generic "scroll" action type
+        # and extract direction from the action type itself if it's a specific scroll action.
+        scroll_direction_from_type: Optional[str] = None
+        if action_type in ["scroll_down", "scroll_up", "scroll_left", "scroll_right"]:
+            scroll_direction_from_type = action_type.split("_")[1] # e.g., "down" from "scroll_down"
+            action_type = "scroll" # Normalize to the generic "scroll" action
+        else:
+            # For the generic "scroll" action, get direction from "direction" parameter
+            scroll_direction_from_type = action_details.get("direction")
+
+
         success = False
-        action_log_info = f"Action Type: {action_type}"
+        action_log_info = f"Action Type: {action_details.get('type')}" # Log original action type
         current_error_msg = None # For this specific execution attempt
 
         try:
@@ -118,12 +129,14 @@ class ActionExecutor:
                         success = False 
             
             elif action_type == "scroll":
-                if isinstance(scroll_direction, str):
-                    action_log_info += f", Direction: {scroll_direction}"
-                    success = self.driver.scroll(direction=scroll_direction)
-                    if not success: current_error_msg = f"Scroll action in direction '{scroll_direction}' failed."
+                # Use the extracted scroll direction
+                resolved_scroll_direction = scroll_direction_from_type
+                if isinstance(resolved_scroll_direction, str):
+                    action_log_info += f", Direction: {resolved_scroll_direction}"
+                    success = self.driver.scroll(direction=resolved_scroll_direction)
+                    if not success: current_error_msg = f"Scroll action in direction '{resolved_scroll_direction}' failed."
                 else:
-                    current_error_msg = f"Invalid direction for scroll action: {scroll_direction}"
+                    current_error_msg = f"Invalid direction for scroll action: {resolved_scroll_direction}"
                     logging.error(current_error_msg)
                     success = False
             
