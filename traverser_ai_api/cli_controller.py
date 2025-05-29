@@ -358,46 +358,72 @@ class CLIController:
             logging.info("Crawler is not currently running.")
             # Clean up flag if it somehow exists and process is not running
             if self.cfg.SHUTDOWN_FLAG_PATH and os.path.exists(self.cfg.SHUTDOWN_FLAG_PATH):
-                 try: os.remove(self.cfg.SHUTDOWN_FLAG_PATH); logging.debug("Cleaned up stale shutdown flag.")
-                 except OSError: pass
+                try:
+                    os.remove(self.cfg.SHUTDOWN_FLAG_PATH)
+                    logging.debug("Cleaned up stale shutdown flag.")
+                except OSError as e:
+                    logging.warning(f"Could not remove stale shutdown flag: {e}")
+            self.crawler_process = None
             return True
 
         logging.info("Attempting to stop crawler...")
         shutdown_flag_created = False
+        
+        # First try graceful shutdown with flag
         if self.cfg.SHUTDOWN_FLAG_PATH:
             try:
-                with open(self.cfg.SHUTDOWN_FLAG_PATH, 'w') as f: f.write("stop")
+                # Create shutdown flag
+                with open(self.cfg.SHUTDOWN_FLAG_PATH, 'w') as f:
+                    f.write("stop")
                 shutdown_flag_created = True
-                logging.info(f"Shutdown flag created at {self.cfg.SHUTDOWN_FLAG_PATH}. Waiting for graceful shutdown (timeout: 15s)...")
-                self.crawler_process.wait(timeout=15)
-                logging.info("Crawler process stopped gracefully via flag.")
-            except subprocess.TimeoutExpired:
-                logging.warning("Graceful shutdown via flag timed out. Escalating to SIGTERM...")
-                self.crawler_process.terminate() # Send SIGTERM
+                logging.info(f"Created shutdown flag at: {self.cfg.SHUTDOWN_FLAG_PATH}")
+                
+                # Give the crawler time to detect the flag and shut down gracefully
+                grace_period = 15  # seconds
+                logging.info(f"Waiting {grace_period}s for graceful shutdown...")
                 try:
-                    self.crawler_process.wait(timeout=7)
-                    logging.info("Crawler process terminated (SIGTERM).")
+                    self.crawler_process.wait(timeout=grace_period)
+                    logging.info("Crawler process stopped gracefully via flag.")
+                    self._cleanup_after_stop(shutdown_flag_created)
+                    return True
                 except subprocess.TimeoutExpired:
-                    logging.warning("SIGTERM timed out. Escalating to SIGKILL...")
-                    self.crawler_process.kill() # Send SIGKILL
-                    self.crawler_process.wait() # Wait for kill to complete
-                    logging.info("Crawler process killed (SIGKILL).")
-            except Exception as e: # Catch errors related to flag creation or initial wait
-                logging.error(f"Error during shutdown flag handling or initial wait: {e}. Attempting direct termination.", exc_info=True)
-                if self.crawler_process.poll() is None: self.crawler_process.terminate() # Try SIGTERM
-        else: # No shutdown flag path configured
-            logging.warning("No SHUTDOWN_FLAG_PATH configured in cfg. Attempting direct SIGTERM.")
+                    logging.warning("Graceful shutdown via flag timed out.")
+                    # Continue to SIGTERM
+            except Exception as e:
+                logging.error(f"Error during shutdown flag handling: {e}")
+                # Continue to SIGTERM
+        else:
+            logging.warning("No SHUTDOWN_FLAG_PATH configured, skipping graceful shutdown.")
+
+        # If we get here, either the flag didn't work or there was no flag path
+        # Try SIGTERM
+        logging.info("Attempting termination via SIGTERM...")
+        try:
             self.crawler_process.terminate()
             try:
                 self.crawler_process.wait(timeout=7)
-                logging.info("Crawler process terminated (SIGTERM).")
+                logging.info("Crawler process terminated via SIGTERM.")
+                self._cleanup_after_stop(shutdown_flag_created)
+                return True
             except subprocess.TimeoutExpired:
-                logging.warning("SIGTERM timed out. Escalating to SIGKILL...")
-                self.crawler_process.kill()
-                self.crawler_process.wait()
-                logging.info("Crawler process killed (SIGKILL).")
+                logging.warning("SIGTERM timed out, escalating to SIGKILL...")
+        except Exception as e:
+            logging.error(f"Error during SIGTERM: {e}")
+            # Continue to SIGKILL
+
+        # Final resort: SIGKILL
+        logging.warning("Attempting forceful termination via SIGKILL...")
+        try:
+            self.crawler_process.kill()
+            self.crawler_process.wait(timeout=5)  # Give it 5 seconds to die
+            logging.info("Crawler process killed via SIGKILL.")
+        except Exception as e:
+            logging.error(f"Error during SIGKILL: {e}")
+            return False
+        finally:
+            # Always try to clean up, even if killing failed
+            self._cleanup_after_stop(shutdown_flag_created)
         
-        self._cleanup_after_stop(shutdown_flag_created)
         return True
 
     def _cleanup_after_stop(self, flag_was_created:bool):
