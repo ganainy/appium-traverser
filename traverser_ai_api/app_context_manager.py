@@ -62,26 +62,43 @@ class AppContextManager:
             self.consecutive_context_failures = 0 # Reset on success
             return True
         
-        # If not, attempt to launch
-        if not self.driver.launch_app(): # launch_app in AppiumDriver now uses its self.cfg
-            self.logger.error(f"Call to driver.launch_app() for {target_pkg} failed.")
-            # No need to sleep here, AppiumDriver.launch_app() should handle its own wait time
-            return False 
+        # Try up to 3 times with increasing wait times
+        max_attempts = 3
+        last_pkg = None
         
-        # AppiumDriver.launch_app() already waits APP_LAUNCH_WAIT_TIME and verifies.
-        # We just need to check the result.
-        # The verification within AppiumDriver.launch_app() is now the primary check.
-        # However, an additional check here can confirm.
-        current_pkg_after_launch = self.driver.get_current_package()
-        current_activity_after_launch = self.driver.get_current_activity()
+        for attempt in range(max_attempts):
+            wait_time = (attempt + 1) * float(self.cfg.APP_LAUNCH_WAIT_TIME)
+            self.logger.info(f"Launch attempt {attempt + 1}/{max_attempts} with wait time {wait_time}s...")
+            
+            # If not first attempt, try to close app first
+            if attempt > 0:
+                try:
+                    self.driver.terminate_app(target_pkg)
+                    time.sleep(1)  # Short wait after termination
+                except Exception as e:
+                    self.logger.warning(f"Failed to terminate app before retry: {e}")
 
-        if current_pkg_after_launch == target_pkg:
-            self.logger.info(f"Successfully launched/focused target app: {target_pkg}/{current_activity_after_launch}")
-            self.consecutive_context_failures = 0 # Reset on success
-            return True
-        else:
-            self.logger.error(f"Failed to verify target app {target_pkg} after launch. Current app is {current_pkg_after_launch}.")
-            return False
+            # Attempt to launch
+            if not self.driver.launch_app(): 
+                self.logger.error(f"Launch attempt {attempt + 1} failed for {target_pkg}")
+                continue
+            
+            # Wait progressively longer
+            time.sleep(wait_time)
+            
+            # Verify launch
+            last_pkg = self.driver.get_current_package()
+            current_activity = self.driver.get_current_activity()
+
+            if last_pkg == target_pkg:
+                self.logger.info(f"Successfully launched target app on attempt {attempt + 1}: {target_pkg}/{current_activity}")
+                self.consecutive_context_failures = 0
+                return True
+            else:
+                self.logger.warning(f"Attempt {attempt + 1}: App not in foreground. Current: {last_pkg}")
+                
+        self.logger.error(f"Failed to launch {target_pkg} after {max_attempts} attempts. Last foreground app: {last_pkg or 'Unknown'}")
+        return False
 
     def ensure_in_app(self) -> bool:
         """

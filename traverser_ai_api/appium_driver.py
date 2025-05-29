@@ -187,10 +187,10 @@ class AppiumDriver:
             return None
         return current_pkg, current_act
 
-    def launch_app(self) -> bool: # Removed app_package, app_activity params, use from self.cfg
+    def launch_app(self) -> bool:
         """
-        Launches the application specified in self.cfg.APP_PACKAGE and self.cfg.APP_ACTIVITY
-        or brings it to the foreground if already running.
+        Launches the application specified in self.cfg.APP_PACKAGE and self.cfg.APP_ACTIVITY,
+        with cleanup and verification steps.
         """
         if not self.driver:
             logging.error("Driver not available, cannot launch app.")
@@ -199,39 +199,57 @@ class AppiumDriver:
         app_package = str(self.cfg.APP_PACKAGE)
         app_activity = str(self.cfg.APP_ACTIVITY)
 
-        if not app_package or not app_activity: # Should be caught by __init__ validation
+        if not app_package or not app_activity:
             logging.error("App package or activity not configured, cannot launch app.")
             return False
+
         try:
-            logging.info(f"Attempting to launch app: {app_package}/{app_activity}")
-            self.driver.execute_script(
-                "mobile: shell",
-                {
-                    "command": "am",
-                    "args": ["start", "-n", f"{app_package}/{app_activity}"],
-                },
-            )
-            launch_wait = float(self.cfg.APP_LAUNCH_WAIT_TIME) # Ensure float
-            logging.debug(f"Waiting {launch_wait}s after sending launch command...")
+            # Step 1: Terminate app if running
+            logging.info(f"Attempting to terminate {app_package} if running...")
+            try:
+                self.driver.terminate_app(app_package)
+                time.sleep(2)  # Brief wait after termination
+            except:
+                logging.warning("App termination failed (may not be running)")
+
+            # Step 2: Clear app data via ADB
+            logging.info(f"Clearing app data for {app_package}...")
+            try:
+                self.driver.execute_script(
+                    "mobile: shell",
+                    {
+                        "command": "pm",
+                        "args": ["clear", app_package],
+                    },
+                )
+                time.sleep(2)  # Wait for clear to take effect
+            except:
+                logging.warning("Failed to clear app data")
+
+            # Step 3: Use Appium's activate_app
+            logging.info(f"Activating app: {app_package}")
+            self.driver.activate_app(app_package)
+            
+            # Step 4: Wait and verify
+            launch_wait = float(self.cfg.APP_LAUNCH_WAIT_TIME)
+            logging.info(f"Waiting {launch_wait}s for app to stabilize...")
             time.sleep(launch_wait)
             
+            # Final verification
             current_pkg_after_launch = self.get_current_package()
-            current_act_after_launch = self.get_current_activity() # Get current activity for more precise check
+            current_act_after_launch = self.get_current_activity()
             
-            # Check if the foreground app is the target app or an allowed external package
-            # (e.g. system permission dialogs)
             if current_pkg_after_launch == app_package:
-                logging.info(f"App {app_package} is now in the foreground (Current Activity: {current_act_after_launch}).")
+                logging.info(f"App {app_package} is now in foreground (Activity: {current_act_after_launch})")
                 return True
             elif self.cfg.ALLOWED_EXTERNAL_PACKAGES and current_pkg_after_launch in self.cfg.ALLOWED_EXTERNAL_PACKAGES:
-                logging.info(f"Allowed external package '{current_pkg_after_launch}' is in foreground after attempting to launch {app_package}.")
-                return True # Consider this a success as it might be an expected intermediate step
+                logging.info(f"Allowed external package '{current_pkg_after_launch}' present after launch attempt")
+                return True
             else:
-                logging.warning(
-                    f"App launch command sent for {app_package}, but current foreground app is '{current_pkg_after_launch}' "
-                    f"(activity: '{current_act_after_launch}'). Target app might not have launched correctly or another app took focus."
-                )
+                logging.warning(f"App launch failed - Current foreground app is '{current_pkg_after_launch}' " 
+                              f"(activity: '{current_act_after_launch}')")
                 return False
+
         except WebDriverException as e:
             logging.error(f"WebDriverException launching app {app_package}/{app_activity}: {e}")
             return False
@@ -652,3 +670,27 @@ class AppiumDriver:
             logging.warning(f"Action '{action_type_lower}' failed or was not supported with target '{str(target)[:50]}'.")
         
         return success
+
+    def terminate_app(self, package_name: str) -> bool:
+        """Terminates the given app if it's running.
+        
+        Args:
+            package_name: The package name of the app to terminate.
+            
+        Returns:
+            bool: True if successful, False otherwise.
+        """
+        try:
+            if not self.driver:
+                logging.error("No active Appium session")
+                return False
+                
+            if self.driver.terminate_app(package_name):
+                logging.info(f"Successfully terminated app: {package_name}")
+                return True
+            else:
+                logging.warning(f"App termination returned False for: {package_name}")
+                return False
+        except Exception as e:
+            logging.error(f"Error terminating app {package_name}: {e}")
+            return False

@@ -1,7 +1,7 @@
 # AI-Driven Android App Crawler - Complete Setup & Usage Guide
 
 [![Python Version](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/)
-[![Status](https://img.shields.io/badge/status-production-green.svg)]()
+[![Status](https://img.shields.io/badge/status-development-yellow.svg)]()
 
 ## Overview
 
@@ -384,6 +384,24 @@ The CLI controller maintains full compatibility with existing GUI configurations
 - Remote execution capability
 - Better CI/CD integration
 - Faster startup times
+
+## UI Element Annotation Tool
+
+The project includes a standalone tool for batch processing screenshots to identify UI elements:
+
+```powershell
+# Process all screenshots in a directory
+python -m tools.ui_element_annotator --input-dir "output_data/screenshots/crawl_screenshots_com.example" --output-file "output_data/annotations.json"
+
+# View help and options
+python -m tools.ui_element_annotator --help
+```
+
+This tool uses Google's Gemini Vision AI to analyze screenshots and create detailed annotations of UI elements, saving their locations and properties in a JSON file. Useful for:
+- Post-crawl analysis
+- Training data generation
+- UI testing verification
+- Accessibility testing
 
 ---
 

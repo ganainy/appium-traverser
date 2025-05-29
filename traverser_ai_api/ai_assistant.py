@@ -58,18 +58,8 @@ class AIAssistant:
         )
 
     @staticmethod
-    def _get_main_response_schema() -> Schema:
-        """
-        Defines the schema for the AI's main response, which includes
-        the action to perform and a list of all identified UI elements.
-        """
-        _action_bounding_box_properties = {
-            'top_left': Schema(type=GLMType.ARRAY, items=Schema(type=GLMType.NUMBER), description="[y1, x1] normalized coordinates for the top-left corner."),
-            'bottom_right': Schema(type=GLMType.ARRAY, items=Schema(type=GLMType.NUMBER), description="[y2, x2] normalized coordinates for the bottom-right corner.")
-        }
-        _action_bounding_box_required = ['top_left', 'bottom_right']
-        _action_bounding_box_description = "Normalized bounding box of the target element for the action."
-
+    def _get_action_to_perform_schema() -> Schema:
+        """Defines the schema for the AI's action_to_perform response part."""
         action_to_perform_schema = Schema(
             type=GLMType.OBJECT,
             description="Describes the single next UI action to perform.",
@@ -87,9 +77,11 @@ class AIAssistant:
                 'target_bounding_box': Schema(
                     type=GLMType.OBJECT,
                     nullable=True,
-                    properties=_action_bounding_box_properties,
-                    required=_action_bounding_box_required,
-                    description=_action_bounding_box_description + " Null if bounds cannot be determined or not applicable."
+                    properties={
+                        'top_left': Schema(type=GLMType.ARRAY, items=Schema(type=GLMType.NUMBER)),
+                        'bottom_right': Schema(type=GLMType.ARRAY, items=Schema(type=GLMType.NUMBER))
+                    },
+                    required=['top_left', 'bottom_right']
                 ),
                 'input_text': Schema(
                     type=GLMType.STRING,
@@ -103,21 +95,19 @@ class AIAssistant:
             },
             required=['action', 'reasoning']
         )
+        return action_to_perform_schema
 
-        main_schema = Schema(
+    @staticmethod
+    def _get_main_response_schema() -> Schema:
+        """Defines the schema for the AI's main response, focused only on action."""
+        return Schema(
             type=GLMType.OBJECT,
-            description="Main response containing the suggested action and all identified UI elements on the screen. Output MUST strictly adhere to this schema.",
+            description="The overall response from the AI, including the action to perform.",
             properties={
-                'action_to_perform': action_to_perform_schema,
-                'all_ui_elements': Schema(
-                    type=GLMType.ARRAY,
-                    description="A list of all identifiable UI elements detected on the screen. This list can be empty if no elements are confidently identified, but the key itself should exist.",
-                    items=AIAssistant._get_ui_element_schema() # Use static call
-                )
+                'action_to_perform': AIAssistant._get_action_to_perform_schema()
             },
-            required=['action_to_perform', 'all_ui_elements']
+            required=['action_to_perform']
         )
-        return main_schema
 
 
     def __init__(self,
@@ -173,7 +163,7 @@ class AIAssistant:
 
         try:
             genai_configure(api_key=self.api_key)
-            self.response_schema = self._get_main_response_schema() # Updated to the new main schema
+            self.response_schema = self._get_main_response_schema()
 
             generation_config_dict = model_config_from_file.get('generation_config')
             if not generation_config_dict or not isinstance(generation_config_dict, dict):
@@ -321,24 +311,16 @@ class AIAssistant:
         """
 
 
-        json_format_instruction_new = f"""
+        json_format_instruction_new = f"""\
         **RESPONSE FORMAT (Strict JSON Schema Enforced by API):**
-        Your response MUST be a JSON object with two top-level keys: `action_to_perform` and `all_ui_elements`.
+        Your response MUST be a JSON object with one top-level key: `action_to_perform`.
 
-        1.  `action_to_perform`: (object) Describes the single best action to take.
+        1.  `action_to_perform`: (object) MANDATORY. Describes the single best action to take. This object itself must always be present.
             -   `action`: (string, enum) The action (e.g., "click", "input"). REQUIRED.
             -   `target_identifier`: (string | null) Identifier for "click"/"input". Crucial if applicable, otherwise null.
             -   `target_bounding_box`: (object | null) Normalized bounding box for the action's target. `{{"top_left": [y1,x1], "bottom_right": [y2,x2]}}`. Strongly preferred for 'click'/'input'.
             -   `input_text`: (string | null) Text for "input" action. Required if action is "input", otherwise null.
             -   `reasoning`: (string) Your brief explanation. REQUIRED.
-
-        2.  `all_ui_elements`: (array) A list of ALL identifiable UI elements on the screen.
-            -   Each element in the array is an object with:
-                -   `type`: (string) Element type (see list of common types). REQUIRED.
-                -   `description`: (string | null) Visible text or accessibility label.
-                -   `resource_id`: (string | null) Resource ID from XML, if discernible.
-                -   `bounding_box`: (object | null) Normalized `{{"top_left": [y1,x1], "bottom_right": [y2,x2]}}`. REQUIRED (can be null if truly indeterminable).
-            -   This list can be empty if no elements are confidently identified, but the `all_ui_elements` key MUST be present.
 
         Example of a valid JSON response:
         ```json
@@ -349,32 +331,11 @@ class AIAssistant:
             "target_bounding_box": {{ "top_left": [0.8, 0.1], "bottom_right": [0.85, 0.9] }},
             "input_text": null,
             "reasoning": "Clicked the submit button to proceed. Bounds estimated from screenshot as XML was minimal."
-          }},
-          "all_ui_elements": [
-            {{
-              "type": "textView",
-              "description": "Welcome to the App!",
-              "resource_id": "com.example.app:id/title_text",
-              "bounding_box": {{ "top_left": [0.1, 0.1], "bottom_right": [0.15, 0.9] }}
-            }},
-            {{
-              "type": "button",
-              "description": "Submit",
-              "resource_id": "com.example.app:id/submit_button",
-              "bounding_box": {{ "top_left": [0.8, 0.1], "bottom_right": [0.85, 0.9] }}
-            }},
-            {{
-              "type": "editText",
-              "description": "Enter your name",
-              "resource_id": null,
-              "bounding_box": {{ "top_left": [0.4, 0.1], "bottom_right": [0.45, 0.9] }}
-            }}
-          ]
+          }}
         }}
         ```
         """
         # ... (rest of loop_threshold, visit_context, visit_instruction, input_value_guidance, etc. remain similar to your provided code) ...
-        # Make sure to integrate these and the general guidance paragraphs as before.
 
         loop_threshold = getattr(self.cfg, 'LOOP_DETECTION_VISIT_THRESHOLD', 3)
         if loop_threshold is None: loop_threshold = 3
@@ -433,7 +394,6 @@ class AIAssistant:
         prompt = f"""
         You are an expert Android app tester. Your goal is to:
         1.  Determine the BEST SINGLE `action_to_perform` based on the visual screenshot and XML context, prioritizing PROGRESSION and IN-APP feature discovery.
-        2.  Identify ALL visible and potentially interactive UI elements on the screen and list them in `all_ui_elements`.
 
         **IMPORTANT: For `action_to_perform.target_identifier`:**
         Provide its actual value from the XML (e.g., "com.app:id/button", "Login") or visible text if no ID.
@@ -450,9 +410,7 @@ class AIAssistant:
         TASK:
         Analyze the screenshot and XML.
         1.  For `action_to_perform`: Identify the BEST SINGLE action. Follow all CRUCIAL instructions and strategic guidance.
-        2.  For `all_ui_elements`: List every distinct, identifiable UI element visible. Include its type, description (text/label), resource_id (if found in XML), and normalized bounding_box.
 
-        {ui_element_types_guidance}
         {defer_authentication_guidance}
         {visit_instruction}
         {external_package_avoidance_guidance}
@@ -563,7 +521,7 @@ class AIAssistant:
                 if not hasattr(response, 'candidates') or not response.candidates:
                     logging.error("AI response contains no candidates.")
                     self._log_empty_response_details(response)
-                    return {"action_to_perform": None, "all_ui_elements": []} # Graceful empty response
+                    return {"action_to_perform": None} # Graceful empty response
 
                 candidate = response.candidates[0]
                 proceed_to_parse = False
@@ -583,29 +541,29 @@ class AIAssistant:
                     elif reason_name in ["SAFETY", "RECITATION", "OTHER"]:
                         logging.error(f"AI generation stopped due to {reason_name} (Raw: {raw_finish_reason_str}).")
                         self._log_empty_response_details(response)
-                        return {"action_to_perform": None, "all_ui_elements": []}
+                        return {"action_to_perform": None}
                     else: # Unknown named reason or unmapped integer
                         logging.error(f"AI generation finished with unhandled reason: {reason_name} (Raw: {raw_finish_reason_str}).")
                         self._log_empty_response_details(response)
-                        return {"action_to_perform": None, "all_ui_elements": []}
+                        return {"action_to_perform": None}
                 else:
                     logging.error("Candidate missing 'finish_reason'.")
                     self._log_empty_response_details(response)
-                    return {"action_to_perform": None, "all_ui_elements": []}
+                    return {"action_to_perform": None}
 
-                if not proceed_to_parse: return {"action_to_perform": None, "all_ui_elements": []}
+                if not proceed_to_parse: return {"action_to_perform": None}
 
                 if not hasattr(candidate, 'content') or not candidate.content or \
                    not hasattr(candidate.content, 'parts') or not candidate.content.parts:
                     logging.error("AI response candidate lacks valid content/parts.")
                     self._log_empty_response_details(response)
-                    return {"action_to_perform": None, "all_ui_elements": []}
+                    return {"action_to_perform": None}
 
                 first_part = candidate.content.parts[0]
                 if not hasattr(first_part, 'text') or not first_part.text:
                     logging.error("AI response first part lacks text content.")
                     self._log_empty_response_details(response)
-                    return {"action_to_perform": None, "all_ui_elements": []}
+                    return {"action_to_perform": None}
 
                 raw_json_text = first_part.text
                 json_str_to_parse = raw_json_text.strip()
@@ -618,7 +576,7 @@ class AIAssistant:
                 if not json_str_to_parse:
                     logging.error("AI response: Empty JSON string after cleaning. Raw: %s", raw_json_text[:200])
                     self._log_empty_response_details(response)
-                    return {"action_to_perform": None, "all_ui_elements": []}
+                    return {"action_to_perform": None}
 
                 try:
                     parsed_main_response = json.loads(json_str_to_parse)
@@ -627,16 +585,27 @@ class AIAssistant:
 
                     if not isinstance(parsed_main_response, dict):
                         logging.error(f"AI main response not a dictionary: {type(parsed_main_response)}. Data: {parsed_main_response}")
-                        return {"action_to_perform": None, "all_ui_elements": []}
+                        return {"action_to_perform": None}
 
                     action_data = parsed_main_response.get("action_to_perform")
-                    all_elements_data = parsed_main_response.get("all_ui_elements", []) # Default to empty list
+                    # all_elements_data = parsed_main_response.get("all_ui_elements", []) # Default to empty list
 
                     if not isinstance(action_data, dict) or \
                        "action" not in action_data or \
                        "reasoning" not in action_data:
-                        logging.error(f"Missing required fields in 'action_to_perform'. Data: {action_data}")
-                        action_data = None # Invalidate if malformed
+                        logging.error(f"Missing required fields in 'action_to_perform'. Data: {action_data}. Attempting fallback.")
+                        # Fallback action
+                        action_data = {
+                            "action": "back",  # Or "scroll_down"
+                            "target_identifier": None,
+                            "target_bounding_box": None,
+                            "input_text": None,
+                            "reasoning": "Fallback action due to AI response error."
+                        }
+                        # Ensure all_ui_elements is at least an empty list if AI failed completely
+                        # if not isinstance(all_elements_data, list):
+                        #     all_elements_data = []
+
 
                     if action_data: # Validate action_data further
                         action_type = action_data.get("action")
@@ -654,40 +623,40 @@ class AIAssistant:
                                 logging.warning(f"Invalid action target_bounding_box: {bbox}. Setting to null. Action: {action_data}")
                                 action_data["target_bounding_box"] = None
                     
-                    if not isinstance(all_elements_data, list):
-                        logging.warning(f"'all_ui_elements' is not a list. Received: {type(all_elements_data)}. Setting to empty list.")
-                        all_elements_data = []
-                    else: # Validate individual elements if needed (optional for brevity here)
-                        valid_elements = []
-                        for elem in all_elements_data:
-                            if isinstance(elem, dict) and "type" in elem and "bounding_box" in elem: # Basic check
-                                # Further validation for elem["bounding_box"] format can be added here
-                                valid_elements.append(elem)
-                            else:
-                                logging.warning(f"Skipping malformed UI element in 'all_ui_elements': {elem}")
-                        all_elements_data = valid_elements
+                    # if not isinstance(all_elements_data, list):
+                    #     logging.warning(f"'all_ui_elements' is not a list. Received: {type(all_elements_data)}. Setting to empty list.")
+                    #     all_elements_data = []
+                    # else: # Validate individual elements if needed (optional for brevity here)
+                    #     valid_elements = []
+                    #     for elem in all_elements_data:
+                    #         if isinstance(elem, dict) and "type" in elem and "bounding_box" in elem: # Basic check
+                    #             # Further validation for elem["bounding_box"] format can be added here
+                    #             valid_elements.append(elem)
+                    #         else:
+                    #             logging.warning(f"Skipping malformed UI element in 'all_ui_elements': {elem}")
+                    #     all_elements_data = valid_elements
 
 
-                    logging.info(f"AI Action: Type='{action_data.get('action') if action_data else 'N/A'}', Target='{action_data.get('target_identifier', 'N/A') if action_data else 'N/A'}'. Found {len(all_elements_data)} UI elements.")
+                    logging.info(f"AI Action: Type='{action_data.get('action') if action_data else 'N/A'}', Target='{action_data.get('target_identifier', 'N/A') if action_data else 'N/A'}.") # Removed Found {len(all_elements_data)} UI elements.
                     return {
                         "action_to_perform": action_data,
-                        "all_ui_elements": all_elements_data
+                        # "all_ui_elements": all_elements_data
                     }
 
                 except json.JSONDecodeError as json_err:
                     logging.error(f"JSON parse error: {json_err}. Snippet: '{json_str_to_parse[:500]}'")
                     self._log_empty_response_details(response)
-                    return {"action_to_perform": None, "all_ui_elements": []}
+                    return {"action_to_perform": None}
                 except Exception as parse_err:
                     logging.error(f"Post-parsing validation error: {parse_err}. Parsed: '{json_str_to_parse[:500]}'", exc_info=True)
-                    return {"action_to_perform": None, "all_ui_elements": []}
+                    return {"action_to_perform": None}
 
             except Exception as api_err:
                 logging.error(f"AI API call error: {api_err}", exc_info=True)
                 if "api key" in str(api_err).lower() or "permission_denied" in str(api_err).lower():
                     logging.critical("API key error or permission denied.")
-                return {"action_to_perform": None, "all_ui_elements": []}
+                return {"action_to_perform": None}
 
         except Exception as e:
             logging.error(f"General error in get_next_action before API call: {e}", exc_info=True)
-            return {"action_to_perform": None, "all_ui_elements": []}
+            return {"action_to_perform": None}
