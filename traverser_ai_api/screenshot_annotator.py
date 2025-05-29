@@ -1,66 +1,74 @@
 import logging
 import os
 from io import BytesIO
-from PIL import Image # For getting image dimensions as a fallback
-from typing import Optional, Dict, Any, TYPE_CHECKING
+from PIL import Image, ImageDraw # Added ImageDraw
+from typing import Optional, Dict, Any, TYPE_CHECKING, List
+import json # For annotations.json
 
-# Import your main Config class and AppiumDriver
-# Adjust paths based on your project structure
 if TYPE_CHECKING:
-    from appium_driver import AppiumDriver # For type hinting
-from config import Config # Assuming Config class is in config.py in the same package
-import utils # This assumes utils.py is in the same directory/package
+    from appium_driver import AppiumDriver
+from config import Config
+import utils
 
 class ScreenshotAnnotator:
-    """Handles the annotation and saving of screenshots using a centralized Config object."""
-
-    def __init__(self, driver: 'AppiumDriver', app_config: Config): # Changed signature
-        """
-        Initialize the ScreenshotAnnotator.
-
-        Args:
-            driver (AppiumDriver): An instance of the refactored AppiumDriver.
-            app_config (Config): The main application Config object instance.
-        """
+    def __init__(self, driver: 'AppiumDriver', app_config: Config):
         self.driver = driver
-        self.cfg = app_config # Store the Config object instance
+        self.cfg = app_config
         self.logger = logging.getLogger(__name__)
 
-        # Validate that ANNOTATED_SCREENSHOTS_DIR is configured
         if not hasattr(self.cfg, 'ANNOTATED_SCREENSHOTS_DIR') or not self.cfg.ANNOTATED_SCREENSHOTS_DIR:
-            raise ValueError("ScreenshotAnnotator: ANNOTATED_SCREENSHOTS_DIR is required in the Config object and cannot be empty.")
+            raise ValueError("ScreenshotAnnotator: ANNOTATED_SCREENSHOTS_DIR is required.")
+        # SCREENSHOTS_DIR is for the raw screenshots where annotations.json will live
+        if not hasattr(self.cfg, 'SCREENSHOTS_DIR') or not self.cfg.SCREENSHOTS_DIR:
+            raise ValueError("ScreenshotAnnotator: SCREENSHOTS_DIR is required for master annotation file.")
         
+        # Ensure the directory for SCREENSHOTS_DIR (raw screenshots) exists before resolving master_annotation_file_path
+        # Config class should have already created this, but an extra check is fine.
+        if self.cfg.SCREENSHOTS_DIR: # Check if the path is not None or empty
+             os.makedirs(str(self.cfg.SCREENSHOTS_DIR), exist_ok=True)
+             self.master_annotation_file_path = os.path.join(str(self.cfg.SCREENSHOTS_DIR), "annotations.json")
+        else: # Should not happen if config is correctly loaded and SCREENSHOTS_DIR is mandatory
+            self.logger.critical("SCREENSHOTS_DIR is not configured properly. Master annotation file path cannot be set.")
+            # Potentially raise an error or set a flag indicating this annotator is partially non-functional
+            self.master_annotation_file_path = None # Or some other indicator of a problem
+
         logging.info(f"ScreenshotAnnotator initialized. Annotated screenshots will be saved to: {self.cfg.ANNOTATED_SCREENSHOTS_DIR}")
+        if self.master_annotation_file_path:
+            logging.info(f"Master UI element annotation file will be managed at: {self.master_annotation_file_path}")
+        else:
+            logging.error("Master annotation file path could not be determined due to missing SCREENSHOTS_DIR config.")
+
+    # ... (rest of the save_annotated_screenshot and update_master_annotation_file methods from previous response) ...
+    # (The save_annotated_screenshot method provided in the user's prompt context is suitable to be kept)
+    # (The update_master_annotation_file method from my previous response is the one for the new JSON file)
 
     def save_annotated_screenshot(self,
                                   original_screenshot_bytes: bytes,
                                   step: int,
-                                  screen_id: int, # This is the DB ID of the ScreenRepresentation
+                                  screen_id: int,
                                   ai_suggestion: Optional[Dict[str, Any]],
-                                  # Optional: pass the ScreenRepresentation object if it has the definitive annotated path
-                                  # screen_repr: Optional[ScreenRepresentation] = None 
-                                  ) -> Optional[str]: # Return the path of the saved file or None
-        """
-        Takes the original screenshot, draws the AI's suggested bounding box (if relevant),
-        and saves it. The filename includes step, screen_id, and bbox info.
-        Uses screen_repr.annotated_screenshot_path if available and valid.
-        """
+                                  ) -> Optional[str]:
         if not original_screenshot_bytes:
             self.logger.debug("Skipping annotated screenshot: No original image bytes provided.")
             return None
-        if not ai_suggestion:
-            self.logger.debug("Skipping annotated screenshot: No AI suggestion provided for annotation.")
-            # Decide if you want to save the original unannotated screenshot anyway.
-            # For now, returning None if no AI suggestion to annotate with.
-            return None
-
-        bbox_data = ai_suggestion.get("target_bounding_box")
-        action_type = ai_suggestion.get("action", "unknown")
-        annotated_bytes_to_save = original_screenshot_bytes # Default to original
-        filename_suffix = "_original.png" # Suffix if no annotation is done
+        
+        annotated_bytes_to_save = original_screenshot_bytes
+        filename_suffix = "_original.png" 
         target_log_info = "original"
 
-        # Only attempt to draw a box if it's relevant (e.g., for click, input) and if bbox_data is present and valid.
+        bbox_data = None
+        action_type = "unknown"
+
+        if ai_suggestion:
+            bbox_data = ai_suggestion.get("target_bounding_box") 
+            action_type = ai_suggestion.get("action", "unknown")
+        else: 
+            self.logger.debug("No AI suggestion provided. Saving original image for annotated screenshot.")
+            # Fall through to save the original image under ANNOTATED_SCREENSHOTS_DIR with a generic name
+            # Or, if ai_suggestion is None and you don't want to save anything in this case:
+            # return None 
+
+
         if bbox_data and isinstance(bbox_data, dict) and action_type in ["click", "input"]:
             self.logger.debug(f"Attempting annotation for action '{action_type}' using AI bbox: {bbox_data}")
             
@@ -68,15 +76,14 @@ class ScreenshotAnnotator:
             img_height: Optional[int] = None
             
             try:
-                # Try to get dimensions from Appium first for reference (more reliable for coordinate systems)
-                window_size = self.driver.get_window_size() # Assumes AppiumDriver.get_window_size() is implemented
+                window_size = self.driver.get_window_size()
                 if window_size and isinstance(window_size.get('width'), int) and isinstance(window_size.get('height'), int):
                     img_width = window_size['width']
                     img_height = window_size['height']
                     self.logger.debug(f"Using Appium window size for coordinate reference: {img_width}x{img_height}")
                 
                 if not (img_width and img_height and img_width > 0 and img_height > 0):
-                    self.logger.debug("Appium window size unavailable or invalid, loading image from bytes to get dimensions.")
+                    self.logger.debug("Appium window size unavailable/invalid, loading image from bytes to get dimensions.")
                     try:
                         with Image.open(BytesIO(original_screenshot_bytes)) as img_for_size:
                             img_width, img_height = img_for_size.size
@@ -85,12 +92,11 @@ class ScreenshotAnnotator:
                         self.logger.debug(f"Using image dimensions from bytes: {img_width}x{img_height}")
                     except Exception as img_err:
                         self.logger.error(f"Failed to get image dimensions from bytes: {img_err}. Cannot proceed with annotation drawing.")
-                        # Fall through to save original if dimensions can't be confirmed for drawing
-                
+
                 if not (img_width and img_height and img_width > 0 and img_height > 0):
-                    self.logger.error("Failed to obtain valid image/screen dimensions. Cannot draw bounding box.")
-                else: # Proceed with coordinate processing and drawing
-                    raw_y1, raw_x1 = bbox_data.get("top_left", [0,0]) # Default if keys missing
+                    self.logger.error("Failed to obtain valid image/screen dimensions. Cannot draw bounding box for action target.")
+                else:
+                    raw_y1, raw_x1 = bbox_data.get("top_left", [0,0])
                     raw_y2, raw_x2 = bbox_data.get("bottom_right", [0,0])
 
                     coords_are_normalized = all(0.0 <= float(c) <= 1.0 for c in [raw_y1, raw_x1, raw_y2, raw_x2] if isinstance(c, (int,float,str)))
@@ -100,10 +106,10 @@ class ScreenshotAnnotator:
                         y1 = int(float(raw_y1) * img_height)
                         x2 = int(float(raw_x2) * img_width)
                         y2 = int(float(raw_y2) * img_height)
-                    else: # Assume absolute pixel coordinates
+                    else: 
                         x1, y1, x2, y2 = int(float(raw_x1)), int(float(raw_y1)), int(float(raw_x2)), int(float(raw_y2))
                     
-                    self.logger.debug(f"Processed AI BBox (x1,y1,x2,y2): ({x1},{y1},{x2},{y2}) from raw: {bbox_data}")
+                    self.logger.debug(f"Processed AI BBox for action target (x1,y1,x2,y2): ({x1},{y1},{x2},{y2}) from raw: {bbox_data}")
 
                     abs_x1, abs_y1 = min(x1, x2), min(y1, y2)
                     abs_x2, abs_y2 = max(x1, x2), max(y1, y2)
@@ -112,51 +118,49 @@ class ScreenshotAnnotator:
                     clipped_x2, clipped_y2 = min(img_width, abs_x2), min(img_height, abs_y2)
                     
                     if clipped_x1 >= clipped_x2 or clipped_y1 >= clipped_y2:
-                        self.logger.warning(f"Bounding box is zero-size or invalid after conversion/clipping. Original: {bbox_data}, Clipped: ({clipped_x1},{clipped_y1},{clipped_x2},{clipped_y2}). Will not draw.")
-                        filename_suffix = f"_action_{action_type}_no_bbox.png"
-                        target_log_info = f"action_{action_type}_no_bbox"
+                        self.logger.warning(f"Action target BBox is zero-size or invalid. Original: {bbox_data}, Clipped: ({clipped_x1},{clipped_y1},{clipped_x2},{clipped_y2}). Will not draw.")
+                        filename_suffix = f"_action_{action_type}_no_target_bbox.png"
+                        target_log_info = f"action_{action_type}_no_target_bbox"
                     else:
                         draw_box_coords = (clipped_x1, clipped_y1, clipped_x2, clipped_y2)
-                        filename_suffix = f"_action_{action_type}_bbox_{'_'.join(map(str, draw_box_coords))}.png"
-                        target_log_info = f"action_{action_type}_bbox=({draw_box_coords})"
+                        filename_suffix = f"_action_{action_type}_target_bbox_{'_'.join(map(str, draw_box_coords))}.png"
+                        target_log_info = f"action_{action_type}_target_bbox=({draw_box_coords})"
                         
-                        self.logger.debug(f"Drawing bounding box: {draw_box_coords}")
+                        self.logger.debug(f"Drawing action target bounding box: {draw_box_coords}")
                         drawn_bytes = utils.draw_rectangle_on_image(original_screenshot_bytes, draw_box_coords)
                         if isinstance(drawn_bytes, bytes):
                             annotated_bytes_to_save = drawn_bytes
                         else:
-                            self.logger.error("utils.draw_rectangle_on_image failed to return bytes. Using original.")
-                            filename_suffix = f"_action_{action_type}_draw_error.png"
+                            self.logger.error("utils.draw_rectangle_on_image failed to return bytes. Using original for annotated image.")
+                            filename_suffix = f"_action_{action_type}_target_draw_error.png"
                             target_log_info += "_draw_error"
             
             except (KeyError, IndexError, TypeError, ValueError) as e_bbox:
-                self.logger.error(f"Error processing AI bounding box data {bbox_data} for action '{action_type}': {e_bbox}. Saving original.")
-                filename_suffix = f"_action_{action_type}_bbox_error.png"
-                target_log_info = f"action_{action_type}_bbox_error"
+                self.logger.error(f"Error processing AI target bounding box data {bbox_data} for action '{action_type}': {e_bbox}. Saving original for annotated image.")
+                filename_suffix = f"_action_{action_type}_target_bbox_error.png"
+                target_log_info = f"action_{action_type}_target_bbox_error"
             except Exception as e_draw:
-                self.logger.error(f"Unexpected error during annotation drawing for action '{action_type}': {e_draw}", exc_info=True)
-                filename_suffix = f"_action_{action_type}_draw_unexpected_error.png"
-                target_log_info = f"action_{action_type}_draw_unexpected_error"
-        else:
-            self.logger.debug(f"No bounding box annotation needed for action '{action_type}' or bbox_data missing/invalid.")
-            filename_suffix = f"_action_{action_type}_no_annotation.png"
-            target_log_info = f"action_{action_type}_no_annotation"
+                self.logger.error(f"Unexpected error during target annotation drawing for action '{action_type}': {e_draw}", exc_info=True)
+                filename_suffix = f"_action_{action_type}_target_draw_unexpected_error.png"
+                target_log_info = f"action_{action_type}_target_draw_unexpected_error"
+        elif not ai_suggestion: # If ai_suggestion was None to begin with
+             filename_suffix = "_no_ai_suggestion.png"
+             target_log_info = "no_ai_suggestion"
+        else: # ai_suggestion exists, but no bbox_data for target or action type not requiring a drawn box
+            self.logger.debug(f"No specific target bounding box to draw for action '{action_type}' or bbox_data missing/invalid. Annotated image will be original.")
+            filename_suffix = f"_action_{action_type}_no_specific_target_annotation.png"
+            target_log_info = f"action_{action_type}_no_specific_target_annotation"
 
-
-        # --- Saving logic ---
-        # ANNOTATED_SCREENSHOTS_DIR is validated in __init__
         annotated_dir = str(self.cfg.ANNOTATED_SCREENSHOTS_DIR)
         os.makedirs(annotated_dir, exist_ok=True)
         
-        # Construct a descriptive filename
-        # Using screen_id (DB ID) makes it easier to associate with persistent screen records
         filename = f"annotated_s{screen_id}_step{step}{filename_suffix}"
         filepath = os.path.join(annotated_dir, filename)
 
         try:
             with open(filepath, "wb") as f:
                 f.write(annotated_bytes_to_save)
-            self.logger.info(f"Saved screenshot ({target_log_info}): {filepath}")
+            self.logger.info(f"Saved annotated screenshot ({target_log_info}): {filepath}")
             return filepath
         except IOError as io_err:
             self.logger.error(f"Failed to save annotated screenshot to {filepath}: {io_err}", exc_info=True)
@@ -164,3 +168,38 @@ class ScreenshotAnnotator:
         except Exception as e:
             self.logger.error(f"Unexpected error saving annotated screenshot {filepath}: {e}", exc_info=True)
             return None
+
+    def update_master_annotation_file(self,
+                                      original_screenshot_filename: str, 
+                                      all_ui_elements_data: List[Dict[str, Any]]):
+        if not self.master_annotation_file_path:
+            self.logger.error("Master annotation file path is not set. Cannot update.")
+            return
+            
+        if not all_ui_elements_data:
+            self.logger.debug(f"No UI elements data provided for {original_screenshot_filename}. Skipping update to master annotation file.")
+            return
+
+        master_annotations = {}
+        try:
+            if os.path.exists(self.master_annotation_file_path):
+                with open(self.master_annotation_file_path, 'r', encoding='utf-8') as f:
+                    master_annotations = json.load(f)
+        except json.JSONDecodeError:
+            self.logger.error(f"Error decoding existing master annotation file: {self.master_annotation_file_path}. Will overwrite with new data for this screenshot.", exc_info=True)
+            master_annotations = {}
+        except Exception as e:
+            self.logger.error(f"Error loading master annotation file {self.master_annotation_file_path}: {e}. Proceeding with new/overwritten data.", exc_info=True)
+            master_annotations = {}
+
+        master_annotations[os.path.basename(original_screenshot_filename)] = all_ui_elements_data
+        
+        try:
+            # SCREENSHOTS_DIR (raw) existence is checked/created in __init__ or by Config class
+            with open(self.master_annotation_file_path, 'w', encoding='utf-8') as f:
+                json.dump(master_annotations, f, indent=4, ensure_ascii=False)
+            self.logger.info(f"Updated master annotation file with {len(all_ui_elements_data)} elements for {original_screenshot_filename}: {self.master_annotation_file_path}")
+        except IOError as e:
+            self.logger.error(f"Failed to write master annotation file {self.master_annotation_file_path}: {e}", exc_info=True)
+        except Exception as e: # Catch any other unexpected error
+            self.logger.error(f"Unexpected error writing master annotation file {self.master_annotation_file_path}: {e}", exc_info=True)
