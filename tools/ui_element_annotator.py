@@ -210,6 +210,11 @@ class UIElementAnnotator:
 
         if results:
             try:
+                # Ensure output directory exists
+                output_dir = os.path.dirname(output_file)
+                if not os.path.exists(output_dir):
+                    os.makedirs(output_dir, exist_ok=True)
+                
                 with open(output_file, 'w', encoding='utf-8') as f:
                     json.dump(results, f, indent=2, ensure_ascii=False)
                 logging.info(f"Results saved to {output_file}")
@@ -219,7 +224,7 @@ class UIElementAnnotator:
         if failed_images:
             logging.warning(f"Failed to process {len(failed_images)} images: {', '.join(failed_images)}")
             # Save failed image list for reference
-            failed_list_file = os.path.join(os.path.dirname(output_file), "failed_annotations.txt")
+            failed_list_file = os.path.join(os.path.dirname(output_file), f"{Path(output_file).stem}_failed_annotations.txt")
             try:
                 with open(failed_list_file, 'w', encoding='utf-8') as f:
                     f.write('\n'.join(failed_images))
@@ -230,7 +235,8 @@ class UIElementAnnotator:
 def main():
     parser = argparse.ArgumentParser(description='Batch annotate UI elements in screenshots')
     parser.add_argument('--input-dir', required=True, help='Directory containing screenshot images')
-    parser.add_argument('--output-file', required=True, help='Output JSON file path')
+    parser.add_argument('--output-dir', required=True, help='Base directory for output JSON file')
+    parser.add_argument('--app-identifier', required=True, help='App identifier (e.g., package name) for naming the output file')
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO)
@@ -244,7 +250,9 @@ def main():
     # Resolve paths relative to project root
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     input_dir = os.path.normpath(os.path.join(project_root, args.input_dir))
-    output_file = os.path.normpath(os.path.join(project_root, args.output_file))
+    # Construct the output file name
+    output_filename = f"{args.app_identifier}_annotations.json"
+    output_file = os.path.normpath(os.path.join(project_root, args.output_dir, output_filename))
 
     # Create output directory if it doesn't exist
     os.makedirs(os.path.dirname(output_file), exist_ok=True)

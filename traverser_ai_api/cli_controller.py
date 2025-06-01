@@ -6,36 +6,52 @@ Uses the centralized Config class.
 
 import sys
 import os
-import logging 
-import json
-import argparse
-import subprocess
-import signal
-import time
-import threading
-import errno # For PID checking
-from typing import Optional, Dict, Any, List
 from pathlib import Path
+
+# Determine project root: E:\Vertiefung\appium-traverser-vertiefung
+# __file__ is E:\Vertiefung\appium-traverser-vertiefung\traverser_ai_api\cli_controller.py
+_project_root = Path(__file__).resolve().parent.parent
+if str(_project_root) not in sys.path:
+    sys.path.insert(0, str(_project_root))
+
+# Now that sys.path is set, proceed with other imports
+import json
+import signal
+import subprocess
+import threading
+import errno
+import time
+import argparse
+import logging
+import sqlite3 # Ensure sqlite3 is imported
+from typing import Optional, Dict, Any, List, Tuple # Added Tuple
+import textwrap
 
 # --- Imports for Config and Logging Utilities ---
 try:
     from config import Config
 except ImportError as e:
-    sys.stderr.write(f"FATAL: Could not import 'Config' class from config.py: {e}\n")
-    sys.stderr.write("Ensure config.py exists and contains the Config class definition.\n")
+    sys.stderr.write(f"FATAL: Could not import 'Config' class from config.py: {e}\\n")
+    sys.stderr.write("Ensure config.py exists and contains the Config class definition.\\n")
     sys.exit(1)
 
 try:
     from utils import SCRIPT_START_TIME, LoggerManager, ElapsedTimeFormatter
 except ImportError as e:
-    sys.stderr.write(f"FATAL: Could not import logging utilities from utils.py: {e}\n")
-    sys.stderr.write("Ensure utils.py exists and contains SCRIPT_START_TIME, LoggerManager, and ElapsedTimeFormatter.\n")
+    sys.stderr.write(f"FATAL: Could not import logging utilities from utils.py: {e}\\n")
+    sys.stderr.write("Ensure utils.py exists and contains SCRIPT_START_TIME, LoggerManager, and ElapsedTimeFormatter.\\n")
     if 'SCRIPT_START_TIME' not in globals():
-        SCRIPT_START_TIME = time.time() 
+        SCRIPT_START_TIME = time.time()
     sys.exit(1)
 
-# Need textwrap for the epilog in create_parser, import early
-import textwrap
+# Import the RunAnalyzer
+try:
+    from analysis_viewer import RunAnalyzer, XHTML2PDF_AVAILABLE
+except ImportError as e:
+    sys.stderr.write(f"FATAL: Could not import from analysis_viewer.py: {e}\n")
+    sys.stderr.write("Ensure analysis_viewer.py is in the same directory or Python path and has no import errors.\n")
+    RunAnalyzer = None
+    XHTML2PDF_AVAILABLE = False # Assume not available if import fails
 
 
 class CLIController:
@@ -46,7 +62,7 @@ class CLIController:
         self.api_dir = os.path.dirname(os.path.abspath(__file__))
         self.find_app_info_script_path = os.path.join(self.api_dir, "find_app_info.py")
         self.health_apps_data: List[Dict[str, Any]] = []
-        
+
         if not self.cfg.BASE_DIR or not os.path.isdir(self.cfg.BASE_DIR):
             fallback_dir = self.api_dir if os.path.isdir(self.api_dir) else os.getcwd()
             logging.warning(f"cfg.BASE_DIR ('{self.cfg.BASE_DIR}') is not a valid directory. Using fallback directory ('{fallback_dir}') for PID file.")
@@ -77,28 +93,23 @@ class CLIController:
         try:
             os.kill(pid, 0)
         except OSError as err:
-            if err.errno == errno.ESRCH: 
-                return False # No such process
-            elif err.errno == errno.EPERM: 
-                return True # Permission denied means process exists
-            else: 
-                # Other OS error
+            if err.errno == errno.ESRCH:
+                return False
+            elif err.errno == errno.EPERM:
+                return True
+            else:
                 logging.debug(f"Unknown OSError when checking PID {pid}: {err}")
-                return False # Can't determine, assume not running for safety
-        except Exception as e: # Catch any other exception
+                return False
+        except Exception as e:
             logging.debug(f"Exception when checking PID {pid}: {e}")
             return False
-        return True # Signal 0 sent successfully, process exists
+        return True
 
     def _signal_handler(self, signum, frame):
         logging.warning(f"\nSignal {signal.Signals(signum).name} received by CLI. Initiating crawler shutdown via flag...")
-        self.stop_crawler() # This will now create the flag
-        # If this CLI instance is managing the crawler_process directly,
-        # the monitor thread for that process should handle its termination.
-        # If stop_crawler also attempts to join/wait, it might conflict.
-        # For now, stop_crawler just sets the flag.
+        self.stop_crawler()
         logging.info("CLI shutdown signal handled. Crawler (if running) should stop.")
-        sys.exit(0) # Exit CLI
+        sys.exit(0)
 
     def save_all_changes(self) -> bool:
         logging.info("Attempting to save all current configuration settings...")
@@ -110,7 +121,7 @@ class CLIController:
             return False
 
     def show_config(self, filter_key: Optional[str] = None):
-        config_to_display = self.cfg._get_user_savable_config() 
+        config_to_display = self.cfg._get_user_savable_config()
         print("\n=== Current Configuration (via CLIController) ===")
         if not config_to_display:
             print("No configuration settings available to display.")
@@ -126,7 +137,7 @@ class CLIController:
     def set_config_value(self, key: str, value_str: str) -> bool:
         logging.info(f"CLI attempting to set config: {key} = '{value_str}'")
         try:
-            self.cfg.update_setting_and_save(key, value_str) 
+            self.cfg.update_setting_and_save(key, value_str)
             return True
         except Exception as e:
             logging.error(f"CLI failed to set config for {key}: {e}", exc_info=True)
@@ -143,11 +154,11 @@ class CLIController:
 
         logging.info("Starting health app scan via find_app_info.py...")
         try:
-            process_cwd = self.api_dir 
+            process_cwd = self.api_dir
             logging.debug(f"Running find_app_info.py from CWD: {process_cwd}")
             result = subprocess.run(
                 [sys.executable, '-u', self.find_app_info_script_path, '--mode', 'discover'],
-                cwd=process_cwd, 
+                cwd=process_cwd,
                 capture_output=True, text=True, timeout=300, check=False
             )
             logging.debug(f"find_app_info.py stdout:\n{result.stdout}")
@@ -156,16 +167,15 @@ class CLIController:
             if result.returncode != 0:
                 logging.error(f"App scan script failed with exit code {result.returncode}.\nStderr: {result.stderr}")
                 return False
-            
+
             output_lines = result.stdout.splitlines()
             cache_file_line = next((line for line in output_lines if "Cache file generated at:" in line), None)
             if not cache_file_line:
                 logging.error(f"Could not find cache file path in scan output.\nStdout: {result.stdout}")
                 return False
-            
+
             cache_file_path = cache_file_line.split("Cache file generated at:", 1)[1].strip()
             if not os.path.exists(cache_file_path):
-                # The script might output a path relative to its own location if not absolute
                 potential_abs_path = os.path.join(self.api_dir, cache_file_path)
                 if not os.path.exists(potential_abs_path):
                     logging.error(f"Cache file reported by script not found at '{cache_file_path}' or '{potential_abs_path}'")
@@ -187,9 +197,9 @@ class CLIController:
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-            if isinstance(data, dict): # Assuming new format {"apps": [...]}
+            if isinstance(data, dict):
                 self.health_apps_data = data.get('apps', [])
-            elif isinstance(data, list): # Support old list format
+            elif isinstance(data, list):
                 self.health_apps_data = data
             else:
                 logging.warning(f"Unexpected data structure in health app file: {file_path}.")
@@ -242,14 +252,13 @@ class CLIController:
             return False
         app_package = selected_app.get('package_name')
         app_activity = selected_app.get('activity_name')
-        app_name = selected_app.get('app_name', app_package if app_package else "Unknown App") # Default app_name
+        app_name = selected_app.get('app_name', app_package if app_package else "Unknown App")
         if not app_package or not app_activity:
             logging.error(f"Selected app '{app_name}' is missing required package_name or activity_name.")
             return False
         logging.info(f"Selecting app: '{app_name}' (Package: {app_package}, Activity: {app_activity})")
         self.cfg.update_setting_and_save('APP_PACKAGE', app_package)
         self.cfg.update_setting_and_save('APP_ACTIVITY', app_activity)
-        # Store more comprehensive info if available
         self.cfg.update_setting_and_save('LAST_SELECTED_APP', {
             'package_name': app_package, 'activity_name': app_activity, 'app_name': app_name
         })
@@ -259,7 +268,6 @@ class CLIController:
         if not self.cfg.SHUTDOWN_FLAG_PATH:
             logging.error("Shutdown flag path is not configured (cfg.SHUTDOWN_FLAG_PATH). Cannot start crawler.")
             return False
-        # Ensure no shutdown flag from a previous run is present
         if os.path.exists(self.cfg.SHUTDOWN_FLAG_PATH):
             logging.warning(f"Removing existing shutdown flag: {self.cfg.SHUTDOWN_FLAG_PATH} before starting.")
             try:
@@ -268,13 +276,13 @@ class CLIController:
                 logging.error(f"Could not remove existing shutdown flag: {e}. Start aborted.")
                 return False
 
-        main_script_path = os.path.join(self.api_dir, 'main.py') 
+        main_script_path = os.path.join(self.api_dir, 'main.py')
 
         if os.path.exists(self.pid_file_path):
             try:
                 with open(self.pid_file_path, 'r') as pf:
                     pid_str = pf.read().strip()
-                    if not pid_str: # Empty PID file
+                    if not pid_str:
                         logging.warning(f"PID file {self.pid_file_path} is empty. Removing.")
                         os.remove(self.pid_file_path)
                     else:
@@ -282,15 +290,15 @@ class CLIController:
                         if self._is_process_running(pid):
                             logging.warning(f"Crawler process seems to be already running with PID {pid} (from PID file: {self.pid_file_path}). If this is incorrect, remove the PID file and any shutdown flag.")
                             return False
-                        else: 
+                        else:
                             logging.info(f"Stale PID file found ({self.pid_file_path} for PID {pid}). Process not running. Removing PID file.")
                             os.remove(self.pid_file_path)
             except (ValueError, OSError) as e:
                 logging.warning(f"Error processing PID file {self.pid_file_path}: {e}. Removing if exists.")
                 if os.path.exists(self.pid_file_path):
                     try: os.remove(self.pid_file_path)
-                    except OSError: pass # Ignore error if removal fails here
-        
+                    except OSError: pass
+
         if self.crawler_process and self.crawler_process.poll() is None:
             logging.warning(f"Crawler process (managed by this CLI instance) already running with PID {self.crawler_process.pid}. Start aborted.")
             return False
@@ -306,16 +314,13 @@ class CLIController:
 
             env = os.environ.copy()
             current_pythonpath = env.get('PYTHONPATH', '')
-            # Prepend project root to PYTHONPATH to help with relative imports in the crawler process
             env['PYTHONPATH'] = project_root_dir + os.pathsep + current_pythonpath
-            
-            # The main.py script will be responsible for its own detailed logging.
-            # This Popen captures stdout/stderr for the CLI to display.
+
             self.crawler_process = subprocess.Popen(
-                [sys.executable, '-u', main_script_path], # -u for unbuffered output
-                cwd=project_root_dir, # Run from project root
-                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, # Combine stderr into stdout
-                text=True, bufsize=1, universal_newlines=True, # Line buffered
+                [sys.executable, '-u', main_script_path],
+                cwd=project_root_dir,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, bufsize=1, universal_newlines=True,
                 encoding='utf-8', errors='replace', env=env
             )
             try:
@@ -323,53 +328,36 @@ class CLIController:
                     pf.write(str(self.crawler_process.pid))
                 logging.info(f"Crawler process started with PID {self.crawler_process.pid}. PID written to {self.pid_file_path}.")
             except IOError as e:
-                # Crawler started, but PID file could not be written. Stop might not find it easily.
                 logging.error(f"Failed to write PID file {self.pid_file_path}: {e}. Crawler started, but --stop might need manual PID if it relies on this file and main.py doesn't create its own.")
 
-            # Start a thread to monitor and print the crawler's output
             threading.Thread(target=self._monitor_crawler_output, daemon=True).start()
             return True
-        except FileNotFoundError: 
+        except FileNotFoundError:
             logging.error(f"Python interpreter '{sys.executable}' not found. Cannot start crawler.")
             return False
         except Exception as e:
             logging.error(f"Failed to start crawler process (script: {main_script_path}): {e}", exc_info=True)
-            # Clean up PID file if process definitely didn't start or Popen failed critically
-            if self.crawler_process is None and os.path.exists(self.pid_file_path):
-                 # Check if the PID in the file (if any) matches a failed attempt vs a pre-existing one
-                 # For simplicity, if Popen failed and self.crawler_process is None, we assume the PID file might be ours and stale.
-                 # This needs careful handling if multiple CLIs could try to start.
-                 # However, start_crawler already has PID check logic at the beginning.
-                 pass # Let the initial check in start_crawler or status handle stale PID files.
             return False
 
     def _monitor_crawler_output(self):
         if not self.crawler_process or not self.crawler_process.stdout:
             logging.debug("Monitor: Crawler process or its stdout not available for current CLI instance.")
             return
-        
-        process_pid = self.crawler_process.pid # Capture PID for logging in case self.crawler_process is cleared
 
+        process_pid = self.crawler_process.pid
         try:
-            # Read and print output line by line
             for line in iter(self.crawler_process.stdout.readline, ''):
-                if not line: break # EOF
-                print(line, end='') # Print line as it comes
-            # self.crawler_process.stdout.close() # Not strictly necessary, Popen.wait() handles pipe closure.
-            return_code = self.crawler_process.wait() # Wait for the process to complete
+                if not line: break
+                print(line, end='')
+            return_code = self.crawler_process.wait()
             logging.info(f"Crawler process PID {process_pid} exited with code {return_code}.")
         except Exception as e:
-            # This could be due to pipe issues or other errors during monitoring
             logging.error(f"Error monitoring crawler output for PID {process_pid}: {e}", exc_info=True)
         finally:
             logging.info(f"Crawler output monitoring thread for PID {process_pid} finished.")
-            # The crawler (main.py) should ideally remove its own PID file.
-            # This cleanup is a fallback or for cases where main.py crashes hard.
             self._cleanup_pid_file_if_matches(process_pid)
-            # Clear the process object if it's the one we were monitoring and it has exited
             if self.crawler_process and self.crawler_process.pid == process_pid:
                  self.crawler_process = None
-
 
     def stop_crawler(self) -> bool:
         logging.info("Attempting to signal crawler to stop via shutdown flag...")
@@ -395,17 +383,14 @@ class CLIController:
                         logging.info(f"Found running crawler process {pid_source_info}.")
                     else:
                         logging.info(f"Stale PID file found for {pid_source_info}. Process not running. Flag will be set anyway.")
-                        # The crawler won't pick up the flag if not running. start_crawler should clean the flag.
-                        # self._cleanup_pid_file_if_matches(pid_in_file) # Clean up stale PID file
-                else: # PID file is empty
+                else:
                     logging.warning(f"PID file {self.pid_file_path} is empty. Flag will be set anyway.")
                     pid_source_info = f"Empty PID file at {self.pid_file_path}"
-                    if os.path.exists(self.pid_file_path): 
-                        try: 
+                    if os.path.exists(self.pid_file_path):
+                        try:
                             os.remove(self.pid_file_path)
-                        except OSError: 
+                        except OSError:
                             pass
-
             except (ValueError, OSError) as e:
                 logging.warning(f"Error reading PID from {self.pid_file_path}: {e}. Flag will be set anyway.")
                 pid_source_info = f"Error reading PID file {self.pid_file_path}"
@@ -415,118 +400,84 @@ class CLIController:
 
         try:
             with open(self.cfg.SHUTDOWN_FLAG_PATH, 'w') as f:
-                f.write("stop") 
+                f.write("stop")
             logging.info(f"Shutdown flag created at: {self.cfg.SHUTDOWN_FLAG_PATH}.")
-            
+
             if pid_in_file and self._is_process_running(pid_in_file):
                  logging.info(f"Crawler process {pid_source_info} should detect this flag and initiate a graceful shutdown.")
-            elif pid_in_file : # PID was identified but process not running
+            elif pid_in_file :
                  logging.info(f"Process {pid_source_info} was not running. Flag set; crawler (if restarted) or next run will see it.")
-                 self._cleanup_pid_file_if_matches(pid_in_file) # Clean up if confirmed stale
-            else: # No PID identified
+                 self._cleanup_pid_file_if_matches(pid_in_file)
+            else :
                  logging.info("If a crawler instance is running, it should detect this flag.")
-            
-            # The crawler process is responsible for its own shutdown and cleanup of the flag/PID file.
-            # CLI's job is to set the flag.
             return True
         except Exception as e:
             logging.error(f"Failed to create shutdown flag at {self.cfg.SHUTDOWN_FLAG_PATH}: {e}", exc_info=True)
             return False
 
-
     def _cleanup_pid_file_if_matches(self, pid_to_check: Optional[int]):
-        # This function is called by the monitor thread when a CLI-managed process exits,
-        # or can be called by status/start if a stale PID file is found.
         if os.path.exists(self.pid_file_path):
             pid_in_file_str = ""
             try:
                 pid_in_file = -1
                 with open(self.pid_file_path, 'r') as pf:
                     pid_in_file_str = pf.read().strip()
-                
-                if not pid_in_file_str: # Empty PID file
+
+                if not pid_in_file_str:
                     logging.debug(f"PID file {self.pid_file_path} is empty during cleanup check. Removing.")
                     os.remove(self.pid_file_path)
                     return
 
                 pid_in_file = int(pid_in_file_str)
-                
-                # Check if the process in the PID file is actually running
                 process_in_pid_file_is_running = self._is_process_running(pid_in_file)
-                
                 should_remove = False
-                if pid_to_check is not None: # Specific PID to check (e.g., from a process that just exited)
+                if pid_to_check is not None:
                     if pid_in_file == pid_to_check:
-                        if not process_in_pid_file_is_running: # The specific process we cared about is gone
+                        if not process_in_pid_file_is_running:
                             should_remove = True
                             logging.debug(f"PID file for exited PID {pid_to_check} matches. Removing PID file.")
-                        # else: It matches, but it's somehow still running? Or _is_process_running is unreliable. Log.
-                        #    logging.warning(f"PID file matches PID {pid_to_check}, but it's unexpectedly still reported as running.")
-                    # else: PID file is for a different process, don't touch it based on pid_to_check.
-                elif not process_in_pid_file_is_running: # General cleanup: PID in file is for a non-running process (stale)
+                elif not process_in_pid_file_is_running:
                     should_remove = True
                     logging.debug(f"PID {pid_in_file} from PID file is not running (stale). Removing PID file.")
-                
+
                 if should_remove:
                     os.remove(self.pid_file_path)
                     logging.info(f"Removed PID file: {self.pid_file_path} (contained PID: {pid_in_file})")
                 else:
                     logging.debug(f"PID file {self.pid_file_path} (for PID {pid_in_file}) not removed: "
                                   f"pid_to_check={pid_to_check}, process_in_pid_file_is_running={process_in_pid_file_is_running}")
-
-            except ValueError: # Invalid content in PID file
+            except ValueError:
                 logging.warning(f"Invalid content '{pid_in_file_str}' in PID file {self.pid_file_path} during cleanup. Removing.")
                 try: os.remove(self.pid_file_path)
                 except OSError as e_rem: logging.warning(f"Could not remove invalid PID file: {e_rem}")
-            except OSError as e: # Error during file operations
+            except OSError as e:
                 logging.warning(f"OSError during PID file cleanup for {self.pid_file_path}: {e}")
             except Exception as e_gen:
                  logging.error(f"Unexpected error during _cleanup_pid_file_if_matches: {e_gen}", exc_info=True)
 
-
     def _cleanup_after_stop(self, flag_was_created:bool, stopped_pid: Optional[int]):
-        # This method's role changes. The crawler itself handles flag removal.
-        # The crawler (main.py) should handle PID file removal on its exit.
-        # This CLI method is mostly for internal CLI state.
         logging.debug(f"_cleanup_after_stop called by CLI (flag_created: {flag_was_created}, pid_context: {stopped_pid}). Crawler manages its own flag/PID cleanup.")
-        
-        # If the CLI was managing a specific crawler_process instance and it was associated with stopped_pid,
-        # and we are sure it's stopped, we can clear self.crawler_process.
-        # However, the _monitor_crawler_output thread is better suited to clear self.crawler_process
-        # when the Popen object actually terminates.
-        if self.crawler_process and stopped_pid is not None and self.crawler_process.pid == stopped_pid:
-            # If we are very sure it's stopped (e.g. poll() is not None), then we can clear.
-            # if self.crawler_process.poll() is not None:
-            #    self.crawler_process = None
-            # But it's safer to let the monitor thread do this.
-            pass
-
+        pass
 
     def status(self):
         print("\n=== CLI Crawler Status ===")
         active_pid: Optional[int] = None
-        pid_file_path_to_report = self.pid_file_path # Could be from config or fallback
-        status_message = "  Crawler Process: Unknown (check logs)" # Default
+        pid_file_path_to_report = self.pid_file_path
+        status_message = "  Crawler Process: Unknown (check logs)"
         pid_file_status_note = ""
-
 
         if self.crawler_process and self.crawler_process.poll() is None:
             active_pid = self.crawler_process.pid
             status_message = f"  Crawler Process: Running (PID: {active_pid}, managed by current CLI instance)"
             pid_file_status_note = f"(PID file: {pid_file_path_to_report})"
-        elif os.path.exists(pid_file_path_to_report): 
+        elif os.path.exists(pid_file_path_to_report):
             pid_from_file_str = ""
             try:
                 with open(pid_file_path_to_report, 'r') as pf:
                     pid_from_file_str = pf.read().strip()
-                if not pid_from_file_str: 
+                if not pid_from_file_str:
                      status_message = f"  Crawler Process: PID file ({pid_file_path_to_report}) is empty. Assuming stopped."
                      pid_file_status_note = "(Action: Consider removing empty PID file)"
-                     # Optionally remove it here if desired, but be cautious
-                     # try: 
-                     #     os.remove(pid_file_path_to_report)
-                     #     logging.info(f"Removed empty PID file during status check: {pid_file_path_to_report}")
-                     # except OSError as e: logging.warning(f"Could not remove empty PID file {pid_file_path_to_report}: {e}")
                 else:
                     pid_from_file = int(pid_from_file_str)
                     if self._is_process_running(pid_from_file):
@@ -536,32 +487,25 @@ class CLIController:
                     else:
                         status_message = f"  Crawler Process: Stale PID file (PID {pid_from_file} not running)."
                         pid_file_status_note = f"(PID file: {pid_file_path_to_report})"
-                        # Optionally remove stale PID file
-                        # try: 
-                        #     os.remove(pid_file_path_to_report)
-                        #     logging.info(f"Removed stale PID file during status check: {pid_file_path_to_report}")
-                        # except OSError as e:
-                        #     logging.warning(f"Could not remove stale PID file {pid_file_path_to_report} during status check: {e}")
-            except ValueError: # Invalid content
+            except ValueError:
                  status_message = f"  Crawler Process: Invalid content in PID file ('{pid_from_file_str}')."
                  pid_file_status_note = f"(PID file: {pid_file_path_to_report})"
-                 # Optionally remove
-            except OSError as e: # Read error
+            except OSError as e:
                 status_message = f"  Crawler Process: Error reading PID file: {e}"
                 pid_file_status_note = f"(PID file: {pid_file_path_to_report})"
-        else: # No CLI managed process, no PID file
+        else:
             status_message = "  Crawler Process: Stopped (no active CLI-managed process or PID file)"
-        
+
         print(status_message)
         if pid_file_status_note : print(f"                     {pid_file_status_note}")
-        
+
         last_selected = self.cfg.LAST_SELECTED_APP
         if self.cfg.APP_PACKAGE and self.cfg.APP_ACTIVITY:
             app_name_display = last_selected.get('app_name', 'N/A') if isinstance(last_selected, dict) else self.cfg.APP_PACKAGE
             print(f"  Target App:      '{app_name_display}' ({self.cfg.APP_PACKAGE})")
         else:
             print("  Target App:      Not Selected")
-        
+
         if self.health_apps_data:
             print(f"  Health Apps:     {len(self.health_apps_data)} app(s) loaded from '{Path(self.cfg.CURRENT_HEALTH_APP_LIST_FILE).name if self.cfg.CURRENT_HEALTH_APP_LIST_FILE and os.path.exists(self.cfg.CURRENT_HEALTH_APP_LIST_FILE) else 'N/A'}'")
         else:
@@ -576,8 +520,93 @@ class CLIController:
         if self.cfg.SHUTDOWN_FLAG_PATH:
             shutdown_flag_status = f"{self.cfg.SHUTDOWN_FLAG_PATH} (exists: {os.path.exists(self.cfg.SHUTDOWN_FLAG_PATH)})"
         print(f"  Shutdown Flag:   {shutdown_flag_status}")
-        print(f"  PID File Path:   {pid_file_path_to_report}") # Show the actual path used
+        print(f"  PID File Path:   {pid_file_path_to_report}")
+        print(f"  Database Path:   {self.cfg.DB_NAME if self.cfg.DB_NAME else 'Not Set'}")
+        print(f"  Output Data Dir: {self.cfg.OUTPUT_DATA_DIR if self.cfg.OUTPUT_DATA_DIR else 'Not Set'}")
         print("========================")
+
+    def handle_analyze_run(self, run_id_str: Optional[str], pdf_output_path: Optional[str] = None):
+        """Handles the 'analyze-run' command, with optional PDF output."""
+        if RunAnalyzer is None:
+            logging.error("RunAnalyzer could not be imported. Cannot analyze run. Ensure analysis_viewer.py is present.")
+            return False
+
+        db_path_to_use = self.cfg.DB_NAME
+        output_dir_to_use = self.cfg.OUTPUT_DATA_DIR
+
+        if db_path_to_use and not os.path.isabs(db_path_to_use) and output_dir_to_use and self.cfg.APP_PACKAGE:
+            potential_db_path = Path(output_dir_to_use) / "database_output" / self.cfg.APP_PACKAGE / db_path_to_use
+            if potential_db_path.exists():
+                db_path_to_use = str(potential_db_path.resolve())
+                logging.info(f"Resolved relative DB_NAME '{self.cfg.DB_NAME}' to absolute path: {db_path_to_use}")
+            else:
+                if (Path(output_dir_to_use) / db_path_to_use).exists():
+                     db_path_to_use = str((Path(output_dir_to_use) / db_path_to_use).resolve())
+                elif (Path(self.api_dir) / db_path_to_use).exists():
+                     db_path_to_use = str((Path(self.api_dir) / db_path_to_use).resolve())
+                else:
+                    logging.warning(f"Could not resolve relative DB_NAME '{self.cfg.DB_NAME}' to an existing file. Using it as is.")
+
+
+        if not db_path_to_use or not os.path.exists(db_path_to_use):
+            logging.error(f"Database path not configured or DB file not found: '{self.cfg.DB_NAME}' (resolved to '{db_path_to_use}').")
+            logging.error("Ensure the crawler has run and generated a database, or check DB_NAME in config.")
+            return False
+
+        if not output_dir_to_use or not os.path.isdir(output_dir_to_use):
+            logging.error(f"Output data directory not configured or not found: {output_dir_to_use}")
+            return False
+
+        app_package_for_specific_run = None
+        if run_id_str:
+            try:
+                conn_temp = sqlite3.connect(db_path_to_use)
+                cursor_temp = conn_temp.cursor()
+                cursor_temp.execute("SELECT app_package FROM runs WHERE run_id = ?", (int(run_id_str),))
+                run_info_temp = cursor_temp.fetchone()
+                if run_info_temp:
+                    app_package_for_specific_run = run_info_temp[0]
+                conn_temp.close()
+            except Exception as e:
+                logging.warning(f"Could not pre-fetch app_package for run {run_id_str} from {db_path_to_use}: {e}")
+        
+        if not app_package_for_specific_run and self.cfg.APP_PACKAGE:
+            app_package_for_specific_run = self.cfg.APP_PACKAGE
+            logging.info(f"Using globally configured APP_PACKAGE '{app_package_for_specific_run}' as fallback for RunAnalyzer.")
+
+
+        try:
+            analyzer = RunAnalyzer(
+                db_path=db_path_to_use,
+                output_data_dir=output_dir_to_use,
+                app_package_for_run=app_package_for_specific_run
+            )
+            if run_id_str:
+                try:
+                    run_id_to_analyze = int(run_id_str)
+                    if pdf_output_path:
+                        if not XHTML2PDF_AVAILABLE: # Changed this line
+                             print("PDF generation requested, but xhtml2pdf is not available. Please install it: pip install xhtml2pdf")
+                             logging.error("PDF generation requested, but xhtml2pdf is not available.")
+                             analyzer._close_db_connection() 
+                             return False
+                        analyzer.analyze_run_to_pdf(run_id_to_analyze, pdf_output_path)
+                    else:
+                        analyzer.analyze_run_to_cli(run_id_to_analyze)
+                except ValueError:
+                    logging.error(f"Invalid Run ID: '{run_id_str}'. Must be an integer.")
+                    analyzer.list_runs()
+                    return False
+            else:
+                if pdf_output_path:
+                    logging.warning("PDF output path provided but no Run ID specified. Listing runs to CLI instead.")
+                analyzer.list_runs()
+            return True
+        except FileNotFoundError: 
+            return False 
+        except Exception as e:
+            logging.error(f"Error during run analysis: {e}", exc_info=True)
+            return False
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -596,6 +625,9 @@ Examples:
   %(prog)s save-config                 # Explicitly save any pending changes to user_config.json
   %(prog)s start
   %(prog)s stop
+  %(prog)s analyze-run                 # Lists available runs
+  %(prog)s analyze-run 123             # Analyzes run with ID 123 to CLI
+  %(prog)s analyze-run 123 --pdf-output report.pdf  # Analyzes run 123 to PDF report
         """)
     )
     app_group = parser.add_argument_group('App Management')
@@ -612,7 +644,14 @@ Examples:
     config_group.add_argument('--show-config', metavar='FILTER_KEY', nargs='?', const='', help='Show current configuration (optionally filter by key).')
     config_group.add_argument('--set-config', metavar='KEY=VALUE', action='append', help='Set a configuration value (e.g., MAX_CRAWL_STEPS=100). For lists, use comma-separated values.')
     config_group.add_argument('--save-config', action='store_true', help='Explicitly save all current config settings to user_config.json.')
-    
+
+    analysis_group = parser.add_argument_group('Analysis')
+    analysis_group.add_argument('--analyze-run', metavar='RUN_ID', nargs='?', const=True,
+                                help='Analyze a specific run ID. If no ID, lists runs. Use with --pdf-output for PDF.')
+    analysis_group.add_argument('--pdf-output', metavar='FILEPATH',
+                                help='Generate a PDF report for the analyzed run at the given filepath. Requires a RUN_ID with --analyze-run.')
+
+
     parser.add_argument('--force-rescan', action='store_true', help='Force app rescan even if a cached list exists.')
     parser.add_argument('-v', '--verbose', action='store_true', help='Enable verbose DEBUG logging for the CLI session.')
     return parser
@@ -622,7 +661,7 @@ def main_cli():
     args = parser.parse_args()
 
     bootstrap_log_level = 'DEBUG' if args.verbose else 'INFO'
-    
+
     existing_root_handlers = logging.root.handlers[:]
     for handler in existing_root_handlers:
         logging.root.removeHandler(handler)
@@ -631,12 +670,12 @@ def main_cli():
         level=bootstrap_log_level,
         format=f"%(asctime)s [{SCRIPT_START_TIME:.0f}] [%(levelname)s] %(message)s (bootstrap)",
         datefmt='%H:%M:%S',
-        handlers=[logging.StreamHandler(sys.stdout)] 
+        handlers=[logging.StreamHandler(sys.stdout)]
     )
     logging.info("CLI Bootstrap logging initialized.")
 
     _cli_script_dir = os.path.dirname(os.path.abspath(__file__))
-    DEFAULT_CONFIG_MODULE_PATH_CLI = os.path.join(_cli_script_dir, 'config.py') 
+    DEFAULT_CONFIG_MODULE_PATH_CLI = os.path.join(_cli_script_dir, 'config.py')
     USER_CONFIG_JSON_PATH_CLI = os.path.join(_cli_script_dir, "user_config.json")
 
     try:
@@ -644,12 +683,9 @@ def main_cli():
             defaults_module_path=DEFAULT_CONFIG_MODULE_PATH_CLI,
             user_config_json_path=USER_CONFIG_JSON_PATH_CLI
         )
-        # Ensure SHUTDOWN_FLAG_PATH has a default if not in user_config.json
-        # This might be better placed in Config class default_config or __init__
-        if not cli_cfg.SHUTDOWN_FLAG_PATH: # Check if it's None or empty
+        if not cli_cfg.SHUTDOWN_FLAG_PATH:
              default_flag_path = os.path.join(cli_cfg.BASE_DIR or _cli_script_dir, "crawler_shutdown.flag")
-             cli_cfg.SHUTDOWN_FLAG_PATH = default_flag_path # Set it on the instance
-             # No need to save here, it's a runtime default if not configured
+             cli_cfg.SHUTDOWN_FLAG_PATH = default_flag_path
              logging.info(f"SHUTDOWN_FLAG_PATH was not set, using default: {default_flag_path}")
         logging.debug(f"Config object initialized. Shutdown flag path: {cli_cfg.SHUTDOWN_FLAG_PATH}")
 
@@ -657,40 +693,38 @@ def main_cli():
         logging.critical(f"Failed to initialize Config object for CLI: {e}", exc_info=True)
         sys.exit(100)
 
-    logger_manager_cli = LoggerManager() 
-    
-    _log_base_dir_cli = _cli_script_dir 
+    logger_manager_cli = LoggerManager()
+
+    _log_base_dir_cli = _cli_script_dir
     if cli_cfg.OUTPUT_DATA_DIR:
         output_data_parent = os.path.dirname(cli_cfg.OUTPUT_DATA_DIR) if cli_cfg.OUTPUT_DATA_DIR else None
-        if output_data_parent and os.path.isdir(output_data_parent): 
+        if output_data_parent and os.path.isdir(output_data_parent):
             _log_base_dir_cli = cli_cfg.OUTPUT_DATA_DIR
-        elif cli_cfg.OUTPUT_DATA_DIR and not output_data_parent : # OUTPUT_DATA_DIR is a root path like "output_data"
-            _log_base_dir_cli = cli_cfg.OUTPUT_DATA_DIR # Use it directly
-        else: # Parent does not exist or OUTPUT_DATA_DIR is not suitable
+        elif cli_cfg.OUTPUT_DATA_DIR and not output_data_parent :
+            _log_base_dir_cli = cli_cfg.OUTPUT_DATA_DIR
+        else:
             logging.warning(f"Parent of cfg.OUTPUT_DATA_DIR ('{output_data_parent}') is not valid or OUTPUT_DATA_DIR itself ('{cli_cfg.OUTPUT_DATA_DIR}') is problematic. CLI logs will be in script directory.")
-            
-    _final_log_dir_cli = os.path.join(_log_base_dir_cli, "logs", "cli") 
-    
+
+    _final_log_dir_cli = os.path.join(_log_base_dir_cli, "logs", "cli")
+
     try:
         os.makedirs(_final_log_dir_cli, exist_ok=True)
     except OSError as e:
         logging.error(f"Failed to create CLI log directory '{_final_log_dir_cli}': {e}. Using script directory for logs.")
-        _final_log_dir_cli = _cli_script_dir 
+        _final_log_dir_cli = _cli_script_dir
         try: os.makedirs(_final_log_dir_cli, exist_ok=True)
         except OSError as e_fallback: logging.critical(f"Failed to create fallback CLI log directory '{_final_log_dir_cli}': {e_fallback}")
 
-
     _final_log_file_path_cli = os.path.join(_final_log_dir_cli, f"cli_{cli_cfg.LOG_FILE_NAME}")
-    
     effective_log_level_str = 'DEBUG' if args.verbose else str(cli_cfg.LOG_LEVEL).upper()
-    
+
     for handler in logging.root.handlers[:]:
-        if isinstance(handler, logging.StreamHandler) and handler.stream == sys.stdout: 
+        if isinstance(handler, logging.StreamHandler) and handler.stream == sys.stdout:
             logging.root.removeHandler(handler)
-            break 
-            
+            break
+
     root_logger_cli = logger_manager_cli.setup_logging(
-        log_level_str=effective_log_level_str, 
+        log_level_str=effective_log_level_str,
         log_file=_final_log_file_path_cli,
     )
     root_logger_cli.info(f"CLI Application Logging Initialized. Level: {effective_log_level_str}. File: '{_final_log_file_path_cli}'")
@@ -698,7 +732,7 @@ def main_cli():
         root_logger_cli.info(f"CLI session is verbose (--verbose), but app default LOG_LEVEL is {cli_cfg.LOG_LEVEL}.")
 
     controller = CLIController(app_config_instance=cli_cfg)
-    
+
     action_taken = False
     exit_code = 0
     try:
@@ -711,9 +745,9 @@ def main_cli():
         if args.select_app and exit_code == 0:
             action_taken = True
             if not controller.select_app(args.select_app): exit_code = 1
-        if args.show_config is not None and exit_code == 0: # nargs='?' means it's present if --show-config is used
+        if args.show_config is not None and exit_code == 0:
             action_taken = True
-            controller.show_config(args.show_config if args.show_config else None) # Pass actual value or None
+            controller.show_config(args.show_config if args.show_config else None)
         if args.set_config and exit_code == 0:
             action_taken = True
             for config_item in args.set_config:
@@ -724,85 +758,78 @@ def main_cli():
         if args.save_config and exit_code == 0:
             action_taken = True
             if not controller.save_all_changes(): exit_code = 1
-        
-        if args.status: 
+
+        if args.status:
             action_taken = True
-            controller.status() 
-        
-        if args.start: 
+            controller.status()
+
+        if args.analyze_run is not None:
             action_taken = True
-            if exit_code == 0: # Only start if previous config commands were successful
-                if not controller.start_crawler(): 
-                    exit_code = 1 # Start command itself failed
-                else: 
-                    # If start_crawler returns True, it means Popen succeeded.
-                    # Now wait for the process if it's managed by this CLI instance.
+            run_id_to_pass = args.analyze_run if isinstance(args.analyze_run, str) else None
+            pdf_path_to_pass = args.pdf_output if args.pdf_output else None
+
+            if pdf_path_to_pass and not run_id_to_pass:
+                logging.warning("--pdf-output requires a specific RUN_ID. Listing runs to CLI instead.")
+                pdf_path_to_pass = None 
+            
+            if not controller.handle_analyze_run(run_id_to_pass, pdf_path_to_pass):
+                 if exit_code == 0: exit_code = 1
+
+        if args.start:
+            action_taken = True
+            if exit_code == 0:
+                if not controller.start_crawler():
+                    exit_code = 1
+                else:
                     try:
-                        if controller.crawler_process: 
-                            # This wait will block until the crawler process (main.py) finishes.
-                            # The _monitor_crawler_output thread will print its output.
-                            controller.crawler_process.wait() 
-                            # At this point, the crawler process has exited.
-                            # The monitor thread should have logged its exit code and cleaned up the PID file.
-                            if controller.crawler_process: # Should be None if monitor cleaned up
+                        if controller.crawler_process:
+                            controller.crawler_process.wait()
+                            if controller.crawler_process:
                                 if controller.crawler_process.returncode != 0:
                                      logging.warning(f"Crawler process finished with non-zero exit code: {controller.crawler_process.returncode}")
-                                     # exit_code = controller.crawler_process.returncode # Or just 1
                                 else:
                                      logging.info("Crawler process finished successfully.")
-                            # else: # Monitor already handled it.
-                        else: # Should not happen if start_crawler returned True and set it.
+                        else:
                             logging.warning("start_crawler reported success but crawler_process is not set in CLI.")
-                    except KeyboardInterrupt: 
+                    except KeyboardInterrupt:
                         logging.info("User interrupted crawl waiting period (Ctrl+C in CLI while crawler runs). Signaling crawler to stop...")
-                        controller.stop_crawler() # Signal the running crawler via flag
-                        # Wait a bit for the crawler to shut down after flagging
+                        controller.stop_crawler()
                         if controller.crawler_process :
-                            try: controller.crawler_process.wait(timeout=10) # brief wait
+                            try: controller.crawler_process.wait(timeout=10)
                             except subprocess.TimeoutExpired: logging.warning("Crawler did not exit quickly after SIGINT+flag.")
-                        exit_code = 130 # Standard exit code for SIGINT
+                        exit_code = 130
                     except Exception as e_wait:
                         logging.error(f"Error while waiting for crawler process: {e_wait}", exc_info=True)
                         exit_code = 1
             else:
                  logging.error("Cannot start crawler due to previous configuration errors.")
 
-        if args.stop: 
-            action_taken = True 
-            if not controller.stop_crawler(): # stop_crawler now just creates a flag
-                # This means flag creation failed.
-                if exit_code == 0 : exit_code = 1 
+        if args.stop:
+            action_taken = True
+            if not controller.stop_crawler():
+                if exit_code == 0 : exit_code = 1
             else:
-                # Flag creation was successful. Crawler should handle its own stop.
                 logging.info("Stop signal (flag) sent to crawler successfully.")
 
-
-        if not action_taken and exit_code == 0: 
+        if not action_taken and exit_code == 0:
             parser.print_help()
-        
-        if exit_code != 0 and action_taken : 
+
+        if exit_code != 0 and action_taken :
              logging.error(f"CLI command processing encountered an error or a sub-command failed (exit_code: {exit_code}).")
 
     except KeyboardInterrupt:
         logging.info("CLI operation interrupted by user (Ctrl+C at CLI level).")
-        # If a crawler process was started by this CLI instance and is still running, signal it.
         if hasattr(controller, 'crawler_process') and controller.crawler_process and controller.crawler_process.poll() is None:
             logging.info("Attempting to signal managed crawler process to stop due to CLI interruption...")
-            controller.stop_crawler() # This will set the flag
-        exit_code = 130 # Standard exit code for Ctrl+C
-    except Exception as e: # Catch-all for unexpected errors in the CLI logic
+            controller.stop_crawler()
+        exit_code = 130
+    except Exception as e:
         logging.critical(f"An unexpected error occurred in CLI: {e}", exc_info=True)
         exit_code = 1
     finally:
-        # Ensure any managed subprocess is truly gone or waited for if CLI is exiting.
-        # This is tricky if the user Ctrl+C'd the 'start' command's wait().
-        # The _signal_handler for the CLI tries to stop_crawler.
         if hasattr(controller, 'crawler_process') and controller.crawler_process and controller.crawler_process.poll() is None:
             logging.info("CLI exiting; ensuring managed crawler process is aware or handled.")
-            # At this point, stop_crawler (flag) should have been called if it was a graceful exit or SIGINT.
-            # If it's an unexpected CLI crash, the crawler might be orphaned but flag might not be set.
-            # For robustness, one last attempt to set flag if exiting due to error.
-            if exit_code !=0 and exit_code != 130 : # not a clean exit or SIGINT
+            if exit_code !=0 and exit_code != 130 :
                 controller.stop_crawler()
 
         logging.info(f"CLI session finished with exit_code: {exit_code}")
