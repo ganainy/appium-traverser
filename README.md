@@ -9,7 +9,6 @@ This project implements an automated crawler for Android applications driven by 
 
 **Available Interfaces:**
 - **CLI Controller** - Command-line interface for automation and scripting
-- **GUI Controller** - Traditional graphical interface with visual controls
 
 ## Quick Start
 
@@ -33,7 +32,6 @@ appium --relaxed-security  # Terminal 1
 ## Features
 
 - **AI-Powered Exploration** - Uses Google Gemini to analyze screens and decide actions
-- **Dual Interface** - Both CLI and GUI controllers for different use cases  
 - **Intelligent State Management** - Visual and structural hashing to identify unique screens
 - **Loop Detection** - Prevents getting stuck in repetitive patterns
 - **Traffic Capture** - Optional network monitoring
@@ -48,7 +46,6 @@ appium --relaxed-security  # Terminal 1
 - **`main.py`** - Entry point and orchestration
 - **`crawler.py`** - Main crawling logic and state transitions
 - **`cli_controller.py`** - Command-line interface
-- **`ui_controller.py`** - Graphical user interface
 - **`ai_assistant.py`** - Google Gemini integration
 - **`state_manager.py`** - Screen state and transition management
 
