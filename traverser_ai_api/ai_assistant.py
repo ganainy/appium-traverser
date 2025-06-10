@@ -66,7 +66,8 @@ class AIAssistant:
             properties={
                 'action': Schema(
                     type=GLMType.STRING,
-                    enum=["click", "input", "scroll_up", "scroll_down", "back"],
+                    # MODIFIED: Add swipe actions here
+                    enum=["click", "input", "scroll_up", "scroll_down", "swipe_left", "swipe_right", "back"],
                     description="The type of action to perform."
                 ),
                 'target_identifier': Schema(
@@ -267,17 +268,28 @@ class AIAssistant:
             return None
 
 
-    def _build_prompt(self, xml_context: str, previous_actions: List[str], available_actions: List[str], current_screen_visit_count: int, current_composite_hash: str) -> str:
+    def _build_prompt(self, xml_context: str, previous_actions: List[str], available_actions: List[str], current_screen_visit_count: int, current_composite_hash: str, last_action_feedback: Optional[str] = None) -> str:
+    
         action_descriptions = {
             "click": getattr(self.cfg, 'ACTION_DESC_CLICK', "Visually identify and select an interactive element."),
             "input": getattr(self.cfg, 'ACTION_DESC_INPUT', "Visually identify a text input field and provide text."),
             "scroll_down": getattr(self.cfg, 'ACTION_DESC_SCROLL_DOWN', "Scroll the view downwards."),
             "scroll_up": getattr(self.cfg, 'ACTION_DESC_SCROLL_UP', "Scroll the view upwards."),
+            "swipe_left": getattr(self.cfg, 'ACTION_DESC_SWIPE_LEFT', "Swipe content from right to left (for carousels)."),
+            "swipe_right": getattr(self.cfg, 'ACTION_DESC_SWIPE_RIGHT', "Swipe content from left to right."),
             "back": getattr(self.cfg, 'ACTION_DESC_BACK', "Navigate back using the system back button.")
         }
+
+        feedback_section = ""
+        if last_action_feedback:
+            feedback_section = f"""**CRITICAL FEEDBACK ON YOUR PREVIOUS ACTION:**
+{last_action_feedback}
+Based on this feedback, you MUST choose a different action to avoid getting stuck.
+"""
+
         actual_available_actions = getattr(self.cfg, 'AVAILABLE_ACTIONS', available_actions)
         if not actual_available_actions:
-            actual_available_actions = ["click", "input", "scroll_down", "scroll_up", "back"]
+            actual_available_actions = ["click", "input", "scroll_down", "scroll_up", "swipe_left", "swipe_right", "back"]
 
         ui_element_types_guidance = """
         **Identifiable UI Element Types for `all_ui_elements` list:**
@@ -395,9 +407,12 @@ class AIAssistant:
         You are an expert Android app tester. Your goal is to:
         1.  Determine the BEST SINGLE `action_to_perform` based on the visual screenshot and XML context, prioritizing PROGRESSION and IN-APP feature discovery.
 
+        {feedback_section}
+
         **IMPORTANT: For `action_to_perform.target_identifier`:**
         Provide its actual value from the XML (e.g., "com.app:id/button", "Login") or visible text if no ID.
         CORRECT: "Login", INCORRECT: 'text="Login"'.
+
 
         {visit_context}
 
@@ -467,40 +482,40 @@ class AIAssistant:
                         xml_context: str,
                         previous_actions: List[str],
                         current_screen_visit_count: int,
-                        current_composite_hash: str
-                        ) -> Optional[Dict[str, Any]]: # This now returns the main response structure
+                        current_composite_hash: str,
+                        last_action_feedback: Optional[str] = None
+                        ) -> Optional[Tuple[Dict[str, Any], float]]: # MODIFIED: Return type changed to a tuple
 
         current_available_actions = getattr(self.cfg, 'AVAILABLE_ACTIONS', None)
         if not current_available_actions or \
            not isinstance(current_available_actions, list) or \
            not all(isinstance(a, str) for a in current_available_actions):
             logging.warning("cfg.AVAILABLE_ACTIONS invalid. Using default actions.")
-            current_available_actions = ["click", "input", "scroll_up", "scroll_down", "back"]
+            current_available_actions = ["click", "input", "scroll_up", "scroll_down", "swipe_left", "swipe_right", "back"]
 
         logging.info(f"get_next_action: xml_len={len(xml_context)}, prev_actions={len(previous_actions)}, avail_actions={current_available_actions}, visits={current_screen_visit_count}, hash={current_composite_hash}")
 
-        # Use the updated _prepare_image_part which returns a Content object
         image_content_part = self._prepare_image_part(screenshot_bytes)
         if not image_content_part:
             logging.error("Failed to prepare image content for AI; cannot proceed. screenshot_bytes length: %d", len(screenshot_bytes) if screenshot_bytes else 0)
-            return None # Return the expected main response structure with empty/null fields
-        
-        start_time = time.time()
+            return None
+
+        start_time = time.time() # Start timer before the API call
         try:
             prompt_text = self._build_prompt(
                 xml_context, previous_actions, current_available_actions,
-                current_screen_visit_count, current_composite_hash
+                current_screen_visit_count, current_composite_hash,
+                last_action_feedback
             )
             
-            # Update: Add role to content parts for the API call
             content_message = Content(
                 parts=[Part(text=prompt_text)],
-                role="user"  # Add the required role here
+                role="user"
             )
-            image_content = image_content_part or Content()  # Ensure we have a Content object
+            image_content = image_content_part or Content()
             content_for_api = [content_message, image_content]
 
-            logging.debug("Requesting AI generation with structured JSON (action & all_elements)...")
+            logging.debug("Requesting AI generation with structured JSON...")
 
             try:
                 if self.use_chat and self.chat:
@@ -513,15 +528,16 @@ class AIAssistant:
                 else:
                     response = self.model.generate_content(content_for_api) # type: ignore
 
-                elapsed_time = time.time() - start_time
+                elapsed_time = time.time() - start_time # MODIFIED: Calculate elapsed time
                 logging.info(f"AI API call completed. Processing Time: {elapsed_time:.2f} seconds")
+
                 if hasattr(response, 'usage_metadata') and response.usage_metadata:
                     logging.info(f"Token Usage: Prompt={getattr(response.usage_metadata, 'prompt_token_count', 'N/A')}, Candidates={getattr(response.usage_metadata, 'candidates_token_count', 'N/A')}, Total={getattr(response.usage_metadata, 'total_token_count', 'N/A')}")
 
                 if not hasattr(response, 'candidates') or not response.candidates:
                     logging.error("AI response contains no candidates.")
                     self._log_empty_response_details(response)
-                    return {"action_to_perform": None} # Graceful empty response
+                    return None
 
                 candidate = response.candidates[0]
                 proceed_to_parse = False
@@ -529,134 +545,54 @@ class AIAssistant:
 
                 if hasattr(candidate, 'finish_reason'):
                     finish_reason_enum = candidate.finish_reason
-                    raw_finish_reason_str = str(finish_reason_enum)
-                    reason_name = getattr(finish_reason_enum, 'name', str(finish_reason_enum)).upper() # More robust
+                    reason_name = getattr(finish_reason_enum, 'name', str(finish_reason_enum)).upper()
 
-                    if reason_name == "STOP":
-                        logging.info(f"AI generation finished normally (Reason: {reason_name}, Raw: {raw_finish_reason_str}).")
+                    if reason_name == "STOP" or reason_name == "MAX_TOKENS":
+                        if reason_name == "MAX_TOKENS": logging.warning(f"AI generation hit MAX_TOKENS. Will attempt to parse.")
                         proceed_to_parse = True
-                    elif reason_name == "MAX_TOKENS":
-                        logging.warning(f"AI generation hit MAX_TOKENS. Will attempt to parse.")
-                        proceed_to_parse = True
-                    elif reason_name in ["SAFETY", "RECITATION", "OTHER"]:
-                        logging.error(f"AI generation stopped due to {reason_name} (Raw: {raw_finish_reason_str}).")
+                    else:
+                        logging.error(f"AI generation stopped for reason: {reason_name}. Raw: {str(finish_reason_enum)}")
                         self._log_empty_response_details(response)
-                        return {"action_to_perform": None}
-                    else: # Unknown named reason or unmapped integer
-                        logging.error(f"AI generation finished with unhandled reason: {reason_name} (Raw: {raw_finish_reason_str}).")
-                        self._log_empty_response_details(response)
-                        return {"action_to_perform": None}
+                        return None
                 else:
                     logging.error("Candidate missing 'finish_reason'.")
                     self._log_empty_response_details(response)
-                    return {"action_to_perform": None}
+                    return None
 
-                if not proceed_to_parse: return {"action_to_perform": None}
+                if not proceed_to_parse: return None
 
-                if not hasattr(candidate, 'content') or not candidate.content or \
-                   not hasattr(candidate.content, 'parts') or not candidate.content.parts:
+                if not hasattr(candidate, 'content') or not candidate.content or not candidate.content.parts or not hasattr(candidate.content.parts[0], 'text'):
                     logging.error("AI response candidate lacks valid content/parts.")
                     self._log_empty_response_details(response)
-                    return {"action_to_perform": None}
+                    return None
 
-                first_part = candidate.content.parts[0]
-                if not hasattr(first_part, 'text') or not first_part.text:
-                    logging.error("AI response first part lacks text content.")
-                    self._log_empty_response_details(response)
-                    return {"action_to_perform": None}
-
-                raw_json_text = first_part.text
-                json_str_to_parse = raw_json_text.strip()
-                if json_str_to_parse.startswith("```"):
-                    logging.debug("Stripping markdown from AI response.")
-                    json_str_to_parse = re.sub(r"^```(?:json)?\s*", "", json_str_to_parse, flags=re.I | re.M)
-                    json_str_to_parse = re.sub(r"\s*```$", "", json_str_to_parse, flags=re.M)
-                    json_str_to_parse = json_str_to_parse.strip()
+                raw_json_text = candidate.content.parts[0].text
+                json_str_to_parse = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw_json_text.strip(), flags=re.I | re.M)
 
                 if not json_str_to_parse:
                     logging.error("AI response: Empty JSON string after cleaning. Raw: %s", raw_json_text[:200])
-                    self._log_empty_response_details(response)
-                    return {"action_to_perform": None}
+                    return None
 
                 try:
                     parsed_main_response = json.loads(json_str_to_parse)
                     logging.info("Successfully parsed AI main JSON response.")
-                    logging.debug(f"Parsed AI JSON data: {parsed_main_response}")
 
-                    if not isinstance(parsed_main_response, dict):
-                        logging.error(f"AI main response not a dictionary: {type(parsed_main_response)}. Data: {parsed_main_response}")
-                        return {"action_to_perform": None}
-
-                    action_data = parsed_main_response.get("action_to_perform")
-                    # all_elements_data = parsed_main_response.get("all_ui_elements", []) # Default to empty list
-
-                    if not isinstance(action_data, dict) or \
-                       "action" not in action_data or \
-                       "reasoning" not in action_data:
-                        logging.error(f"Missing required fields in 'action_to_perform'. Data: {action_data}. Attempting fallback.")
-                        # Fallback action
-                        action_data = {
-                            "action": "back",  # Or "scroll_down"
-                            "target_identifier": None,
-                            "target_bounding_box": None,
-                            "input_text": None,
-                            "reasoning": "Fallback action due to AI response error."
-                        }
-                        # Ensure all_ui_elements is at least an empty list if AI failed completely
-                        # if not isinstance(all_elements_data, list):
-                        #     all_elements_data = []
-
-
-                    if action_data: # Validate action_data further
-                        action_type = action_data.get("action")
-                        if action_type in ["click", "input"] and not action_data.get("target_identifier"):
-                            logging.warning(f"Missing 'target_identifier' for AI action '{action_type}'. Action: {action_data}")
-                        if action_type == "input" and action_data.get("input_text") is None:
-                            logging.warning(f"'input_text' is null for 'input' action. Action: {action_data}")
-                        
-                        bbox = action_data.get("target_bounding_box")
-                        if bbox is not None:
-                            if not (isinstance(bbox, dict) and \
-                                  "top_left" in bbox and isinstance(bbox["top_left"], list) and len(bbox["top_left"]) == 2 and \
-                                  "bottom_right" in bbox and isinstance(bbox["bottom_right"], list) and len(bbox["bottom_right"]) == 2 and \
-                                  all(isinstance(c, (int, float)) for p in [bbox["top_left"], bbox["bottom_right"]] for c in p)):
-                                logging.warning(f"Invalid action target_bounding_box: {bbox}. Setting to null. Action: {action_data}")
-                                action_data["target_bounding_box"] = None
+                    if not isinstance(parsed_main_response.get("action_to_perform"), dict):
+                        logging.error(f"Parsed JSON lacks 'action_to_perform' dictionary. Data: {parsed_main_response}")
+                        return None
                     
-                    # if not isinstance(all_elements_data, list):
-                    #     logging.warning(f"'all_ui_elements' is not a list. Received: {type(all_elements_data)}. Setting to empty list.")
-                    #     all_elements_data = []
-                    # else: # Validate individual elements if needed (optional for brevity here)
-                    #     valid_elements = []
-                    #     for elem in all_elements_data:
-                    #         if isinstance(elem, dict) and "type" in elem and "bounding_box" in elem: # Basic check
-                    #             # Further validation for elem["bounding_box"] format can be added here
-                    #             valid_elements.append(elem)
-                    #         else:
-                    #             logging.warning(f"Skipping malformed UI element in 'all_ui_elements': {elem}")
-                    #     all_elements_data = valid_elements
-
-
-                    logging.info(f"AI Action: Type='{action_data.get('action') if action_data else 'N/A'}', Target='{action_data.get('target_identifier', 'N/A') if action_data else 'N/A'}.") # Removed Found {len(all_elements_data)} UI elements.
-                    return {
-                        "action_to_perform": action_data,
-                        # "all_ui_elements": all_elements_data
-                    }
+                    # MODIFIED: Return the parsed response and the elapsed time
+                    return parsed_main_response, elapsed_time
 
                 except json.JSONDecodeError as json_err:
                     logging.error(f"JSON parse error: {json_err}. Snippet: '{json_str_to_parse[:500]}'")
                     self._log_empty_response_details(response)
-                    return {"action_to_perform": None}
-                except Exception as parse_err:
-                    logging.error(f"Post-parsing validation error: {parse_err}. Parsed: '{json_str_to_parse[:500]}'", exc_info=True)
-                    return {"action_to_perform": None}
+                    return None
 
             except Exception as api_err:
                 logging.error(f"AI API call error: {api_err}", exc_info=True)
-                if "api key" in str(api_err).lower() or "permission_denied" in str(api_err).lower():
-                    logging.critical("API key error or permission denied.")
-                return {"action_to_perform": None}
+                return None
 
         except Exception as e:
             logging.error(f"General error in get_next_action before API call: {e}", exc_info=True)
-            return {"action_to_perform": None}
+            return None

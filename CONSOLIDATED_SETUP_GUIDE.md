@@ -235,7 +235,7 @@ python traverser_ai_api/cli_controller.py --stop
 *   `--generate-analysis-pdf`: Generates a PDF report for an analysis target.
     *   Requires either `--target-index <NUMBER>` OR `--target-app-package <PACKAGE_NAME>`.
     *   The PDF is generated for the latest run if multiple exist for the target, or the only run if just one. The specific run ID used is determined automatically.
-    *   Optionally takes `--pdf-output-name <FILENAME.pdf>` to customize the suffix of the PDF filename. If omitted, a default name (`analysis.pdf`) is used as the suffix. The PDF is always prefixed with the app package and the determined run ID.
+    *   Optionally takes `--pdf-output-name <FILENAME.pdf>` to customize the suffix of the PDF filename. If omitted, a default name (`analysis.pdf`) is used as the suffix. The PDF is always prefixed with the app package.
 
 ##### Options:
 *   `--force-rescan`: Forces the `--scan-apps` command to re-scan even if a cached app list exists.

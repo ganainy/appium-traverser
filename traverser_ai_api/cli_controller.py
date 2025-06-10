@@ -481,7 +481,7 @@ class CLIController:
 
         pdf_filename_suffix = Path(pdf_output_name).name if pdf_output_name else "analysis.pdf"
         # Use the determined actual_run_id in the filename
-        final_pdf_filename = f"{selected_target['app_package']}_run_{actual_run_id}_{pdf_filename_suffix}"
+        final_pdf_filename = f"{selected_target['app_package']}_{pdf_filename_suffix}"
         final_pdf_path = str(analysis_reports_dir / final_pdf_filename)
 
         logging.info(f"Generating PDF for Target: {selected_target['app_package']}, Run ID: {actual_run_id}, Output: {final_pdf_path}")

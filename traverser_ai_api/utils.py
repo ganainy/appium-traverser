@@ -3,17 +3,17 @@ import logging
 import time
 import sys
 import os
-import io # For LoggerManager's TextIOWrapper and image operations
-import json # Not directly used by provided utils, but often useful
-from config import Config # For configuration values
-import shutil # Not directly used by provided utils
-from typing import Tuple, Optional, Any, cast, List, Dict # Added List, Dict for type hints
+import io
+import json
+from config import Config
+import shutil
+from typing import Tuple, Optional, Any, cast, List, Dict, Set
 
 import hashlib
-import imagehash # For visual hashing
-from PIL import Image, ImageDraw # For image manipulation
-from lxml import etree # For XML processing
-import re # For regex operations in XML simplification
+import imagehash
+from PIL import Image, ImageDraw
+from lxml import etree
+import re
 
 # --- Global Script Start Time (for ElapsedTimeFormatter) ---
 SCRIPT_START_TIME = time.time()
@@ -38,17 +38,16 @@ class LoggerManager:
         if not isinstance(numeric_level, int):
             raise ValueError(f"Invalid log level string: {log_level_str}")
 
-        logger = logging.getLogger() # Get the root logger
+        logger = logging.getLogger()
         logger.setLevel(numeric_level)
 
-        # Remove existing handlers from the root logger to avoid duplication
         for handler in list(logger.handlers):
             logger.removeHandler(handler)
             if isinstance(handler, logging.FileHandler):
                 try:
                     handler.close()
-                except Exception: # nosemgrep: arbitrary-except
-                    pass 
+                except Exception:
+                    pass
         self.handlers.clear()
 
         log_formatter = ElapsedTimeFormatter(
@@ -56,10 +55,10 @@ class LoggerManager:
         )
 
         try:
-            if not self.stdout_wrapper: # Create wrapper only once
+            if not self.stdout_wrapper:
                 self.stdout_wrapper = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
             console_handler = logging.StreamHandler(self.stdout_wrapper)
-        except Exception: # nosemgrep: arbitrary-except
+        except Exception:
             console_handler = logging.StreamHandler(sys.stdout)
 
         console_handler.setFormatter(log_formatter)
@@ -69,31 +68,31 @@ class LoggerManager:
         if log_file:
             try:
                 log_file_dir = os.path.dirname(os.path.abspath(log_file))
-                if log_file_dir: 
+                if log_file_dir:
                     os.makedirs(log_file_dir, exist_ok=True)
-                
+
                 file_handler = logging.FileHandler(log_file, mode='a', encoding='utf-8')
                 file_handler.setFormatter(log_formatter)
                 logger.addHandler(file_handler)
                 self.handlers.append(file_handler)
-            except Exception as e: # nosemgrep: arbitrary-except
+            except Exception as e:
                 print(f"Error setting up file logger for {log_file}: {e}", file=sys.stderr)
 
         if numeric_level > logging.DEBUG:
             for lib_name in ["appium.webdriver.webdriver", "urllib3.connectionpool", "selenium.webdriver.remote.remote_connection"]:
                 logging.getLogger(lib_name).setLevel(logging.WARNING)
-        
+
         return logger
 
 # --- Constants for XML Simplification ---
 KEEP_ATTRS = {
-    'class', 'resource-id', 'text', 'content-desc', 'hint', 
-    'clickable', 'focusable', 'enabled', 'checkable', 'checked', 
-    'selected', 'editable', 'long-clickable', 'password', 
-    'bounds' 
+    'class', 'resource-id', 'text', 'content-desc', 'hint',
+    'clickable', 'focusable', 'enabled', 'checkable', 'checked',
+    'selected', 'editable', 'long-clickable', 'password',
+    'bounds'
 }
 BOOLEAN_ATTRS_TRUE_ONLY = {
-    'clickable', 'focusable', 'enabled', 'checkable', 
+    'clickable', 'focusable', 'enabled', 'checkable',
     'selected', 'editable', 'long-clickable', 'password'
 }
 
@@ -120,15 +119,15 @@ def visual_hash_distance(hash1: str, hash2: str) -> int:
     if hash1 == hash2:
         return 0
     if "no_image" in [hash1, hash2] or "hash_error" in [hash1, hash2]:
-        return 1000 # Indicate invalid comparison
+        return 1000
 
     try:
         h1 = imagehash.hex_to_hash(hash1)
         h2 = imagehash.hex_to_hash(hash2)
-        return h1 - h2 # Hamming distance
+        return h1 - h2
     except Exception as e:
         logging.error(f"Error calculating hash distance between {hash1} and {hash2}: {e}")
-        return 1000 
+        return 1000
 
 def simplify_xml_for_ai(xml_string: str, max_len: int) -> str:
     """
@@ -139,8 +138,7 @@ def simplify_xml_for_ai(xml_string: str, max_len: int) -> str:
         return ""
 
     original_len = len(xml_string)
-    # Log only if XML length is significant to avoid flooding logs for tiny XMLs.
-    if original_len > 200: # Arbitrary threshold for "significant"
+    if original_len > 200:
         logging.debug(f"Original XML length: {original_len}")
 
     try:
@@ -160,46 +158,85 @@ def simplify_xml_for_ai(xml_string: str, max_len: int) -> str:
                     if isinstance(attr_value, str) and attr_value.lower() == 'false':
                         del element.attrib[attr_name]
                         continue
-        
-        xml_bytes = etree.tostring(root) 
+
+        xml_bytes = etree.tostring(root)
         simplified_xml = xml_bytes.decode('utf-8')
 
         if len(simplified_xml) > max_len:
             logging.warning(f"Simplified XML still exceeds max_len ({len(simplified_xml)} > {max_len}). Performing final smart truncation.")
             trunc_point = simplified_xml.rfind('</', 0, max_len)
             if trunc_point != -1:
-                end_tag_point = simplified_xml.find('>', trunc_point, max_len + 30) 
+                end_tag_point = simplified_xml.find('>', trunc_point, max_len + 30)
                 if end_tag_point != -1:
                     simplified_xml = simplified_xml[:end_tag_point+1] + "\n... (truncated)"
-                else: 
+                else:
                     simplified_xml = simplified_xml[:max_len] + "... (truncated)"
-            else: 
+            else:
                 simplified_xml = simplified_xml[:max_len] + "... (truncated)"
-        
+
         simplified_xml = re.sub(r'>\s+<', '><', simplified_xml).strip()
-        
+
         final_len = len(simplified_xml)
-        if original_len > 200: # Only log if original was significant
+        if original_len > 200:
             logging.debug(f"Simplified XML length: {final_len} (from {original_len})")
         return simplified_xml
 
     except (etree.XMLSyntaxError, ValueError, TypeError) as e:
         logging.error(f"Failed to parse or simplify XML: {e}. Falling back to basic truncation.")
-        if len(xml_string) > max_len:
-            return xml_string[:max_len] + "\n... (fallback truncation)"
-        return xml_string
+        return xml_string[:max_len] + "\n... (fallback truncation)" if len(xml_string) > max_len else xml_string
     except Exception as e:
         logging.error(f"Unexpected error during XML simplification: {e}. Falling back.", exc_info=True)
-        if len(xml_string) > max_len:
-            return xml_string[:max_len] + "\n... (fallback truncation)"
+        return xml_string[:max_len] + "\n... (fallback truncation)" if len(xml_string) > max_len else xml_string
+
+def filter_xml_by_allowed_packages(xml_string: str, target_package: str, allowed_packages: List[str]) -> str:
+    """
+    Filters an XML string, removing elements not belonging to the target or allowed packages.
+    System UI packages (e.g., 'com.android.systemui') are implicitly allowed to keep essential navigation.
+    """
+    if not xml_string:
+        return ""
+    try:
+        parser = etree.XMLParser(recover=True, remove_blank_text=True)
+        root = etree.fromstring(xml_string.encode('utf-8'), parser=parser)
+        if root is None:
+            raise ValueError("Failed to parse XML root.")
+
+        allowed_set: Set[str] = set(allowed_packages)
+        allowed_set.add(target_package)
+        allowed_set.add('com.android.systemui')
+
+        # Using a list comprehension with a recursive check is cleaner
+        # The parent map is needed to remove elements from their parent
+        parent_map = {c: p for p in root.iter() for c in p}
+        nodes_to_remove = []
+        for elem in root.iter('*'):
+            pkg = elem.get('package')
+            if pkg and pkg not in allowed_set:
+                nodes_to_remove.append(elem)
+
+        for elem in nodes_to_remove:
+            parent = parent_map.get(elem)
+            if parent is not None:
+                logging.debug(f"Filtering out XML element with package: '{elem.get('package')}'")
+                parent.remove(elem)
+
+        xml_bytes = etree.tostring(root)
+        return xml_bytes.decode('utf-8')
+
+    except (etree.XMLSyntaxError, ValueError, TypeError) as e:
+        logging.error(f"XML ParseError during package filtering: {e}. Returning original XML.")
         return xml_string
+    except Exception as e:
+        logging.error(f"Unexpected error during XML filtering: {e}", exc_info=True)
+        return xml_string
+
 
 def draw_indicator_on_image(image_bytes: bytes, coordinates: Tuple[int, int], color="red", radius=15) -> Optional[bytes]:
     """Draws a circle indicator at the given coordinates on an image."""
     if not image_bytes or not coordinates:
         return None
     try:
-        img = Image.open(io.BytesIO(image_bytes)).convert("RGB") 
+        img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
         draw = ImageDraw.Draw(img)
         x, y = coordinates
         left_up_point = (x - radius, y - radius)
@@ -217,7 +254,7 @@ def generate_action_description(action_type: str, target_obj: Optional[Any], inp
     description = f"{action_type.upper()}"
     if ai_target_identifier:
         description += f" on '{ai_target_identifier}'"
-    elif isinstance(target_obj, str): 
+    elif isinstance(target_obj, str):
         description += f" {target_obj}"
     if input_text:
         description += f" with text '{input_text}'"
@@ -225,11 +262,11 @@ def generate_action_description(action_type: str, target_obj: Optional[Any], inp
 
 def draw_rectangle_on_image(
     image_bytes: bytes,
-    box_coords: Tuple[int, int, int, int], 
-    primary_color: str = "red", 
-    border_color: str = "black", 
-    line_thickness: int = 1, 
-    border_size: int = 1 
+    box_coords: Tuple[int, int, int, int],
+    primary_color: str = "red",
+    border_color: str = "black",
+    line_thickness: int = 1,
+    border_size: int = 1
 ) -> Optional[bytes]:
     """Draws a rectangle (bounding box) with a contrasting border on an image."""
     if not image_bytes or not box_coords:
@@ -237,18 +274,18 @@ def draw_rectangle_on_image(
         return None
     if line_thickness <= 0:
         logging.warning("draw_rectangle_on_image: line_thickness must be positive.")
-        return image_bytes 
+        return image_bytes
     if border_size < 0:
         logging.warning("draw_rectangle_on_image: border_size cannot be negative.")
-        return image_bytes 
+        return image_bytes
 
     try:
-        img = Image.open(io.BytesIO(image_bytes)).convert("RGB") 
+        img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
         draw = ImageDraw.Draw(img)
         x1, y1, x2, y2 = box_coords
 
         if not (0 <= x1 < img.width and 0 <= y1 < img.height and \
-                  x1 < x2 <= img.width and y1 < y2 <= img.height):
+                x1 < x2 <= img.width and y1 < y2 <= img.height):
             logging.warning(
                 f"draw_rectangle_on_image: Invalid or out-of-bounds box_coords ({x1},{y1},{x2},{y2}) "
                 f"for image size ({img.width}x{img.height}). Skipping drawing."
@@ -258,8 +295,8 @@ def draw_rectangle_on_image(
         border_rect_line_width = line_thickness + (2 * border_size)
         if border_size > 0 and border_rect_line_width > 0:
             draw.rectangle([x1, y1, x2, y2], outline=border_color, width=border_rect_line_width)
-        
-        if line_thickness > 0 : 
+
+        if line_thickness > 0 :
             draw.rectangle([x1, y1, x2, y2], outline=primary_color, width=line_thickness)
 
         output_buffer = io.BytesIO()
@@ -283,7 +320,7 @@ def are_visual_hashes_valid(hash1: Optional[str], hash2: Optional[str]) -> bool:
 if __name__ == '__main__':
     # Example usage or tests for utils can go here
     print(f"Utils module loaded. SCRIPT_START_TIME: {SCRIPT_START_TIME}")
-    
+
     # Basic test for LoggerManager
     test_logger_manager = LoggerManager()
     test_logger = test_logger_manager.setup_logging(log_level_str='DEBUG', log_file='test_utils.log')

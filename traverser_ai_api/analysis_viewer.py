@@ -143,10 +143,11 @@ class RunAnalyzer:
             self.app_package_for_run = run_data['app_package']
             logger.info(f"Set app_package_for_run to '{self.app_package_for_run}' from run data for run ID {run_id}.")
         
+        # MODIFIED: Query now includes composite_hash from both from/to screens to reconstruct feedback
         query = """
         SELECT sl.*,
-               s_from.screenshot_path AS from_screenshot_path, s_from.xml_content AS from_xml_content, s_from.activity_name AS from_activity_name,
-               s_to.screenshot_path AS to_screenshot_path, s_to.activity_name AS to_activity_name
+               s_from.screenshot_path AS from_screenshot_path, s_from.activity_name AS from_activity_name, s_from.composite_hash AS from_hash,
+               s_to.screenshot_path AS to_screenshot_path, s_to.activity_name AS to_activity_name, s_to.composite_hash AS to_hash
         FROM steps_log sl
         LEFT JOIN screens s_from ON sl.from_screen_id = s_from.screen_id
         LEFT JOIN screens s_to ON sl.to_screen_id = s_to.screen_id
@@ -423,6 +424,15 @@ class RunAnalyzer:
                 # AI OUTPUT
                 html_parts.append(f"<h4>AI OUTPUT</h4>")
                 ai_sugg_text_html, ai_reas_text_html = "N/A", "N/A"
+                ai_response_time_html = ""
+                if step['ai_response_time_ms'] is not None:
+                    response_time_ms = step['ai_response_time_ms']
+                    if response_time_ms >= 1000:
+                        response_time_str = f"{response_time_ms/1000:.2f} seconds"
+                    else:
+                        response_time_str = f"{int(response_time_ms)} ms"
+                    ai_response_time_html = f"<p class='feature-item'><strong class='feature-title'>Response Time:</strong>{response_time_str}</p>"
+
                 if step['ai_suggestion_json']:
                     try:
                         sugg_data = json.loads(step['ai_suggestion_json'])
@@ -442,6 +452,7 @@ class RunAnalyzer:
                     except json.JSONDecodeError: ai_sugg_text_html = f"Error parsing JSON: {escape(step['ai_suggestion_json'])}"
                     except Exception: ai_sugg_text_html = f"Error processing: {escape(step['ai_suggestion_json'])}"
                 html_parts.append(f"<p class='feature-item'><strong class='feature-title'>Suggested:</strong>{ai_sugg_text_html}</p>")
+                html_parts.append(ai_response_time_html)  # Add the response time here
                 html_parts.append(f"<p class='feature-item'><strong class='feature-title'>Reasoning:</strong></p><pre>{ai_reas_text_html}</pre>")
                 
                 # CRAWLER ACTION EXECUTED
@@ -456,10 +467,27 @@ class RunAnalyzer:
                         if input_text_map: map_act_disp_html += f", Input: '{escape(input_text_map)}'"
                     except json.JSONDecodeError: map_act_disp_html = f"Error parsing JSON: {escape(step['mapped_action_json'])}"
                 html_parts.append(f"<p class='feature-item'><strong class='feature-title'>Mapped/Executed:</strong>{map_act_disp_html}</p>")
-                html_parts.append(f"<p class='feature-item'><strong class='feature-title'>Execution Success:</strong>{step['execution_success']}</p>")
+                
+                # Add execution status with color coding
+                status_color = "#28a745" if step['execution_success'] else "#dc3545"  # Green for success, red for failure
+                html_parts.append(f"""
+                    <p class='feature-item'>
+                        <strong class='feature-title'>Execution Status:</strong>
+                        <span style="color: {status_color}; font-weight: bold;">
+                            {'Success' if step['execution_success'] else 'Failed'}
+                        </span>
+                    </p>
+                """)
+                
+                # Add error message if present and execution failed
                 if not step['execution_success'] and step['error_message']:
-                    html_parts.append(f"<p class='feature-item'><strong class='feature-title'>Error Message:</strong>{escape(step['error_message'] or 'N/A')}</p>")
-
+                    html_parts.append(f"""
+                        <p class='feature-item'>
+                            <strong class='feature-title'>Error Message:</strong>
+                            <span style="color: #dc3545;">{escape(step['error_message'])}</span>
+                        </p>
+                    """)
+                
                 # TO SCREEN Text
                 if step['to_screen_id'] is not None:
                     html_parts.append(f"<h4>TO SCREEN</h4>")

@@ -59,10 +59,19 @@ class Config:
         self.ACTION_DESC_SCROLL_DOWN: Optional[str] = None
         self.ACTION_DESC_SCROLL_UP: Optional[str] = None
         self.ACTION_DESC_BACK: Optional[str] = None
+        # ---- Start of Corrected Area ----
+        self.ACTION_DESC_SWIPE_LEFT: Optional[str] = None
+        self.ACTION_DESC_SWIPE_RIGHT: Optional[str] = None
+        # ---- End of Corrected Area ----
         self.MAX_CONSECUTIVE_AI_FAILURES: int = 3
         self.MAX_CONSECUTIVE_MAP_FAILURES: int = 3
         self.MAX_CONSECUTIVE_EXEC_FAILURES: int = 3
         self.MAX_CONSECUTIVE_CONTEXT_FAILURES: int = 3
+        # ---- Start of Corrected Area ----
+        self.MAX_CONSECUTIVE_NO_OP_FAILURES: int = 3
+        self.FALLBACK_ACTIONS_SEQUENCE: List[Dict[str, Any]] = []
+        self.USE_ADB_INPUT_FALLBACK: bool = True
+        # ---- End of Corrected Area ----
         self.ENABLE_TRAFFIC_CAPTURE: bool = True
         self.PCAPDROID_PACKAGE: str = "com.emanuelef.remote_capture"
         self.PCAPDROID_ACTIVITY: Optional[str] = None # Will be derived
@@ -75,14 +84,11 @@ class Config:
         # Store templates from defaults for dynamic resolution
         self._OUTPUT_DATA_DIR_TEMPLATE: str = "output_data"
         self._APP_INFO_OUTPUT_DIR_TEMPLATE: str = "{output_data_dir}/app_info" # Shared
-        # These screenshot directory names are package-specific at their level
         self._SCREENSHOTS_DIR_TEMPLATE: str = "{output_data_dir}/screenshots/crawl_screenshots_{package}"
         self._ANNOTATED_SCREENSHOTS_DIR_TEMPLATE: str = "{output_data_dir}/screenshots/annotated_crawl_screenshots_{package}"
-        # These will have a package sub-directory
         self._TRAFFIC_CAPTURE_OUTPUT_DIR_TEMPLATE: str = "{output_data_dir}/traffic_captures/{package}"
         self._DB_NAME_TEMPLATE: str = "{output_data_dir}/database_output/{package}/{package}_crawl_data.db"
         self._LOG_DIR_TEMPLATE: str = "{output_data_dir}/logs/{package}"
-
 
         self._load_from_defaults_module()
         self._load_environment_variables()
@@ -395,12 +401,15 @@ CONTINUE_EXISTING_RUN = False
 VISUAL_SIMILARITY_THRESHOLD = 5
 THIRD_PARTY_APPS_ONLY = True
 
-AVAILABLE_ACTIONS = ["click", "input", "scroll_down", "scroll_up", "back"]
+AVAILABLE_ACTIONS = ["click", "input", "scroll_down", "scroll_up", "swipe_left", "swipe_right", "back"]
 ACTION_DESC_CLICK = "Click the specified element."
 ACTION_DESC_INPUT = "Input the provided text into the specified element."
 ACTION_DESC_SCROLL_DOWN = "Scroll the screen down to reveal more content."
 ACTION_DESC_SCROLL_UP = "Scroll the screen up to reveal previous content."
 ACTION_DESC_BACK = "Press the device's back button."
+ACTION_DESC_SWIPE_LEFT = "Swipe content from right to left (e.g., for carousels)."
+ACTION_DESC_SWIPE_RIGHT = "Swipe content from left to right (e.g., for carousels)."
+
 
 MAX_CONSECUTIVE_AI_FAILURES = 3
 MAX_CONSECUTIVE_MAP_FAILURES = 3
@@ -413,3 +422,11 @@ PCAPDROID_PACKAGE = "com.emanuelef.remote_capture"
 # PCAPDROID_ACTIVITY is derived by Config class
 DEVICE_PCAP_DIR = "/sdcard/Download/PCAPdroid"
 CLEANUP_DEVICE_PCAP_FILE = True
+
+MAX_CONSECUTIVE_NO_OP_FAILURES = 3
+FALLBACK_ACTIONS_SEQUENCE = [
+    {"action": "scroll_down", "target_identifier": None, "input_text": None},
+    {"action": "back", "target_identifier": None, "input_text": None},
+    {"action": "swipe_left", "target_identifier": None, "input_text": None},
+]
+USE_ADB_INPUT_FALLBACK = True

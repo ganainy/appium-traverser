@@ -19,8 +19,13 @@ class ActionExecutor:
             self.max_exec_failures = 3
         else:
             self.max_exec_failures = int(self.cfg.MAX_CONSECUTIVE_EXEC_FAILURES)
-        
-        self.use_adb_input_fallback = getattr(self.cfg, 'USE_ADB_INPUT_FALLBACK', False)
+
+        use_adb_input_fallback = getattr(self.cfg, 'USE_ADB_INPUT_FALLBACK', None)
+        if use_adb_input_fallback is None:
+            logging.warning("USE_ADB_INPUT_FALLBACK not in config, defaulting to True.")
+            self.use_adb_input_fallback = True
+        else:
+            self.use_adb_input_fallback = bool(use_adb_input_fallback)
 
         self.consecutive_exec_failures = 0
         self.last_error_message: Optional[str] = None # Added attribute
@@ -39,30 +44,27 @@ class ActionExecutor:
             logging.error(error_msg)
             self._track_failure(error_msg)
             return False
-        
+
         action_type = action_details.get("type")
         element: Optional[WebElement] = action_details.get("element")
         input_text: Optional[str] = action_details.get("text")
-        # scroll_direction: Optional[str] = action_details.get("direction") # Keep original for "scroll"
         intended_input_text_for_coord_tap: Optional[str] = action_details.get("intended_input_text")
-        
-        # Map specific scroll actions to the generic "scroll" action type
-        # and extract direction from the action type itself if it's a specific scroll action.
-        scroll_direction_from_type: Optional[str] = None
-        if action_type in ["scroll_down", "scroll_up", "scroll_left", "scroll_right"]:
-            scroll_direction_from_type = action_type.split("_")[1] # e.g., "down" from "scroll_down"
-            action_type = "scroll" # Normalize to the generic "scroll" action
-        else:
-            # For the generic "scroll" action, get direction from "direction" parameter
-            scroll_direction_from_type = action_details.get("direction")
 
+        # Normalize scroll/swipe actions to a generic "scroll_or_swipe" action type
+        direction_from_type: Optional[str] = None
+        # NEW: Added swipe_left and swipe_right to the list of recognized actions
+        if action_type in ["scroll_down", "scroll_up", "swipe_left", "swipe_right"]:
+            direction_from_type = action_type.split("_")[-1] # e.g., "down" from "scroll_down", "left" from "swipe_left"
+            internal_action = "scroll_or_swipe"
+        else:
+            internal_action = action_type
 
         success = False
         action_log_info = f"Action Type: {action_details.get('type')}" # Log original action type
         current_error_msg = None # For this specific execution attempt
 
         try:
-            if action_type == "tap_coords":
+            if internal_action == "tap_coords":
                 coordinates = action_details.get("coordinates")
                 if isinstance(coordinates, tuple) and len(coordinates) == 2:
                     action_log_info += f", Coords: {coordinates}"
@@ -76,7 +78,7 @@ class ActionExecutor:
                         if active_el:
                             logging.debug(f"Found active element (ID: {active_el.id}) after coord tap, attempting input.")
                             input_via_active_el = self.driver.input_text_into_element(active_el, intended_input_text_for_coord_tap, click_first=False, clear_first=True)
-                        
+
                         if not input_via_active_el:
                             if self.use_adb_input_fallback:
                                 logging.warning("Input to active element failed or no active element. Trying ADB input fallback.")
@@ -85,7 +87,7 @@ class ActionExecutor:
                             else:
                                 current_error_msg = "Input to active element failed and ADB fallback disabled after coordinate tap."
                                 logging.warning(current_error_msg)
-                                success = False 
+                                success = False
                         else: # input via active_el succeeded
                             success = True
                 else:
@@ -93,7 +95,7 @@ class ActionExecutor:
                     logging.error(current_error_msg)
                     success = False
 
-            elif action_type == "click":
+            elif internal_action == "click":
                 if isinstance(element, WebElement):
                     action_log_info += f", Element ID: {getattr(element, 'id', 'N/A')}"
                     success = self.driver.click_element(element)
@@ -102,12 +104,28 @@ class ActionExecutor:
                     current_error_msg = f"Invalid element for click action: {element}"
                     logging.error(current_error_msg)
                     success = False
-            
-            elif action_type == "input":
+
+            elif internal_action == "input":
                 if isinstance(element, WebElement) and input_text is not None:
                     action_log_info += f", Element ID: {getattr(element, 'id', 'N/A')}, Text: '{input_text}'"
+                    # Initial attempt with standard Appium command
                     success = self.driver.input_text_into_element(element, input_text)
-                    if not success: current_error_msg = f"Input text into element (ID: {getattr(element, 'id', 'N/A')}) failed."
+
+                    # NEW: ADB input fallback logic
+                    if not success and self.use_adb_input_fallback:
+                        logging.warning(f"Standard input failed for element (ID: {getattr(element, 'id', 'N/A')}). Attempting ADB fallback.")
+                        # Re-click to ensure focus before global ADB typing
+                        self.driver.click_element(element)
+                        time.sleep(0.5) # Allow time for keyboard/focus
+                        adb_success = self.driver.type_text_by_adb(input_text)
+                        if adb_success:
+                            logging.info("ADB input fallback succeeded.")
+                            success = True
+                        else:
+                            current_error_msg = f"Standard and ADB input fallbacks failed for element (ID: {getattr(element, 'id', 'N/A')})."
+                    elif not success:
+                        current_error_msg = f"Input text into element (ID: {getattr(element, 'id', 'N/A')}) failed and ADB fallback is disabled."
+
                 elif not isinstance(element, WebElement):
                     current_error_msg = f"Invalid element for input action: {element}"
                     logging.error(current_error_msg)
@@ -124,26 +142,25 @@ class ActionExecutor:
                             current_error_msg = f"Failed to clear element (ID: {getattr(element, 'id', 'N/A')}): {e_clear}"
                             logging.warning(current_error_msg)
                             success = False
-                    else: # Should not happen due to outer check, but defensive
+                    else:
                         current_error_msg = "No valid element to clear when input_text was None."
-                        success = False 
-            
-            elif action_type == "scroll":
-                # Use the extracted scroll direction
-                resolved_scroll_direction = scroll_direction_from_type
-                if isinstance(resolved_scroll_direction, str):
-                    action_log_info += f", Direction: {resolved_scroll_direction}"
-                    success = self.driver.scroll(direction=resolved_scroll_direction)
-                    if not success: current_error_msg = f"Scroll action in direction '{resolved_scroll_direction}' failed."
+                        success = False
+
+            # NEW: This block now handles all scroll and swipe directions
+            elif internal_action == "scroll_or_swipe":
+                if isinstance(direction_from_type, str):
+                    action_log_info += f", Direction: {direction_from_type}"
+                    success = self.driver.scroll(direction=direction_from_type)
+                    if not success: current_error_msg = f"Scroll/Swipe action in direction '{direction_from_type}' failed."
                 else:
-                    current_error_msg = f"Invalid direction for scroll action: {resolved_scroll_direction}"
+                    current_error_msg = f"Invalid direction for scroll/swipe action: {direction_from_type}"
                     logging.error(current_error_msg)
                     success = False
-            
-            elif action_type == "back":
+
+            elif internal_action == "back":
                 success = self.driver.press_back_button()
                 if not success: current_error_msg = "Press back button action failed."
-            
+
             else:
                 current_error_msg = f"Unknown action type for execution: {action_type}"
                 logging.error(current_error_msg)
@@ -151,7 +168,7 @@ class ActionExecutor:
 
         except StaleElementReferenceException as e_stale:
             current_error_msg = f"StaleElementReferenceException during action execution ({action_log_info}): {e_stale}"
-            logging.error(current_error_msg, exc_info=True) # Keep exc_info for stale elements as it's common
+            logging.error(current_error_msg, exc_info=True)
             success = False
         except Exception as e:
             current_error_msg = f"Exception during action execution ({action_log_info}): {e}"
@@ -159,16 +176,16 @@ class ActionExecutor:
             success = False
 
         if success:
-            self.reset_consecutive_failures() # Use the new method
+            self.reset_consecutive_failures()
             logging.info(f"Action execution successful: {action_log_info}")
         else:
             self._track_failure(current_error_msg or f"Unknown failure: {action_log_info}")
-        
+
         return success
 
     def _track_failure(self, reason: str):
         self.consecutive_exec_failures += 1
-        self.last_error_message = reason # Store the reason for this failure
+        self.last_error_message = reason
         logging.warning(
             f"Action execution failed: {reason}. Consecutive execution failures: "
             f"{self.consecutive_exec_failures}/{self.max_exec_failures}"

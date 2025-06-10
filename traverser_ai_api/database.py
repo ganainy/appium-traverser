@@ -47,7 +47,7 @@ class DatabaseManager:
                 finally:
                     self.conn = None
                     self._conn_thread_ident = None
-        
+
         # If self.conn is None (either initially or cleared above)
         try:
             db_dir = os.path.dirname(self.db_path)
@@ -57,11 +57,11 @@ class DatabaseManager:
 
             connect_timeout_seconds = float(self.cfg.DB_CONNECT_TIMEOUT)
             busy_timeout_ms = int(self.cfg.DB_BUSY_TIMEOUT)
-            
+
             # Connect with check_same_thread=True (default)
             self.conn = sqlite3.connect(self.db_path, timeout=connect_timeout_seconds)
             self._conn_thread_ident = current_thread_id # Store the creator thread ID
-            
+
             self.conn.execute("PRAGMA foreign_keys = ON;")
             self.conn.execute("PRAGMA journal_mode=WAL;")
             self.conn.execute(f"PRAGMA busy_timeout = {busy_timeout_ms};")
@@ -106,7 +106,7 @@ class DatabaseManager:
             logging.debug(f"Attempted to close an already non-existent database connection (Thread ID: {current_thread_id}).")
 
 
-    def _execute_sql(self, sql: str, params: tuple = (), fetch_one: bool = False, 
+    def _execute_sql(self, sql: str, params: tuple = (), fetch_one: bool = False,
                      fetch_all: bool = False, commit: bool = True) -> Any:
         current_thread_id = threading.get_ident()
         # Ensure connection is valid for the current thread.
@@ -117,7 +117,7 @@ class DatabaseManager:
                 logging.error(f"Failed to establish/validate DB connection for thread {current_thread_id} from _execute_sql.")
                 if fetch_all: return []
                 return None
-        
+
         # At this point, self.conn should be valid and owned by current_thread_id
         try:
             if not self.conn:
@@ -129,15 +129,12 @@ class DatabaseManager:
             if fetch_one:
                 return cursor.fetchone()
             if fetch_all:
-                return cursor.fetchall() or [] 
-            if commit: 
+                return cursor.fetchall() or []
+            if commit:
                 self.conn.commit()
-            return cursor.lastrowid 
+            return cursor.lastrowid
         except sqlite3.Error as e: # sqlite3.Error includes ProgrammingError
             logging.error(f"Database error executing SQL in thread {current_thread_id}: {sql} | Params: {params} | Error: {e}", exc_info=True)
-            # Avoid rollback if the error is a threading issue, as rollback might also fail.
-            # If it's another sqlite3.Error, rollback might be okay if conn is still valid.
-            # For simplicity here, we'll rely on a fresh connection next time if this one is truly broken.
             if "thread" in str(e).lower(): # Heuristic for threading error
                 logging.warning("Detected potential threading error during SQL execution. Invalidating connection for this manager instance.")
                 self.conn = None # Invalidate the connection
@@ -153,8 +150,6 @@ class DatabaseManager:
             if fetch_all: return []
             return None
 
-    # ... (Rest of DatabaseManager methods: _create_tables, get_or_create_run_info, etc., remain unchanged in their SQL logic,
-    #      as _execute_sql now handles the connection state more robustly)
     def _create_tables(self) -> bool:
         sql_create_screens = f"""
         CREATE TABLE IF NOT EXISTS {self.SCREENS_TABLE} (
@@ -193,6 +188,7 @@ class DatabaseManager:
             execution_success BOOLEAN,
             error_message TEXT,
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+            ai_response_time_ms REAL,
             FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE,
             FOREIGN KEY (from_screen_id) REFERENCES {self.SCREENS_TABLE}(screen_id) ON DELETE SET NULL,
             FOREIGN KEY (to_screen_id) REFERENCES {self.SCREENS_TABLE}(screen_id) ON DELETE SET NULL,
@@ -202,7 +198,7 @@ class DatabaseManager:
         sql_create_transitions_simplified = f"""
         CREATE TABLE IF NOT EXISTS {self.TRANSITIONS_TABLE} (
             transition_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            from_screen_id INTEGER NOT NULL, 
+            from_screen_id INTEGER NOT NULL,
             to_screen_id INTEGER,
             action_description TEXT NOT NULL,
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -262,7 +258,7 @@ class DatabaseManager:
             return existing[0]
 
         sql_insert = f"""
-        INSERT INTO {self.SCREENS_TABLE} 
+        INSERT INTO {self.SCREENS_TABLE}
         (composite_hash, xml_hash, visual_hash, screenshot_path, activity_name, xml_content, first_seen_run_id, first_seen_step_number)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """
@@ -291,15 +287,16 @@ class DatabaseManager:
     def insert_step_log(self, run_id: int, step_number: int, from_screen_id: Optional[int],
                         to_screen_id: Optional[int], action_description: Optional[str],
                         ai_suggestion_json: Optional[str], mapped_action_json: Optional[str],
-                        execution_success: bool, error_message: Optional[str]) -> Optional[int]:
+                        execution_success: bool, error_message: Optional[str],
+                        ai_response_time: Optional[float] = None) -> Optional[int]:
         sql = """
-        INSERT INTO steps_log 
-        (run_id, step_number, from_screen_id, to_screen_id, action_description, 
-         ai_suggestion_json, mapped_action_json, execution_success, error_message)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO steps_log
+        (run_id, step_number, from_screen_id, to_screen_id, action_description,
+         ai_suggestion_json, mapped_action_json, execution_success, error_message, ai_response_time_ms)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         params = (run_id, step_number, from_screen_id, to_screen_id, action_description,
-                  ai_suggestion_json, mapped_action_json, execution_success, error_message)
+                  ai_suggestion_json, mapped_action_json, execution_success, error_message, ai_response_time)
         step_log_id = self._execute_sql(sql, params, commit=True)
         return step_log_id if isinstance(step_log_id, int) else None
 
@@ -312,13 +309,13 @@ class DatabaseManager:
         sql = "SELECT COUNT(*) FROM steps_log WHERE run_id = ?"
         result = self._execute_sql(sql, (run_id,), fetch_one=True, commit=False)
         return result[0] if result and result[0] is not None else 0
-        
+
     def get_action_history_for_screen(self, screen_id: int) -> List[str]:
         sql = """
-        SELECT DISTINCT action_description FROM steps_log 
+        SELECT DISTINCT action_description FROM steps_log
         WHERE from_screen_id = ? AND action_description IS NOT NULL
-        ORDER BY timestamp ASC 
-        """ 
+        ORDER BY timestamp ASC
+        """
         results = self._execute_sql(sql, (screen_id,), fetch_all=True, commit=False)
         return [row[0] for row in results] if isinstance(results, list) else []
 
@@ -341,7 +338,7 @@ class DatabaseManager:
         logging.warning("Clearing Screens, Simplified Transitions, and Steps Log for a fresh run...")
         try:
             self._execute_sql(f"DELETE FROM {self.TRANSITIONS_TABLE};", commit=True)
-            self._execute_sql(f"DELETE FROM steps_log;", commit=True) 
+            self._execute_sql(f"DELETE FROM steps_log;", commit=True)
             self._execute_sql(f"DELETE FROM {self.SCREENS_TABLE};", commit=True)
             self._execute_sql(f"DELETE FROM sqlite_sequence WHERE name='{self.SCREENS_TABLE}';", commit=True)
             self._execute_sql(f"DELETE FROM sqlite_sequence WHERE name='{self.TRANSITIONS_TABLE}';", commit=True)

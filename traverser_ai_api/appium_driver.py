@@ -6,8 +6,8 @@ from appium.webdriver.webdriver import WebDriver as AppiumRemote
 from appium.options.android.uiautomator2.base import UiAutomator2Options
 from appium.webdriver.common.appiumby import AppiumBy
 from selenium.common.exceptions import (
-    StaleElementReferenceException, 
-    WebDriverException, 
+    StaleElementReferenceException,
+    WebDriverException,
     NoSuchElementException,
     InvalidElementStateException
 )
@@ -38,9 +38,9 @@ class AppiumDriver:
 
         # Validate required configuration values from self.cfg
         required_attrs = [
-            'APPIUM_SERVER_URL', 'APP_PACKAGE', 'APP_ACTIVITY', 
-            'NEW_COMMAND_TIMEOUT', 'APPIUM_IMPLICIT_WAIT', 
-            'APP_LAUNCH_WAIT_TIME', 'WAIT_AFTER_ACTION', 
+            'APPIUM_SERVER_URL', 'APP_PACKAGE', 'APP_ACTIVITY',
+            'NEW_COMMAND_TIMEOUT', 'APPIUM_IMPLICIT_WAIT',
+            'APP_LAUNCH_WAIT_TIME', 'WAIT_AFTER_ACTION',
             'ALLOWED_EXTERNAL_PACKAGES' # Ensure this is a list, even if empty
         ]
         missing_attrs = []
@@ -49,10 +49,10 @@ class AppiumDriver:
             if value is None:
                 # For lists like ALLOWED_EXTERNAL_PACKAGES, an empty list is acceptable,
                 # but None might indicate it wasn't set. Config class should init to [].
-                if attr_name == 'ALLOWED_EXTERNAL_PACKAGES' and isinstance(value, list): 
+                if attr_name == 'ALLOWED_EXTERNAL_PACKAGES' and isinstance(value, list):
                     continue # Empty list is fine
                 missing_attrs.append(attr_name)
-        
+
         if missing_attrs:
             raise ValueError(f"AppiumDriver: Missing required configurations in Config object: {', '.join(missing_attrs)}")
 
@@ -94,7 +94,7 @@ class AppiumDriver:
             logging.info(f"Set Appium implicit wait to {implicit_wait_time} seconds.")
             logging.info("Appium session established successfully.")
             return True
-            
+
         except WebDriverException as e:
             logging.error(f"Failed to connect to Appium server or start session: {e}")
             self.driver = None
@@ -123,7 +123,7 @@ class AppiumDriver:
 
     def get_page_source(self) -> Optional[str]:
         """Retrieves the XML page source."""
-        if not self.driver: 
+        if not self.driver:
             logging.warning("Driver not available, cannot get page source.")
             return None
         try:
@@ -138,7 +138,7 @@ class AppiumDriver:
 
     def get_screenshot_bytes(self) -> Optional[bytes]:
         """Retrieves the current screen screenshot as PNG bytes."""
-        if not self.driver: 
+        if not self.driver:
             logging.warning("Driver not available, cannot get screenshot.")
             return None
         try:
@@ -195,7 +195,7 @@ class AppiumDriver:
         if not self.driver:
             logging.error("Driver not available, cannot launch app.")
             return False
-        
+
         app_package = str(self.cfg.APP_PACKAGE)
         app_activity = str(self.cfg.APP_ACTIVITY)
 
@@ -229,16 +229,16 @@ class AppiumDriver:
             # Step 3: Use Appium's activate_app
             logging.info(f"Activating app: {app_package}")
             self.driver.activate_app(app_package)
-            
+
             # Step 4: Wait and verify
             launch_wait = float(self.cfg.APP_LAUNCH_WAIT_TIME)
             logging.info(f"Waiting {launch_wait}s for app to stabilize...")
             time.sleep(launch_wait)
-            
+
             # Final verification
             current_pkg_after_launch = self.get_current_package()
             current_act_after_launch = self.get_current_activity()
-            
+
             if current_pkg_after_launch == app_package:
                 logging.info(f"App {app_package} is now in foreground (Activity: {current_act_after_launch})")
                 return True
@@ -246,7 +246,7 @@ class AppiumDriver:
                 logging.info(f"Allowed external package '{current_pkg_after_launch}' present after launch attempt")
                 return True
             else:
-                logging.warning(f"App launch failed - Current foreground app is '{current_pkg_after_launch}' " 
+                logging.warning(f"App launch failed - Current foreground app is '{current_pkg_after_launch}' "
                               f"(activity: '{current_act_after_launch}')")
                 return False
 
@@ -262,15 +262,7 @@ class AppiumDriver:
         if not self.driver or not value:
             logging.debug(f"Driver not available or value is empty for find_element({by}, {value})")
             return None
-        
-        # Use a short explicit wait if timeout is provided, otherwise rely on implicit wait
-        # This part requires WebDriverWait and expected_conditions if using explicit waits.
-        # For simplicity, relying on implicit wait for now, or a direct find.
-        # To implement explicit wait:
-        # from selenium.webdriver.support.ui import WebDriverWait
-        # from selenium.webdriver.support import expected_conditions as EC
-        # wait_time = timeout if timeout is not None else float(self.cfg.APPIUM_IMPLICIT_WAIT) / 2 # Shorter than implicit
-        
+
         try:
             # For now, direct find (relies on implicit wait set on driver)
             element = self.driver.find_element(by=by, value=value)
@@ -324,23 +316,23 @@ class AppiumDriver:
 
             # Create touch pointer action
             actions = ActionBuilder(self.driver, mouse=PointerInput(interaction.POINTER_TOUCH, "touch"))
-            
+
             # Move to the target coordinates
             actions.pointer_action.move_to_location(x, y)
-            
+
             # Perform tap (press and release)
             actions.pointer_action.pointer_down()
             if actual_duration > 0:
                 actions.pointer_action.pause(actual_duration / 1000)  # Convert ms to seconds
             actions.pointer_action.release()
-            
+
             # Execute the action sequence
             actions.perform()
             logging.info(f"Successfully tapped at coordinates: ({x}, {y})")
-            
+
             # Add a small pause after tap to ensure it's registered
             time.sleep(0.1)
-            
+
             return True
 
         except WebDriverException as e:
@@ -390,17 +382,11 @@ class AppiumDriver:
                     logging.warning(f"Failed to click element (ID: {element_id_str}) before input, but will still attempt input.")
                 time.sleep(0.3) # Small delay to ensure focus is properly set and keyboard appears
 
-            # Verify focus if possible (optional, can be complex)
-            # active_el = self.get_active_element()
-            # if not active_el or active_el.id != element_id_str:
-            #     logging.warning(f"Element (ID: {element_id_str}) may not be focused after click. Active element ID: {active_el.id if active_el else 'None'}")
-            #     # Optionally, re-click or fail here if focus is critical
-
             if clear_first:
                 try:
                     logging.debug(f"Clearing element (ID: {element_id_str}) before input.")
                     element.clear()
-                    time.sleep(0.1) 
+                    time.sleep(0.1)
                 except (InvalidElementStateException, WebDriverException) as clear_err: # Catch common clear issues
                     logging.warning(f"Could not clear element (ID: {element_id_str}) using native method: {clear_err}. Attempting fallback clear.")
                     try:
@@ -439,12 +425,12 @@ class AppiumDriver:
 
     def press_back_button(self) -> bool:
         """Presses the Android back button."""
-        if not self.driver: 
+        if not self.driver:
             logging.error("Driver not available, cannot press back button.")
             return False
         try:
             logging.info("Pressing Android back button (keycode 4).")
-            self.driver.press_keycode(4) 
+            self.driver.press_keycode(4)
             return True
         except WebDriverException as e:
             logging.error(f"Error pressing back button: {e}")
@@ -455,27 +441,34 @@ class AppiumDriver:
 
     def scroll(self, direction: str, element: Optional[WebElement] = None, distance_ratio: float = 0.5) -> bool:
         """Performs a scroll gesture (swipe) on the screen or a specific element if provided."""
-        if not self.driver: 
+        if not self.driver:
             logging.error("Driver not available, cannot scroll.")
             return False
         try:
             start_x, start_y, end_x, end_y = 0, 0, 0, 0
-            
+
             if element: # Scroll within a specific element
                 ele_loc = element.location
                 ele_size = element.size
-                # Define scroll area within the element, avoiding edges
                 el_center_x = ele_loc['x'] + ele_size['width'] // 2
-                el_top_y = ele_loc['y'] + int(ele_size['height'] * 0.2) # Start swipe 20% from top of element
-                el_bottom_y = ele_loc['y'] + int(ele_size['height'] * 0.8) # Start swipe 80% from top of element
-                scroll_amount_y = int(ele_size['height'] * distance_ratio * 0.5) # Scroll half the distance ratio within element
+                el_center_y = ele_loc['y'] + ele_size['height'] // 2
+                el_top_y = ele_loc['y'] + int(ele_size['height'] * 0.2)
+                el_bottom_y = ele_loc['y'] + int(ele_size['height'] * 0.8)
+                el_left_x = ele_loc['x'] + int(ele_size['width'] * 0.2)
+                el_right_x = ele_loc['x'] + int(ele_size['width'] * 0.8)
 
                 if direction == "down":
                     start_x, end_x = el_center_x, el_center_x
-                    start_y, end_y = el_bottom_y, max(ele_loc['y'], el_bottom_y - scroll_amount_y) # Scroll up from bottom
+                    start_y, end_y = el_bottom_y, el_top_y
                 elif direction == "up":
                     start_x, end_x = el_center_x, el_center_x
-                    start_y, end_y = el_top_y, min(ele_loc['y'] + ele_size['height'], el_top_y + scroll_amount_y) # Scroll down from top
+                    start_y, end_y = el_top_y, el_bottom_y
+                elif direction == "left": # Swipe right-to-left within element
+                    start_y, end_y = el_center_y, el_center_y
+                    start_x, end_x = el_right_x, el_left_x
+                elif direction == "right": # Swipe left-to-right within element
+                    start_y, end_y = el_center_y, el_center_y
+                    start_x, end_x = el_left_x, el_right_x
                 else:
                     logging.error(f"Unsupported scroll direction for element scroll: {direction}")
                     return False
@@ -483,33 +476,36 @@ class AppiumDriver:
                 window_size = self.get_window_size()
                 if not window_size: return False
                 width, height = window_size['width'], window_size['height']
-                
+
                 center_x = width // 2
-                margin = int(min(width, height) * 0.1) # 10% margin from edges for full screen scroll
+                center_y = height // 2
 
                 if direction == "down": # Swipe up to scroll content down
                     start_x, end_x = center_x, center_x
-                    start_y = int(height * (0.5 + distance_ratio / 2)) # Start lower
-                    end_y = int(height * (0.5 - distance_ratio / 2))   # End higher
-                    start_y = max(margin, min(start_y, height - margin)) # Clamp within margins
-                    end_y = max(margin, min(end_y, height - margin))
+                    start_y = int(height * (0.5 + distance_ratio / 2))
+                    end_y = int(height * (0.5 - distance_ratio / 2))
                 elif direction == "up": # Swipe down to scroll content up
                     start_x, end_x = center_x, center_x
-                    start_y = int(height * (0.5 - distance_ratio / 2)) # Start higher
-                    end_y = int(height * (0.5 + distance_ratio / 2))   # End lower
-                    start_y = max(margin, min(start_y, height - margin)) # Clamp
-                    end_y = max(margin, min(end_y, height - margin))
+                    start_y = int(height * (0.5 - distance_ratio / 2))
+                    end_y = int(height * (0.5 + distance_ratio / 2))
+                elif direction == "left": # Swipe right-to-left on screen
+                    start_y, end_y = center_y, center_y
+                    start_x = int(width * (0.5 + distance_ratio / 2))
+                    end_x = int(width * (0.5 - distance_ratio / 2))
+                elif direction == "right": # Swipe left-to-right on screen
+                    start_y, end_y = center_y, center_y
+                    start_x = int(width * (0.5 - distance_ratio / 2))
+                    end_x = int(width * (0.5 + distance_ratio / 2))
                 else:
                     logging.error(f"Unsupported scroll direction for full screen: {direction}")
                     return False
-            
-            if start_y == end_y and start_x == end_x : # Avoid zero-distance swipe
+
+            if start_y == end_y and start_x == end_x:
                 logging.warning(f"Scroll calculation resulted in zero distance for direction '{direction}'. Skipping swipe.")
                 return False
 
-
-            logging.info(f"Scrolling {direction} from ({start_x},{start_y}) to ({end_x},{end_y}) with ratio {distance_ratio}")
-            self.driver.swipe(start_x, start_y, end_x, end_y, duration=max(200, int(800 * distance_ratio))) # Scale duration too
+            logging.info(f"Scrolling {direction} from ({start_x},{start_y}) to ({end_x},{end_y})")
+            self.driver.swipe(start_x, start_y, end_x, end_y, duration=max(200, int(800 * distance_ratio)))
             return True
         except StaleElementReferenceException:
             logging.warning(f"Stale element encountered during scroll setup for element: {element}")
@@ -523,7 +519,7 @@ class AppiumDriver:
 
     def get_all_elements(self) -> List[WebElement]:
         """Gets all elements on the current screen using XPath '//*'."""
-        if not self.driver: 
+        if not self.driver:
             logging.warning("Driver not available, cannot get all elements.")
             return []
         try:
@@ -539,10 +535,10 @@ class AppiumDriver:
     def get_element_attributes(self, element: WebElement, attributes: List[str]) -> Dict[str, Optional[str]]:
         """Safely gets multiple attributes for a given element."""
         element_attrs: Dict[str, Optional[str]] = {}
-        if not element: 
+        if not element:
             logging.debug("get_element_attributes called with None element.")
             return element_attrs
-        
+
         for attr in attributes:
             val = None # Default to None if attribute cannot be fetched
             try:
@@ -550,10 +546,8 @@ class AppiumDriver:
                 elif attr == 'displayed': val = str(element.is_displayed()).lower()
                 elif attr == 'enabled': val = str(element.is_enabled()).lower()
                 elif attr == 'selected': val = str(element.is_selected()).lower()
-                # 'resource-id' for Appium on Android is often fetched as 'resourceId' or just 'name' sometimes.
-                # The get_attribute('name') can sometimes return resource-id if 'name' (content-desc) isn't set.
-                elif attr == 'resource-id': val = element.get_attribute('resourceId') 
-                elif attr == 'content-desc': val = element.get_attribute('contentDescription') # Correct for content-desc
+                elif attr == 'resource-id': val = element.get_attribute('resourceId')
+                elif attr == 'content-desc': val = element.get_attribute('contentDescription')
                 else: val = element.get_attribute(attr)
             except StaleElementReferenceException:
                 logging.warning(f"Stale element while getting attribute '{attr}'.")
@@ -568,7 +562,7 @@ class AppiumDriver:
 
     def get_window_size(self) -> Optional[Dict[str, int]]:
         """Gets the current device window size."""
-        if not self.driver: 
+        if not self.driver:
             logging.warning("Driver not available, cannot get window size.")
             return None
         try:
@@ -600,7 +594,7 @@ class AppiumDriver:
             logging.info(f"Executing ADB input text: '{text}'")
             self.driver.execute_script("mobile: shell", {
                 'command': 'input',
-                'args': ['text', text] 
+                'args': ['text', text]
             })
             return True
         except WebDriverException as e:
@@ -612,7 +606,7 @@ class AppiumDriver:
 
     def is_keyboard_shown(self) -> bool:
         """Checks if the software keyboard is currently shown."""
-        if not self.driver: 
+        if not self.driver:
             logging.warning("Driver not available, assuming keyboard not shown.")
             return False
         try:
@@ -627,7 +621,7 @@ class AppiumDriver:
 
     def hide_keyboard(self):
         """Hides the software keyboard if it is shown."""
-        if not self.driver: 
+        if not self.driver:
             logging.warning("Driver not available, cannot hide keyboard.")
             return
         try:
@@ -644,7 +638,7 @@ class AppiumDriver:
     def perform_action(self, action_type: str, target: Optional[Any], input_text: Optional[str] = None) -> bool:
         """
         Performs a given action based on type, target, and optional input text.
-        'target' can be WebElement for click/input, direction string for scroll, 
+        'target' can be WebElement for click/input, direction string for scroll,
         or (x,y) tuple for tap.
         """
         if not self.driver:
@@ -691,15 +685,15 @@ class AppiumDriver:
             logging.info(f"Action '{action_type_lower}' performed successfully on target '{str(target)[:50]}'.")
         else:
             logging.warning(f"Action '{action_type_lower}' failed or was not supported with target '{str(target)[:50]}'.")
-        
+
         return success
 
     def terminate_app(self, package_name: str) -> bool:
         """Terminates the given app if it's running.
-        
+
         Args:
             package_name: The package name of the app to terminate.
-            
+
         Returns:
             bool: True if successful, False otherwise.
         """
@@ -707,7 +701,7 @@ class AppiumDriver:
             if not self.driver:
                 logging.error("No active Appium session")
                 return False
-                
+
             if self.driver.terminate_app(package_name):
                 logging.info(f"Successfully terminated app: {package_name}")
                 return True
