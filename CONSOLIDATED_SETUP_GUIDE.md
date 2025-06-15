@@ -21,6 +21,7 @@ Required Software:
 Environment Variables:
 *   `ANDROID_HOME` or `ANDROID_SDK_ROOT` pointing to your Android SDK directory
 *   `GEMINI_API_KEY` in `.env` file for AI features
+*   `PCAPDROID_API_KEY` in `.env` file for traffic capture functionality
 
 ### 2. Quick Installation
 
@@ -142,10 +143,13 @@ pip install -r requirements.txt
 
 **Environment Configuration (`.env` file):**
 Create a file named `.env` in the project root directory (`appium-traverser-vertiefung/.env`).
-Add your Google Gemini API key to it:
+Add your Google Gemini API key and PCAPdroid API key to it:
 ```env
 GEMINI_API_KEY=your_api_key_here
+PCAPDROID_API_KEY=your_pcapdroid_key_here
 ```
+
+This file contains sensitive information and should NOT be committed to version control.
 
 ## Usage Guide
 

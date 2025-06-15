@@ -1,6 +1,6 @@
 {
-    "APP_PACKAGE": "com.teleClinic.teleClinic",
-    "APP_ACTIVITY": "com.teleclinic.main.ui._01_start.LoadingActivity",
+    "APP_PACKAGE": "com.ganainy.gymmasterscompose",
+    "APP_ACTIVITY": "com.ganainy.gymmasterscompose.MainActivity",
     "ALLOWED_EXTERNAL_PACKAGES": [
         "com.google.android.gms",
         "com.google.android.permissioncontroller"
@@ -39,9 +39,9 @@
     "CLEANUP_DEVICE_PCAP_FILE": true,
     "CURRENT_HEALTH_APP_LIST_FILE": "E:\\Vertiefung\\appium-traverser-vertiefung\\traverser_ai_api\\output_data\\app_info\\279cb9b1_app_info_health_filtered.json",
     "LAST_SELECTED_APP": {
-        "package_name": "com.teleClinic.teleClinic",
-        "activity_name": "com.teleclinic.main.ui._01_start.LoadingActivity",
-        "app_name": "TeleClinic"
+        "package_name": "com.ganainy.gymmasterscompose",
+        "activity_name": "com.ganainy.gymmasterscompose.MainActivity",
+        "app_name": "Gym Masters"
     },
     "OUTPUT_DATA_DIR": "output_data"
 }

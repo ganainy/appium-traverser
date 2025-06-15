@@ -116,6 +116,8 @@ class AIAssistant:
                  model_alias_override: Optional[str] = None,
                  safety_settings_override: Optional[Dict] = None):
         self.cfg = app_config
+        self.response_cache: Dict[str, Tuple[Dict[str, Any], float, int]] = {}
+        logging.info("AI response cache initialized.")
 
         if not self.cfg.GEMINI_API_KEY:
             raise ValueError("GEMINI_API_KEY is not set in the provided application configuration.")
@@ -253,16 +255,29 @@ class AIAssistant:
 
 
     def _prepare_image_part(self, screenshot_bytes: bytes) -> Optional[Content]:
-        # ... (This method needs to return a Content object or an Image object based on SDK usage)
-        # For newer SDKs that expect Content > Part > Image Data:
         try:
             img = Image.open(io.BytesIO(screenshot_bytes))
-            # Ensure the image is in a format the API supports (e.g., PNG, JPEG)
-            # Forcing PNG for consistency
+
+            # --- Image Optimization Logic ---
+            max_width = 720
+            if img.width > max_width:
+                scale = max_width / img.width
+                new_height = int(img.height * scale)
+                img = img.resize((max_width, new_height), Image.Resampling.LANCZOS)
+                logging.debug(f"Resized screenshot to {img.size} for AI analysis.")
+
+            # --- FIX: Convert RGBA to RGB before saving as JPEG ---
+            if img.mode == 'RGBA':
+                img = img.convert('RGB')
+                logging.debug("Converted image from RGBA to RGB for JPEG compatibility.")
+
             img_byte_arr = io.BytesIO()
-            img.save(img_byte_arr, format='PNG')
+            img.save(img_byte_arr, format='JPEG', quality=85)
             img_bytes_for_api = img_byte_arr.getvalue()
-            return Content(parts=[Part(inline_data=glm.Blob(mime_type="image/png", data=img_bytes_for_api))])
+            
+            logging.debug(f"Prepared image for AI. Original size: {len(screenshot_bytes)} bytes, Optimized size: {len(img_bytes_for_api)} bytes.")
+
+            return Content(parts=[Part(inline_data=glm.Blob(mime_type="image/jpeg", data=img_bytes_for_api))])
         except Exception as e:
             logging.error(f"Failed to prepare image part for AI: {e}", exc_info=True)
             return None
@@ -485,6 +500,16 @@ Based on this feedback, you MUST choose a different action to avoid getting stuc
                         current_composite_hash: str,
                         last_action_feedback: Optional[str] = None
                         ) -> Optional[Tuple[Dict[str, Any], float, int]]:
+        
+        # Create a unique key for the current state and context
+        cache_key = f"{current_composite_hash}_{str(sorted(previous_actions))}_{last_action_feedback}"
+
+        # Check cache before making the API call
+        if cache_key in self.response_cache:
+            logging.info(f"CACHE HIT: Found cached AI response for key: {cache_key[:70]}...")
+            # Return a copy of the cached response with a simulated time of 0
+            cached_response, _, cached_tokens = self.response_cache[cache_key]
+            return dict(cached_response), 0.0, cached_tokens
 
         current_available_actions = getattr(self.cfg, 'AVAILABLE_ACTIONS', None)
         if not current_available_actions or \
@@ -577,11 +602,15 @@ Based on this feedback, you MUST choose a different action to avoid getting stuc
 
                 try:
                     parsed_main_response = json.loads(json_str_to_parse)
-                    logging.info("Successfully parsed AI main JSON response.")
+                    logging.info("Successfully parsed AI main JSON response.")                    
 
                     if not isinstance(parsed_main_response.get("action_to_perform"), dict):
                         logging.error(f"Parsed JSON lacks 'action_to_perform' dictionary. Data: {parsed_main_response}")
                         return None
+                    
+                    # Store the successful response in the cache before returning
+                    self.response_cache[cache_key] = (dict(parsed_main_response), elapsed_time, total_tokens)
+                    logging.debug(f"Stored AI response in cache with key: {cache_key[:70]}...")
                     
                     return parsed_main_response, elapsed_time, total_tokens
 

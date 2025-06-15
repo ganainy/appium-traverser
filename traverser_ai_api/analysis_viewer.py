@@ -7,6 +7,7 @@ from typing import Optional, List, Dict, Any, Tuple
 from html import escape
 from pathlib import Path 
 import base64 
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 if not logger.handlers:
@@ -31,8 +32,6 @@ def truncate_text(text: Optional[str], max_length: int = 200) -> str:
     return text
 
 class RunAnalyzer:
-    WEASYPRINT_AVAILABLE = False
-
     def __init__(self, db_path: str, output_data_dir: str, app_package_for_run: Optional[str] = None):
         self.db_path = db_path
         self.output_data_dir = output_data_dir
@@ -65,8 +64,7 @@ class RunAnalyzer:
         if not self.conn:
             logger.error("No database connection available to list runs.")
             self._connect_db() 
-            if not self.conn:
-                return
+            if not self.conn: return
 
         cursor = self.conn.cursor()
         try:
@@ -120,6 +118,110 @@ class RunAnalyzer:
 
         logger.warning(f"Screenshot path '{db_screenshot_path}' could not be reliably resolved to an existing absolute path. PDF generation might fail for this image.")
         return None
+    
+    def _calculate_summary_metrics(self, run_id: int, run_data: sqlite3.Row, steps: List[sqlite3.Row]) -> Dict[str, Any]:
+        """Calculates all the summary metrics for a given run."""
+        metrics = {}
+        total_steps = len(steps)
+        
+        # General Run Info
+        if run_data['start_time'] and run_data['end_time']:
+            start = datetime.fromisoformat(run_data['start_time'])
+            end = datetime.fromisoformat(run_data['end_time'])
+            duration = end - start
+            metrics['Total Duration'] = str(duration).split('.')[0]
+        else:
+            metrics['Total Duration'] = "N/A (Run Incomplete)"
+
+        metrics['Final Status'] = run_data['status']
+        metrics['Total Steps'] = total_steps
+        
+        # Coverage Metrics
+        unique_screen_ids = {s['from_screen_id'] for s in steps if s['from_screen_id']} | {s['to_screen_id'] for s in steps if s['to_screen_id']}
+        metrics['Unique Screens Discovered'] = len(unique_screen_ids)
+        
+        unique_transitions = {(s['from_screen_id'], s['to_screen_id'], s['action_description']) for s in steps}
+        metrics['Unique Transitions'] = len(unique_transitions)
+        
+        if self.conn and unique_screen_ids:
+            cursor = self.conn.cursor()
+            placeholders = ','.join('?' for _ in unique_screen_ids)
+            query = f"SELECT COUNT(DISTINCT activity_name) FROM screens WHERE screen_id IN ({placeholders})"
+            cursor.execute(query, list(unique_screen_ids))
+            metrics['Activity Coverage'] = cursor.fetchone()[0]
+        else:
+            metrics['Activity Coverage'] = "N/A"
+
+        action_types = [json.loads(s['ai_suggestion_json']).get('action') for s in steps if s['ai_suggestion_json']]
+        action_distribution = {action: action_types.count(action) for action in set(action_types) if action}
+        metrics['Action Distribution'] = ", ".join([f"{k}: {v}" for k, v in action_distribution.items()])
+
+        # Efficiency Metrics
+        if metrics['Unique Screens Discovered'] > 0:
+            metrics['Steps per New Screen'] = f"{total_steps / metrics['Unique Screens Discovered']:.2f}"
+        else:
+            metrics['Steps per New Screen'] = "N/A"
+            
+        total_tokens = sum(s['total_tokens'] for s in steps if s['total_tokens'])
+        metrics['Total Token Usage'] = f"{total_tokens:,}" if total_tokens else "N/A"
+        
+        valid_response_times = [s['ai_response_time_ms'] for s in steps if s['ai_response_time_ms'] is not None]
+        if valid_response_times:
+            avg_time = sum(valid_response_times) / len(valid_response_times)
+            metrics['Avg AI Response Time'] = f"{avg_time:.0f} ms"
+        else:
+            metrics['Avg AI Response Time'] = "N/A"
+            
+        # Robustness Metrics
+        stuck_steps = sum(1 for s in steps if s['from_screen_id'] == s['to_screen_id'])
+        metrics['Stuck Steps (No-Op)'] = stuck_steps
+        
+        exec_failures = sum(1 for s in steps if not s['execution_success'])
+        metrics['Execution Failures'] = exec_failures
+        
+        if total_steps > 0:
+            metrics['Action Success Rate'] = f"{(1 - (exec_failures / total_steps)) * 100:.1f}%"
+        else:
+            metrics['Action Success Rate'] = "N/A"
+            
+        return metrics
+
+    def _generate_summary_table_html(self, metrics: Dict[str, Any]) -> str:
+        """Generates an HTML table from the metrics dictionary."""
+        
+        html = """
+        <div class="summary-table-container">
+            <h2>Run Summary Metrics</h2>
+            <table class="summary-table">
+                <tr><th colspan="2">General</th></tr>
+                <tr><td>Total Duration</td><td>{Total Duration}</td></tr>
+                <tr><td>Final Status</td><td>{Final Status}</td></tr>
+                <tr><td>Total Steps</td><td>{Total Steps}</td></tr>
+                
+                <tr><th colspan="2">Coverage</th></tr>
+                <tr><td>Unique Screens Discovered</td><td>{Unique Screens Discovered}</td></tr>
+                <tr><td>Unique Transitions</td><td>{Unique Transitions}</td></tr>
+                <tr><td>Activity Coverage</td><td>{Activity Coverage}</td></tr>
+                <tr><td>Action Distribution</td><td>{Action Distribution}</td></tr>
+                
+                <tr><th colspan="2">Efficiency</th></tr>
+                <tr><td>Steps per New Screen</td><td>{Steps per New Screen}</td></tr>
+                <tr><td>Avg. AI Response Time</td><td>{Avg AI Response Time}</td></tr>
+                <tr><td>Total Token Usage</td><td>{Total Token Usage}</td></tr>
+                
+                <tr><th colspan="2">Robustness</th></tr>
+                <tr><td>Action Success Rate</td><td>{Action Success Rate}</td></tr>
+                <tr><td>Execution Failures</td><td>{Execution Failures}</td></tr>
+                <tr><td>Stuck Steps (No-Op)</td><td>{Stuck Steps (No-Op)}</td></tr>
+            </table>
+        </div>
+        """
+        
+        return html.format(**{k: metrics.get(k, 'N/A') for k in [
+            'Total Duration', 'Final Status', 'Total Steps', 'Unique Screens Discovered',
+            'Unique Transitions', 'Activity Coverage', 'Action Distribution', 'Steps per New Screen',
+            'Avg AI Response Time', 'Total Token Usage', 'Action Success Rate', 'Execution Failures', 'Stuck Steps (No-Op)'
+        ]})
 
     def _fetch_run_and_steps_data(self, run_id: int) -> Tuple[Optional[sqlite3.Row], Optional[List[sqlite3.Row]]]:
         if not self.conn:
@@ -143,7 +245,6 @@ class RunAnalyzer:
             self.app_package_for_run = run_data['app_package']
             logger.info(f"Set app_package_for_run to '{self.app_package_for_run}' from run data for run ID {run_id}.")
         
-        # MODIFIED: Query now includes composite_hash from both from/to screens to reconstruct feedback
         query = """
         SELECT sl.*,
                s_from.screenshot_path AS from_screenshot_path, s_from.activity_name AS from_activity_name, s_from.composite_hash AS from_hash,
@@ -161,125 +262,6 @@ class RunAnalyzer:
             return run_data, None
         
         return run_data, steps
-
-    def analyze_run_to_cli(self, run_id: int):
-        run_data, steps = self._fetch_run_and_steps_data(run_id)
-
-        if not run_data:
-            print(f"Run ID {run_id} not found.")
-            self._close_db_connection() 
-            self.list_runs() 
-            return
-
-        print(f"\n--- Analyzing Run ID: {run_id} for App: {run_data['app_package']} ---")
-        start_time_str = run_data['start_time'][:19] if run_data['start_time'] else "N/A"
-        end_time_str = run_data['end_time'][:19] if run_data['end_time'] else "N/A"
-        print(f"Start Time: {start_time_str}, End Time: {end_time_str}, Status: {run_data['status']}\n")
-
-        if not steps:
-            print("No steps found for this run.")
-            self._close_db_connection()
-            return
-
-        for i, step in enumerate(steps):
-            print(f"\n==================== Step {step['step_number']} (Log ID: {step['step_log_id']}) ====================")
-            print("\n  [FROM SCREEN]")
-            from_activity = step['from_activity_name'] if step['from_activity_name'] else 'N/A'
-            print(f"    Activity: {from_activity}")
-            from_screenshot_path_db = step['from_screenshot_path']
-            full_from_ss_path = self._get_screenshot_full_path(from_screenshot_path_db)
-            print(f"    Screenshot Path: {full_from_ss_path if full_from_ss_path else 'N/A'}")
-            if full_from_ss_path and not os.path.exists(full_from_ss_path):
-                 print(f"      WARNING: Screenshot file not found at '{full_from_ss_path}'")
-            print("\n  [AI INPUT CONTEXT (Approximated)]")
-            # XML is not printed to CLI by default for brevity
-            if i > 0: 
-                prev_step_action_desc = steps[i-1]['action_description']
-                prev_step_mapped_json = steps[i-1]['mapped_action_json']
-                prev_action_display = prev_step_action_desc 
-                if prev_step_mapped_json:
-                    try:
-                        mapped = json.loads(prev_step_mapped_json)
-                        prev_action_display = f"Type: {mapped.get('action_type', 'N/A')}, Target: {truncate_text(mapped.get('target_element_desc', 'N/A'), 30)}"
-                        if mapped.get('input_text'):
-                            prev_action_display += f", Input: '{truncate_text(mapped.get('input_text'), 20)}'"
-                    except json.JSONDecodeError:
-                        logger.debug(f"Could not parse prev_step_mapped_json for display: {prev_step_mapped_json}")
-                print(f"    Last Action (Previous Step): {truncate_text(prev_action_display, 100)}")
-            else:
-                print(f"    Last Action (Previous Step): N/A (Start of run)")
-            print("\n  [AI OUTPUT]")
-            ai_suggestion_text = "N/A"
-            ai_reasoning_text = "N/A"
-            if step['ai_suggestion_json']:
-                try:
-                    suggestion_data = json.loads(step['ai_suggestion_json'])
-                    action_source_dict = None
-                    if isinstance(suggestion_data, dict):
-                        if 'action_to_perform' in suggestion_data and isinstance(suggestion_data.get('action_to_perform'), dict):
-                            action_source_dict = suggestion_data['action_to_perform']
-                        elif 'action' in suggestion_data: 
-                            action_source_dict = suggestion_data
-                    if action_source_dict:
-                        act_type = action_source_dict.get('action', 'N/A')
-                        target_id = action_source_dict.get('target_identifier')
-                        if target_id is None: target_id = action_source_dict.get('target_element_desc')
-                        if target_id is None: target_id = action_source_dict.get('target_element_description')
-                        if target_id is None: target_id = 'N/A' 
-                        input_txt = action_source_dict.get('input_text')
-                        reasoning = action_source_dict.get('reasoning')
-                        if reasoning is None: reasoning = action_source_dict.get('short_reasoning')
-                        if reasoning is None: reasoning = action_source_dict.get('explanation')
-                        ai_reasoning_text = reasoning if reasoning is not None else "N/A"
-                        ai_suggestion_text = f"Action: {act_type}"
-                        if target_id != 'N/A': ai_suggestion_text += f" on '{truncate_text(str(target_id), 50)}'"
-                        if input_txt: ai_suggestion_text += f" | Input: '{truncate_text(input_txt, 30)}'"
-                        if ai_reasoning_text == "N/A" and not any(k in action_source_dict for k in ['reasoning', 'short_reasoning', 'explanation']):
-                            ai_reasoning_text = "Reasoning field missing"
-                        elif reasoning is None and any(k in action_source_dict for k in ['reasoning', 'short_reasoning', 'explanation']):
-                            ai_reasoning_text = "Reasoning field present but empty/null"
-                    else: 
-                        ai_suggestion_text = f"Raw JSON: {truncate_text(str(suggestion_data), 100)}"
-                        ai_reasoning_text = "N/A (Could not parse AI suggestion structure)"
-                except json.JSONDecodeError:
-                    logger.warning(f"Could not parse ai_suggestion_json: {step['ai_suggestion_json']}")
-                    ai_suggestion_text = f"Error parsing JSON: {truncate_text(step['ai_suggestion_json'])}"
-                except Exception as e:
-                    logger.error(f"Unexpected error processing AI suggestion: {e} - Data: {step['ai_suggestion_json']}", exc_info=True)
-                    ai_suggestion_text = f"Error processing: {truncate_text(str(step['ai_suggestion_json']))}"
-            print(f"    Suggested: {ai_suggestion_text}")
-            print(f"    Reasoning: {truncate_text(ai_reasoning_text, 300)}")
-            print("\n  [CRAWLER ACTION EXECUTED]")
-            action_desc_text = step['action_description'] if step['action_description'] else "N/A"
-            print(f"    High-Level: {action_desc_text}")
-            mapped_action_display = "N/A"
-            if step['mapped_action_json']:
-                try:
-                    mapped_data = json.loads(step['mapped_action_json'])
-                    mapped_action_display = f"Type: {mapped_data.get('action_type', 'N/A')}, Target: {truncate_text(mapped_data.get('target_element_desc', 'N/A'), 50)}"
-                    if mapped_data.get('input_text'): mapped_action_display += f", Input: '{truncate_text(mapped_data.get('input_text'), 30)}'"
-                except json.JSONDecodeError:
-                    logger.warning(f"Could not parse mapped_action_json: {step['mapped_action_json']}")
-                    mapped_action_display = f"Error parsing JSON: {truncate_text(step['mapped_action_json'])}"
-            print(f"    Mapped/Executed: {mapped_action_display}")
-            print(f"    Execution Success: {step['execution_success']}")
-            if not step['execution_success'] and step['error_message']:
-                print(f"    Error Message: {truncate_text(step['error_message'])}")
-            if step['to_screen_id'] is not None:
-                print("\n  [TO SCREEN]")
-                to_activity = step['to_activity_name'] if step['to_activity_name'] else 'N/A'
-                print(f"    Activity: {to_activity}")
-                to_screenshot_path_db = step['to_screenshot_path']
-                full_to_ss_path = self._get_screenshot_full_path(to_screenshot_path_db)
-                print(f"    Screenshot Path: {full_to_ss_path if full_to_ss_path else 'N/A'}")
-                if full_to_ss_path and not os.path.exists(full_to_ss_path):
-                    print(f"      WARNING: Screenshot file not found at '{full_to_ss_path}'")
-            elif step['execution_success']:
-                 print("\n  [TO SCREEN]: N/A (Action succeeded, but no distinct 'to_screen' recorded or transition out of app)")
-            else:
-                 print("\n  [TO SCREEN]: N/A (Action failed or did not result in a screen change)")
-        print(f"\n--- End of Analysis for Run ID: {run_id} ---")
-        self._close_db_connection()
 
     def _image_to_base64(self, image_path: str) -> Optional[str]:
         if not os.path.exists(image_path):
@@ -311,6 +293,11 @@ class RunAnalyzer:
             self._close_db_connection()
             return
 
+        steps = steps or []
+
+        metrics_data = self._calculate_summary_metrics(run_id, run_data, steps)
+        summary_table_html = self._generate_summary_table_html(metrics_data)
+        
         html_parts = ["""
         <!DOCTYPE html>
         <html>
@@ -324,12 +311,18 @@ class RunAnalyzer:
                 }
                 body { font-family: Helvetica, Arial, sans-serif; margin: 0; font-size: 9pt; line-height: 1.25; }
                 h1 { font-size: 16pt; text-align: center; margin-top:0; margin-bottom: 12px; } 
-                h2 { font-size: 12pt; margin-top: 12px; border-bottom: 1px solid #ccc; padding-bottom: 2px; margin-bottom: 8px;} 
+                h2 { font-size: 12pt; margin-top: 18px; border-bottom: 1px solid #ccc; padding-bottom: 2px; margin-bottom: 8px;} 
                 h3 { font-size: 11pt; margin-top: 10px; margin-bottom: 6px; color: #222; background-color: #e9e9e9; padding: 4px 6px; border-radius: 3px;}
                 h4 { font-size: 9.5pt; margin-top: 8px; margin-bottom: 3px; color: #333; font-weight: bold; border-bottom: 1px dotted #ddd; padding-bottom: 2px;} 
                 
-                p.feature-item { margin: 4px 0 6px 5px; } /* Consistent spacing for feature items */
-                strong.feature-title { font-weight: bold; color: #111; display: block; margin-bottom: 1px;} /* Title on its own line */
+                .summary-table-container { page-break-after: always; }
+                .summary-table { border-collapse: collapse; width: 100%; margin-bottom: 20px; font-size: 8.5pt; }
+                .summary-table th { background-color: #e9e9e9; text-align: left; padding: 6px; border: 1px solid #ccc; }
+                .summary-table td { padding: 5px; border: 1px solid #ddd; }
+                .summary-table td:first-child { font-weight: bold; width: 40%; }
+                
+                p.feature-item { margin: 4px 0 6px 5px; } 
+                strong.feature-title { font-weight: bold; color: #111; display: block; margin-bottom: 1px;} 
                 
                 .step-container { 
                     margin-bottom: 12px; 
@@ -338,9 +331,7 @@ class RunAnalyzer:
                     background-color: #fcfcfc;
                     page-break-inside: avoid !important;
                 }
-                .step-text-content {
-                    margin-bottom: 10px; 
-                }
+                .step-text-content { margin-bottom: 10px; }
                 .step-screenshots-container { 
                     display: -pdf-flex-box; 
                     -pdf-flex-direction: row; 
@@ -350,249 +341,116 @@ class RunAnalyzer:
                     border-top: 1px solid #eee;
                     padding-top: 8px;
                 }
-                .step-screenshots-container > div { 
-                    -pdf-flex: 1; 
-                    text-align: center; 
-                    padding: 0 4px;
-                }
-                .step-screenshots-container img.screenshot { 
-                    max-width: 95%; 
-                    max-height: 240px; 
-                    width: auto; 
-                    height: auto; 
-                    border: 1px solid #bbb; 
-                    margin-top: 2px; margin-bottom: 4px;
-                    display: inline-block; 
-                }
+                .step-screenshots-container > div { -pdf-flex: 1; text-align: center; padding: 0 4px; }
+                .step-screenshots-container img.screenshot { max-width: 95%; max-height: 240px; width: auto; height: auto; border: 1px solid #bbb; margin-top: 2px; margin-bottom: 4px; display: inline-block; }
                 .screenshot-warning { color: red; font-size: 7pt; }
-                pre { 
-                    white-space: pre-wrap; 
-                    word-wrap: break-word; 
-                    background-color: #f0f0f0; 
-                    border: 1px solid #ccc; 
-                    padding: 5px;
-                    font-size: 7.5pt; 
-                    max-height: 100px; 
-                    overflow: hidden; 
-                    margin-left: 5px;
-                    margin-bottom: 5px;
-                }
+                pre { white-space: pre-wrap; word-wrap: break-word; background-color: #f0f0f0; border: 1px solid #ccc; padding: 5px; font-size: 7.5pt; max-height: 100px; overflow: hidden; margin-left: 5px; margin-bottom: 5px; }
                 hr { border: 0; border-top: 1px solid #ddd; margin: 12px 0; } 
-                .to-screen-section-na { 
-                    margin-left: 5px;
-                    font-style: italic;
-                }
+                .to-screen-section-na { margin-left: 5px; font-style: italic; }
             </style>
         </head>
         <body>
         """]
 
-        # Run Summary is removed as per request
-
+        html_parts.append(summary_table_html)
+        html_parts.append(f"<h1>Run Analysis Report - Run ID: {run_id} (App: {escape(str(run_data['app_package']))})</h1>")
+        
         if not steps:
             html_parts.append("<p>No steps found for this run.</p>")
         else:
-            html_parts.append(f"<h1>Run Analysis Report - Run ID: {run_id} (App: {escape(str(run_data['app_package']))})</h1>")
             html_parts.append("<h2>Step Details</h2>")
             for i, step in enumerate(steps):
                 html_parts.append(f"<div class='step-container'><h3>Step {step['step_number']} (Log ID: {step['step_log_id']})</h3>")
                 
                 html_parts.append("<div class='step-text-content'>")
 
-                # FROM SCREEN Text
                 html_parts.append(f"<h4>FROM SCREEN</h4>")
                 html_parts.append(f"<p class='feature-item'><strong class='feature-title'>Activity:</strong>{escape(step['from_activity_name'] or 'N/A')}</p>")
-                # XML content for 'from_xml_content' is intentionally omitted from PDF
 
-                # AI INPUT CONTEXT
                 html_parts.append(f"<h4>AI INPUT CONTEXT (Approximated)</h4>")
                 prev_action_display_html = "N/A (Start of run)"
-                if i > 0:
-                    prev_s_action_desc = steps[i-1]['action_description']
-                    prev_s_mapped_json = steps[i-1]['mapped_action_json']
-                    prev_action_display_html = escape(prev_s_action_desc or "N/A")
-                    if prev_s_mapped_json:
-                        try:
-                            mapped = json.loads(prev_s_mapped_json)
-                            target_desc_prev = mapped.get('target_element_desc', 'N/A')
-                            input_text_prev = mapped.get('input_text')
-                            prev_action_display_html = f"Type: {escape(mapped.get('action_type', 'N/A'))}, Target: {escape(target_desc_prev)}"
-                            if input_text_prev: prev_action_display_html += f", Input: '{escape(input_text_prev)}'"
-                        except json.JSONDecodeError: pass
+                if i > 0: prev_action_display_html = escape(steps[i-1]['action_description'] or "N/A")
                 html_parts.append(f"<p class='feature-item'><strong class='feature-title'>Last Action (Previous Step):</strong>{prev_action_display_html}</p>")
 
-                # AI OUTPUT
                 html_parts.append(f"<h4>AI OUTPUT</h4>")
-                ai_sugg_text_html, ai_reas_text_html = "N/A", "N/A"
-                ai_response_time_html = ""
+                ai_sugg_text_html, ai_reas_text_html, ai_response_time_html = "N/A", "N/A", ""
                 
-                # Add safe check for ai_response_time_ms column existence
-                try:
-                    response_time_ms = step['ai_response_time_ms']
-                    if response_time_ms is not None:
-                        if response_time_ms >= 1000:
-                            response_time_str = f"{response_time_ms/1000:.2f} seconds"
-                        else:
-                            response_time_str = f"{int(response_time_ms)} ms"
-                        ai_response_time_html = f"<p class='feature-item'><strong class='feature-title'>Response Time:</strong>{response_time_str}</p>"
-                except (KeyError, IndexError):
-                    # Column doesn't exist in older database versions
-                    pass
+                if 'ai_response_time_ms' in step.keys() and step['ai_response_time_ms'] is not None:
+                    ai_response_time_html = f"<p class='feature-item'><strong class='feature-title'>Response Time:</strong>{step['ai_response_time_ms']/1000:.2f} seconds</p>"
 
                 if step['ai_suggestion_json']:
                     try:
                         sugg_data = json.loads(step['ai_suggestion_json'])
-                        act_src_dict = sugg_data.get('action_to_perform') if isinstance(sugg_data.get('action_to_perform'), dict) else (sugg_data if isinstance(sugg_data, dict) and 'action' in sugg_data else None)
-                        if act_src_dict:
+                        act_src_dict = sugg_data.get('action_to_perform') or sugg_data
+                        if act_src_dict and isinstance(act_src_dict, dict):
                             act_t = act_src_dict.get('action', 'N/A')
-                            tgt_id = act_src_dict.get('target_identifier') or act_src_dict.get('target_element_desc') or act_src_dict.get('target_element_description') or 'N/A'
+                            tgt_id = act_src_dict.get('target_identifier', 'N/A')
                             in_txt = act_src_dict.get('input_text')
-                            rsng = act_src_dict.get('reasoning') or act_src_dict.get('short_reasoning') or act_src_dict.get('explanation')
-                            ai_reas_text_html = escape(rsng or "N/A")
+                            rsng = act_src_dict.get('reasoning', "N/A")
+                            ai_reas_text_html = escape(rsng)
                             ai_sugg_text_html = f"Action: {escape(act_t)}"
                             if tgt_id != 'N/A': ai_sugg_text_html += f" on '{escape(str(tgt_id))}'"
                             if in_txt: ai_sugg_text_html += f" | Input: '{escape(in_txt)}'"
-                            if ai_reas_text_html == "N/A" and not any(k in act_src_dict for k in ['reasoning', 'short_reasoning', 'explanation']): ai_reas_text_html = "Reasoning field missing"
-                            elif rsng is None and any(k in act_src_dict for k in ['reasoning', 'short_reasoning', 'explanation']): ai_reas_text_html = "Reasoning field present but empty/null"
-                        else: ai_sugg_text_html, ai_reas_text_html = f"Raw JSON: {escape(str(sugg_data))}", "N/A (Could not parse AI suggestion structure)"
-                    except json.JSONDecodeError: ai_sugg_text_html = f"Error parsing JSON: {escape(step['ai_suggestion_json'])}"
-                    except Exception: ai_sugg_text_html = f"Error processing: {escape(step['ai_suggestion_json'])}"
+                    except (json.JSONDecodeError, AttributeError):
+                        ai_sugg_text_html = f"Error parsing JSON: {escape(step['ai_suggestion_json'])}"
                 html_parts.append(f"<p class='feature-item'><strong class='feature-title'>Suggested:</strong>{ai_sugg_text_html}</p>")
-                html_parts.append(ai_response_time_html)  # Add the response time here
+                html_parts.append(ai_response_time_html)
                 html_parts.append(f"<p class='feature-item'><strong class='feature-title'>Reasoning:</strong></p><pre>{ai_reas_text_html}</pre>")
                 
-                # CRAWLER ACTION EXECUTED
                 html_parts.append(f"<h4>CRAWLER ACTION EXECUTED</h4>")
                 html_parts.append(f"<p class='feature-item'><strong class='feature-title'>High-Level:</strong>{escape(step['action_description'] or 'N/A')}</p>")
-                map_act_disp_html = "N/A"
-                if step['mapped_action_json']:
-                    try:
-                        map_data = json.loads(step['mapped_action_json'])
-                        target_desc_map, input_text_map = map_data.get('target_element_desc', 'N/A'), map_data.get('input_text')
-                        map_act_disp_html = f"Type: {escape(map_data.get('action_type', 'N/A'))}, Target: {escape(target_desc_map)}"
-                        if input_text_map: map_act_disp_html += f", Input: '{escape(input_text_map)}'"
-                    except json.JSONDecodeError: map_act_disp_html = f"Error parsing JSON: {escape(step['mapped_action_json'])}"
-                html_parts.append(f"<p class='feature-item'><strong class='feature-title'>Mapped/Executed:</strong>{map_act_disp_html}</p>")
                 
-                # Add execution status with color coding
-                status_color = "#28a745" if step['execution_success'] else "#dc3545"  # Green for success, red for failure
-                html_parts.append(f"""
-                    <p class='feature-item'>
-                        <strong class='feature-title'>Execution Status:</strong>
-                        <span style="color: {status_color}; font-weight: bold;">
-                            {'Success' if step['execution_success'] else 'Failed'}
-                        </span>
-                    </p>
-                """)
+                status_color = "#28a745" if step['execution_success'] else "#dc3545"
+                html_parts.append(f"<p class='feature-item'><strong class='feature-title'>Execution Status:</strong><span style='color: {status_color}; font-weight: bold;'>{'Success' if step['execution_success'] else 'Failed'}</span></p>")
                 
-                # Add error message if present and execution failed
                 if not step['execution_success'] and step['error_message']:
-                    html_parts.append(f"""
-                        <p class='feature-item'>
-                            <strong class='feature-title'>Error Message:</strong>
-                            <span style="color: #dc3545;">{escape(step['error_message'])}</span>
-                        </p>
-                    """)
+                    html_parts.append(f"<p class='feature-item'><strong class='feature-title'>Error Message:</strong><span style='color: #dc3545;'>{escape(step['error_message'])}</span></p>")
                 
-                # TO SCREEN Text
-                if step['to_screen_id'] is not None:
-                    html_parts.append(f"<h4>TO SCREEN</h4>")
-                    html_parts.append(f"<p class='feature-item'><strong class='feature-title'>Activity:</strong>{escape(step['to_activity_name'] or 'N/A')}</p>")
-                elif step['execution_success']:
-                    html_parts.append("<p class='to-screen-section-na feature-item'><strong class='feature-title'>TO SCREEN:</strong>N/A (Action succeeded, but no distinct 'to_screen' recorded or transition out of app)</p>")
-                else:
-                    html_parts.append("<p class='to-screen-section-na feature-item'><strong class='feature-title'>TO SCREEN:</strong>N/A (Action failed or did not result in a screen change)</p>")
-                
-                html_parts.append("</div>") # End step-text-content
+                html_parts.append("</div>")
 
-                # Screenshots container at the end of the step
                 html_parts.append("<div class='step-screenshots-container'>")
-                from_ss_html_added = False
-                full_from_ss_path = self._get_screenshot_full_path(step['from_screenshot_path'])
-                if full_from_ss_path:
-                    base64_image = self._image_to_base64(full_from_ss_path)
-                    if base64_image:
-                        html_parts.append(f"<div><p><strong class='feature-title'>FROM Screen:</strong></p><img src='{base64_image}' class='screenshot' alt='From screen {step['step_number']}'></div>")
-                        from_ss_html_added = True
-                if not from_ss_html_added: # Fallback if no image
-                     html_parts.append(f"<div><p><strong class='feature-title'>FROM Screen:</strong> N/A</p></div>")
-
-
-                to_ss_html_added = False
-                if step['to_screen_id'] is not None:
-                    full_to_ss_path = self._get_screenshot_full_path(step['to_screenshot_path'])
-                    if full_to_ss_path:
-                        base64_image_to = self._image_to_base64(full_to_ss_path)
-                        if base64_image_to:
-                            html_parts.append(f"<div><p><strong class='feature-title'>TO Screen:</strong></p><img src='{base64_image_to}' class='screenshot' alt='To screen {step['step_number']}'></div>")
-                            to_ss_html_added = True
-                if not to_ss_html_added: # Fallback if no TO screen image (or no TO screen)
-                    html_parts.append(f"<div><p><strong class='feature-title'>TO Screen:</strong> N/A</p></div>")
+                if full_from_ss_path := self._get_screenshot_full_path(step['from_screenshot_path']):
+                    if base64_image := self._image_to_base64(full_from_ss_path):
+                        html_parts.append(f"<div><p><strong>FROM Screen:</strong></p><img src='{base64_image}' class='screenshot'></div>")
                 
-                html_parts.append("</div>") # End step-screenshots-container
-                html_parts.append("</div>") # End step-container
+                if step['to_screen_id'] is not None:
+                    if full_to_ss_path := self._get_screenshot_full_path(step['to_screenshot_path']):
+                        if base64_image_to := self._image_to_base64(full_to_ss_path):
+                            html_parts.append(f"<div><p><strong>TO Screen:</strong></p><img src='{base64_image_to}' class='screenshot'></div>")
+
+                html_parts.append("</div></div>")
                 if i < len(steps) - 1: html_parts.append("<hr>")
+        
         html_parts.append("</body></html>")
         full_html = "".join(html_parts)
 
+        # --- MODIFIED: More robust PDF generation block ---
         try:
-            pisa_document = None
             with open(pdf_filepath, "wb") as f_pdf:
                 if pisa:
-                    pisa_document = pisa.CreatePDF(full_html, dest=f_pdf, encoding='utf-8')
+                    # pisa.CreatePDF returns a pisaDocument status object
+                    pisa_status = pisa.CreatePDF(full_html, dest=f_pdf, encoding='utf-8')
+                    
+                    # Check if the status object was created and if it has a non-zero error code
+                    if pisa_status and not pisa_status.err: # type: ignore
+                        logger.info(f"Successfully generated PDF report: {pdf_filepath}")
+                        print(f"PDF report generated: {pdf_filepath}")
+                    else:
+                        error_code = getattr(pisa_status, 'err', -1) # Safely get error code
+                        logger.error(f"Error generating PDF. Error code: {error_code}")
+                        print(f"Error generating PDF (code: {error_code}). Check logs for details.")
                 else:
-                    logger.error("xhtml2pdf (pisa) is None. Cannot generate PDF.")
-                    print("Error: xhtml2pdf (pisa) is not available. PDF not generated.")
-                    self._close_db_connection()
-                    return
-
-            pdf_generated_successfully = False 
-
-            if pisa_document is None:
-                logger.error("Error generating PDF: xhtml2pdf.CreatePDF returned None.")
-                print("Error generating PDF: Creation failed (PDF library returned None). Check logs.")
-            elif isinstance(pisa_document, (bytes, bytearray, memoryview)):
-                logger.error(f"Error generating PDF: xhtml2pdf.CreatePDF returned raw bytes-like object ({type(pisa_document).__name__}) unexpectedly when a destination file was provided.")
-                print("Error generating PDF: Unexpected data type from PDF library. Check logs.")
-            elif hasattr(pisa_document, 'err'):
-                err_code = pisa_document.err 
-                if err_code == 0:
-                    pdf_generated_successfully = True
-                    logger.info(f"Successfully generated PDF report: {pdf_filepath}")
-                    print(f"PDF report generated: {pdf_filepath}")
-                    if hasattr(pisa_document, 'warn') and pisa_document.warn:
-                        logger.warning(f"xhtml2pdf warnings during PDF generation: {pisa_document.warn}")
-                        print(f"PDF report generated with warnings: {pdf_filepath}. Check logs for details.")
-                else:
-                    error_message = f"Error generating PDF with xhtml2pdf. Error code: {err_code}"
-                    if hasattr(pisa_document, 'warn') and pisa_document.warn:
-                        error_message += f", Warnings: {pisa_document.warn}"
-                    logger.error(error_message)
-                    print(f"Error generating PDF (code: {err_code}). Check logs.")
-            else:
-                logger.error(f"Error generating PDF: xhtml2pdf.CreatePDF returned an object of type {type(pisa_document).__name__} which lacks an 'err' attribute. This is unexpected.")
-                print("Error generating PDF: Unexpected result from PDF library (missing 'err' attribute). Check logs.")
-
-            if not pdf_generated_successfully:
-                html_debug_filepath = os.path.splitext(pdf_filepath)[0] + "_debug.html"
-                try:
-                    with open(html_debug_filepath, "w", encoding="utf-8") as f_html:
-                        f_html.write(full_html) 
-                    logger.info(f"Saved HTML content for debugging to: {html_debug_filepath}")
-                    print(f"Saved HTML for debugging: {html_debug_filepath}")
-                except Exception as e_debug_save:
-                    logger.error(f"Failed to save debug HTML file: {e_debug_save}")
-                    print(f"Additionally, failed to save debug HTML: {e_debug_save}")
+                    logger.error("xhtml2pdf is not available.")
+                    print("Error: xhtml2pdf is not available. PDF not generated.")
         except Exception as e:
             logger.error(f"Unexpected error during PDF generation: {e}", exc_info=True)
-            print(f"Unexpected error generating PDF: {e}. Check logs for details.")
+            # Try to save debug HTML even on unexpected errors
             html_debug_filepath = os.path.splitext(pdf_filepath)[0] + "_debug.html"
             try:
-                with open(html_debug_filepath, "w", encoding="utf-8") as f_html: f_html.write(full_html)
+                with open(html_debug_filepath, "w", encoding="utf-8") as f_html:
+                    f_html.write(full_html)
                 logger.info(f"Saved HTML content for debugging to: {html_debug_filepath}")
-                print(f"Saved HTML for debugging: {html_debug_filepath}")
-            except Exception as e_debug_save_outer:
-                 logger.error(f"Failed to save debug HTML file after unexpected error: {e_debug_save_outer}")
-                 print(f"Additionally, failed to save debug HTML after unexpected error: {e_debug_save_outer}")
+            except Exception as e_debug:
+                logger.error(f"Failed to save debug HTML file: {e_debug}")
         finally:
             self._close_db_connection()
