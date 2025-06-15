@@ -190,6 +190,37 @@ class CLIController:
         self.cfg.update_setting_and_save('LAST_SELECTED_APP', {'package_name': pkg, 'activity_name': act, 'app_name': name})
         return True
 
+
+    def pause_crawler(self) -> bool:
+        logging.info("Signaling crawler to pause...")
+        if not self.cfg.PAUSE_FLAG_PATH:
+            logging.error("PAUSE_FLAG_PATH not configured.")
+            return False
+        try:
+            Path(self.cfg.PAUSE_FLAG_PATH).write_text("pause")
+            logging.info(f"Pause flag created: {self.cfg.PAUSE_FLAG_PATH}.")
+            return True
+        except Exception as e:
+            logging.error(f"Failed to create pause flag: {e}", exc_info=True)
+            return False
+
+    def resume_crawler(self) -> bool:
+        logging.info("Signaling crawler to resume...")
+        if not self.cfg.PAUSE_FLAG_PATH:
+            logging.error("PAUSE_FLAG_PATH not configured.")
+            return False
+        try:
+            if Path(self.cfg.PAUSE_FLAG_PATH).exists():
+                Path(self.cfg.PAUSE_FLAG_PATH).unlink()
+                logging.info(f"Pause flag removed: {self.cfg.PAUSE_FLAG_PATH}.")
+            else:
+                logging.info("Pause flag not found, crawler is likely not paused.")
+            return True
+        except Exception as e:
+            logging.error(f"Failed to remove pause flag: {e}", exc_info=True)
+            return False
+        
+
     def start_crawler(self) -> bool:
         if not self.cfg.SHUTDOWN_FLAG_PATH: logging.error("Shutdown flag path not configured."); return False
         if Path(self.cfg.SHUTDOWN_FLAG_PATH).exists():
@@ -291,6 +322,12 @@ class CLIController:
             except (ValueError, OSError): status_msg = "  Crawler Process: Invalid PID file"
         else: status_msg = "  Crawler Process: Stopped (no PID file)"
         print(status_msg)
+
+        if self.cfg.PAUSE_FLAG_PATH and Path(self.cfg.PAUSE_FLAG_PATH).exists():
+            print("  Execution State: Paused (pause flag is present)")
+        else:
+            print("  Execution State: Running")
+
         print(f"  Target App:      '{self.cfg.LAST_SELECTED_APP.get('app_name', self.cfg.APP_PACKAGE) if self.cfg.LAST_SELECTED_APP else self.cfg.APP_PACKAGE}' ({self.cfg.APP_PACKAGE or 'Not Set'})")
         print(f"  Output Data Dir: {self.cfg.OUTPUT_DATA_DIR or 'Not Set'}")
         print("========================")
@@ -517,7 +554,9 @@ Examples:
   %(prog)s set-config MAX_CRAWL_STEPS=50
   %(prog)s start
   %(prog)s stop
-
+  %(prog)s pause
+  %(prog)s resume
+                               
   # New Analysis Commands:
   %(prog)s --list-analysis-targets
   %(prog)s --list-runs-for-target --target-index 1
@@ -535,8 +574,11 @@ Examples:
 
     crawler_group = parser.add_argument_group('Crawler Control')
     crawler_group.add_argument('--start', action='store_true', help='Start the crawler.')
+    crawler_group.add_argument('--pause', action='store_true', help='Signal the running crawler to pause execution.')
+    crawler_group.add_argument('--resume', action='store_true', help='Signal a paused crawler to resume execution.')
     crawler_group.add_argument('--stop', action='store_true', help='Signal the crawler to stop.')
     crawler_group.add_argument('--status', action='store_true', help='Show crawler status.')
+
 
     config_group = parser.add_argument_group('Configuration Management')
     config_group.add_argument('--show-config', metavar='FILTER', nargs='?', const='', help='Show config (optionally filter by key).')
@@ -627,6 +669,8 @@ def main_cli():
                 except KeyboardInterrupt: logging.info("Crawler wait interrupted."); controller.stop_crawler()
             else: exit_code = 1
         elif args.stop: action_taken = True; controller.stop_crawler()
+        elif args.pause: action_taken = True; controller.pause_crawler()
+        elif args.resume: action_taken = True; controller.resume_crawler()
 
         elif args.list_analysis_targets:
             action_taken = True

@@ -2,6 +2,7 @@
 # AI-Driven Android App Crawler - Complete Setup & Usage Guide
 
 ## Overview
+
 This project implements an automated crawler for Android applications driven by a multimodal AI model (Google Gemini). It intelligently explores app screens by analyzing visual layout and structural information, deciding the next best action to discover new states and interactions.
 
 Available Interfaces:
@@ -10,6 +11,7 @@ Available Interfaces:
 ## Quick Start
 
 ### 1. Prerequisites Installation
+
 Required Software:
 *   Python 3.8+ - Download here (ensure it's added to PATH)
 *   Node.js & npm - Download here (for Appium)
@@ -206,6 +208,17 @@ Check crawler status (can be run while crawler is active or stopped):
 ```powershell
 python traverser_ai_api/cli_controller.py --status
 ```
+
+Pause a running crawler:
+```powershell
+python traverser_ai_api/cli_controller.py --pause
+```
+
+Resume a paused crawler:
+```powershell
+python traverser_ai_api/cli_controller.py --resume
+```
+
 Stop a running crawler gracefully:
 ```powershell
 python traverser_ai_api/cli_controller.py --stop
@@ -221,7 +234,9 @@ python traverser_ai_api/cli_controller.py --stop
 ##### Crawler Control:
 *   `--start`: Starts the crawling process on the currently selected application.
 *   `--stop`: Signals a running crawler to stop gracefully.
-*   `--status`: Shows the current status of the crawler (running, stopped, selected app, etc.).
+*   `--pause`: Temporarily halts crawler execution after completing current action.
+*   `--resume`: Continues execution of a paused crawler.
+*   `--status`: Shows the current status of the crawler (running, stopped, paused, selected app, etc.).
 
 ##### Configuration:
 *   `--show-config [FILTER_KEY]`: Displays the current configuration. Optionally filters by a key string.
@@ -477,6 +492,7 @@ Ensure Appium server, emulator/device, and Python environment are set up in prio
 
 
 ## UI Element Annotation Tool
+
 The project includes a standalone tool for batch processing screenshots to identify and annotate UI elements using Google's Gemini Vision AI.
 
 ### Usage:

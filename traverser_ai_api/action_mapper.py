@@ -180,7 +180,6 @@ class ActionMapper:
         # Termination due to max failures is handled by AppCrawler's _should_terminate()
 
     def _extract_coordinates_from_bbox(self, target_bounding_box: Dict[str, Any]) -> Optional[Tuple[int, int]]:
-        """Extracts and calculates center coordinates from a bounding box dictionary."""
         try:
             top_left = target_bounding_box.get('top_left')
             bottom_right = target_bounding_box.get('bottom_right')
@@ -190,23 +189,32 @@ class ActionMapper:
                 logging.warning(f"Invalid format for 'top_left' or 'bottom_right' in bounding box: {target_bounding_box}")
                 return None
 
-            # AI schema uses [y1, x1], [y2, x2]
-            y1, x1 = top_left
-            y2, x2 = bottom_right
-
-            if not all(isinstance(coord, (int, float)) for coord in [y1, x1, y2, x2]):
-                logging.warning(f"Non-numeric coordinate types in bounding box: {target_bounding_box}")
+            window_size = self.driver.get_window_size()
+            if not window_size:
+                logging.error("Failed to get window size for coordinate calculation.")
                 return None
             
-            # Ensure coordinates are valid (e.g., x1 < x2, y1 < y2)
-            if x1 > x2 or y1 > y2:
-                logging.warning(f"Invalid bounding box coordinates (x1>x2 or y1>y2): tl=({x1},{y1}), br=({x2},{y2}). Swapping.")
-                # Attempt to correct by swapping if order is simply reversed
-                if x1 > x2: x1, x2 = x2, x1
-                if y1 > y2: y1, y2 = y2, y1
+            screen_width, screen_height = window_size['width'], window_size['height']
+
+            y1_norm, x1_norm = top_left
+            y2_norm, x2_norm = bottom_right
+
+            if not all(isinstance(coord, (int, float)) for coord in [y1_norm, x1_norm, y2_norm, x2_norm]):
+                logging.warning(f"Non-numeric coordinate types in normalized bounding box: {target_bounding_box}")
+                return None
+            
+            x1 = int(float(x1_norm) * screen_width)
+            y1 = int(float(y1_norm) * screen_height)
+            x2 = int(float(x2_norm) * screen_width)
+            y2 = int(float(y2_norm) * screen_height)
+
+            if x1 > x2: x1, x2 = x2, x1
+            if y1 > y2: y1, y2 = y2, y1
 
             center_x = int((x1 + x2) / 2)
             center_y = int((y1 + y2) / 2)
+            
+            logging.info(f"Calculated absolute tap coordinates ({center_x}, {center_y}) from normalized bbox {target_bounding_box} and screen size {screen_width}x{screen_height}")
             return center_x, center_y
         except Exception as e:
             logging.error(f"Error processing bounding box {target_bounding_box} for coordinate action: {e}", exc_info=True)
@@ -214,49 +222,33 @@ class ActionMapper:
 
 
     def map_ai_action_to_appium(self, ai_response: Dict[str, Any], current_xml_string: Optional[str] = None) -> Optional[Dict[str, Any]]:
-        """
-        Maps the AI's JSON suggestion to an executable action dictionary for ActionExecutor.
-
-        Args:
-            ai_response (Dict[str, Any]): The structured JSON response from the AI.
-            current_xml_string (Optional[str]): Full XML of the current screen for detailed mapping if needed.
-        
-        Returns:
-            Optional[Dict[str, Any]]: Action details for ActionExecutor, or None if mapping fails.
-            Example: {'type': 'click', 'element': WebElement, 'element_info': {...}}
-                     {'type': 'input', 'element': WebElement, 'text': '...', 'element_info': {...}}
-                     {'type': 'tap_coords', 'coordinates': (x,y), 'original_bbox': {...}}
-                     {'type': 'scroll', 'direction': 'down'}
-                     {'type': 'back'}
-        """
         action_type = ai_response.get("action")
-        target_identifier = ai_response.get("target_identifier") # String from AI (text, ID, content-desc)
+        target_identifier = ai_response.get("target_identifier")
         input_text = ai_response.get("input_text")
-        target_bounding_box = ai_response.get("target_bounding_box") # Dict or None
+        target_bounding_box = ai_response.get("target_bounding_box")
 
         logging.info(
             f"Mapping AI suggestion: Action='{action_type}', Identifier='{target_identifier}', "
             f"Input='{input_text}', BBox='{target_bounding_box is not None}'"
         )
 
-        if not action_type or action_type not in self.cfg.AVAILABLE_ACTIONS: # Use cfg for available actions
+        if not action_type or action_type not in self.cfg.AVAILABLE_ACTIONS:
             self._track_map_failure(f"Unknown or unavailable action type from AI: {action_type}")
             return None
 
         action_details: Dict[str, Any] = {"type": action_type}
 
-        if action_type in ["scroll_down", "scroll_up"]:
+        if action_type in ["scroll_down", "scroll_up", "swipe_left", "swipe_right"]:
             self.consecutive_map_failures = 0
-            action_details["direction"] = action_type.split('_')[1] # "down" or "up"
+            action_details["direction"] = action_type.split('_')[1]
             return action_details
         
         if action_type == "back":
             self.consecutive_map_failures = 0
-            return action_details # Type 'back' is sufficient
+            return action_details
 
-        # For click and input, we need a target
-        target_element: Optional[Any] = None # WebElement
-        element_info: Dict[str, Any] = {} # To store how element was found
+        target_element: Optional[Any] = None
+        element_info: Dict[str, Any] = {}
 
         if target_identifier:
             target_element = self._find_element_by_ai_identifier(str(target_identifier))
@@ -271,7 +263,7 @@ class ActionMapper:
                     element_info["bounds"] = target_element.get_attribute('bounds')
                 except StaleElementReferenceException:
                      logging.warning(f"Element found by '{target_identifier}' became stale when fetching attributes.")
-                     target_element = None # Treat as not found
+                     target_element = None
                 except Exception as e_attr:
                     logging.warning(f"Error fetching attributes for element found by '{target_identifier}': {e_attr}")
 
@@ -280,28 +272,24 @@ class ActionMapper:
             action_details["element"] = target_element
             action_details["element_info"] = element_info
             if action_type == "input":
-                if input_text is None: # Allow empty string for input
+                if input_text is None:
                     logging.warning(f"AI suggested 'input' for '{target_identifier}' but 'input_text' is null. Will attempt to clear or input empty.")
                     action_details["text"] = "" 
                 else:
-                    action_details["text"] = str(input_text) # Ensure string
+                    action_details["text"] = str(input_text)
             self.consecutive_map_failures = 0
             logging.info(f"Successfully mapped action '{action_type}' to element (ID: {element_info.get('id', 'N/A')}) found by identifier.")
             return action_details
         
-        # If element not found by identifier, or no identifier, try coordinate fallback
         logging.info(f"Element not found by identifier '{target_identifier}'. Checking coordinate fallback (Enabled: {self.use_coordinate_fallback}).")
         if self.use_coordinate_fallback and target_bounding_box and isinstance(target_bounding_box, dict):
             coordinates = self._extract_coordinates_from_bbox(target_bounding_box)
             if coordinates:
                 center_x, center_y = coordinates
-                action_details["type"] = "tap_coords" # Change action type for coordinate tap
+                action_details["type"] = "tap_coords"
                 action_details["coordinates"] = (center_x, center_y)
-                action_details["original_bbox"] = target_bounding_box # For annotation/logging
-                # If original action was "input", we need to decide how to handle it.
-                # For now, tap_coords won't carry input_text unless ActionExecutor handles it.
+                action_details["original_bbox"] = target_bounding_box
                 if action_type == "input" and input_text is not None:
-                    # ActionExecutor will need to know it should try ADB input after tap if this mode is used.
                     action_details["intended_input_text"] = str(input_text)
                     logging.info(f"Coordinate fallback for INPUT action: will tap at ({center_x},{center_y}), then try to input '{input_text}' (likely via ADB).")
                 else:
@@ -312,7 +300,6 @@ class ActionMapper:
             else:
                 logging.warning(f"Bounding box provided but could not extract valid coordinates: {target_bounding_box}")
         
-        # If all methods fail
         log_msg = f"Failed to map AI action. Element for identifier '{target_identifier}' not found."
         if self.use_coordinate_fallback:
             log_msg += " Coordinate fallback also failed or BBox not suitable."

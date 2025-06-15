@@ -425,13 +425,19 @@ class RunAnalyzer:
                 html_parts.append(f"<h4>AI OUTPUT</h4>")
                 ai_sugg_text_html, ai_reas_text_html = "N/A", "N/A"
                 ai_response_time_html = ""
-                if step['ai_response_time_ms'] is not None:
+                
+                # Add safe check for ai_response_time_ms column existence
+                try:
                     response_time_ms = step['ai_response_time_ms']
-                    if response_time_ms >= 1000:
-                        response_time_str = f"{response_time_ms/1000:.2f} seconds"
-                    else:
-                        response_time_str = f"{int(response_time_ms)} ms"
-                    ai_response_time_html = f"<p class='feature-item'><strong class='feature-title'>Response Time:</strong>{response_time_str}</p>"
+                    if response_time_ms is not None:
+                        if response_time_ms >= 1000:
+                            response_time_str = f"{response_time_ms/1000:.2f} seconds"
+                        else:
+                            response_time_str = f"{int(response_time_ms)} ms"
+                        ai_response_time_html = f"<p class='feature-item'><strong class='feature-title'>Response Time:</strong>{response_time_str}</p>"
+                except (KeyError, IndexError):
+                    # Column doesn't exist in older database versions
+                    pass
 
                 if step['ai_suggestion_json']:
                     try:

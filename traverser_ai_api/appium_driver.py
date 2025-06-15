@@ -342,6 +342,25 @@ class AppiumDriver:
             logging.error(f"Unexpected error during tap at ({x}, {y}): {e}", exc_info=True)
             return False
 
+    def tap_element_center(self, element: WebElement) -> bool:
+        """Calculates the center of an element and performs a tap."""
+        if not self.driver or not element:
+            logging.warning("Driver or element not available for tap_element_center.")
+            return False
+        try:
+            location = element.location
+            size = element.size
+            center_x = location['x'] + size['width'] // 2
+            center_y = location['y'] + size['height'] // 2
+            logging.info(f"Tapping center of element (ID: {element.id}) at coordinates ({center_x}, {center_y})")
+            return self.tap_at_coordinates(center_x, center_y)
+        except StaleElementReferenceException:
+            logging.warning(f"Element became stale before center could be calculated for tap.")
+            return False
+        except Exception as e:
+            logging.error(f"Unexpected error in tap_element_center: {e}", exc_info=True)
+            return False
+        
     def get_active_element(self) -> Optional[WebElement]:
         """Retrieves the currently active (focused) element on the screen."""
         if not self.driver:
@@ -366,34 +385,55 @@ class AppiumDriver:
             return None
 
     def input_text_into_element(self, element: WebElement, text: str, click_first: bool = True, clear_first: bool = True) -> bool:
-        """Inputs text into a WebElement, optionally clicking and clearing it first."""
         if not self.driver or not element:
             logging.warning("Driver not available or element is None, cannot input text.")
             return False
 
-        element_id_str = "UnknownElementID" # Default if ID retrieval fails
+        element_id_str = "UnknownElementID"
         try:
-            element_id_str = element.id # Get ID for logging
+            element_id_str = element.id
             logging.debug(f"Attempting to input '{text}' into element (ID: {element_id_str})")
 
             if click_first:
-                logging.debug(f"Clicking element (ID: {element_id_str}) before input.")
-                if not self.click_element(element): # Use self.click_element for consistent error handling
+                logging.debug(f"Clicking element (ID: {element_id_str}) to ensure focus before input.")
+                if not self.click_element(element):
                     logging.warning(f"Failed to click element (ID: {element_id_str}) before input, but will still attempt input.")
-                time.sleep(0.3) # Small delay to ensure focus is properly set and keyboard appears
+                time.sleep(1.0)
+
+                # --- NEW: Focus Verification Logic ---
+                logging.debug(f"Verifying focus on element (ID: {element_id_str}) after click.")
+                active_element = self.get_active_element()
+                if not active_element or active_element.id != element.id:
+                    logging.warning(f"Focus check failed. Element (ID: {element_id_str}) is not the active element after click. Active element ID: {getattr(active_element, 'id', 'None')}.")
+                    logging.info(f"Attempting fallback tap on element (ID: {element_id_str}) to enforce focus.")
+
+                    if self.tap_element_center(element):
+                        time.sleep(0.5)  # Wait again after tap
+                        active_element = self.get_active_element()  # Re-check focus
+                        if not active_element or active_element.id != element.id:
+                            logging.error(f"Focus check failed again after tap fallback. Cannot safely input text. Active element ID: {getattr(active_element, 'id', 'None')}.")
+                            return False
+                        else:
+                            logging.info("Focus successfully established after tap fallback.")
+                    else:
+                        logging.error("Tap fallback also failed. Cannot safely input text.")
+                        return False
+                else:
+                    logging.info(f"Focus confirmed on correct element (ID: {element_id_str}).")
+                # --- End of New Logic ---
 
             if clear_first:
                 try:
                     logging.debug(f"Clearing element (ID: {element_id_str}) before input.")
                     element.clear()
                     time.sleep(0.1)
-                except (InvalidElementStateException, WebDriverException) as clear_err: # Catch common clear issues
+                except (InvalidElementStateException, WebDriverException) as clear_err:
                     logging.warning(f"Could not clear element (ID: {element_id_str}) using native method: {clear_err}. Attempting fallback clear.")
                     try:
                         current_text_val = element.get_attribute('text')
                         if current_text_val:
-                            for _ in range(len(current_text_val) + 5): # Send a few extra backspaces
-                                element.send_keys(AppiumBy.XPATH, "\uE003") # Backspace key using a common locator
+                            for _ in range(len(current_text_val) + 5):
+                                element.send_keys(AppiumBy.XPATH, "\uE003")
                             time.sleep(0.1)
                     except Exception as fb_clear_err:
                         logging.warning(f"Fallback clear method also failed for element (ID: {element_id_str}): {fb_clear_err}")
@@ -404,7 +444,7 @@ class AppiumDriver:
             logging.info(f"Successfully sent keys '{text}' to element (ID: {element_id_str})")
 
             try:
-                if self.is_keyboard_shown(): # Check if method exists and then call
+                if self.is_keyboard_shown():
                     logging.debug("Hiding keyboard after input.")
                     self.hide_keyboard()
             except Exception as kb_err:
@@ -413,7 +453,7 @@ class AppiumDriver:
         except StaleElementReferenceException:
             logging.warning(f"Element (ID: {element_id_str}) became stale during input operation.")
             return False
-        except InvalidElementStateException as e: # Element not interactable
+        except InvalidElementStateException as e:
             logging.error(f"Element (ID: {element_id_str}) is not in a state to receive text (e.g., not visible, not enabled): {e}")
             return False
         except WebDriverException as e:

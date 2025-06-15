@@ -12,6 +12,7 @@ class Config:
         self.USER_CONFIG_FILE_PATH = os.path.abspath(user_config_json_path)
         self.BASE_DIR = os.path.dirname(self.DEFAULTS_MODULE_PATH) # Dir where config.py resides
         self.SHUTDOWN_FLAG_PATH = os.path.join(self.BASE_DIR, "crawler_shutdown.flag")  # Set default path for shutdown flag
+        self.PAUSE_FLAG_PATH = os.path.join(self.BASE_DIR, "crawler_pause.flag") # For pause/resume
 
         # --- Initialize all attributes to None or default literals ---
         self.APP_PACKAGE: Optional[str] = None

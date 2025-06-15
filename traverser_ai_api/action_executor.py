@@ -99,7 +99,11 @@ class ActionExecutor:
                 if isinstance(element, WebElement):
                     action_log_info += f", Element ID: {getattr(element, 'id', 'N/A')}"
                     success = self.driver.click_element(element)
-                    if not success: current_error_msg = f"Click on element (ID: {getattr(element, 'id', 'N/A')}) failed."
+                    if not success:
+                        logging.warning(f"Standard click failed for element ID {getattr(element, 'id', 'N/A')}. Attempting tap fallback.")
+                        success = self.driver.tap_element_center(element)
+                        if not success:
+                            current_error_msg = f"Click and tap fallbacks failed for element (ID: {getattr(element, 'id', 'N/A')})."
                 else:
                     current_error_msg = f"Invalid element for click action: {element}"
                     logging.error(current_error_msg)
