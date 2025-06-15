@@ -484,7 +484,7 @@ Based on this feedback, you MUST choose a different action to avoid getting stuc
                         current_screen_visit_count: int,
                         current_composite_hash: str,
                         last_action_feedback: Optional[str] = None
-                        ) -> Optional[Tuple[Dict[str, Any], float]]: # MODIFIED: Return type changed to a tuple
+                        ) -> Optional[Tuple[Dict[str, Any], float, int]]:
 
         current_available_actions = getattr(self.cfg, 'AVAILABLE_ACTIONS', None)
         if not current_available_actions or \
@@ -500,7 +500,7 @@ Based on this feedback, you MUST choose a different action to avoid getting stuc
             logging.error("Failed to prepare image content for AI; cannot proceed. screenshot_bytes length: %d", len(screenshot_bytes) if screenshot_bytes else 0)
             return None
 
-        start_time = time.time() # Start timer before the API call
+        start_time = time.time()
         try:
             prompt_text = self._build_prompt(
                 xml_context, previous_actions, current_available_actions,
@@ -519,20 +519,22 @@ Based on this feedback, you MUST choose a different action to avoid getting stuc
 
             try:
                 if self.use_chat and self.chat:
-                    response = self.chat.send_message(content_for_api) # type: ignore
+                    response = self.chat.send_message(content_for_api)
                     if len(self.chat.history) > self.max_history * 2 and self.max_history > 0:
                         num_pairs_to_trim = (len(self.chat.history) // 2) - self.max_history
                         if num_pairs_to_trim > 0:
                             self.chat.history = self.chat.history[2 * num_pairs_to_trim:]
                             logging.info(f"Trimmed chat history to ~{len(self.chat.history)//2} exchanges.")
                 else:
-                    response = self.model.generate_content(content_for_api) # type: ignore
+                    response = self.model.generate_content(content_for_api)
 
-                elapsed_time = time.time() - start_time # MODIFIED: Calculate elapsed time
-                logging.info(f"AI API call completed. Processing Time: {elapsed_time:.2f} seconds")
-
+                elapsed_time = time.time() - start_time
+                total_tokens = 0
                 if hasattr(response, 'usage_metadata') and response.usage_metadata:
-                    logging.info(f"Token Usage: Prompt={getattr(response.usage_metadata, 'prompt_token_count', 'N/A')}, Candidates={getattr(response.usage_metadata, 'candidates_token_count', 'N/A')}, Total={getattr(response.usage_metadata, 'total_token_count', 'N/A')}")
+                    total_tokens = getattr(response.usage_metadata, 'total_token_count', 0)
+                    logging.info(f"Token Usage: Prompt={getattr(response.usage_metadata, 'prompt_token_count', 'N/A')}, Candidates={getattr(response.usage_metadata, 'candidates_token_count', 'N/A')}, Total={total_tokens}")
+
+                logging.info(f"AI API call completed. Processing Time: {elapsed_time:.2f} seconds")
 
                 if not hasattr(response, 'candidates') or not response.candidates:
                     logging.error("AI response contains no candidates.")
@@ -581,8 +583,7 @@ Based on this feedback, you MUST choose a different action to avoid getting stuc
                         logging.error(f"Parsed JSON lacks 'action_to_perform' dictionary. Data: {parsed_main_response}")
                         return None
                     
-                    # MODIFIED: Return the parsed response and the elapsed time
-                    return parsed_main_response, elapsed_time
+                    return parsed_main_response, elapsed_time, total_tokens
 
                 except json.JSONDecodeError as json_err:
                     logging.error(f"JSON parse error: {json_err}. Snippet: '{json_str_to_parse[:500]}'")

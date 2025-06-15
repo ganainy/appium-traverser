@@ -189,6 +189,7 @@ class DatabaseManager:
             error_message TEXT,
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
             ai_response_time_ms REAL,
+            total_tokens INTEGER,
             FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE,
             FOREIGN KEY (from_screen_id) REFERENCES {self.SCREENS_TABLE}(screen_id) ON DELETE SET NULL,
             FOREIGN KEY (to_screen_id) REFERENCES {self.SCREENS_TABLE}(screen_id) ON DELETE SET NULL,
@@ -288,15 +289,15 @@ class DatabaseManager:
                         to_screen_id: Optional[int], action_description: Optional[str],
                         ai_suggestion_json: Optional[str], mapped_action_json: Optional[str],
                         execution_success: bool, error_message: Optional[str],
-                        ai_response_time: Optional[float] = None) -> Optional[int]:
+                        ai_response_time: Optional[float] = None, total_tokens: Optional[int] = None) -> Optional[int]:
         sql = """
         INSERT INTO steps_log
         (run_id, step_number, from_screen_id, to_screen_id, action_description,
-         ai_suggestion_json, mapped_action_json, execution_success, error_message, ai_response_time_ms)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ai_suggestion_json, mapped_action_json, execution_success, error_message, ai_response_time_ms, total_tokens)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         params = (run_id, step_number, from_screen_id, to_screen_id, action_description,
-                  ai_suggestion_json, mapped_action_json, execution_success, error_message, ai_response_time)
+                  ai_suggestion_json, mapped_action_json, execution_success, error_message, ai_response_time, total_tokens)
         step_log_id = self._execute_sql(sql, params, commit=True)
         return step_log_id if isinstance(step_log_id, int) else None
 

@@ -314,10 +314,11 @@ class AppCrawler:
             logging.info(f"Resume signal received. Paused for {pause_duration:.2f}s. Total paused time: {self.total_paused_time:.2f}s. Resuming execution...")
             print(f"{UI_STATUS_PREFIX}RESUMING")
 
-    async def _get_next_action(self, definitive_screen_repr: ScreenRepresentation, visit_info: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], Optional[float]]:
+    async def _get_next_action(self, definitive_screen_repr: ScreenRepresentation, visit_info: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], Optional[float], Optional[int]]:
         """Decides whether to use a fallback action or query the AI."""
         ai_action_suggestion = None
         ai_time_taken = None
+        total_tokens = None
 
         max_no_op = getattr(self.cfg, 'MAX_CONSECUTIVE_NO_OP_FAILURES', 3)
         if self.consecutive_no_op_failures >= max_no_op:
@@ -338,7 +339,6 @@ class AppCrawler:
             simplified_xml = utils.simplify_xml_for_ai(filtered_xml, int(self.cfg.XML_SNIPPET_MAX_LEN))
             
             if definitive_screen_repr.screenshot_bytes and self.loop:
-                # Run the blocking AI call in a thread pool executor
                 ai_response_tuple = await self.loop.run_in_executor(
                     self.default_executor,
                     self.ai_assistant.get_next_action,
@@ -350,7 +350,7 @@ class AppCrawler:
                     self.last_action_feedback_for_ai
                 )
                 if ai_response_tuple:
-                    ai_full_response, ai_time_taken = ai_response_tuple
+                    ai_full_response, ai_time_taken, total_tokens = ai_response_tuple
                     if ai_full_response and "action_to_perform" in ai_full_response:
                         ai_action_suggestion = ai_full_response.get("action_to_perform")
             elif not definitive_screen_repr.screenshot_bytes:
@@ -358,9 +358,9 @@ class AppCrawler:
             elif not self.loop:
                  logging.error("Event loop not available, cannot call AI.")
         
-        return ai_action_suggestion, ai_time_taken
+        return ai_action_suggestion, ai_time_taken, total_tokens
 
-    async def _process_action_result(self, execution_success: bool, definitive_screen_repr: ScreenRepresentation, ai_suggestion: Dict[str, Any], action_details: Dict[str, Any], ai_time_taken: Optional[float]):
+    async def _process_action_result(self, execution_success: bool, definitive_screen_repr: ScreenRepresentation, ai_suggestion: Dict[str, Any], action_details: Dict[str, Any], ai_time_taken: Optional[float], total_tokens: Optional[int]):
         """Handles the outcome of an action, updates feedback, and logs the step."""
         if not self.run_id:
             logging.error("Cannot process action result without a valid run_id.")
@@ -402,66 +402,72 @@ class AppCrawler:
                 mapped_action_json=json.dumps(action_details, default=lambda o: "<WebElement>" if isinstance(o, WebElement) else str(o)),
                 execution_success=execution_success,
                 error_message=self.action_executor.last_error_message if not execution_success else None,
-                ai_response_time=(ai_time_taken * 1000 if ai_time_taken is not None else None)
+                ai_response_time=(ai_time_taken * 1000 if ai_time_taken is not None else None),
+                total_tokens=total_tokens
             )
         self.screen_state_manager.record_action_taken_from_screen(definitive_screen_repr.composite_hash, f"{action_str_log} (Success: {execution_success})")
 
     async def _perform_one_crawl_step(self) -> Tuple[str, Optional[str]]:
         """Executes a single step of the crawl, from state capture to action execution."""
         self.crawl_steps_taken += 1
-        logging.info(f"--- Crawl Step {self.crawl_steps_taken} (Run ID: {self.run_id}) ---")
-        print(f"{UI_STEP_PREFIX}{self.crawl_steps_taken}\n{UI_STATUS_PREFIX}Step {self.crawl_steps_taken}: Checking app context...")
+        current_step_for_log = self.crawl_steps_taken
+        logging.info(f"--- Crawl Step {current_step_for_log} (Run ID: {self.run_id}) ---")
+        print(f"{UI_STEP_PREFIX}{current_step_for_log}\n{UI_STATUS_PREFIX}Step {current_step_for_log}: Checking app context...")
 
-        if not self.run_id: # Guard against None
+        if not self.run_id:
             return "BREAK", "CRITICAL_ERROR_NO_RUN_ID"
 
         if not self.app_context_manager.ensure_in_app():
-            logging.error(f"Step {self.crawl_steps_taken}: Failed to ensure app context. Failures: {self.app_context_manager.consecutive_context_failures}")
+            logging.error(f"Step {current_step_for_log}: Failed to ensure app context. Failures: {self.app_context_manager.consecutive_context_failures}")
             if self._should_terminate(): return "BREAK", "TERMINATED_CONTEXT_FAIL"
             await asyncio.sleep(1)
             return "CONTINUE", None
 
-        print(f"{UI_STATUS_PREFIX}Step {self.crawl_steps_taken}: Getting screen state...")
-        candidate_repr = self.screen_state_manager.get_current_screen_representation(self.run_id, self.crawl_steps_taken)
-        if not candidate_repr or not candidate_repr.screenshot_bytes:
-            logging.error(f"Step {self.crawl_steps_taken}: Failed to get valid screen state.")
-            self._handle_mapping_failure()
+        print(f"{UI_STATUS_PREFIX}Step {current_step_for_log}: Getting screen state...")
+        screen = self.screen_state_manager.get_current_screen_representation(self.run_id, current_step_for_log)
+        if not screen or not screen.screenshot_bytes:
+            self._handle_mapping_failure() # Treat as a mapping failure
+            if self.db_manager:
+                self.db_manager.insert_step_log(self.run_id, current_step_for_log, None, None, "GET_SCREEN_STATE", None, None, False, "Failed to get valid screen state", None, None)
             if self._should_terminate(): return "BREAK", "TERMINATED_STATE_FAIL"
             await asyncio.sleep(float(self.cfg.WAIT_AFTER_ACTION))
             return "CONTINUE", None
 
-        screen, visit_info = self.screen_state_manager.process_and_record_state(candidate_repr, self.run_id, self.crawl_steps_taken)
-        if screen.screenshot_path:
-            print(f"{UI_SCREENSHOT_PREFIX}{screen.screenshot_path}")
+        screen, visit_info = self.screen_state_manager.process_and_record_state(screen, self.run_id, current_step_for_log)
+        if screen.screenshot_path: print(f"{UI_SCREENSHOT_PREFIX}{screen.screenshot_path}")
         self.previous_composite_hash = screen.composite_hash
-        logging.info(f"Step {self.crawl_steps_taken}: State Processed. Screen ID: {screen.id}, Hash: '{screen.composite_hash}'")
+        logging.info(f"Step {current_step_for_log}: State Processed. Screen ID: {screen.id}, Hash: '{screen.composite_hash}'")
         
-        print(f"{UI_STATUS_PREFIX}Step {self.crawl_steps_taken}: Deciding next action...")
-        ai_suggestion, ai_time = await self._get_next_action(screen, visit_info)
+        print(f"{UI_STATUS_PREFIX}Step {current_step_for_log}: Deciding next action...")
+        ai_suggestion, ai_time, tokens = await self._get_next_action(screen, visit_info)
 
         if not ai_suggestion:
             self._handle_ai_failure()
+            if self.db_manager:
+                self.db_manager.insert_step_log(self.run_id, current_step_for_log, screen.id, None, "AI_ACTION_DECISION", None, None, False, "AI failed to return a suggestion", ai_time, tokens)
             if self._should_terminate(): return "BREAK", "TERMINATED_AI_FAIL"
             return "CONTINUE", None
         self.consecutive_ai_failures = 0
         
         action_str = utils.generate_action_description(ai_suggestion.get('action', 'unknown'), None, ai_suggestion.get('input_text'), ai_suggestion.get('target_identifier'))
-        logging.info(f"Step {self.crawl_steps_taken}: AI suggested: {action_str}. Reasoning: {ai_suggestion.get('reasoning')}")
-        print(f"{UI_ACTION_PREFIX}{action_str}\n{UI_STATUS_PREFIX}Step {self.crawl_steps_taken}: Mapping and executing...")
+        logging.info(f"Step {current_step_for_log}: AI suggested: {action_str}. Reasoning: {ai_suggestion.get('reasoning')}")
+        print(f"{UI_ACTION_PREFIX}{action_str}\n{UI_STATUS_PREFIX}Step {current_step_for_log}: Mapping and executing...")
 
         action_details = self.action_mapper.map_ai_action_to_appium(ai_suggestion, screen.xml_content)
         if not action_details:
             self._handle_mapping_failure()
+            if self.db_manager:
+                 self.db_manager.insert_step_log(self.run_id, current_step_for_log, screen.id, None, action_str, json.dumps(ai_suggestion), None, False, "Failed to map AI action to element", ai_time, tokens)
             if self._should_terminate(): return "BREAK", "TERMINATED_MAP_FAIL"
             return "CONTINUE", None
         self.consecutive_map_failures = 0
 
         if screen.screenshot_bytes:
-            annotated_path = self.screenshot_annotator.save_annotated_screenshot(screen.screenshot_bytes, self.crawl_steps_taken, screen.id, ai_suggestion)
+            annotated_path = self.screenshot_annotator.save_annotated_screenshot(screen.screenshot_bytes, current_step_for_log, screen.id, ai_suggestion)
             if annotated_path: print(f"{UI_ANNOTATED_SCREENSHOT_PREFIX}{annotated_path}")
 
         success = self.action_executor.execute_action(action_details)
-        await self._process_action_result(success, screen, ai_suggestion, action_details, ai_time)
+        await self._process_action_result(success, screen, ai_suggestion, action_details, ai_time, tokens)
 
         if not success and self._should_terminate():
             return "BREAK", "TERMINATED_EXEC_FAIL"
