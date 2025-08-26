@@ -7,10 +7,16 @@ import shutil
 import asyncio 
 from typing import Optional
 
-from config import Config
+try:
+    from .config import Config
+except ImportError:
+    from config import Config
 
 try:
-    from utils import SCRIPT_START_TIME, LoggerManager, ElapsedTimeFormatter
+    try:
+        from .utils import SCRIPT_START_TIME, LoggerManager, ElapsedTimeFormatter
+    except ImportError:
+        from utils import SCRIPT_START_TIME, LoggerManager, ElapsedTimeFormatter
 except ImportError as e:
     sys.stderr.write(f"Error: Could not import logging utilities from utils.py: {e}\n")
     if 'SCRIPT_START_TIME' not in globals():
@@ -225,7 +231,10 @@ if __name__ == "__main__":
         # Ensure current directory is in path for local 'crawler' import
         if _current_script_dir not in sys.path:
             sys.path.insert(0, _current_script_dir) 
-        from crawler import AppCrawler 
+        try:
+            from .crawler import AppCrawler 
+        except ImportError:
+            from crawler import AppCrawler 
         crawler_instance = AppCrawler(app_config=cfg)
         root_logger.info("AppCrawler initialized. Starting crawl...")
         crawler_instance.run() # This internally calls asyncio.run()

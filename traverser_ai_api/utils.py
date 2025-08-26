@@ -5,14 +5,23 @@ import sys
 import os
 import io
 import json
-from config import Config
+try:
+    from .config import Config
+except ImportError:
+    from config import Config
 import shutil
 from typing import Tuple, Optional, Any, cast, List, Dict, Set
 
 import hashlib
 import imagehash
 from PIL import Image, ImageDraw
-from lxml import etree
+try:
+    from lxml import etree
+    USING_LXML = True
+except ImportError:
+    import xml.etree.ElementTree as etree
+    USING_LXML = False
+    logging.warning("lxml not available, falling back to xml.etree.ElementTree")
 import re
 
 # --- Global Script Start Time (for ElapsedTimeFormatter) ---
@@ -142,8 +151,11 @@ def simplify_xml_for_ai(xml_string: str, max_len: int) -> str:
         logging.debug(f"Original XML length: {original_len}")
 
     try:
-        parser = etree.XMLParser(recover=True, remove_blank_text=True)
-        root = etree.fromstring(xml_string.encode('utf-8'), parser=parser)
+        if USING_LXML:
+            parser = etree.XMLParser(recover=True, remove_blank_text=True)
+            root = etree.fromstring(xml_string.encode('utf-8'), parser=parser)
+        else:
+            root = etree.fromstring(xml_string.encode('utf-8'))
         if root is None:
             raise ValueError("Failed to parse XML root.")
 
@@ -181,7 +193,7 @@ def simplify_xml_for_ai(xml_string: str, max_len: int) -> str:
             logging.debug(f"Simplified XML length: {final_len} (from {original_len})")
         return simplified_xml
 
-    except (etree.XMLSyntaxError, ValueError, TypeError) as e:
+    except (etree.ParseError if hasattr(etree, 'ParseError') else Exception, ValueError, TypeError) as e:
         logging.error(f"Failed to parse or simplify XML: {e}. Falling back to basic truncation.")
         return xml_string[:max_len] + "\n... (fallback truncation)" if len(xml_string) > max_len else xml_string
     except Exception as e:
@@ -196,8 +208,11 @@ def filter_xml_by_allowed_packages(xml_string: str, target_package: str, allowed
     if not xml_string:
         return ""
     try:
-        parser = etree.XMLParser(recover=True, remove_blank_text=True)
-        root = etree.fromstring(xml_string.encode('utf-8'), parser=parser)
+        if USING_LXML:
+            parser = etree.XMLParser(recover=True, remove_blank_text=True)
+            root = etree.fromstring(xml_string.encode('utf-8'), parser=parser)
+        else:
+            root = etree.fromstring(xml_string.encode('utf-8'))
         if root is None:
             raise ValueError("Failed to parse XML root.")
 
@@ -223,7 +238,7 @@ def filter_xml_by_allowed_packages(xml_string: str, target_package: str, allowed
         xml_bytes = etree.tostring(root)
         return xml_bytes.decode('utf-8')
 
-    except (etree.XMLSyntaxError, ValueError, TypeError) as e:
+    except (etree.ParseError if hasattr(etree, 'ParseError') else Exception, ValueError, TypeError) as e:
         logging.error(f"XML ParseError during package filtering: {e}. Returning original XML.")
         return xml_string
     except Exception as e:
