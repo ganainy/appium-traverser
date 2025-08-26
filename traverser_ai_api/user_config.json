@@ -1,6 +1,6 @@
 {
-    "APP_PACKAGE": "com.ganainy.gymmasterscompose",
-    "APP_ACTIVITY": "com.ganainy.gymmasterscompose.MainActivity",
+    "APP_PACKAGE": "de.ka.kamedi.heat_it",
+    "APP_ACTIVITY": "de.ka.kamedi.heat_it.android.MainActivity",
     "ALLOWED_EXTERNAL_PACKAGES": [
         "com.google.android.gms",
         "com.google.android.permissioncontroller"
@@ -26,7 +26,7 @@
     "AI_SAFETY_SETTINGS": {},
     "CRAWL_MODE": "time",
     "MAX_CRAWL_STEPS": 5,
-    "MAX_CRAWL_DURATION_SECONDS": 600,
+    "MAX_CRAWL_DURATION_SECONDS": 180,
     "CONTINUE_EXISTING_RUN": false,
     "VISUAL_SIMILARITY_THRESHOLD": 5,
     "THIRD_PARTY_APPS_ONLY": true,
@@ -39,9 +39,9 @@
     "CLEANUP_DEVICE_PCAP_FILE": true,
     "CURRENT_HEALTH_APP_LIST_FILE": "E:\\Vertiefung\\appium-traverser-vertiefung\\traverser_ai_api\\output_data\\app_info\\279cb9b1_app_info_health_filtered.json",
     "LAST_SELECTED_APP": {
-        "package_name": "com.ganainy.gymmasterscompose",
-        "activity_name": "com.ganainy.gymmasterscompose.MainActivity",
-        "app_name": "Gym Masters"
+        "package_name": "de.ka.kamedi.heat_it",
+        "activity_name": "de.ka.kamedi.heat_it.android.MainActivity",
+        "app_name": "Heat It"
     },
     "OUTPUT_DATA_DIR": "output_data"
 }
