@@ -1,12 +1,36 @@
 <!-- filepath: e:\Vertiefung\appium-traverser-vertiefung\CONSOLIDATED_SETUP_GUIDE.md -->
 # AI-Driven Android App Crawler - Complete Setup & Usage Guide
 
+## Table of Contents
+
+- [Overview](#overview)
+- [Quick Start](#quick-start)
+  - [Prerequisites Installation](#1-prerequisites-installation)
+  - [Quick Installation](#2-quick-installation)
+  - [Start Crawling (CLI Method)](#3-start-crawling-cli-method)
+  - [Start Crawling (UI Method)](#4-start-crawling-ui-method)
+- [Detailed Setup Instructions](#detailed-setup-instructions)
+  - [Prerequisites Setup](#prerequisites-setup)
+  - [Project Setup](#project-setup)
+- [Usage Guide](#usage-guide)
+  - [CLI Controller](#cli-controller-recommended-for-automation)
+  - [Configuration Management](#configuration-management)
+- [MobSF Setup](#mobsf-setup)
+- [Project Architecture](#project-architecture)
+  - [Core Components](#core-components)
+  - [Key Features](#key-features)
+  - [Output Locations](#output-locations-relative-to-traverser_ai_api)
+- [Troubleshooting](#troubleshooting)
+- [Advanced Usage](#advanced-usage)
+- [UI Element Annotation Tool](#ui-element-annotation-tool)
+
 ## Overview
 
 This project implements an automated crawler for Android applications driven by a multimodal AI model (Google Gemini). It intelligently explores app screens by analyzing visual layout and structural information, deciding the next best action to discover new states and interactions.
 
 Available Interfaces:
 *   CLI Controller - Command-line interface for automation and scripting
+*   UI Controller - Graphical user interface for interactive use
 
 ## Quick Start
 
@@ -63,18 +87,61 @@ adb devices
 
 ### 3. Start Crawling (CLI Method)
 
-**Terminal 1: Start Appium**
+#### Terminal 1: Start Appium
+
 ```bash
 appium --relaxed-security
 ```
 
-**Terminal 2: Use CLI Controller (ensure .venv is active)**
+#### Terminal 2: Use CLI Controller (ensure .venv is active)
+
 ```powershell
 python traverser_ai_api/cli_controller.py --scan-apps
 python traverser_ai_api/cli_controller.py --list-apps
 python traverser_ai_api/cli_controller.py --select-app 1 # Or by name
 python traverser_ai_api/cli_controller.py --start
 ```
+
+### 4. Start Crawling (UI Method)
+
+#### Terminal 1: Start Appium (same as CLI method)
+
+```bash
+appium --relaxed-security
+```
+
+#### Terminal 2: Launch UI Controller (ensure .venv is active)
+
+```powershell
+python traverser_ai_api/ui_controller.py
+```
+
+**Using the UI Controller:**
+
+1. The UI will open in a new window with several tabs for configuration and control
+
+2. On the "App Selection" tab:
+   * Click "Scan Device for Apps" to find installed applications
+   * Select an app from the list that appears
+   * Click "Set as Target App" to select it for crawling
+
+3. On the "Configuration" tab:
+   * Adjust settings as needed (crawl steps, duration, features, etc.)
+   * Settings are automatically saved
+
+4. On the "Crawler Control" tab:
+   * Click "Start Crawler" to begin the crawling process
+   * The log window will show real-time progress
+   * Use "Pause/Resume" or "Stop" buttons to control the crawler
+   * Screenshot previews will appear as the crawler explores the app
+
+5. For MobSF static analysis:
+   - Configure MobSF settings in the "Configuration" tab
+   - Test the connection using "Test MobSF Connection"
+   - Run analysis using "Run MobSF Analysis"
+   - Note: MobSF must be installed and running separately (see [MobSF Setup](#mobsf-setup) section below)
+
+The UI provides the same functionality as the CLI with a more interactive experience, making it ideal for monitoring crawl progress and viewing results in real-time.
 
 ## Detailed Setup Instructions
 
@@ -474,52 +541,84 @@ You can run multiple Appium servers on different ports and target different devi
 
 It's often easier to manage separate `user_config.json` files or use environment variables to switch between device configurations if running multiple instances of the crawler system.
 
-### CI/CD Integration (Conceptual Example)
-Example GitHub Actions step (conceptual):
-Ensure Appium server, emulator/device, and Python environment are set up in prior steps.
-```yaml
-- name: Run Appium Crawler for a specific app
-  run: |
-    # Activate virtual environment
-    # .\.venv\Scripts\Activate.ps1 # Windows
-    # source .venv/bin/activate   # Linux/macOS
-    
-    python traverser_ai_api/cli_controller.py --select-app "com.example.ci_target_app"
-    python traverser_ai_api/cli_controller.py --set-config MAX_CRAWL_DURATION_SECONDS=600 # Example: 10 min crawl
-    python traverser_ai_api/cli_controller.py --save-config
-    python traverser_ai_api/cli_controller.py --start
-    # Add result collection/upload steps here
-  env:
-    GEMINI_API_KEY: ${{ secrets.YOUR_GEMINI_API_KEY }}
-    # ANDROID_HOME might also be needed depending on runner setup
-```
 
+## MobSF Setup
+
+The AppTransverser supports integration with MobSF (Mobile Security Framework) for static analysis of Android applications. To use this feature:
+
+1. Install MobSF
+   - Follow the official installation guide at [https://github.com/MobSF/Mobile-Security-Framework-MobSF](https://github.com/MobSF/Mobile-Security-Framework-MobSF)
+   - Basic installation steps:
+
+     ```bash
+     # Clone the repository
+     git clone https://github.com/MobSF/Mobile-Security-Framework-MobSF.git
+     cd Mobile-Security-Framework-MobSF
+
+     # Setup
+     ./setup.sh    # For Linux/Mac
+     setup.bat     # For Windows
+     
+     # Run MobSF
+     ./run.sh      # For Linux/Mac
+     run.bat       # For Windows
+     ```
+
+2. Get your MobSF API Key
+   - Start MobSF and access the web interface (typically at [http://localhost:8000](http://localhost:8000))
+   - Go to Settings (⚙️ icon) in the top-right corner
+   - Find your API key in the API Key section
+
+3. Configure AppTransverser to use MobSF
+   - In the UI Controller: Go to Configuration tab → MobSF Static Analysis section
+   - In the config file: Set the following parameters in your user_config.json:
+
+     ```json
+     "ENABLE_MOBSF_ANALYSIS": true,
+     "MOBSF_API_URL": "http://localhost:8000/api/v1",
+     "MOBSF_API_KEY": "YOUR_API_KEY_HERE"
+     ```
+
+4. Test the connection
+   - In the UI Controller: Click "Test MobSF Connection" button
+   - Check that the connection succeeds without errors
+
+5. Usage
+   - When starting a crawl with MobSF analysis enabled, the system will:
+     - Extract the APK from the connected device
+     - Upload it to MobSF for analysis
+     - Process the results and save reports in the output directory
 
 ## UI Element Annotation Tool
 
 The project includes a standalone tool for batch processing screenshots to identify and annotate UI elements using Google's Gemini Vision AI.
 
-### Usage:
+### Usage
+
 Ensure virtual environment is active.
 Run from the project root directory (`appium-traverser-vertiefung`).
 
 Example: Process all screenshots in a specific crawl output directory
+
 ```powershell
 python -m traverser_ai_api.tools.ui_element_annotator --input-dir "traverser_ai_api/output_data/screenshots/crawl_screenshots_com.example.app1" --output-file "traverser_ai_api/output_data/annotations/app1_annotations.json"
 ```
 
 View help for all options:
+
 ```powershell
 python -m traverser_ai_api.tools.ui_element_annotator --help
 ```
 
 This tool analyzes screenshots to:
-*   Detect various UI elements (buttons, text fields, images, etc.).
-*   Determine their bounding box coordinates.
-*   Extract text content if present.
-*   Save this information in a structured JSON output file.
+
+- Detect various UI elements (buttons, text fields, images, etc.)
+- Determine their bounding box coordinates
+- Extract text content if present
+- Save this information in a structured JSON output file
 
 This can be useful for:
-*   Detailed post-crawl analysis of UI components.
-*   Generating datasets for training custom UI understanding models.
-*   Verifying UI elements for automated testing or analysis.
+
+- Detailed post-crawl analysis of UI components
+- Generating datasets for training custom UI understanding models
+- Verifying UI elements for automated testing or analysis

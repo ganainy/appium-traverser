@@ -485,6 +485,67 @@ class AppCrawler:
             pcap_file = await self.traffic_capture_manager.stop_capture_and_pull_async(self.run_id or 0, self.crawl_steps_taken)
             if pcap_file: logging.info(f"Final traffic capture saved to: {pcap_file}")
             else: logging.warning("Failed to save final traffic capture.")
+            
+            # MobSF Integration - Run static analysis at the end of the crawl if enabled
+        if hasattr(self.cfg, 'ENABLE_MOBSF_ANALYSIS') and self.cfg.ENABLE_MOBSF_ANALYSIS:
+            logging.info("MobSF static analysis enabled. Starting analysis...")
+            print(f"{UI_STATUS_PREFIX}Starting MobSF static analysis...")
+            
+            try:
+                # Import here to avoid circular imports
+                from mobsf_manager import MobSFManager
+                
+                # Create MobSF manager and run analysis
+                mobsf_manager = MobSFManager(self.cfg)
+                
+                # Since perform_complete_scan isn't async, use run_in_executor
+                if self.loop:
+                    try:
+                        # Execute in thread pool to avoid blocking
+                        success, result = await self.loop.run_in_executor(
+                            self.default_executor, 
+                            lambda: mobsf_manager.perform_complete_scan(str(self.cfg.APP_PACKAGE))
+                        )
+                    except Exception as e:
+                        logging.error(f"Error running MobSF analysis in executor: {e}", exc_info=True)
+                        success, result = False, {"error": f"Analysis execution error: {str(e)}"}
+                else:
+                    # Fallback to direct execution if no event loop
+                    success, result = mobsf_manager.perform_complete_scan(str(self.cfg.APP_PACKAGE))
+                
+                if success:
+                    logging.info(f"MobSF analysis completed successfully. PDF report: {result.get('pdf_report')}")
+                    print(f"{UI_STATUS_PREFIX}MobSF analysis completed successfully.")
+                    
+                    # Update the run status with MobSF results if we have a database connection
+                    if self.run_id and self.db_manager:
+                        try:
+                            # Store the file paths in the run_meta table
+                            meta_data = {
+                                "mobsf_pdf_report": result.get('pdf_report', ''),
+                                "mobsf_json_report": result.get('json_report', ''),
+                                "mobsf_file_hash": result.get('file_hash', '')
+                            }
+                            
+                            # Try to extract and store the security score
+                            if 'security_score' in result and result['security_score'] != "Unknown":
+                                security_score = result['security_score']
+                                if isinstance(security_score, dict):
+                                    for category, score in security_score.items():
+                                        if isinstance(score, dict) and 'value' in score:
+                                            meta_data[f"mobsf_score_{category}"] = score['value']
+                            
+                            # Save meta data to database
+                            self.db_manager.update_run_meta(self.run_id, json.dumps(meta_data))
+                            logging.info("MobSF analysis results saved to database.")
+                        except Exception as e:
+                            logging.error(f"Error saving MobSF results to database: {e}")
+                else:
+                    logging.error(f"MobSF analysis failed: {result.get('error', 'Unknown error')}")
+                    print(f"{UI_STATUS_PREFIX}MobSF analysis failed: {result.get('error', 'Unknown error')}")
+            except Exception as e:
+                logging.error(f"Error during MobSF analysis: {e}", exc_info=True)
+                print(f"{UI_STATUS_PREFIX}Error during MobSF analysis: {str(e)}")
 
         if self.run_id and self.db_manager:
             self.db_manager.update_run_status(self.run_id, status, time.strftime("%Y-%m-%d %H:%M:%S"))

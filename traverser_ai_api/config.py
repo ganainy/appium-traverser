@@ -82,6 +82,10 @@ class Config:
         self.CURRENT_HEALTH_APP_LIST_FILE: Optional[str] = None
         self.LAST_SELECTED_APP: Optional[Dict[str,str]] = None
 
+        self.MOBSF_API_URL: Optional[str] = None
+        self.MOBSF_API_KEY: Optional[str] = None
+        self.ENABLE_MOBSF_ANALYSIS: bool = False
+        
         # Store templates from defaults for dynamic resolution
         self._OUTPUT_DATA_DIR_TEMPLATE: str = "output_data"
         self._APP_INFO_OUTPUT_DIR_TEMPLATE: str = "{output_data_dir}/app_info" # Shared
@@ -144,6 +148,7 @@ class Config:
         load_dotenv(override=True)
         self.GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", self.GEMINI_API_KEY)
         self.PCAPDROID_API_KEY = os.getenv("PCAPDROID_API_KEY", self.PCAPDROID_API_KEY)
+        self.MOBSF_API_KEY = os.getenv("MOBSF_API_KEY", self.MOBSF_API_KEY)
         logging.info("Applied configuration from environment variables.")
 
     def _update_attribute(self, key: str, new_value: Any, source: str, perform_type_conversion: bool = True):
@@ -431,3 +436,9 @@ FALLBACK_ACTIONS_SEQUENCE = [
     {"action": "swipe_left", "target_identifier": None, "input_text": None},
 ]
 USE_ADB_INPUT_FALLBACK = True
+
+# MobSF Integration settings - URL and default for ENABLE flag only
+# API key should be set via environment variable MOBSF_API_KEY
+MOBSF_API_URL = "http://localhost:8000/api/v1"
+MOBSF_API_KEY = None  # Will be loaded from environment variable
+ENABLE_MOBSF_ANALYSIS = True

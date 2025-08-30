@@ -3,12 +3,23 @@
 [![Python Version](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/)
 [![Status](https://img.shields.io/badge/status-production-green.svg)]()
 
+## Table of Contents
+
+- [Overview](#overview)
+- [Quick Start](#quick-start)
+- [Features](#features)
+- [Complete Setup & Usage](#complete-setup--usage)
+- [Architecture](#architecture)
+- [Output](#output)
+
 ## Overview
 
 This project implements an automated crawler for Android applications driven by a multimodal AI model (Google Gemini). It intelligently explores app screens by analyzing visual layout and structural information, deciding the next best action to discover new states and interactions.
 
 **Available Interfaces:**
+
 - **CLI Controller** - Command-line interface for automation and scripting
+- **UI Controller** - Graphical user interface for interactive use
 
 ## Quick Start
 
@@ -26,7 +37,12 @@ pip install -r requirements.txt
 
 # 3. Start crawling
 appium --relaxed-security  # Terminal 1
-.\run_cli_controller.ps1 --scan-apps --list-apps --select-app 1 --start  # Terminal 2
+
+# CLI Controller (Terminal 2)
+.\run_cli_controller.ps1 --scan-apps --list-apps --select-app 1 --start
+
+# OR UI Controller (Terminal 2)
+.\run_ui_controller.ps1  # Opens graphical interface
 ```
 
 ## Features
@@ -46,6 +62,7 @@ appium --relaxed-security  # Terminal 1
 - **`main.py`** - Entry point and orchestration
 - **`crawler.py`** - Main crawling logic and state transitions
 - **`cli_controller.py`** - Command-line interface
+- **`ui_controller.py`** - Graphical user interface
 - **`ai_assistant.py`** - Google Gemini integration
 - **`state_manager.py`** - Screen state and transition management
 

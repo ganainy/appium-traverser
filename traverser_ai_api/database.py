@@ -207,6 +207,15 @@ class DatabaseManager:
             FOREIGN KEY (to_screen_id) REFERENCES {self.SCREENS_TABLE}(screen_id) ON DELETE SET NULL
         );
         """
+        sql_create_run_meta = f"""
+        CREATE TABLE IF NOT EXISTS run_meta (
+            meta_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id INTEGER NOT NULL,
+            meta_json TEXT,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE
+        );
+        """
         try:
             self._execute_sql(sql_create_screens, commit=True)
             self._execute_sql(f"CREATE INDEX IF NOT EXISTS idx_screens_composite_hash ON {self.SCREENS_TABLE}(composite_hash);", commit=True)
@@ -217,6 +226,8 @@ class DatabaseManager:
             self._execute_sql(f"CREATE INDEX IF NOT EXISTS idx_steps_log_from_screen ON steps_log(from_screen_id);", commit=True)
             self._execute_sql(sql_create_transitions_simplified, commit=True)
             self._execute_sql(f"CREATE INDEX IF NOT EXISTS idx_transitions_from_screen_id ON {self.TRANSITIONS_TABLE}(from_screen_id);", commit=True)
+            self._execute_sql(sql_create_run_meta, commit=True)
+            self._execute_sql(f"CREATE INDEX IF NOT EXISTS idx_run_meta_run_id ON run_meta(run_id);", commit=True)
             logging.debug("Database tables created/verified successfully.")
             return True
         except Exception as e:
@@ -349,3 +360,33 @@ class DatabaseManager:
         except Exception as e:
             logging.error(f"Failed to clear tables for fresh run: {e}", exc_info=True)
             return False
+            
+    def update_run_meta(self, run_id: int, meta_json: str) -> Optional[int]:
+        """
+        Insert or update metadata for a run (used for storing MobSF analysis results, etc.)
+        
+        Args:
+            run_id: The run ID to update
+            meta_json: JSON string containing metadata
+            
+        Returns:
+            ID of the inserted metadata record, or None if it failed
+        """
+        sql = "INSERT INTO run_meta (run_id, meta_json) VALUES (?, ?)"
+        params = (run_id, meta_json)
+        meta_id = self._execute_sql(sql, params, commit=True)
+        return meta_id if isinstance(meta_id, int) else None
+        
+    def get_run_meta(self, run_id: int) -> Optional[str]:
+        """
+        Get the most recent metadata for a run
+        
+        Args:
+            run_id: The run ID to query
+            
+        Returns:
+            The JSON metadata string, or None if not found
+        """
+        sql = "SELECT meta_json FROM run_meta WHERE run_id = ? ORDER BY timestamp DESC LIMIT 1"
+        result = self._execute_sql(sql, (run_id,), fetch_one=True, commit=False)
+        return result[0] if result else None

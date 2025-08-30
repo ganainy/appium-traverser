@@ -15,13 +15,15 @@ from typing import Tuple, Optional, Any, cast, List, Dict, Set
 import hashlib
 import imagehash
 from PIL import Image, ImageDraw
+
+import xml.etree.ElementTree as std_etree
 try:
-    from lxml import etree
+    import lxml.etree as lxml_etree
     USING_LXML = True
-except ImportError:
-    import xml.etree.ElementTree as etree
+except ImportError as e:
+    lxml_etree = None
     USING_LXML = False
-    logging.warning("lxml not available, falling back to xml.etree.ElementTree")
+    logging.warning(f"lxml not available, falling back to xml.etree.ElementTree. Error: {e}")
 import re
 
 # --- Global Script Start Time (for ElapsedTimeFormatter) ---
@@ -150,12 +152,17 @@ def simplify_xml_for_ai(xml_string: str, max_len: int) -> str:
     if original_len > 200:
         logging.debug(f"Original XML length: {original_len}")
 
+    possible_parse_errors = (std_etree.ParseError,)
+    if USING_LXML and lxml_etree:
+        possible_parse_errors += (lxml_etree.ParseError, lxml_etree.XMLSyntaxError)
+
     try:
-        if USING_LXML:
-            parser = etree.XMLParser(recover=True, remove_blank_text=True)
-            root = etree.fromstring(xml_string.encode('utf-8'), parser=parser)
+        if USING_LXML and lxml_etree:
+            parser = lxml_etree.XMLParser(recover=True, remove_blank_text=True)
+            root = lxml_etree.fromstring(xml_string.encode('utf-8'), parser=parser)
         else:
-            root = etree.fromstring(xml_string.encode('utf-8'))
+            root = std_etree.fromstring(xml_string.encode('utf-8'))
+
         if root is None:
             raise ValueError("Failed to parse XML root.")
 
@@ -171,7 +178,10 @@ def simplify_xml_for_ai(xml_string: str, max_len: int) -> str:
                         del element.attrib[attr_name]
                         continue
 
-        xml_bytes = etree.tostring(root)
+        if USING_LXML and lxml_etree:
+            xml_bytes = lxml_etree.tostring(root)
+        else:
+            xml_bytes = std_etree.tostring(root)
         simplified_xml = xml_bytes.decode('utf-8')
 
         if len(simplified_xml) > max_len:
@@ -193,7 +203,7 @@ def simplify_xml_for_ai(xml_string: str, max_len: int) -> str:
             logging.debug(f"Simplified XML length: {final_len} (from {original_len})")
         return simplified_xml
 
-    except (etree.ParseError if hasattr(etree, 'ParseError') else Exception, ValueError, TypeError) as e:
+    except possible_parse_errors + (ValueError, TypeError) as e:
         logging.error(f"Failed to parse or simplify XML: {e}. Falling back to basic truncation.")
         return xml_string[:max_len] + "\n... (fallback truncation)" if len(xml_string) > max_len else xml_string
     except Exception as e:
@@ -207,12 +217,17 @@ def filter_xml_by_allowed_packages(xml_string: str, target_package: str, allowed
     """
     if not xml_string:
         return ""
+
+    possible_parse_errors = (std_etree.ParseError,)
+    if USING_LXML and lxml_etree:
+        possible_parse_errors += (lxml_etree.ParseError, lxml_etree.XMLSyntaxError)
+
     try:
-        if USING_LXML:
-            parser = etree.XMLParser(recover=True, remove_blank_text=True)
-            root = etree.fromstring(xml_string.encode('utf-8'), parser=parser)
+        if USING_LXML and lxml_etree:
+            parser = lxml_etree.XMLParser(recover=True, remove_blank_text=True)
+            root = lxml_etree.fromstring(xml_string.encode('utf-8'), parser=parser)
         else:
-            root = etree.fromstring(xml_string.encode('utf-8'))
+            root = std_etree.fromstring(xml_string.encode('utf-8'))
         if root is None:
             raise ValueError("Failed to parse XML root.")
 
@@ -220,8 +235,6 @@ def filter_xml_by_allowed_packages(xml_string: str, target_package: str, allowed
         allowed_set.add(target_package)
         allowed_set.add('com.android.systemui')
 
-        # Using a list comprehension with a recursive check is cleaner
-        # The parent map is needed to remove elements from their parent
         parent_map = {c: p for p in root.iter() for c in p}
         nodes_to_remove = []
         for elem in root.iter('*'):
@@ -235,10 +248,13 @@ def filter_xml_by_allowed_packages(xml_string: str, target_package: str, allowed
                 logging.debug(f"Filtering out XML element with package: '{elem.get('package')}'")
                 parent.remove(elem)
 
-        xml_bytes = etree.tostring(root)
+        if USING_LXML and lxml_etree:
+            xml_bytes = lxml_etree.tostring(root)
+        else:
+            xml_bytes = std_etree.tostring(root)
         return xml_bytes.decode('utf-8')
 
-    except (etree.ParseError if hasattr(etree, 'ParseError') else Exception, ValueError, TypeError) as e:
+    except possible_parse_errors + (ValueError, TypeError) as e:
         logging.error(f"XML ParseError during package filtering: {e}. Returning original XML.")
         return xml_string
     except Exception as e:
