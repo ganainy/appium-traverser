@@ -145,7 +145,34 @@ class Config:
             raise
 
     def _load_environment_variables(self):
-        load_dotenv(override=True)
+        # Always use the .env file in the project root (parent directory of BASE_DIR)
+        project_root_env_path = os.path.abspath(os.path.join(os.path.dirname(self.BASE_DIR), ".env"))
+        try:
+            if os.path.exists(project_root_env_path):
+                # Try to manually read and parse the .env file to avoid encoding issues
+                with open(project_root_env_path, 'r', encoding='utf-8', errors='ignore') as env_file:
+                    for line in env_file:
+                        line = line.strip()
+                        if not line or line.startswith('#'):
+                            continue
+                        if '=' in line:
+                            key, value = line.split('=', 1)
+                            key = key.strip()
+                            value = value.strip().strip('"\'')
+                            os.environ[key] = value
+                            logging.debug(f"Loaded environment variable: {key}=****")
+                logging.info(f"Manually loaded environment variables from: {project_root_env_path}")
+            else:
+                logging.warning(f"No .env file found at expected location: {project_root_env_path}")
+                # Fallback to default dotenv behavior
+                load_dotenv(override=True)
+        except Exception as e:
+            logging.error(f"Error loading .env file: {e}. Trying standard dotenv loader.")
+            try:
+                load_dotenv(override=True)
+            except Exception as e2:
+                logging.error(f"Failed to load environment variables with dotenv: {e2}")
+            
         self.GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", self.GEMINI_API_KEY)
         self.PCAPDROID_API_KEY = os.getenv("PCAPDROID_API_KEY", self.PCAPDROID_API_KEY)
         self.MOBSF_API_KEY = os.getenv("MOBSF_API_KEY", self.MOBSF_API_KEY)
@@ -228,6 +255,7 @@ class Config:
             "ENABLE_TRAFFIC_CAPTURE", "PCAPDROID_PACKAGE",
             "DEVICE_PCAP_DIR", "CLEANUP_DEVICE_PCAP_FILE",
             "CURRENT_HEALTH_APP_LIST_FILE", "LAST_SELECTED_APP",
+            "MOBSF_API_URL", "ENABLE_MOBSF_ANALYSIS",
             # Save the template for OUTPUT_DATA_DIR so user can change base output loc
             # The actual key in user_config.json will be "OUTPUT_DATA_DIR"
         ]
@@ -235,6 +263,19 @@ class Config:
         for key in savable_keys:
             if hasattr(self, key):
                 value = getattr(self, key)
+                
+                # Make paths relative when saving to config if they're within the app directory
+                if key == "CURRENT_HEALTH_APP_LIST_FILE" and value and os.path.isabs(value):
+                    try:
+                        # Try to make it relative to the base directory
+                        rel_path = os.path.relpath(value, self.BASE_DIR)
+                        # Only make relative if it's within the app directory hierarchy
+                        if not rel_path.startswith('..'):
+                            value = rel_path
+                    except ValueError:
+                        # Different drives, can't make relative
+                        pass
+                        
                 config_to_save[key] = value
         
         # Explicitly add the _OUTPUT_DATA_DIR_TEMPLATE value under the key "OUTPUT_DATA_DIR"

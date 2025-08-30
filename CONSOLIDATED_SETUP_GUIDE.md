@@ -209,12 +209,18 @@ pip install -r requirements.txt
 ```
 
 **Environment Configuration (`.env` file):**
-Create a file named `.env` in the project root directory (`appium-traverser-vertiefung/.env`).
-Add your Google Gemini API key and PCAPdroid API key to it:
+Create a file named `.env` in the project root directory (NOT in the traverser_ai_api subdirectory).
+Add your Google Gemini API key and optionally PCAPdroid API key to it:
 ```env
+# Required for AI functionality
 GEMINI_API_KEY=your_api_key_here
-PCAPDROID_API_KEY=your_pcapdroid_key_here
+
+# Optional keys
+# PCAPDROID_API_KEY=your_pcapdroid_key_here
+# MOBSF_API_KEY=your_mobsf_key_here
 ```
+
+IMPORTANT: Only use ONE .env file in the project root. The application is configured to look for it there.
 
 This file contains sensitive information and should NOT be committed to version control.
 

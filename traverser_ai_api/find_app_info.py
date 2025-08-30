@@ -172,23 +172,28 @@ def run_adb_command(command_list):
 
 def get_device_serial():
     """Gets a unique device identifier."""
-    output = run_adb_command(['get-serialno'])
-    if output and output != "unknown" and "error" not in output.lower() and output.strip() != "": # Added empty check
-        serial = re.sub(r'[^\w\-.:]', '_', output) # Allow colon for emulators like 'emulator-5554:5555'
-        return serial
-    else:
-        print("Warning: Could not get device serial via get-serialno. Trying 'adb devices'...", file=sys.stderr)
-        devices_output = run_adb_command(['devices'])
-        if devices_output:
-            lines = devices_output.strip().splitlines()
+    try:
+        result = subprocess.run(['adb', 'get-serialno'], capture_output=True, text=True, timeout=5)
+        if result.returncode == 0 and result.stdout.strip() and result.stdout.strip() != "unknown":
+            device_id = result.stdout.strip()
+            # Clean the device ID to make it safe for filenames
+            safe_device_id = re.sub(r'[^\w\-.]', '_', device_id)
+            return safe_device_id
+            
+        # Fallback to devices command if get-serialno fails
+        devices_result = subprocess.run(['adb', 'devices'], capture_output=True, text=True, timeout=5)
+        if devices_result.returncode == 0:
+            lines = devices_result.stdout.strip().splitlines()
             device_lines = [line for line in lines[1:] if line.strip() and '\tdevice' in line]
             if device_lines:
-                first_device_line = device_lines[0]
-                fallback_id = first_device_line.split('\t')[0]
-                if fallback_id:
-                    print(f"Using fallback identifier from 'adb devices': {fallback_id}", file=sys.stderr)
-                    return re.sub(r'[^\w\-.:]', '_', fallback_id)
-        print("Error: Could not get any device identifier. Using generic 'unknown_device'.", file=sys.stderr)
+                device_id = device_lines[0].split('\t')[0].strip()
+                # Clean the device ID to make it safe for filenames
+                safe_device_id = re.sub(r'[^\w\-.]', '_', device_id)
+                return safe_device_id
+                
+        return "unknown_device"
+    except Exception as e:
+        print(f"Error getting device ID: {e}", file=sys.stderr)
         return "unknown_device"
 
 def get_installed_packages(third_party_only_from_param=True): # Parameter name more specific
@@ -448,21 +453,42 @@ def generate_app_info_cache(perform_ai_filtering_on_this_call: bool = False):
     else:
         print("AI Filtering not specifically requested for this cache generation call. Using all discovered apps.")
 
+    # Add timestamp to the output
+    import datetime
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    result_data = {
+        "timestamp": timestamp,
+        "device_id": device_id,
+        "ai_filtered": perform_ai_filtering_on_this_call and ai_filter_was_effectively_applied,
+        "health_apps": apps_to_save
+    }
+
     # APP_INFO_DIR is an absolute path from cfg and directory is already created
     file_suffix = "health_filtered" if perform_ai_filtering_on_this_call and ai_filter_was_effectively_applied else "all"
+    
+    # Use device-specific file path
     output_filename = f"{device_id}_app_info_{file_suffix}.json"
     output_path = os.path.join(APP_INFO_DIR, output_filename)
+    
+    # Also save a copy to the generic path for backward compatibility
+    generic_path = os.path.join(APP_INFO_DIR, "health_apps.json")
 
     print(f"\n--- Saving app info to: {output_path} (Suffix based on effective filtering: {file_suffix}) ---")
     try:
+        # Save to device-specific path
         with open(output_path, 'w', encoding='utf-8') as f:
-            json.dump(apps_to_save, f, indent=4, ensure_ascii=False)
+            json.dump(result_data, f, indent=4, ensure_ascii=False)
         print(f"Successfully saved {len(apps_to_save)} app(s) to {output_path}")
+        
+        # Also save to generic path
+        with open(generic_path, 'w', encoding='utf-8') as f:
+            json.dump(result_data, f, indent=4, ensure_ascii=False)
+        print(f"Also saved to generic path: {generic_path}")
     except IOError as e:
         print(f"Error writing to file {output_path}: {e}", file=sys.stderr)
         traceback.print_exc()
-        return None, apps_to_save # Return current list even if save fails
-    return output_path, apps_to_save
+        return None, result_data # Return current data even if save fails
+    return output_path, result_data
 
 
 def filter_existing_app_info_file(input_filepath: str):
@@ -575,14 +601,28 @@ if __name__ == "__main__":
 
     elif args.mode == 'discover':
         print(f"--- Starting App Info Finder (Discovery Mode, Attempt AI Filter: {should_attempt_ai_filtering_for_discover}) ---")
-        output_file_path, _ = generate_app_info_cache(
+        output_file_path, result_data = generate_app_info_cache(
             perform_ai_filtering_on_this_call=should_attempt_ai_filtering_for_discover
         )
         if output_file_path:
             # This print is crucial for ui_controller.py/cli_controller.py to parse the path
             print(f"\nCache file generated at: {output_file_path}")
+            # Output a JSON string with the summary for better parsing by the caller
+            app_count = len(result_data.get("health_apps", [])) if isinstance(result_data, dict) else 0
+            summary_json = json.dumps({
+                "status": "success",
+                "file_path": output_file_path,
+                "app_count": app_count,
+                "timestamp": result_data.get("timestamp") if isinstance(result_data, dict) else ""
+            })
+            print(f"\nSUMMARY_JSON: {summary_json}")
         else:
             print("\nApp info cache generation (discover mode) failed or did not produce a file.")
+            error_json = json.dumps({
+                "status": "error",
+                "message": "Failed to generate app info cache"
+            })
+            print(f"\nSUMMARY_JSON: {error_json}")
 
     end_time = time.time()
     print(f"\n--- Script Finished in {end_time - start_time:.2f} seconds ---")
