@@ -7,6 +7,7 @@ import json
 from PIL import Image
 import io
 import re
+import base64
 
 class AgentAssistant:
     """
@@ -27,8 +28,7 @@ class AgentAssistant:
         self.api_key = self.cfg.GEMINI_API_KEY
         # Set the API key for Google Generative AI
         os.environ["GOOGLE_API_KEY"] = self.api_key
-        # Configure the API
-        genai.configure(api_key=self.api_key)
+        # API key will be picked up from environment variable
 
         model_alias = model_alias_override or self.cfg.DEFAULT_MODEL_TYPE
         if not model_alias:
@@ -86,19 +86,21 @@ class AgentAssistant:
             if missing_fields:
                 raise ValueError(f"Missing gen config fields for '{self.model_alias}': {', '.join(missing_fields)}")
             
-            # Create the generation config as a dictionary (API has changed)
-            generation_config = {
-                "temperature": generation_config_dict['temperature'],
-                "top_p": generation_config_dict['top_p'],
-                "top_k": generation_config_dict['top_k'],
-                "max_output_tokens": generation_config_dict['max_output_tokens'],
-            }
+            # Create the generation config with the proper class
+            from google.generativeai.types import GenerationConfig
+            generation_config = GenerationConfig(
+                temperature=generation_config_dict['temperature'],
+                top_p=generation_config_dict['top_p'],
+                top_k=generation_config_dict['top_k'],
+                max_output_tokens=generation_config_dict['max_output_tokens']
+            )
             
             # Set up safety settings
             safety_settings = safety_settings_override or getattr(self.cfg, 'AI_SAFETY_SETTINGS', None)
             
-            # Initialize the model
-            self.model = genai.GenerativeModel(
+            # Initialize the model with appropriate import
+            from google.generativeai.generative_models import GenerativeModel
+            self.model = GenerativeModel(
                 model_name=self.actual_model_name,
                 generation_config=generation_config,
                 safety_settings=safety_settings
