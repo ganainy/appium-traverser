@@ -66,7 +66,6 @@ class AppCrawler:
 
 
         self.driver = AppiumDriver(app_config=self.cfg)
-        self.ai_assistant = AgentAssistant(app_config=self.cfg)
         self.db_manager = DatabaseManager(app_config=self.cfg)
         self.screen_state_manager = ScreenStateManager(db_manager=self.db_manager, driver=self.driver, app_config=self.cfg)
         self.element_finding_strategies: List[Tuple[str, Optional[str], str]] = [
@@ -80,6 +79,20 @@ class AppCrawler:
         self.action_executor = ActionExecutor(driver=self.driver, app_config=self.cfg)
         self.app_context_manager = AppContextManager(driver=self.driver, app_config=self.cfg)
         self.screenshot_annotator = ScreenshotAnnotator(driver=self.driver, app_config=self.cfg)
+        
+        # Create the agent tools
+        from agent_tools import AgentTools
+        self.agent_tools = AgentTools(
+            driver=self.driver,
+            action_executor=self.action_executor,
+            action_mapper=self.action_mapper,
+            screen_state_manager=self.screen_state_manager,
+            app_context_manager=self.app_context_manager,
+            config=self.cfg
+        )
+        
+        # Initialize the AI assistant with agent tools
+        self.ai_assistant = AgentAssistant(app_config=self.cfg, agent_tools=self.agent_tools)
 
         self.consecutive_ai_failures = 0
         self.consecutive_map_failures = 0
@@ -315,7 +328,7 @@ class AppCrawler:
             print(f"{UI_STATUS_PREFIX}RESUMING")
 
     async def _get_next_action(self, definitive_screen_repr: ScreenRepresentation, visit_info: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], Optional[float], Optional[int]]:
-        """Decides whether to use a fallback action or query the AI."""
+        """Decides whether to use a fallback action or query the AI using the agent-based approach."""
         ai_action_suggestion = None
         ai_time_taken = None
         total_tokens = None
@@ -339,20 +352,49 @@ class AppCrawler:
             simplified_xml = utils.simplify_xml_for_ai(filtered_xml, int(self.cfg.XML_SNIPPET_MAX_LEN))
             
             if definitive_screen_repr.screenshot_bytes and self.loop:
-                ai_response_tuple = await self.loop.run_in_executor(
-                    self.default_executor,
-                    self.ai_assistant.get_next_action,
-                    definitive_screen_repr.screenshot_bytes,
-                    simplified_xml,
-                    visit_info.get("previous_actions_on_this_state", []),
-                    visit_info.get("visit_count_this_run", 1),
-                    definitive_screen_repr.composite_hash,
-                    self.last_action_feedback_for_ai
-                )
-                if ai_response_tuple:
-                    ai_full_response, ai_time_taken, total_tokens = ai_response_tuple
-                    if ai_full_response and "action_to_perform" in ai_full_response:
-                        ai_action_suggestion = ai_full_response.get("action_to_perform")
+                try:
+                    # Use the agent-based approach
+                    agent_result = None
+                    if definitive_screen_repr.screenshot_bytes is not None:  # Ensure screenshot is not None
+                        agent_result = await self.loop.run_in_executor(
+                            self.default_executor,
+                            lambda: self.ai_assistant.plan_and_execute(
+                                definitive_screen_repr.screenshot_bytes,
+                                simplified_xml,
+                                visit_info.get("previous_actions_on_this_state", []),
+                                visit_info.get("visit_count_this_run", 1),
+                                definitive_screen_repr.composite_hash,
+                                self.last_action_feedback_for_ai
+                            )
+                        )
+                    
+                    if agent_result:
+                        action_data, time_taken, success = agent_result
+                        ai_time_taken = time_taken
+                        
+                        # If the action was already executed by the agent, record the result
+                        if success:
+                            ai_action_suggestion = action_data
+                            action_str = utils.generate_action_description(
+                                action_data.get('action', 'unknown'),
+                                None,
+                                action_data.get('input_text'),
+                                action_data.get('target_identifier')
+                            )
+                            self.screen_state_manager.record_action_taken_from_screen(
+                                definitive_screen_repr.composite_hash, 
+                                f"{action_str} (Success: {success}) [Agent Executed]"
+                            )
+                            # Reset the failure counters since the agent successfully executed an action
+                            self.consecutive_ai_failures = 0
+                            self.consecutive_map_failures = 0
+                            self.action_executor.reset_consecutive_failures()
+                        else:
+                            # If execution failed but we have a valid action, return it for standard execution
+                            ai_action_suggestion = action_data
+                            
+                except Exception as e:
+                    logging.error(f"Error in agent-based execution: {e}", exc_info=True)
             elif not definitive_screen_repr.screenshot_bytes:
                 logging.error("Screenshot bytes are None, cannot call AI.")
             elif not self.loop:

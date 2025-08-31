@@ -87,9 +87,10 @@ class CrawlerManager(QObject):
             
             # Use the same Python executable that's running this script
             python_exe = sys.executable
-            script_path = os.path.join(self.config.BASE_DIR, "crawler.py")
+            script_path = os.path.join(self.config.BASE_DIR, "main.py")
             
             # Start the process
+            self.main_controller.log_message(f"Starting crawler with: {python_exe} {script_path}", 'blue')
             self.crawler_process.start(python_exe, [script_path])
             self.update_progress()
         else:
@@ -225,26 +226,38 @@ class CrawlerManager(QObject):
             # Display the raw output in the log
             self.main_controller.log_message(output.strip())
             
-            # Extract current step if found
-            step_match = re.search(r'Step: (\d+)', output)
+            # Check for UI_STEP_PREFIX:step
+            step_match = re.search(r'UI_STEP:(\d+)', output)
             if step_match:
                 self.step_count = int(step_match.group(1))
                 self.main_controller.step_label.setText(f"Step: {self.step_count}")
                 self.update_progress()
             
-            # Extract last action if found
-            action_match = re.search(r'Action: (.*?)($|\n)', output)
+            # Check for UI_ACTION_PREFIX:action
+            action_match = re.search(r'UI_ACTION:(.*?)($|\n)', output)
             if action_match:
                 self.last_action = action_match.group(1).strip()
                 self.main_controller.last_action_label.setText(f"Last Action: {self.last_action}")
             
-            # Extract screenshot path if found
-            screenshot_match = re.search(r'Screenshot: (.*?)($|\n)', output)
+            # Check for UI_SCREENSHOT_PREFIX:path
+            screenshot_match = re.search(r'UI_SCREENSHOT:(.*?)($|\n)', output)
             if screenshot_match:
                 screenshot_path = screenshot_match.group(1).strip()
                 if os.path.exists(screenshot_path):
                     self.current_screenshot = screenshot_path
                     self.main_controller.update_screenshot(screenshot_path)
+                    
+            # Check for UI_STATUS_PREFIX:status
+            status_match = re.search(r'UI_STATUS:(.*?)($|\n)', output)
+            if status_match:
+                status_text = status_match.group(1).strip()
+                self.main_controller.status_label.setText(f"Status: {status_text}")
+                
+            # Check for UI_END_PREFIX:reason
+            end_match = re.search(r'UI_END:(.*?)($|\n)', output)
+            if end_match:
+                end_reason = end_match.group(1).strip()
+                self.main_controller.log_message(f"Crawler ended: {end_reason}", 'orange')
         except Exception as e:
             self.main_controller.log_message(f"Error processing crawler output: {e}", 'red')
             logging.error(f"Error processing crawler output: {e}")

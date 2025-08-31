@@ -296,6 +296,21 @@ class ScreenStateManager:
 
     def get_visit_count_for_run(self, screen_composite_hash: str) -> int:
         return self.current_run_visit_counts.get(screen_composite_hash, 0)
+        
+    def get_visit_count(self, screen_composite_hash: str) -> int:
+        """Get the total visit count for a screen across all runs."""
+        if not self.db_manager:
+            return self.get_visit_count_for_run(screen_composite_hash)
+            
+        try:
+            # Get the total visit count from the database
+            total_count = self.db_manager.get_screen_visit_count(screen_composite_hash)
+            # Add the current run's visit count
+            run_count = self.get_visit_count_for_run(screen_composite_hash)
+            return total_count + run_count
+        except Exception as e:
+            logging.error(f"Error getting visit count from database: {e}")
+            return self.get_visit_count_for_run(screen_composite_hash)
 
     def get_total_unique_screens_in_cache(self) -> int:
         return len(self.known_screens_cache)

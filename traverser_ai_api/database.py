@@ -295,6 +295,12 @@ class DatabaseManager:
         sql = f"SELECT MAX(screen_id) FROM {self.SCREENS_TABLE}"
         result = self._execute_sql(sql, fetch_one=True, commit=False)
         return result[0] if result and result[0] is not None else 0
+        
+    def get_screen_visit_count(self, composite_hash: str) -> int:
+        """Get the total number of visits to a screen across all runs."""
+        sql = f"SELECT COUNT(*) FROM {self.TRANSITIONS_TABLE} WHERE to_screen_hash = ?"
+        result = self._execute_sql(sql, (composite_hash,), fetch_one=True, commit=False)
+        return result[0] if result and result[0] is not None else 0
 
     def insert_step_log(self, run_id: int, step_number: int, from_screen_id: Optional[int],
                         to_screen_id: Optional[int], action_description: Optional[str],

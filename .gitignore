@@ -12,6 +12,8 @@ output_data/
 .venv/
 
 /traverser_ai_api/user_config.json
+/traverser_ai_api/crawler.pid
+*.pid
 
 /traverser_ai_api/__pycache__/
 __pycache__/

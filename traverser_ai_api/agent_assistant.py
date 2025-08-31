@@ -13,14 +13,19 @@ class AgentAssistant:
     """
     Handles interactions with a Google Gemini model using a direct approach with the Google Generative AI SDK.
     Implements structured prompting for mobile app UI testing.
+    
+    The AgentAssistant can also directly perform actions using the AgentTools, allowing it to 
+    implement more complex behaviors like planning, self-correction, and memory.
     """
     
     def __init__(self,
                  app_config, # Type hint with your actual Config class
                  model_alias_override: Optional[str] = None,
-                 safety_settings_override: Optional[Dict] = None):
+                 safety_settings_override: Optional[Dict] = None,
+                 agent_tools=None):
         self.cfg = app_config
         self.response_cache: Dict[str, Tuple[Dict[str, Any], float, int]] = {}
+        self.tools = agent_tools  # May be None initially and set later
         logging.info("AI response cache initialized.")
 
         if not self.cfg.GEMINI_API_KEY:
@@ -292,91 +297,155 @@ class AgentAssistant:
                         last_action_feedback: Optional[str] = None
                         ) -> Optional[Tuple[Dict[str, Any], float, int]]:
         """
-        Uses the Google Gemini model to determine the next action to take.
+        Uses the agent-based approach with Google Gemini model to determine the next action to take.
         Returns the action data, processing time, and token count.
         """
-        # Create a unique key for the current state and context
-        cache_key = f"{current_composite_hash}_{str(sorted(previous_actions))}_{last_action_feedback}"
-
-        # Check cache before making the API call
-        if cache_key in self.response_cache:
-            logging.info(f"CACHE HIT: Found cached AI response for key: {cache_key[:70]}...")
-            # Return a copy of the cached response with a simulated time of 0
-            cached_response, _, cached_tokens = self.response_cache[cache_key]
-            return dict(cached_response), 0.0, cached_tokens
-
-        logging.info(f"get_next_action: xml_len={len(xml_context)}, prev_actions={len(previous_actions)}, visits={current_screen_visit_count}, hash={current_composite_hash}")
-
-        # Prepare the image for the model
-        image = self._prepare_image_part(screenshot_bytes)
-        if not image:
-            logging.error("Failed to prepare image for AI; cannot proceed. screenshot_bytes length: %d", len(screenshot_bytes) if screenshot_bytes else 0)
+        # Let's directly use plan_and_execute since we're only supporting the agent approach now
+        result = self.plan_and_execute(
+            screenshot_bytes,
+            xml_context,
+            previous_actions,
+            current_screen_visit_count,
+            current_composite_hash,
+            last_action_feedback
+        )
+        
+        if not result:
             return None
-
-        start_time = time.time()
+            
+        action_data, elapsed_time, success = result
+        # Estimate token count (not directly available from API)
+        total_tokens = len(xml_context) // 4  # Rough estimate
+        
+        return {"action_to_perform": action_data}, elapsed_time, total_tokens
+            
+    def execute_action(self, action_data: Dict[str, Any]) -> bool:
+        """
+        Executes an action using the provided agent tools.
+        
+        Args:
+            action_data: The action data to execute
+            
+        Returns:
+            True if the action was successfully executed, False otherwise
+        """
+        if not self.tools:
+            logging.error("Cannot execute action: AgentTools not available")
+            return False
+            
+        action_type = action_data.get("action")
+        if not action_type:
+            logging.error("Cannot execute action: No action type provided")
+            return False
+            
         try:
-            # Build the system prompt
-            system_prompt = self._build_system_prompt(
-                xml_context, previous_actions, self.cfg.AVAILABLE_ACTIONS,
-                current_screen_visit_count, current_composite_hash,
-                last_action_feedback
-            )
-            
-            # Convert PIL image to bytes for Google Generative AI
-            img_byte_arr = io.BytesIO()
-            image.save(img_byte_arr, format='JPEG')
-            img_byte_arr = img_byte_arr.getvalue()
-            
-            # Create the content properly for Google Gemini API
-            content = [
-                system_prompt,
-                {"inline_data": {"mime_type": "image/jpeg", "data": img_byte_arr}}
-            ]
-            
-            # Use chat history if enabled
-            chat_session = None
-            if self.use_chat and current_composite_hash in self.chat_history:
-                chat_session = self.chat_history[current_composite_hash]
-            
-            # Generate response
-            if chat_session:
-                response = chat_session.send_message(content)
-            else:
-                # Create a new chat session if needed
-                if self.use_chat:
-                    chat_session = self.model.start_chat(history=[])
-                    self.chat_history[current_composite_hash] = chat_session
-                    response = chat_session.send_message(content)
-                else:
-                    # Use generate_content for a one-off request
-                    response = self.model.generate_content(content)
-            
-            # Extract the response text
-            response_text = response.text
-            
-            # Parse the response to extract action data
-            action_data = self._parse_action_from_response(response_text)
-            
-            if not action_data:
-                logging.error("Failed to parse action from response")
-                return None
+            if action_type == "click":
+                target_id = action_data.get("target_identifier")
+                if not target_id:
+                    # Try to use coordinates if available
+                    bbox = action_data.get("target_bounding_box")
+                    if bbox and isinstance(bbox, dict):
+                        top_left = bbox.get("top_left", [])
+                        bottom_right = bbox.get("bottom_right", [])
+                        if len(top_left) == 2 and len(bottom_right) == 2:
+                            center_y = (top_left[0] + bottom_right[0]) / 2
+                            center_x = (top_left[1] + bottom_right[1]) / 2
+                            result = self.tools.tap_coordinates(center_x, center_y)
+                            return result.get("success", False)
+                    logging.error("Cannot execute click: No target identifier or valid bounding box provided")
+                    return False
+                result = self.tools.click_element(target_id)
+                return result.get("success", False)
                 
-            # Construct the response data
-            response_data = {"action_to_perform": action_data}
-            
-            elapsed_time = time.time() - start_time
-            # Estimate token count (not directly available from API)
-            total_tokens = len(system_prompt) // 4  # Rough estimate
-            
-            # Store the successful response in the cache before returning
-            self.response_cache[cache_key] = (dict(response_data), elapsed_time, total_tokens)
-            logging.debug(f"Stored AI response in cache with key: {cache_key[:70]}...")
-            
-            return response_data, elapsed_time, total_tokens
-            
+            elif action_type == "input":
+                target_id = action_data.get("target_identifier")
+                input_text = action_data.get("input_text")
+                if not target_id:
+                    logging.error("Cannot execute input: No target identifier provided")
+                    return False
+                if input_text is None:
+                    input_text = ""  # Empty string for clear operations
+                result = self.tools.input_text(target_id, input_text)
+                return result.get("success", False)
+                
+            elif action_type == "scroll_down":
+                result = self.tools.scroll("down")
+                return result.get("success", False)
+                
+            elif action_type == "scroll_up":
+                result = self.tools.scroll("up")
+                return result.get("success", False)
+                
+            elif action_type == "swipe_left":
+                result = self.tools.scroll("left")
+                return result.get("success", False)
+                
+            elif action_type == "swipe_right":
+                result = self.tools.scroll("right")
+                return result.get("success", False)
+                
+            elif action_type == "back":
+                result = self.tools.press_back()
+                return result.get("success", False)
+                
+            else:
+                logging.error(f"Unknown action type: {action_type}")
+                return False
+                
         except Exception as e:
-            logging.error(f"Error in get_next_action: {e}", exc_info=True)
+            logging.error(f"Error executing action: {e}", exc_info=True)
+            return False
+            
+    def plan_and_execute(self, 
+                        screenshot_bytes: Optional[bytes],
+                        xml_context: str,
+                        previous_actions: List[str],
+                        current_screen_visit_count: int,
+                        current_composite_hash: str,
+                        last_action_feedback: Optional[str] = None) -> Optional[Tuple[Dict[str, Any], float, bool]]:
+        """
+        Plans and executes the next action using a ReAct-style approach where the agent:
+        1. Reasons about the current state
+        2. Decides on an action
+        3. Executes the action
+        4. Observes the result
+        5. Repeats as needed
+        
+        Returns:
+            Tuple of (action_data, processing_time, success)
+        """
+        if not self.tools:
+            logging.error("Cannot plan and execute: AgentTools not available")
             return None
+            
+        if screenshot_bytes is None:
+            logging.error("Cannot plan and execute: Screenshot bytes is None")
+            return None
+            
+        # First, get the next action suggestion from the model
+        result = self.get_next_action(
+            screenshot_bytes,
+            xml_context,
+            previous_actions,
+            current_screen_visit_count,
+            current_composite_hash,
+            last_action_feedback
+        )
+        
+        if not result:
+            return None
+            
+        response, elapsed_time, _ = result
+        
+        action_data = response.get("action_to_perform")
+        if not action_data:
+            return None
+            
+        # Execute the action using agent tools
+        success = self.execute_action(action_data)
+        
+        # Return the action data, time taken, and success status
+        return action_data, elapsed_time, success
             
     def _parse_action_from_response(self, response_text: str) -> Optional[Dict[str, Any]]:
         """Parse the action data from the model's response text."""

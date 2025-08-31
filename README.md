@@ -56,9 +56,9 @@ python traverser_ai_api/ui_controller.py  # Opens graphical interface
 
 ## Agent-Based Architecture
 
-This branch implements a new agent-based architecture for the Android app crawler, replacing the previous LLM implementation with a more flexible and extensible agent model using Google Generative AI (Gemini).
+This project implements an agent-based architecture for the Android app crawler using Google Generative AI (Gemini). The agent follows the ReAct (Reason-Act-Observe) pattern for intelligent app exploration.
 
-### Agent Architecture
+### How It Works
 
 The agent-based architecture uses Google Generative AI (Gemini) for multimodal analysis of mobile app screens, making intelligent decisions about what UI actions to take next. The implementation focuses on direct API integration with the Google Generative AI SDK, providing a cleaner and more maintainable codebase.
 
@@ -69,7 +69,47 @@ The agent-based architecture uses Google Generative AI (Gemini) for multimodal a
 - **Image Optimization** - Automatically resizes and optimizes screenshots for the model
 - **Robust Error Handling** - Comprehensive error handling and logging
 - **Response Caching** - Caches responses to avoid duplicate API calls
-- **Extensive Test Suite** - Comprehensive test coverage with mocks and integration tests
+
+### Agent Components
+
+#### 1. Agent Tools
+
+The `AgentTools` class provides a bridge between the AI agent and the app under test:
+
+- `click_element` - Clicks on UI elements
+- `input_text` - Enters text in input fields
+- `scroll` - Scrolls in different directions
+- `press_back` - Presses the back button
+- `tap_coordinates` - Directly taps at specific coordinates
+- `get_screen_state` - Retrieves information about the current screen
+- `get_action_history` - Retrieves the history of performed actions
+- `check_app_context` - Ensures the app is in the foreground
+
+#### 2. Agent Assistant
+
+The `AgentAssistant` class implements the core agent functionality:
+
+- `plan_and_execute` - The main agent method that analyzes the current screen and decides what action to take
+- Uses structured prompting to guide the agent's reasoning process
+- Directly executes actions using the agent tools
+- Observes the results of actions and adapts its strategy
+
+### Agent Workflow
+
+The agent-based approach follows these steps:
+
+1. **Observe**: The agent receives a screenshot of the current app state and its XML representation
+2. **Reason**: The agent analyzes the screen to determine what elements are present and what actions are possible
+3. **Plan**: The agent decides on the most appropriate action to take
+4. **Act**: The agent executes the action directly using the agent tools
+5. **Observe Again**: The agent receives feedback from the action execution and updates its understanding
+
+### Benefits of the Agent Approach
+
+- **Direct Execution**: The agent can directly execute actions without needing a separate execution layer
+- **Feedback Loop**: The agent can observe the results of its actions and adjust its strategy
+- **Adaptability**: The agent can handle unexpected situations by trying alternative approaches
+- **Self-correction**: The agent can detect and recover from errors during exploration
 
 ### Implementation Details
 
@@ -81,62 +121,16 @@ The agent-based architecture is centered around the `AgentAssistant` class in `t
 4. **Response Parsing** - Extracting structured action data from model responses
 5. **Caching** - Avoiding duplicate API calls for the same state
 
-#### Key Components
+### Testing and Demo
 
-- **Model Configuration** - Uses environment variables for API keys and configuration objects for model settings
-- **Action Extraction** - Parses JSON from model responses to extract structured action data
-- **Loop Detection** - Analyzes action history to detect and break out of loops
-- **Image Optimization** - Resizes images to optimal dimensions for the model
+For testing, use the built-in test files in the `tests/` directory:
 
-### Getting Started with the Agent
+```powershell
+cd tests
+python test_agent_assistant.py
+```
 
-#### Prerequisites
-
-- Python 3.8+
-- Google Generative AI API key (from [Google AI Studio](https://ai.google.dev/))
-- Appium setup (as described in the Quick Start section)
-
-#### Installation
-
-1. Install the additional requirements:
-
-   ```powershell
-   pip install -r agent-requirements.txt
-   ```
-
-2. Set your Google API key:
-
-   ```powershell
-   $env:GOOGLE_API_KEY="your-api-key-here"
-   ```
-
-#### Testing and Demo
-
-1. Run the test suite to verify the implementation:
-
-   ```powershell
-   .\run_agent_tests.ps1 -ApiKey "your-api-key-here"
-   ```
-
-   Or run specific tests:
-
-   ```powershell
-   .\run_agent_tests.ps1 -ApiKey "your-api-key-here" -Test "test_full_integration"
-   ```
-
-2. Try the demo with sample data:
-
-   ```powershell
-   .\run_agent_demo.ps1 -ApiKey "your-api-key-here"
-   ```
-
-   You can also provide custom screenshots and XML data:
-
-   ```powershell
-   .\run_agent_demo.ps1 -ApiKey "your-api-key-here" -Screenshot "path/to/screenshot.png" -Xml "path/to/xml.xml"
-   ```
-
-   Note: All test and demo files are located in the `tests/` directory. The root directory scripts automatically redirect to the actual implementation in the tests directory.
+You can also run specific tests by modifying the test file or implementing your own test cases based on the existing ones.
 
 ### Future Improvements
 
@@ -154,9 +148,10 @@ The agent-based architecture is centered around the `AgentAssistant` class in `t
 - **`main.py`** - Entry point and orchestration
 - **`crawler.py`** - Main crawling logic and state transitions
 - **`agent_assistant.py`** - Google Generative AI integration using direct API
+- **`agent_tools.py`** - Tools for the agent to interact with the app
 - **`cli_controller.py`** - Command-line interface
 - **`ui_controller.py`** - Graphical user interface
-- **`state_manager.py`** - Screen state and transition management
+- **`screen_state_manager.py`** - Screen state and transition management
 
 ## Output
 
