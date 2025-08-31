@@ -28,7 +28,7 @@ class AgentAssistant:
         self.api_key = self.cfg.GEMINI_API_KEY
         # Set the API key for Google Generative AI
         os.environ["GOOGLE_API_KEY"] = self.api_key
-        # API key will be picked up from environment variable
+        logging.info("Set GOOGLE_API_KEY environment variable in initialization")
 
         model_alias = model_alias_override or self.cfg.DEFAULT_MODEL_TYPE
         if not model_alias:
@@ -98,8 +98,14 @@ class AgentAssistant:
             # Set up safety settings
             safety_settings = safety_settings_override or getattr(self.cfg, 'AI_SAFETY_SETTINGS', None)
             
-            # Initialize the model with appropriate import
+            # Initialize the model
             from google.generativeai.generative_models import GenerativeModel
+            
+            # Make sure the environment variable is set
+            if self.api_key:
+                os.environ["GOOGLE_API_KEY"] = self.api_key
+                logging.info("Set GOOGLE_API_KEY environment variable before model creation")
+                
             self.model = GenerativeModel(
                 model_name=self.actual_model_name,
                 generation_config=generation_config,
