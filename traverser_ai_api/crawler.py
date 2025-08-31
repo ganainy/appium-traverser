@@ -14,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 from config import Config
 import utils
 
-from ai_assistant import AIAssistant
+from agent_assistant import AgentAssistant
 from appium_driver import AppiumDriver
 from screen_state_manager import ScreenStateManager, ScreenRepresentation
 from database import DatabaseManager
@@ -66,7 +66,7 @@ class AppCrawler:
 
 
         self.driver = AppiumDriver(app_config=self.cfg)
-        self.ai_assistant = AIAssistant(app_config=self.cfg)
+        self.ai_assistant = AgentAssistant(app_config=self.cfg)
         self.db_manager = DatabaseManager(app_config=self.cfg)
         self.screen_state_manager = ScreenStateManager(db_manager=self.db_manager, driver=self.driver, app_config=self.cfg)
         self.element_finding_strategies: List[Tuple[str, Optional[str], str]] = [
