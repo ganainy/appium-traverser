@@ -74,6 +74,12 @@ class CrawlerControllerWindow(QMainWindow):
         self.config = Config(defaults_module_path, user_config_json_path)
         self.config.load_user_config()
         
+        # Set default UI_MODE if not already in config
+        # This is done after load_user_config to not overwrite existing setting
+        if not hasattr(self.config, 'UI_MODE'):
+            # Use update_setting_and_save which handles attribute creation
+            self.config.update_setting_and_save('UI_MODE', 'Expert')
+        
         # Initialize instance variables
         self.config_widgets = {}
         self.current_health_app_list_file = self.config.CURRENT_HEALTH_APP_LIST_FILE

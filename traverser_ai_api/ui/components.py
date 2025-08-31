@@ -15,6 +15,37 @@ from PySide6.QtGui import QColor, QPixmap
 class UIComponents:
     """Factory class for creating UI components used in the Crawler Controller."""
     
+    # Define which settings groups and fields are considered advanced
+    # These will be hidden in basic mode
+    ADVANCED_GROUPS = [
+        "appium_settings_group",
+        "ai_settings_group",
+        "error_handling_group"
+    ]
+    
+    ADVANCED_FIELDS = {
+        "APPIUM_SERVER_URL": True,  # True means hide in basic mode
+        "TARGET_DEVICE_UDID": True,  # True means hide in basic mode
+        "NEW_COMMAND_TIMEOUT": True,
+        "APPIUM_IMPLICIT_WAIT": True,
+        "DEFAULT_MODEL_TYPE": True,
+        "USE_CHAT_MEMORY": True,
+        "MAX_CHAT_HISTORY": True,
+        "XML_SNIPPET_MAX_LEN": True,
+        "STABILITY_WAIT": True,
+        "VISUAL_SIMILARITY_THRESHOLD": True,
+        "ALLOWED_EXTERNAL_PACKAGES": True,
+        "MAX_CONSECUTIVE_AI_FAILURES": True,
+        "MAX_CONSECUTIVE_MAP_FAILURES": True,
+        "MAX_CONSECUTIVE_EXEC_FAILURES": True,
+        "ENABLE_XML_CONTEXT": True,
+        "ENABLE_TRAFFIC_CAPTURE": False,
+        "CLEANUP_DEVICE_PCAP_FILE": True,
+        "CONTINUE_EXISTING_RUN": False,
+        "MOBSF_API_URL": True,
+        "MOBSF_API_KEY": True,
+    }
+    
     @staticmethod
     def create_left_panel(
         config_widgets: Dict[str, Any],
@@ -37,6 +68,17 @@ class UIComponents:
         panel = QWidget()
         layout = QVBoxLayout(panel)
         
+        # Create UI mode switch (Basic/Expert)
+        mode_layout = QHBoxLayout()
+        mode_label = QLabel("UI Mode:")
+        config_handler.ui_mode_dropdown = QComboBox()
+        config_handler.ui_mode_dropdown.addItems(["Basic", "Expert"])
+        config_handler.ui_mode_dropdown.setCurrentIndex(0)  # Default to Basic mode
+        config_handler.ui_mode_dropdown.setToolTip("Basic mode hides advanced settings. Expert mode shows all settings.")
+        mode_layout.addWidget(mode_label)
+        mode_layout.addWidget(config_handler.ui_mode_dropdown)
+        layout.addLayout(mode_layout)
+        
         # Create scrollable area for config inputs
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -44,22 +86,54 @@ class UIComponents:
         scroll_content = QWidget()
         scroll_layout = QFormLayout(scroll_content)
         
+        # Store scroll_content in config_handler for later reference
+        config_handler.scroll_content = scroll_content
+        
         # Create the config inputs sections
-        UIComponents._create_appium_settings_group(scroll_layout, config_widgets, tooltips)
-        UIComponents._create_app_settings_group(
+        appium_group = UIComponents._create_appium_settings_group(scroll_layout, config_widgets, tooltips)
+        appium_group.setObjectName("appium_settings_group")
+        
+        app_group = UIComponents._create_app_settings_group(
             scroll_layout, config_widgets, tooltips, config_handler
         )
-        UIComponents._create_ai_settings_group(scroll_layout, config_widgets, tooltips)
-        UIComponents._create_crawler_settings_group(scroll_layout, config_widgets, tooltips)
-        UIComponents._create_error_handling_group(scroll_layout, config_widgets, tooltips)
-        UIComponents._create_feature_toggles_group(scroll_layout, config_widgets, tooltips)
-        UIComponents._create_mobsf_settings_group(
+        app_group.setObjectName("app_settings_group")
+        
+        ai_group = UIComponents._create_ai_settings_group(scroll_layout, config_widgets, tooltips)
+        ai_group.setObjectName("ai_settings_group")
+        
+        crawler_group = UIComponents._create_crawler_settings_group(scroll_layout, config_widgets, tooltips)
+        crawler_group.setObjectName("crawler_settings_group")
+        
+        error_handling_group = UIComponents._create_error_handling_group(scroll_layout, config_widgets, tooltips)
+        error_handling_group.setObjectName("error_handling_group")
+        
+        feature_toggle_group = UIComponents._create_feature_toggles_group(scroll_layout, config_widgets, tooltips)
+        feature_toggle_group.setObjectName("feature_toggles_group")
+        
+        mobsf_group = UIComponents._create_mobsf_settings_group(
             scroll_layout, config_widgets, tooltips, config_handler
         )
+        mobsf_group.setObjectName("mobsf_settings_group")
         
         # Apply default values
         config_handler._apply_defaults_from_config_to_widgets()
         config_handler._update_crawl_mode_inputs_state()
+        
+        # Store the group widgets for mode switching
+        config_handler.ui_groups = {
+            "appium_settings_group": appium_group,
+            "app_settings_group": app_group,
+            "ai_settings_group": ai_group,
+            "crawler_settings_group": crawler_group,
+            "error_handling_group": error_handling_group,
+            "feature_toggles_group": feature_toggle_group,
+            "mobsf_settings_group": mobsf_group
+        }
+        
+        # Connect UI mode dropdown to toggle UI complexity
+        config_handler.ui_mode_dropdown.currentTextChanged.connect(
+            lambda mode: UIComponents.toggle_ui_complexity(mode, config_handler)
+        )
         
         scroll.setWidget(scroll_content)
         layout.addWidget(scroll)
@@ -68,7 +142,74 @@ class UIComponents:
         controls_group = UIComponents._create_control_buttons(controls_handler)
         layout.addWidget(controls_group)
         
+        # Initialize with basic mode by default (hide advanced settings)
+        UIComponents.toggle_ui_complexity("Basic", config_handler)
+        
         return panel
+    
+    @staticmethod
+    def toggle_ui_complexity(mode: str, config_handler):
+        """
+        Toggle between basic and expert UI modes
+        
+        Args:
+            mode: "Basic" or "Expert" mode
+            config_handler: The config handler with references to UI widgets
+        """
+        is_basic = mode == "Basic"
+        
+        # Toggle group visibility based on mode
+        for group_name, group_widget in config_handler.ui_groups.items():
+            # Hide advanced groups in basic mode
+            if group_name in UIComponents.ADVANCED_GROUPS:
+                group_widget.setVisible(not is_basic)
+        
+        # Toggle individual field visibility based on mode
+        for field_name, is_advanced in UIComponents.ADVANCED_FIELDS.items():
+            # Skip if widget not in config_widgets
+            if field_name not in config_handler.main_controller.config_widgets:
+                continue
+                
+            # Get widget reference
+            widget = config_handler.main_controller.config_widgets.get(field_name)
+            
+            # Skip None widgets
+            if widget is None:
+                continue
+                
+            try:
+                # Skip widgets that don't have a parent (not yet added to layout)
+                if not hasattr(widget, 'parent') or widget.parent() is None:
+                    continue
+                    
+                # Get parent layout
+                parent_layout = widget.parent().layout() if widget.parent() else None
+                if parent_layout is None:
+                    continue
+                
+                # If in basic mode and field is advanced, hide it
+                # If in expert mode, show all
+                widget_visible = not (is_basic and is_advanced)
+                
+                # Find and set visibility of associated QLabel
+                for i in range(parent_layout.count()):
+                    label_item = parent_layout.itemAt(i)
+                    if (label_item and label_item.widget() and 
+                        isinstance(label_item.widget(), QLabel) and
+                        i + 1 < parent_layout.count() and
+                        parent_layout.itemAt(i + 1).widget() == widget):
+                        label_item.widget().setVisible(widget_visible)
+                        break
+                
+                # Set widget visibility
+                widget.setVisible(widget_visible)
+            except Exception as e:
+                # Log but don't crash if there's an issue with a specific widget
+                logging.warning(f"Error toggling visibility for {field_name}: {e}")
+        
+        # Save the current mode to user config
+        config_handler.config.update_setting_and_save("UI_MODE", mode)
+        config_handler.main_controller.log_message(f"Switched to {mode} mode", 'blue')
     
     @staticmethod
     def create_right_panel(controller) -> QWidget:
@@ -122,7 +263,7 @@ class UIComponents:
         layout: QFormLayout, 
         config_widgets: Dict[str, Any],
         tooltips: Dict[str, str]
-    ) -> None:
+    ) -> QGroupBox:
         """Create the Appium settings group."""
         appium_group = QGroupBox("Appium Settings")
         appium_layout = QFormLayout(appium_group)
@@ -150,6 +291,7 @@ class UIComponents:
         appium_layout.addRow(label_implicit_wait, config_widgets['APPIUM_IMPLICIT_WAIT'])
         
         layout.addRow(appium_group)
+        return appium_group
     
     @staticmethod
     def _create_app_settings_group(
@@ -157,7 +299,7 @@ class UIComponents:
         config_widgets: Dict[str, Any],
         tooltips: Dict[str, str],
         config_handler: Any
-    ) -> None:
+    ) -> QGroupBox:
         """Create the App settings group with health app selection."""
         app_group = QGroupBox("App Settings")
         app_layout = QFormLayout(app_group)
@@ -196,13 +338,14 @@ class UIComponents:
         app_layout.addRow(label_app_activity, config_widgets['APP_ACTIVITY'])
         
         layout.addRow(app_group)
+        return app_group
     
     @staticmethod
     def _create_ai_settings_group(
         layout: QFormLayout, 
         config_widgets: Dict[str, Any],
         tooltips: Dict[str, str]
-    ) -> None:
+    ) -> QGroupBox:
         """Create the AI settings group."""
         ai_group = QGroupBox("AI Settings")
         ai_layout = QFormLayout(ai_group)
@@ -233,13 +376,14 @@ class UIComponents:
         ai_layout.addRow(label_xml_snippet_max_len, config_widgets['XML_SNIPPET_MAX_LEN'])
         
         layout.addRow(ai_group)
+        return ai_group
     
     @staticmethod
     def _create_crawler_settings_group(
         layout: QFormLayout, 
         config_widgets: Dict[str, Any],
         tooltips: Dict[str, str]
-    ) -> None:
+    ) -> QGroupBox:
         """Create the Crawler settings group."""
         crawler_group = QGroupBox("Crawler Settings")
         crawler_layout = QFormLayout(crawler_group)
@@ -296,13 +440,14 @@ class UIComponents:
         crawler_layout.addRow(label_allowed_external_packages, config_widgets['ALLOWED_EXTERNAL_PACKAGES'])
         
         layout.addRow(crawler_group)
+        return crawler_group
     
     @staticmethod
     def _create_error_handling_group(
         layout: QFormLayout, 
         config_widgets: Dict[str, Any],
         tooltips: Dict[str, str]
-    ) -> None:
+    ) -> QGroupBox:
         """Create the Error Handling settings group."""
         error_handling_group = QGroupBox("Error Handling Settings")
         error_handling_layout = QFormLayout(error_handling_group)
@@ -326,13 +471,14 @@ class UIComponents:
         error_handling_layout.addRow(label_max_exec_failures, config_widgets['MAX_CONSECUTIVE_EXEC_FAILURES'])
         
         layout.addRow(error_handling_group)
+        return error_handling_group
     
     @staticmethod
     def _create_feature_toggles_group(
         layout: QFormLayout, 
         config_widgets: Dict[str, Any],
         tooltips: Dict[str, str]
-    ) -> None:
+    ) -> QGroupBox:
         """Create the Feature Toggles group."""
         feature_toggle_group = QGroupBox("Feature Toggles")
         feature_toggle_layout = QFormLayout(feature_toggle_group)
@@ -358,6 +504,7 @@ class UIComponents:
         feature_toggle_layout.addRow(label_continue_run, config_widgets['CONTINUE_EXISTING_RUN'])
         
         layout.addRow(feature_toggle_group)
+        return feature_toggle_group
     
     @staticmethod
     def _create_mobsf_settings_group(
@@ -365,7 +512,7 @@ class UIComponents:
         config_widgets: Dict[str, Any],
         tooltips: Dict[str, str],
         config_handler: Any
-    ) -> None:
+    ) -> QGroupBox:
         """Create the MobSF settings group."""
         mobsf_group = QGroupBox("MobSF Static Analysis")
         mobsf_layout = QFormLayout(mobsf_group)
@@ -416,6 +563,7 @@ class UIComponents:
         )
         
         layout.addRow(mobsf_group)
+        return mobsf_group
     
     @staticmethod
     def _create_control_buttons(controls_handler: Any) -> QGroupBox:

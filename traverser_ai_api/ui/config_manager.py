@@ -7,7 +7,7 @@ import logging
 from typing import Dict, Any, Optional, List
 from PySide6.QtWidgets import (
     QLineEdit, QSpinBox, QCheckBox, QComboBox, QTextEdit, 
-    QPushButton, QLabel
+    QPushButton, QLabel, QGroupBox, QWidget
 )
 from PySide6.QtCore import Slot
 from PySide6.QtCore import QObject
@@ -20,6 +20,9 @@ class ConfigManager(QObject):
     health_app_dropdown: QComboBox
     refresh_apps_btn: QPushButton
     app_scan_status_label: QLabel
+    ui_mode_dropdown: QComboBox
+    ui_groups: Dict[str, QGroupBox]
+    scroll_content: QWidget
     
     def __init__(self, config, main_controller):
         """
@@ -144,6 +147,10 @@ class ConfigManager(QObject):
                 else:
                     config_data[key] = text
         
+        # Save UI mode setting
+        if hasattr(self, 'ui_mode_dropdown'):
+            config_data['UI_MODE'] = self.ui_mode_dropdown.currentText()
+        
         # Save health app list path
         config_data['CURRENT_HEALTH_APP_LIST_FILE'] = self.main_controller.current_health_app_list_file
         
@@ -218,6 +225,13 @@ class ConfigManager(QObject):
                 elif key == 'LAST_SELECTED_APP':
                     # Store for later use when populating health app dropdown
                     self.main_controller.last_selected_app = value
+            
+            # Apply specific config settings that aren't directly tied to widgets
+            if 'UI_MODE' in self.user_config and hasattr(self, 'ui_mode_dropdown'):
+                mode = self.user_config['UI_MODE']
+                index = self.ui_mode_dropdown.findText(mode)
+                if index >= 0:
+                    self.ui_mode_dropdown.setCurrentIndex(index)
             
             self._update_crawl_mode_inputs_state()
             self.main_controller.log_message("Configuration loaded successfully.", 'green')
