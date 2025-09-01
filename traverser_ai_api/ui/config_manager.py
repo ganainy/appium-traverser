@@ -12,6 +12,9 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Slot
 from PySide6.QtCore import QObject
 
+# Import UIComponents 
+from .components import UIComponents
+
 
 class ConfigManager(QObject):
     """Manages configuration for the Appium Crawler Controller UI."""
@@ -36,7 +39,10 @@ class ConfigManager(QObject):
         self.config = config
         self.main_controller = main_controller  # This is a reference to CrawlerControllerWindow
         self.user_config = {}
-        self.config_file_path = os.path.join(config.BASE_DIR, "user_config.json")
+        
+        # Use the USER_CONFIG_FILE_PATH from the config object which should be set to the root config file
+        self.config_file_path = self.config.USER_CONFIG_FILE_PATH
+        logging.info(f"ConfigManager initialized with config file path: {self.config_file_path}")
     
     def _apply_defaults_from_config_to_widgets(self):
         """Apply default values from the config module to UI widgets."""
@@ -149,7 +155,12 @@ class ConfigManager(QObject):
         
         # Save UI mode setting
         if hasattr(self, 'ui_mode_dropdown'):
-            config_data['UI_MODE'] = self.ui_mode_dropdown.currentText()
+            ui_mode = self.ui_mode_dropdown.currentText()
+            config_data['UI_MODE'] = ui_mode
+            # Also update the config object's UI_MODE attribute
+            if hasattr(self.config, 'UI_MODE'):
+                self.config.UI_MODE = ui_mode
+            logging.info(f"Saving UI_MODE to config: {ui_mode}")
         
         # Save health app list path
         config_data['CURRENT_HEALTH_APP_LIST_FILE'] = self.main_controller.current_health_app_list_file
@@ -178,6 +189,27 @@ class ConfigManager(QObject):
                 if hasattr(self.config, key):
                     setattr(self.config, key, value)
             
+            # Also save to the API directory user_config.json to keep both in sync
+            api_config_path = os.path.join(os.path.dirname(os.path.dirname(self.config_file_path)), 
+                                          "traverser_ai_api", "user_config.json")
+            if os.path.exists(api_config_path):
+                try:
+                    # Read existing API config first
+                    with open(api_config_path, 'r', encoding='utf-8') as f:
+                        api_config = json.load(f)
+                    
+                    # Update UI_MODE in API config
+                    if 'UI_MODE' in config_data:
+                        api_config['UI_MODE'] = config_data['UI_MODE']
+                        
+                    # Save back to API config file
+                    with open(api_config_path, 'w', encoding='utf-8') as f:
+                        json.dump(api_config, f, indent=4, ensure_ascii=False)
+                        
+                    logging.info(f"Updated UI_MODE in API config file: {api_config_path}")
+                except Exception as api_sync_error:
+                    logging.error(f"Error synchronizing UI_MODE to API config file: {api_sync_error}")
+            
             self.main_controller.log_message("Configuration saved successfully.", 'green')
         except Exception as e:
             self.main_controller.log_message(f"Error saving configuration: {e}", 'red')
@@ -196,6 +228,12 @@ class ConfigManager(QObject):
             if 'ENABLE_MOBSF_ANALYSIS' in self.user_config:
                 logging.info(f"Loading ENABLE_MOBSF_ANALYSIS state: {self.user_config['ENABLE_MOBSF_ANALYSIS']}")
             
+            if 'UI_MODE' in self.user_config:
+                logging.info(f"Loading UI_MODE from user_config.json: {self.user_config['UI_MODE']}")
+                # Update the config object with UI_MODE
+                if hasattr(self.config, 'UI_MODE'):
+                    self.config.UI_MODE = self.user_config['UI_MODE']
+            
             for key, value in self.user_config.items():
                 if key in self.main_controller.config_widgets:
                     widget = self.main_controller.config_widgets[key]
@@ -213,6 +251,9 @@ class ConfigManager(QObject):
                                 index = widget.findText(value)
                                 if index >= 0:
                                     widget.setCurrentIndex(index)
+                                    # If this is the AI_PROVIDER combobox, update the model types
+                                    if key == 'AI_PROVIDER':
+                                        UIComponents._update_model_types(value, self.main_controller.config_widgets)
                         elif isinstance(widget, QTextEdit):
                             if isinstance(value, list):
                                 widget.setPlainText('\n'.join(value))
@@ -224,14 +265,21 @@ class ConfigManager(QObject):
                     self.main_controller.current_health_app_list_file = value
                 elif key == 'LAST_SELECTED_APP':
                     # Store for later use when populating health app dropdown
-                    self.main_controller.last_selected_app = value
+                    # Ensure it's a dictionary, not None
+                    if value is None:
+                        self.main_controller.last_selected_app = {}
+                    else:
+                        self.main_controller.last_selected_app = value
             
             # Apply specific config settings that aren't directly tied to widgets
             if 'UI_MODE' in self.user_config and hasattr(self, 'ui_mode_dropdown'):
                 mode = self.user_config['UI_MODE']
+                logging.info(f"Setting ui_mode_dropdown to {mode} based on user_config")
                 index = self.ui_mode_dropdown.findText(mode)
                 if index >= 0:
                     self.ui_mode_dropdown.setCurrentIndex(index)
+                    # Call toggle_ui_complexity directly to ensure UI is updated
+                    UIComponents.toggle_ui_complexity(mode, self)
             
             self._update_crawl_mode_inputs_state()
             self.main_controller.log_message("Configuration loaded successfully.", 'green')

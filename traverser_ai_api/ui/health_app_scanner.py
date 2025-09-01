@@ -582,6 +582,10 @@ class HealthAppScanner(QObject):
 
             # Try to restore last selected app if it exists
             last_selected_app = getattr(self.main_controller, 'last_selected_app', {})
+            # Ensure last_selected_app is a dictionary, not None
+            if last_selected_app is None:
+                last_selected_app = {}
+                
             last_selected_package = last_selected_app.get('package_name', '')
             selected_index = 0  # Default to 0 (Select target app...)
 

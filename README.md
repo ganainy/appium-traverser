@@ -121,16 +121,24 @@ The agent-based architecture is centered around the `AgentAssistant` class in `t
 4. **Response Parsing** - Extracting structured action data from model responses
 5. **Caching** - Avoiding duplicate API calls for the same state
 
-### Testing and Demo
+### Testing
 
 For testing, use the built-in test files in the `tests/` directory:
 
 ```powershell
+# Run agent tests
 cd tests
 python test_agent_assistant.py
+
+# Run the agent demo with a sample screenshot
+python demo_agent.py --api-key "your-api-key"
 ```
 
-You can also run specific tests by modifying the test file or implementing your own test cases based on the existing ones.
+You can also provide custom screenshots and XML files to the demo:
+
+```powershell
+python demo_agent.py --api-key "your-api-key" --screenshot "path/to/screenshot.png" --xml "path/to/xml.xml"
+```
 
 ### Future Improvements
 

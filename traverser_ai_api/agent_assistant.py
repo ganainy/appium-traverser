@@ -1,17 +1,23 @@
 import os
 import logging
 import time
-import google.generativeai as genai
-from typing import Any, Dict, List, Optional, Tuple
 import json
+from typing import Any, Dict, List, Optional, Tuple
+import re
 from PIL import Image
 import io
-import re
-import base64
+
+# Try both relative and absolute imports to support different execution contexts
+try:
+    # When running as a module within the traverser_ai_api package
+    from traverser_ai_api.model_adapters import create_model_adapter
+except ImportError:
+    # When running directly from the traverser_ai_api directory
+    from model_adapters import create_model_adapter
 
 class AgentAssistant:
     """
-    Handles interactions with a Google Gemini model using a direct approach with the Google Generative AI SDK.
+    Handles interactions with AI models (Google Gemini, DeepSeek) using adapters.
     Implements structured prompting for mobile app UI testing.
     
     The AgentAssistant can also directly perform actions using the AgentTools, allowing it to 
@@ -28,27 +34,54 @@ class AgentAssistant:
         self.tools = agent_tools  # May be None initially and set later
         logging.info("AI response cache initialized.")
 
-        if not self.cfg.GEMINI_API_KEY:
-            raise ValueError("GEMINI_API_KEY is not set in the provided application configuration.")
-        self.api_key = self.cfg.GEMINI_API_KEY
-        # Set the API key for Google Generative AI
-        os.environ["GOOGLE_API_KEY"] = self.api_key
-        logging.info("Set GOOGLE_API_KEY environment variable in initialization")
+        # Determine which AI provider to use
+        self.ai_provider = getattr(self.cfg, 'AI_PROVIDER', 'gemini').lower()
+        logging.info(f"Using AI provider: {self.ai_provider}")
+
+        # Get the appropriate API key based on the provider
+        if self.ai_provider == 'gemini':
+            if not self.cfg.GEMINI_API_KEY:
+                raise ValueError("GEMINI_API_KEY is not set in the provided application configuration.")
+            self.api_key = self.cfg.GEMINI_API_KEY
+        elif self.ai_provider == 'deepseek':
+            if not self.cfg.DEEPSEEK_API_KEY:
+                raise ValueError("DEEPSEEK_API_KEY is not set in the provided application configuration.")
+            self.api_key = self.cfg.DEEPSEEK_API_KEY
+        else:
+            raise ValueError(f"Unsupported AI provider: {self.ai_provider}")
 
         model_alias = model_alias_override or self.cfg.DEFAULT_MODEL_TYPE
         if not model_alias:
             raise ValueError("Model alias must be provided.")
 
-        if not self.cfg.GEMINI_MODELS or not isinstance(self.cfg.GEMINI_MODELS, dict):
-            raise ValueError("GEMINI_MODELS must be defined in app_config and be a non-empty dictionary.")
+        # Get the models configuration based on the provider
+        if self.ai_provider == 'gemini':
+            models_config = self.cfg.GEMINI_MODELS
+            if not models_config or not isinstance(models_config, dict):
+                raise ValueError("GEMINI_MODELS must be defined in app_config and be a non-empty dictionary.")
+        elif self.ai_provider == 'deepseek':
+            models_config = self.cfg.DEEPSEEK_MODELS
+            if not models_config or not isinstance(models_config, dict):
+                raise ValueError("DEEPSEEK_MODELS must be defined in app_config and be a non-empty dictionary.")
+        else:
+            raise ValueError(f"Unsupported AI provider: {self.ai_provider}")
 
-        available_model_aliases = list(self.cfg.GEMINI_MODELS.keys())
+        available_model_aliases = list(models_config.keys())
         if not available_model_aliases:
-            raise ValueError("GEMINI_MODELS in app_config is empty.")
+            raise ValueError(f"{self.ai_provider.upper()}_MODELS in app_config is empty.")
+        
+        # Handle model alias that doesn't match the provider
         if model_alias not in available_model_aliases:
-            raise ValueError(f"Invalid model alias '{model_alias}'. Available: {', '.join(available_model_aliases)}")
+            logging.warning(f"Model alias '{model_alias}' not found in {self.ai_provider.upper()}_MODELS. " +
+                           f"Using default model for {self.ai_provider} provider.")
+            # Use the first available model for this provider
+            model_alias = available_model_aliases[0]
+            # Also update the config to match
+            if hasattr(self.cfg, 'update_setting_and_save'):
+                self.cfg.update_setting_and_save("DEFAULT_MODEL_TYPE", model_alias)
+                logging.info(f"Updated DEFAULT_MODEL_TYPE setting to '{model_alias}' to match {self.ai_provider} provider")
 
-        model_config_from_file = self.cfg.GEMINI_MODELS.get(model_alias)
+        model_config_from_file = models_config.get(model_alias)
         if not model_config_from_file or not isinstance(model_config_from_file, dict):
             raise ValueError(f"Model configuration for alias '{model_alias}' not found or invalid.")
 
@@ -59,7 +92,7 @@ class AgentAssistant:
         self.model_alias = model_alias
         self.actual_model_name = actual_model_name
 
-        # Initialize model
+        # Initialize model using the adapter
         self._initialize_model(model_config_from_file, safety_settings_override)
         
         # Cache and history settings
@@ -80,48 +113,39 @@ class AgentAssistant:
             logging.info("Chat memory is disabled.")
 
     def _initialize_model(self, model_config, safety_settings_override):
-        """Initialize the Google Gemini model with appropriate settings."""
+        """Initialize the AI model with appropriate settings using the adapter."""
         try:
-            generation_config_dict = model_config.get('generation_config')
-            if not generation_config_dict or not isinstance(generation_config_dict, dict):
-                raise ValueError(f"Generation config not found or invalid for alias '{self.model_alias}'.")
-
-            required_fields = ['temperature', 'top_p', 'top_k', 'max_output_tokens']
-            missing_fields = [f for f in required_fields if f not in generation_config_dict]
-            if missing_fields:
-                raise ValueError(f"Missing gen config fields for '{self.model_alias}': {', '.join(missing_fields)}")
+            # Check if the required dependencies are installed for the chosen provider
+            from model_adapters import check_dependencies
+            deps_installed, error_msg = check_dependencies(self.ai_provider)
             
-            # Create the generation config with the proper class
-            from google.generativeai.types import GenerationConfig
-            generation_config = GenerationConfig(
-                temperature=generation_config_dict['temperature'],
-                top_p=generation_config_dict['top_p'],
-                top_k=generation_config_dict['top_k'],
-                max_output_tokens=generation_config_dict['max_output_tokens']
+            if not deps_installed:
+                logging.error(f"Missing dependencies for {self.ai_provider}: {error_msg}")
+                raise ImportError(error_msg)
+            
+            # Ensure we have a valid model name
+            if not self.actual_model_name:
+                raise ValueError("Model name must be provided.")
+                    
+            # Create model adapter
+            self.model_adapter = create_model_adapter(
+                provider=self.ai_provider,
+                api_key=self.api_key,
+                model_name=self.actual_model_name
             )
             
             # Set up safety settings
             safety_settings = safety_settings_override or getattr(self.cfg, 'AI_SAFETY_SETTINGS', None)
             
-            # Initialize the model
-            from google.generativeai.generative_models import GenerativeModel
-            
-            # Make sure the environment variable is set
-            if self.api_key:
-                os.environ["GOOGLE_API_KEY"] = self.api_key
-                logging.info("Set GOOGLE_API_KEY environment variable before model creation")
-                
-            self.model = GenerativeModel(
-                model_name=self.actual_model_name,
-                generation_config=generation_config,
-                safety_settings=safety_settings
-            )
+            # Initialize the model adapter
+            self.model_adapter.initialize(model_config, safety_settings)
             
             logging.info(f"AI Assistant initialized with model alias: {self.model_alias} (actual: {self.actual_model_name})")
             logging.info(f"Model description: {model_config.get('description', 'N/A')}")
+            logging.info(f"Model provider: {self.ai_provider}")
 
         except Exception as e:
-            logging.error(f"Failed to initialize Google Generative AI model: {e}", exc_info=True)
+            logging.error(f"Failed to initialize AI model: {e}", exc_info=True)
             raise
 
     def _prepare_image_part(self, screenshot_bytes: bytes) -> Optional[Image.Image]:
@@ -297,27 +321,52 @@ class AgentAssistant:
                         last_action_feedback: Optional[str] = None
                         ) -> Optional[Tuple[Dict[str, Any], float, int]]:
         """
-        Uses the agent-based approach with Google Gemini model to determine the next action to take.
+        Uses the agent-based approach with the configured AI model to determine the next action to take.
         Returns the action data, processing time, and token count.
         """
-        # Let's directly use plan_and_execute since we're only supporting the agent approach now
-        result = self.plan_and_execute(
-            screenshot_bytes,
-            xml_context,
-            previous_actions,
-            current_screen_visit_count,
-            current_composite_hash,
-            last_action_feedback
-        )
-        
-        if not result:
-            return None
+        try:
+            start_time = time.time()
             
-        action_data, elapsed_time, success = result
-        # Estimate token count (not directly available from API)
-        total_tokens = len(xml_context) // 4  # Rough estimate
-        
-        return {"action_to_perform": action_data}, elapsed_time, total_tokens
+            # Prepare image
+            processed_image = self._prepare_image_part(screenshot_bytes)
+            if not processed_image:
+                logging.error("Failed to process screenshot for AI analysis")
+                return None
+                
+            # Build the system prompt
+            available_actions = getattr(self.cfg, 'AVAILABLE_ACTIONS', [])
+            prompt = self._build_system_prompt(
+                xml_context,
+                previous_actions,
+                available_actions,
+                current_screen_visit_count,
+                current_composite_hash,
+                last_action_feedback
+            )
+            
+            # Generate response from the model
+            try:
+                response_text, metadata = self.model_adapter.generate_response(
+                    prompt=prompt,
+                    image=processed_image
+                )
+                elapsed_time = metadata.get("processing_time", time.time() - start_time)
+                token_count = metadata.get("token_count", {}).get("total", len(prompt) // 4)
+            except Exception as e:
+                logging.error(f"Error generating AI response: {e}", exc_info=True)
+                return None
+                
+            # Parse the action from the response
+            action_data = self._parse_action_from_response(response_text)
+            if not action_data:
+                logging.error("Failed to parse action data from AI response")
+                return None
+                
+            return {"action_to_perform": action_data}, elapsed_time, token_count
+            
+        except Exception as e:
+            logging.error(f"Error in get_next_action: {e}", exc_info=True)
+            return None
             
     def execute_action(self, action_data: Dict[str, Any]) -> bool:
         """
@@ -422,7 +471,7 @@ class AgentAssistant:
             logging.error("Cannot plan and execute: Screenshot bytes is None")
             return None
             
-        # First, get the next action suggestion from the model
+        # Get the next action suggestion from the model
         result = self.get_next_action(
             screenshot_bytes,
             xml_context,

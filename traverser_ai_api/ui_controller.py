@@ -67,10 +67,11 @@ class CrawlerControllerWindow(QMainWindow):
 
         # Set paths relative to the current script directory
         self.api_dir = os.path.dirname(__file__)  # Directory containing this script
+        self.project_root = os.path.dirname(self.api_dir)  # Parent directory of api_dir
         
         # Initialize Config instance
         defaults_module_path = os.path.join(self.api_dir, "config.py")
-        user_config_json_path = os.path.join(self.api_dir, "user_config.json")
+        user_config_json_path = os.path.join(self.project_root, "user_config.json")
         self.config = Config(defaults_module_path, user_config_json_path)
         self.config.load_user_config()
         
@@ -78,13 +79,19 @@ class CrawlerControllerWindow(QMainWindow):
         # This is done after load_user_config to not overwrite existing setting
         if not hasattr(self.config, 'UI_MODE'):
             # Use update_setting_and_save which handles attribute creation
+            logging.info(f"Setting default UI_MODE to Expert in config file: {user_config_json_path}")
             self.config.update_setting_and_save('UI_MODE', 'Expert')
+            
+        # Log current UI_MODE setting
+        ui_mode = getattr(self.config, 'UI_MODE', 'Unknown')
+        logging.info(f"Current UI_MODE setting: {ui_mode}")
         
         # Initialize instance variables
         self.config_widgets = {}
         self.current_health_app_list_file = self.config.CURRENT_HEALTH_APP_LIST_FILE
         self.health_apps_data = []
-        self.last_selected_app = None
+        # Initialize last_selected_app as an empty dictionary instead of None
+        self.last_selected_app = {}
         
         # Ensure output directories exist
         self._ensure_output_directories_exist()
@@ -351,6 +358,9 @@ class CrawlerControllerWindow(QMainWindow):
             # Update config with relative paths if using absolute paths
             self._update_relative_paths_in_config()
             
+            # Synchronize the API directory user_config.json with the root user_config.json
+            self._sync_user_config_files()
+            
         except Exception as e:
             logging.error(f"Error creating output directories: {e}", exc_info=True)
             if hasattr(self, 'log_output') and self.log_output:
@@ -390,7 +400,38 @@ class CrawlerControllerWindow(QMainWindow):
         except Exception as e:
             logging.error(f"Error updating relative paths in config: {e}", exc_info=True)
             
-    def log_message(self, message: str, color: str = 'black'):
+    def _sync_user_config_files(self):
+        """Synchronize the user_config.json in API directory with the root user_config.json file."""
+        try:
+            # Path to the API directory user_config.json
+            api_config_path = os.path.join(self.api_dir, "user_config.json")
+            # Path to the root user_config.json (already set in self.config.USER_CONFIG_FILE_PATH)
+            root_config_path = self.config.USER_CONFIG_FILE_PATH
+            
+            # If both files exist, make sure they have the same settings
+            if os.path.exists(api_config_path) and os.path.exists(root_config_path):
+                # Read root config file
+                with open(root_config_path, 'r', encoding='utf-8') as f:
+                    root_config = json.load(f)
+                
+                # Read API config file
+                with open(api_config_path, 'r', encoding='utf-8') as f:
+                    api_config = json.load(f)
+                
+                # Copy 'UI_MODE' from root to API config if it exists
+                if 'UI_MODE' in root_config and root_config['UI_MODE'] != api_config.get('UI_MODE'):
+                    api_config['UI_MODE'] = root_config['UI_MODE']
+                    # Save updated API config
+                    with open(api_config_path, 'w', encoding='utf-8') as f:
+                        json.dump(api_config, f, indent=4, ensure_ascii=False)
+                    self.log_message(f"Synchronized UI_MODE '{root_config['UI_MODE']}' to API config file", 'blue')
+                    logging.info(f"Synchronized UI_MODE '{root_config['UI_MODE']}' to API config file: {api_config_path}")
+        except Exception as e:
+            logging.error(f"Error synchronizing user config files: {e}", exc_info=True)
+            if hasattr(self, 'log_output') and self.log_output:
+                self.log_message(f"Error synchronizing user config files: {e}", 'red')
+            
+    def log_message(self, message: str, color: str = 'white'):
         """Append a message to the log output with a specified color."""
         # Always log to console for backup
         logging.info(message)
@@ -408,7 +449,7 @@ class CrawlerControllerWindow(QMainWindow):
             return
 
         color_map = {
-            'black': QColor('black'),
+            'white': QColor('white'),
             'red': QColor('red'),
             'green': QColor('green'),
             'blue': QColor('blue'),

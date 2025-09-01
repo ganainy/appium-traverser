@@ -19,16 +19,30 @@ class UIComponents:
     # These will be hidden in basic mode
     ADVANCED_GROUPS = [
         "appium_settings_group",
-        "ai_settings_group",
         "error_handling_group"
     ]
+    
+    @staticmethod
+    def _update_model_types(provider: str, config_widgets: Dict[str, Any]) -> None:
+        """Update the model types based on the selected AI provider."""
+        model_dropdown = config_widgets['DEFAULT_MODEL_TYPE']
+        model_dropdown.clear()
+        
+        if provider == 'gemini':
+            model_dropdown.addItems([
+                'flash-latest', 'flash-latest-fast'
+            ])
+        elif provider == 'deepseek':
+            model_dropdown.addItems([
+                'deepseek-vision', 'deepseek-vision-fast'
+            ])
     
     ADVANCED_FIELDS = {
         "APPIUM_SERVER_URL": True,  # True means hide in basic mode
         "TARGET_DEVICE_UDID": True,  # True means hide in basic mode
         "NEW_COMMAND_TIMEOUT": True,
         "APPIUM_IMPLICIT_WAIT": True,
-        "DEFAULT_MODEL_TYPE": True,
+        "DEFAULT_MODEL_TYPE": False,
         "USE_CHAT_MEMORY": True,
         "MAX_CHAT_HISTORY": True,
         "XML_SNIPPET_MAX_LEN": True,
@@ -73,11 +87,42 @@ class UIComponents:
         mode_label = QLabel("UI Mode:")
         config_handler.ui_mode_dropdown = QComboBox()
         config_handler.ui_mode_dropdown.addItems(["Basic", "Expert"])
-        config_handler.ui_mode_dropdown.setCurrentIndex(0)  # Default to Basic mode
+        
+        # Get the UI mode from config
+        initial_mode = "Basic"  # Default if not found
+        
+        # Check if the user_config has a UI_MODE (loaded from user_config.json)
+        if hasattr(config_handler, 'user_config') and 'UI_MODE' in config_handler.user_config:
+            initial_mode = config_handler.user_config['UI_MODE']
+            logging.info(f"Setting initial UI mode from user_config: {initial_mode}")
+        # Fallback to config attribute if it exists
+        elif hasattr(config_handler.main_controller.config, 'UI_MODE'):
+            initial_mode = config_handler.main_controller.config.UI_MODE
+            logging.info(f"Setting initial UI mode from config attribute: {initial_mode}")
+        
+        logging.info(f"Initial UI mode determined as: {initial_mode}")
+        
+        # Set the dropdown to the initial mode
+        mode_index = config_handler.ui_mode_dropdown.findText(initial_mode)
+        if mode_index >= 0:
+            config_handler.ui_mode_dropdown.setCurrentIndex(mode_index)
+        else:
+            config_handler.ui_mode_dropdown.setCurrentIndex(0)  # Default to Basic if not found
+            
         config_handler.ui_mode_dropdown.setToolTip("Basic mode hides advanced settings. Expert mode shows all settings.")
         mode_layout.addWidget(mode_label)
         mode_layout.addWidget(config_handler.ui_mode_dropdown)
         layout.addLayout(mode_layout)
+        
+        # Connect UI mode dropdown to toggle UI complexity
+        config_handler.ui_mode_dropdown.currentTextChanged.connect(
+            lambda mode: UIComponents.toggle_ui_complexity(mode, config_handler)
+        )
+        
+        # Connect a complete save to ensure full config is updated when UI mode changes
+        config_handler.ui_mode_dropdown.currentTextChanged.connect(
+            lambda _: config_handler.save_config()
+        )
         
         # Create scrollable area for config inputs
         scroll = QScrollArea()
@@ -98,7 +143,9 @@ class UIComponents:
         )
         app_group.setObjectName("app_settings_group")
         
-        ai_group = UIComponents._create_ai_settings_group(scroll_layout, config_widgets, tooltips)
+        ai_group = UIComponents._create_ai_settings_group(
+            scroll_layout, config_widgets, tooltips, config_handler
+        )
         ai_group.setObjectName("ai_settings_group")
         
         crawler_group = UIComponents._create_crawler_settings_group(scroll_layout, config_widgets, tooltips)
@@ -130,11 +177,6 @@ class UIComponents:
             "mobsf_settings_group": mobsf_group
         }
         
-        # Connect UI mode dropdown to toggle UI complexity
-        config_handler.ui_mode_dropdown.currentTextChanged.connect(
-            lambda mode: UIComponents.toggle_ui_complexity(mode, config_handler)
-        )
-        
         scroll.setWidget(scroll_content)
         layout.addWidget(scroll)
         
@@ -142,8 +184,8 @@ class UIComponents:
         controls_group = UIComponents._create_control_buttons(controls_handler)
         layout.addWidget(controls_group)
         
-        # Initialize with basic mode by default (hide advanced settings)
-        UIComponents.toggle_ui_complexity("Basic", config_handler)
+        # Initialize the UI complexity based on the mode we determined
+        UIComponents.toggle_ui_complexity(initial_mode, config_handler)
         
         return panel
     
@@ -207,8 +249,20 @@ class UIComponents:
                 # Log but don't crash if there's an issue with a specific widget
                 logging.warning(f"Error toggling visibility for {field_name}: {e}")
         
+        # Set the dropdown to the current mode
+        if hasattr(config_handler, 'ui_mode_dropdown'):
+            index = config_handler.ui_mode_dropdown.findText(mode)
+            if index >= 0 and config_handler.ui_mode_dropdown.currentIndex() != index:
+                # Only set if it's different to avoid triggering change events
+                config_handler.ui_mode_dropdown.setCurrentIndex(index)
+        
         # Save the current mode to user config
         config_handler.config.update_setting_and_save("UI_MODE", mode)
+        # Ensure the config.UI_MODE attribute is updated
+        if hasattr(config_handler.config, 'UI_MODE'):
+            config_handler.config.UI_MODE = mode
+        logging.info(f"UI mode switched to and saved: {mode}")
+        logging.info(f"Config file location: {config_handler.config.USER_CONFIG_FILE_PATH}")
         config_handler.main_controller.log_message(f"Switched to {mode} mode", 'blue')
     
     @staticmethod
@@ -249,6 +303,8 @@ class UIComponents:
         # Log output
         controller.log_output = QTextEdit()
         controller.log_output.setReadOnly(True)
+        # Set dark background for log output to make white text visible
+        controller.log_output.setStyleSheet("background-color: #333333;")
         
         # Add all sections to the layout
         layout.addLayout(status_layout)
@@ -344,19 +400,52 @@ class UIComponents:
     def _create_ai_settings_group(
         layout: QFormLayout, 
         config_widgets: Dict[str, Any],
-        tooltips: Dict[str, str]
+        tooltips: Dict[str, str],
+        config_handler: Any = None
     ) -> QGroupBox:
         """Create the AI settings group."""
         ai_group = QGroupBox("AI Settings")
         ai_layout = QFormLayout(ai_group)
         
+        # AI Provider Selection
+        config_widgets['AI_PROVIDER'] = QComboBox()
+        config_widgets['AI_PROVIDER'].addItems(['gemini', 'deepseek'])
+        label_ai_provider = QLabel("AI Provider: ")
+        label_ai_provider.setToolTip("The AI model provider to use for analysis and decision making.")
+        ai_layout.addRow(label_ai_provider, config_widgets['AI_PROVIDER'])
+        
+        # Connect the AI provider selection to update model types
+        config_widgets['AI_PROVIDER'].currentTextChanged.connect(
+            lambda provider: UIComponents._update_model_types(provider, config_widgets)
+        )
+        
+        # Connect the AI provider selection to auto-save the setting if config_handler is provided
+        if config_handler and hasattr(config_handler, 'config'):
+            config_widgets['AI_PROVIDER'].currentTextChanged.connect(
+                lambda provider: config_handler.config.update_setting_and_save("AI_PROVIDER", provider)
+            )
+            # Also connect it to save the entire config
+            config_widgets['AI_PROVIDER'].currentTextChanged.connect(
+                lambda _: config_handler.save_config()
+            )
+        
         config_widgets['DEFAULT_MODEL_TYPE'] = QComboBox()
         config_widgets['DEFAULT_MODEL_TYPE'].addItems([
-            'flash-latest', 'flash-latest-fast', 'pro-latest-accurate'
+            'flash-latest', 'flash-latest-fast'
         ])
         label_model_type = QLabel("Default Model Type: ")
         label_model_type.setToolTip(tooltips['DEFAULT_MODEL_TYPE'])
         ai_layout.addRow(label_model_type, config_widgets['DEFAULT_MODEL_TYPE'])
+        
+        # Connect the model type selection to auto-save the setting if config_handler is provided
+        if config_handler and hasattr(config_handler, 'config'):
+            config_widgets['DEFAULT_MODEL_TYPE'].currentTextChanged.connect(
+                lambda model_type: config_handler.config.update_setting_and_save("DEFAULT_MODEL_TYPE", model_type)
+            )
+            # Also connect it to save the entire config
+            config_widgets['DEFAULT_MODEL_TYPE'].currentTextChanged.connect(
+                lambda _: config_handler.save_config()
+            )
         
         config_widgets['USE_CHAT_MEMORY'] = QCheckBox()
         label_use_chat_memory = QLabel("Use Chat Memory: ")

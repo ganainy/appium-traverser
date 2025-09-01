@@ -38,6 +38,8 @@ class Config:
         self.TARGET_DEVICE_UDID: Optional[str] = None
         self.USE_COORDINATE_FALLBACK: bool = True
         self.GEMINI_API_KEY: Optional[str] = None
+        self.DEEPSEEK_API_KEY: Optional[str] = None
+        self.AI_PROVIDER: str = 'gemini'  # 'gemini' or 'deepseek'
         self.DEFAULT_MODEL_TYPE: str = 'flash-latest-fast'
         self.USE_CHAT_MEMORY: bool = False
         self.MAX_CHAT_HISTORY: int = 10
@@ -48,6 +50,7 @@ class Config:
         self.USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY: bool = True
         self.AI_SAFETY_SETTINGS: Dict[str, Any] = {}
         self.GEMINI_MODELS: Dict[str, Any] = {}
+        self.DEEPSEEK_MODELS: Dict[str, Any] = {}
         self.CRAWL_MODE: str = 'steps'
         self.MAX_CRAWL_STEPS: int = 10
         self.MAX_CRAWL_DURATION_SECONDS: int = 600
@@ -81,6 +84,7 @@ class Config:
         self.CLEANUP_DEVICE_PCAP_FILE: bool = True
         self.CURRENT_HEALTH_APP_LIST_FILE: Optional[str] = None
         self.LAST_SELECTED_APP: Optional[Dict[str,str]] = None
+        self.UI_MODE: str = 'Basic' # basic or expert
 
         self.MOBSF_API_URL: Optional[str] = None
         self.MOBSF_API_KEY: Optional[str] = None
@@ -174,6 +178,7 @@ class Config:
                 logging.error(f"Failed to load environment variables with dotenv: {e2}")
             
         self.GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", self.GEMINI_API_KEY)
+        self.DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", self.DEEPSEEK_API_KEY)
         self.PCAPDROID_API_KEY = os.getenv("PCAPDROID_API_KEY", self.PCAPDROID_API_KEY)
         self.MOBSF_API_KEY = os.getenv("MOBSF_API_KEY", self.MOBSF_API_KEY)
         logging.info("Applied configuration from environment variables.")
@@ -254,7 +259,7 @@ class Config:
             "MAX_CONSECUTIVE_AI_FAILURES", "MAX_CONSECUTIVE_MAP_FAILURES", "MAX_CONSECUTIVE_EXEC_FAILURES",
             "ENABLE_TRAFFIC_CAPTURE", "PCAPDROID_PACKAGE",
             "DEVICE_PCAP_DIR", "CLEANUP_DEVICE_PCAP_FILE",
-            "CURRENT_HEALTH_APP_LIST_FILE", "LAST_SELECTED_APP",
+            "CURRENT_HEALTH_APP_LIST_FILE", "LAST_SELECTED_APP", "UI_MODE",
             "MOBSF_API_URL", "ENABLE_MOBSF_ANALYSIS",
             # Save the template for OUTPUT_DATA_DIR so user can change base output loc
             # The actual key in user_config.json will be "OUTPUT_DATA_DIR"
@@ -420,6 +425,7 @@ APPIUM_SERVER_URL = "http://127.0.0.1:4723"
 TARGET_DEVICE_UDID = None
 USE_COORDINATE_FALLBACK = True
 
+AI_PROVIDER = 'gemini'  # 'gemini' or 'deepseek'
 DEFAULT_MODEL_TYPE = 'flash-latest-fast'
 USE_CHAT_MEMORY = False
 MAX_CHAT_HISTORY = 10
@@ -438,6 +444,18 @@ GEMINI_MODELS = {
         'name': 'gemini-2.5-flash-preview-05-20',
         'description': 'Latest Flash model (2.5) with settings optimized for faster responses.',
         'generation_config': {'temperature': 0.3, 'top_p': 0.8, 'top_k': 20, 'max_output_tokens': 8192}
+    }
+}
+DEEPSEEK_MODELS = {
+    'deepseek-vision': {
+        'name': 'deepseek-vl',
+        'description': 'DeepSeek Vision-Language model for multimodal tasks.',
+        'generation_config': {'temperature': 0.7, 'top_p': 0.95, 'max_output_tokens': 4096}
+    },
+    'deepseek-vision-fast': {
+        'name': 'deepseek-vl',
+        'description': 'DeepSeek Vision-Language model with settings optimized for faster responses.',
+        'generation_config': {'temperature': 0.3, 'top_p': 0.8, 'max_output_tokens': 4096}
     }
 }
 

@@ -50,6 +50,38 @@ class CrawlerManager(QObject):
     @Slot()
     def start_crawler(self):
         """Start the crawler process."""
+        # Check if app package is selected
+        app_package = getattr(self.config, 'APP_PACKAGE', None)
+        if not app_package:
+            self.main_controller.log_message(
+                "ERROR: No target app selected. Please scan for and select a health app before starting the crawler.",
+                'red'
+            )
+            return
+            
+        # Check if the required dependencies are installed for the selected AI provider
+        try:
+            from traverser_ai_api.model_adapters import check_dependencies
+        except ImportError:
+            try:
+                from model_adapters import check_dependencies
+            except ImportError:
+                self.main_controller.log_message(
+                    "ERROR: Could not import model_adapters module. Please check your installation.",
+                    'red'
+                )
+                return
+                
+        ai_provider = getattr(self.config, 'AI_PROVIDER', 'gemini').lower()
+        deps_installed, error_msg = check_dependencies(ai_provider)
+        
+        if not deps_installed:
+            self.main_controller.log_message(
+                f"ERROR: Missing dependencies for {ai_provider} provider. {error_msg}",
+                'red'
+            )
+            return
+            
         if self._shutdown_flag_file_path and os.path.exists(self._shutdown_flag_file_path):
             try:
                 os.remove(self._shutdown_flag_file_path)

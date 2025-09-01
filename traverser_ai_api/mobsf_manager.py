@@ -53,7 +53,16 @@ class MobSFManager:
         Returns:
             Tuple of (success, response_data)
         """
-        url = f"{self.api_url}/{endpoint}"
+        # Ensure endpoint doesn't start with a slash to prevent double slashes
+        endpoint = endpoint.lstrip('/')
+        
+        # Ensure API URL has a scheme and is properly formatted with a trailing slash
+        api_url = self.api_url
+        if not api_url.startswith(('http://', 'https://')):
+            api_url = f"http://{api_url}"
+        api_url = api_url.rstrip('/') + '/'
+        
+        url = f"{api_url}{endpoint}"
         try:
             if method.upper() == 'GET':
                 response = requests.get(url, headers=self.headers, stream=stream)

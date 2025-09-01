@@ -2,7 +2,12 @@
 """
 Standalone Android App Package and Activity Finder
 
-This script identifies the package name, application label (name), and main launch
+This script identifies the package name, application label (name), and maiif CAN_ENABLE_AI_FILTERING_GLOBALLY: # Check again before accessing AI_SAFETY_SETTINGS
+    if not hasattr(cfg, 'AI_SAFETY_SETTINGS') or not isinstance(cfg.AI_SAFETY_SETTINGS, dict):
+        print("Error: AI_SAFETY_SETTINGS not a valid dictionary in Config. AI Filtering will be globally unavailable.", file=sys.stderr)
+        CAN_ENABLE_AI_FILTERING_GLOBALLY = False
+    else:
+        AI_MODEL_SAFETY_SETTINGS = cfg.AI_SAFETY_SETTINGSunch
 activity of Android applications installed on a connected device using ADB.
 
 AI Filtering Option:
@@ -26,7 +31,8 @@ import traceback
 import argparse
 import time
 
-# --- Try importing Google AI Library (required only for filtering) ---
+# --- Try importing AI Libraries (required only for filtering) ---
+# Gemini
 try:
     import google.generativeai as genai
     from google.generativeai.client import configure as genai_configure
@@ -37,6 +43,14 @@ except ImportError:
     genai = None
     genai_configure = None # Define to None if import fails
     GenAIModel = None      # Define to None if import fails
+
+# DeepSeek
+try:
+    from deepseek import Client as DeepSeekClient
+    DEEPSEEK_AVAILABLE = True
+except ImportError:
+    DEEPSEEK_AVAILABLE = False
+    DeepSeekClient = None
 
 # --- Centralized Configuration Setup ---
 CURRENT_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -92,28 +106,60 @@ if not isinstance(APP_INFO_DIR, str):
 os.makedirs(APP_INFO_DIR, exist_ok=True) # Ensure it exists
 
 print("Validating AI prerequisites for filtering (using Config instance)...")
-if not GENAI_AVAILABLE:
-    print("Error: 'google-generativeai' library not installed. AI Filtering will be globally unavailable.", file=sys.stderr)
-    CAN_ENABLE_AI_FILTERING_GLOBALLY = False
 
-if CAN_ENABLE_AI_FILTERING_GLOBALLY and not GEMINI_API_KEY:
-    print("Error: GEMINI_API_KEY not found in configuration (via Config). AI Filtering will be globally unavailable.", file=sys.stderr)
-    CAN_ENABLE_AI_FILTERING_GLOBALLY = False
+# Determine which AI provider to use
+AI_PROVIDER = getattr(cfg, 'AI_PROVIDER', 'gemini').lower()
+print(f"Using AI provider: {AI_PROVIDER}")
 
-if CAN_ENABLE_AI_FILTERING_GLOBALLY:
-    if not cfg.DEFAULT_MODEL_TYPE or not cfg.GEMINI_MODELS or \
-       not isinstance(cfg.GEMINI_MODELS, dict) or not cfg.GEMINI_MODELS.get(cfg.DEFAULT_MODEL_TYPE):
-        print("Error: DEFAULT_MODEL_TYPE or GEMINI_MODELS (with entry for default) not valid in Config. AI Filtering will be globally unavailable.", file=sys.stderr)
+if AI_PROVIDER == 'gemini':
+    if not GENAI_AVAILABLE:
+        print("Error: 'google-generativeai' library not installed. AI Filtering will be globally unavailable.", file=sys.stderr)
         CAN_ENABLE_AI_FILTERING_GLOBALLY = False
-    else:
-        model_type = cfg.DEFAULT_MODEL_TYPE
-        model_details = cfg.GEMINI_MODELS[model_type]
-        DEFAULT_AI_MODEL_NAME = model_details.get('name')
-        if not DEFAULT_AI_MODEL_NAME:
-            print(f"Error: 'name' for model type '{model_type}' not in GEMINI_MODELS (Config). AI Filtering will be globally unavailable.", file=sys.stderr)
+
+    if CAN_ENABLE_AI_FILTERING_GLOBALLY and not cfg.GEMINI_API_KEY:
+        print("Error: GEMINI_API_KEY not found in configuration (via Config). AI Filtering will be globally unavailable.", file=sys.stderr)
+        CAN_ENABLE_AI_FILTERING_GLOBALLY = False
+
+    if CAN_ENABLE_AI_FILTERING_GLOBALLY:
+        if not cfg.DEFAULT_MODEL_TYPE or not cfg.GEMINI_MODELS or \
+           not isinstance(cfg.GEMINI_MODELS, dict) or not cfg.GEMINI_MODELS.get(cfg.DEFAULT_MODEL_TYPE):
+            print("Error: DEFAULT_MODEL_TYPE or GEMINI_MODELS (with entry for default) not valid in Config. AI Filtering will be globally unavailable.", file=sys.stderr)
             CAN_ENABLE_AI_FILTERING_GLOBALLY = False
         else:
-            print(f"Using AI Model from Config: {DEFAULT_AI_MODEL_NAME} (type: {model_type})")
+            model_type = cfg.DEFAULT_MODEL_TYPE
+            model_details = cfg.GEMINI_MODELS[model_type]
+            DEFAULT_AI_MODEL_NAME = model_details.get('name')
+            if not DEFAULT_AI_MODEL_NAME:
+                print(f"Error: 'name' for model type '{model_type}' not in GEMINI_MODELS (Config). AI Filtering will be globally unavailable.", file=sys.stderr)
+                CAN_ENABLE_AI_FILTERING_GLOBALLY = False
+            else:
+                print(f"Using AI Model from Config: {DEFAULT_AI_MODEL_NAME} (type: {model_type})")
+elif AI_PROVIDER == 'deepseek':
+    if not DEEPSEEK_AVAILABLE:
+        print("Error: 'deepseek' library not installed. AI Filtering will be globally unavailable.", file=sys.stderr)
+        CAN_ENABLE_AI_FILTERING_GLOBALLY = False
+        
+    if CAN_ENABLE_AI_FILTERING_GLOBALLY and not cfg.DEEPSEEK_API_KEY:
+        print("Error: DEEPSEEK_API_KEY not found in configuration (via Config). AI Filtering will be globally unavailable.", file=sys.stderr)
+        CAN_ENABLE_AI_FILTERING_GLOBALLY = False
+        
+    if CAN_ENABLE_AI_FILTERING_GLOBALLY:
+        if not cfg.DEFAULT_MODEL_TYPE or not cfg.DEEPSEEK_MODELS or \
+           not isinstance(cfg.DEEPSEEK_MODELS, dict) or not cfg.DEEPSEEK_MODELS.get(cfg.DEFAULT_MODEL_TYPE):
+            print("Error: DEFAULT_MODEL_TYPE or DEEPSEEK_MODELS (with entry for default) not valid in Config. AI Filtering will be globally unavailable.", file=sys.stderr)
+            CAN_ENABLE_AI_FILTERING_GLOBALLY = False
+        else:
+            model_type = cfg.DEFAULT_MODEL_TYPE
+            model_details = cfg.DEEPSEEK_MODELS[model_type]
+            DEFAULT_AI_MODEL_NAME = model_details.get('name')
+            if not DEFAULT_AI_MODEL_NAME:
+                print(f"Error: 'name' for model type '{model_type}' not in DEEPSEEK_MODELS (Config). AI Filtering will be globally unavailable.", file=sys.stderr)
+                CAN_ENABLE_AI_FILTERING_GLOBALLY = False
+            else:
+                print(f"Using AI Model from Config: {DEFAULT_AI_MODEL_NAME} (type: {model_type})")
+else:
+    print(f"Error: Unsupported AI provider: {AI_PROVIDER}. AI Filtering will be globally unavailable.", file=sys.stderr)
+    CAN_ENABLE_AI_FILTERING_GLOBALLY = False
 
     if CAN_ENABLE_AI_FILTERING_GLOBALLY: # Check again before accessing AI_SAFETY_SETTINGS
         if not hasattr(cfg, 'AI_SAFETY_SETTINGS') or not isinstance(cfg.AI_SAFETY_SETTINGS, dict):
@@ -304,7 +350,7 @@ def find_main_activity(package_name):
     return None
 
 def filter_apps_with_ai(app_data_list: list):
-    """Uses Google Gemini AI to filter apps for health/fitness categories."""
+    """Uses AI (Google Gemini or DeepSeek) to filter apps for health/fitness categories."""
     print("\n--- Filtering apps using AI ---")
     if not CAN_ENABLE_AI_FILTERING_GLOBALLY:
         print("AI Filtering globally disabled - will NOT filter app list.", file=sys.stderr)
@@ -316,17 +362,35 @@ def filter_apps_with_ai(app_data_list: list):
         print("No app data to filter.")
         return []
 
-    if not genai_configure or not GenAIModel or not DEFAULT_AI_MODEL_NAME or AI_MODEL_SAFETY_SETTINGS is None:
-        print("Error: Google AI SDK components, model name, or safety settings missing. Cannot proceed.", file=sys.stderr)
-        return app_data_list  # Return original on configuration error
+    # Initialize the appropriate AI model based on provider
+    if AI_PROVIDER == 'gemini':
+        if not genai_configure or not GenAIModel or not DEFAULT_AI_MODEL_NAME or AI_MODEL_SAFETY_SETTINGS is None:
+            print("Error: Google AI SDK components, model name, or safety settings missing. Cannot proceed.", file=sys.stderr)
+            return app_data_list  # Return original on configuration error
 
-    try:
-        genai_configure(api_key=GEMINI_API_KEY)
-        model = GenAIModel(model_name=DEFAULT_AI_MODEL_NAME, safety_settings=AI_MODEL_SAFETY_SETTINGS)
-    except Exception as e:
-        print(f"Error configuring Google AI SDK or initializing model: {e}", file=sys.stderr)
-        traceback.print_exc()
-        return app_data_list  # Return original list on SDK error
+        try:
+            genai_configure(api_key=cfg.GEMINI_API_KEY)
+            model = GenAIModel(model_name=DEFAULT_AI_MODEL_NAME, safety_settings=AI_MODEL_SAFETY_SETTINGS)
+        except Exception as e:
+            print(f"Error configuring Google AI SDK or initializing model: {e}", file=sys.stderr)
+            traceback.print_exc()
+            return app_data_list  # Return original list on SDK error
+    
+    elif AI_PROVIDER == 'deepseek':
+        if not DeepSeekClient or not DEFAULT_AI_MODEL_NAME:
+            print("Error: DeepSeek client or model name missing. Cannot proceed.", file=sys.stderr)
+            return app_data_list  # Return original on configuration error
+            
+        try:
+            client = DeepSeekClient(api_key=cfg.DEEPSEEK_API_KEY)
+        except Exception as e:
+            print(f"Error initializing DeepSeek client: {e}", file=sys.stderr)
+            traceback.print_exc()
+            return app_data_list  # Return original list on SDK error
+    
+    else:
+        print(f"Error: Unsupported AI provider: {AI_PROVIDER}", file=sys.stderr)
+        return app_data_list  # Return original on provider error
 
     filtered_results = []
     for i in range(0, len(app_data_list), cfg.MAX_APPS_TO_SEND_TO_AI):
@@ -361,16 +425,32 @@ Input JSON:
         )
 
         try:
-            response = model.generate_content(prompt)
-            if response is None:
-                print("Error: AI returned None response", file=sys.stderr)
-                continue  # Skip to the next chunk
-            response_text = response.text.strip() if hasattr(response, 'text') else ""
-            if not response_text:
-                print("Warning: Empty response from AI", file=sys.stderr)
-                if hasattr(response, 'prompt_feedback'):
-                    print(f"Prompt Feedback: {response.prompt_feedback}", file=sys.stderr)
-                continue  # Skip to the next chunk
+            # Generate response based on the AI provider
+            response_text = ""
+            if AI_PROVIDER == 'gemini':
+                response = model.generate_content(prompt)
+                if response is None:
+                    print("Error: AI returned None response", file=sys.stderr)
+                    continue  # Skip to the next chunk
+                response_text = response.text.strip() if hasattr(response, 'text') else ""
+                if not response_text:
+                    print("Warning: Empty response from AI", file=sys.stderr)
+                    if hasattr(response, 'prompt_feedback'):
+                        print(f"Prompt Feedback: {response.prompt_feedback}", file=sys.stderr)
+                    continue  # Skip to the next chunk
+            
+            elif AI_PROVIDER == 'deepseek':
+                response = client.chat.completions.create(
+                    model=DEFAULT_AI_MODEL_NAME,
+                    messages=[{"role": "user", "content": prompt}]
+                )
+                if response is None:
+                    print("Error: AI returned None response", file=sys.stderr)
+                    continue  # Skip to the next chunk
+                response_text = response.choices[0].message.content.strip() if hasattr(response.choices[0].message, 'content') else ""
+                if not response_text:
+                    print("Warning: Empty response from AI", file=sys.stderr)
+                    continue  # Skip to the next chunk
 
             # Clean up JSON formatting if present
             if response_text.startswith("```json"):
