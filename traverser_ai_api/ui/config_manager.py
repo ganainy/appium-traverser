@@ -134,37 +134,32 @@ class ConfigManager(QObject):
             logging.error(f"Error updating crawl mode inputs: {e}")
     
     @Slot()
-    def save_config(self):
-        """Save the current configuration to the user config file."""
+    def save_config(self, key: Optional[str] = None):
+        """
+        Save the current configuration to the user config file.
+        If a key is provided, only that key's widget value is saved.
+        Otherwise, all widget values are saved.
+        """
         config_data = {}
-        for key, widget in self.main_controller.config_widgets.items():
-            if isinstance(widget, QLineEdit):
-                config_data[key] = widget.text()
-            elif isinstance(widget, QSpinBox):
-                config_data[key] = widget.value()
-            elif isinstance(widget, QCheckBox):
-                config_data[key] = widget.isChecked()
-            elif isinstance(widget, QComboBox):
-                config_data[key] = widget.currentText()
-            elif isinstance(widget, QTextEdit):
-                text = widget.toPlainText()
-                if key == 'ALLOWED_EXTERNAL_PACKAGES':
-                    config_data[key] = [line.strip() for line in text.split('\n') if line.strip()]
-                else:
-                    config_data[key] = text
-        
+
+        if key and key in self.main_controller.config_widgets:
+            # Save only the specific key that triggered the change
+            widget = self.main_controller.config_widgets[key]
+            config_data[key] = self._get_widget_value(key, widget)
+        else:
+            # Fallback to saving all widgets if no key is provided
+            for k, widget in self.main_controller.config_widgets.items():
+                config_data[k] = self._get_widget_value(k, widget)
+
+        # --- Always save these non-widget settings ---
         # Save UI mode setting
         if hasattr(self, 'ui_mode_dropdown'):
-            ui_mode = self.ui_mode_dropdown.currentText()
-            config_data['UI_MODE'] = ui_mode
-            # Also update the config object's UI_MODE attribute
-            if hasattr(self.config, 'UI_MODE'):
-                self.config.UI_MODE = ui_mode
-            logging.info(f"Saving UI_MODE to config: {ui_mode}")
-        
+            config_data['UI_MODE'] = self.ui_mode_dropdown.currentText()
+
         # Save health app list path
-        config_data['CURRENT_HEALTH_APP_LIST_FILE'] = self.main_controller.current_health_app_list_file
-        
+        if self.main_controller.current_health_app_list_file:
+            config_data['CURRENT_HEALTH_APP_LIST_FILE'] = self.main_controller.current_health_app_list_file
+
         # Save selected app info
         selected_index = self.main_controller.health_app_dropdown.currentIndex() if self.main_controller.health_app_dropdown else -1
         if selected_index > 0 and self.main_controller.health_app_dropdown:
@@ -175,44 +170,30 @@ class ConfigManager(QObject):
                     'activity_name': selected_data.get('activity_name', ''),
                     'app_name': selected_data.get('app_name', '')
                 }
+        
+        # Update the config object with the new data
+        for k, value in config_data.items():
+            self.config.update_setting_and_save(k, value)
 
-        # Log important states for debugging
-        if 'ENABLE_MOBSF_ANALYSIS' in config_data:
-            logging.info(f"Saving ENABLE_MOBSF_ANALYSIS state: {config_data['ENABLE_MOBSF_ANALYSIS']}")
+        self.main_controller.log_message("Configuration auto-saved successfully.", 'green')
 
-        try:
-            with open(self.config_file_path, 'w', encoding='utf-8') as f:
-                json.dump(config_data, f, indent=4, ensure_ascii=False)
-            
-            # Update the config object
-            for key, value in config_data.items():
-                if hasattr(self.config, key):
-                    setattr(self.config, key, value)
-            
-            # Also save to the API directory user_config.json to keep both in sync
-            api_config_path = os.path.join(os.path.dirname(os.path.dirname(self.config_file_path)), 
-                                          "traverser_ai_api", "user_config.json")
-            if os.path.exists(api_config_path):
-                try:
-                    # Read existing API config first
-                    with open(api_config_path, 'r', encoding='utf-8') as f:
-                        api_config = json.load(f)
-                    
-                    # Update UI_MODE in API config
-                    if 'UI_MODE' in config_data:
-                        api_config['UI_MODE'] = config_data['UI_MODE']
-                        
-                    # Save back to API config file
-                    with open(api_config_path, 'w', encoding='utf-8') as f:
-                        json.dump(api_config, f, indent=4, ensure_ascii=False)
-                        
-                    logging.info(f"Updated UI_MODE in API config file: {api_config_path}")
-                except Exception as api_sync_error:
-                    logging.error(f"Error synchronizing UI_MODE to API config file: {api_sync_error}")
-            
-            self.main_controller.log_message("Configuration saved successfully.", 'green')
-        except Exception as e:
-            self.main_controller.log_message(f"Error saving configuration: {e}", 'red')
+    def _get_widget_value(self, key: str, widget: QWidget) -> Any:
+        """Extracts the value from a given widget."""
+        if isinstance(widget, QLineEdit):
+            return widget.text()
+        elif isinstance(widget, QSpinBox):
+            return widget.value()
+        elif isinstance(widget, QCheckBox):
+            return widget.isChecked()
+        elif isinstance(widget, QComboBox):
+            return widget.currentText()
+        elif isinstance(widget, QTextEdit):
+            text = widget.toPlainText()
+            if key == 'ALLOWED_EXTERNAL_PACKAGES':
+                return [line.strip() for line in text.split('\n') if line.strip()]
+            else:
+                return text
+        return None
     
     def load_config(self):
         """Load configuration from the user config file."""
@@ -332,6 +313,9 @@ class ConfigManager(QObject):
                 if 'APP_ACTIVITY' in self.main_controller.config_widgets:
                     self.main_controller.config_widgets['APP_ACTIVITY'].setText(activity_name)
                 self.main_controller.log_message(f"Selected app: {selected_data.get('app_name', '')}", 'blue')
+                
+                # Save the selected app information to config
+                self.save_config()
             else:
                 if 'APP_PACKAGE' in self.main_controller.config_widgets:
                     self.main_controller.config_widgets['APP_PACKAGE'].setText("")
@@ -339,3 +323,26 @@ class ConfigManager(QObject):
                     self.main_controller.config_widgets['APP_ACTIVITY'].setText("")
         except Exception as e:
             logging.error(f"Error handling health app selection: {e}")
+    
+    def connect_widgets_for_auto_save(self):
+        """Connect all config widgets to auto-save on change."""
+        for key, widget in self.main_controller.config_widgets.items():
+            # Create a lambda that captures the current key
+            save_lambda = lambda *args, k=key: self.save_config(key=k)
+            
+            if isinstance(widget, QLineEdit):
+                widget.editingFinished.connect(save_lambda)
+            elif isinstance(widget, QSpinBox):
+                widget.editingFinished.connect(save_lambda)
+            elif isinstance(widget, QCheckBox):
+                widget.stateChanged.connect(save_lambda)
+            elif isinstance(widget, QComboBox):
+                widget.currentIndexChanged.connect(save_lambda)
+            elif isinstance(widget, QTextEdit):
+                # QTextEdit doesn't have a simple 'editingFinished' signal.
+                # We can connect to textChanged, but it fires on every keystroke.
+                # A better approach is to handle it when the widget loses focus,
+                # but that requires event filtering. For now, we'll omit auto-save
+                # on QTextEdit to avoid excessive saving.
+                pass
+        logging.info("Connected widgets for auto-saving.")

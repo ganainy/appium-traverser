@@ -36,8 +36,9 @@
     "CLEANUP_DEVICE_PCAP_FILE": false,
     "CURRENT_HEALTH_APP_LIST_FILE": "output_data\\app_info\\health_apps.json",
     "LAST_SELECTED_APP": null,
-    "UI_MODE": "Basic",
+    "UI_MODE": "Expert",
     "MOBSF_API_URL": "http://localhost:8000/api/v1",
     "ENABLE_MOBSF_ANALYSIS": true,
-    "OUTPUT_DATA_DIR": "output_data"
+    "OUTPUT_DATA_DIR": "output_data",
+    "AI_PROVIDER": "deepseek"
 }

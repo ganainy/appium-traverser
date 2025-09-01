@@ -26,6 +26,10 @@ class UIComponents:
     def _update_model_types(provider: str, config_widgets: Dict[str, Any]) -> None:
         """Update the model types based on the selected AI provider."""
         model_dropdown = config_widgets['DEFAULT_MODEL_TYPE']
+        
+        # Block signals to prevent auto-save from triggering with an empty value
+        model_dropdown.blockSignals(True)
+        
         model_dropdown.clear()
         
         if provider == 'gemini':
@@ -36,6 +40,9 @@ class UIComponents:
             model_dropdown.addItems([
                 'deepseek-vision', 'deepseek-vision-fast'
             ])
+            
+        # Unblock signals after updating
+        model_dropdown.blockSignals(False)
     
     ADVANCED_FIELDS = {
         "APPIUM_SERVER_URL": True,  # True means hide in basic mode
@@ -119,11 +126,6 @@ class UIComponents:
             lambda mode: UIComponents.toggle_ui_complexity(mode, config_handler)
         )
         
-        # Connect a complete save to ensure full config is updated when UI mode changes
-        config_handler.ui_mode_dropdown.currentTextChanged.connect(
-            lambda _: config_handler.save_config()
-        )
-        
         # Create scrollable area for config inputs
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -186,6 +188,9 @@ class UIComponents:
         
         # Initialize the UI complexity based on the mode we determined
         UIComponents.toggle_ui_complexity(initial_mode, config_handler)
+        
+        # Connect all widgets to auto-save
+        config_handler.connect_widgets_for_auto_save()
         
         return panel
     
@@ -419,16 +424,6 @@ class UIComponents:
             lambda provider: UIComponents._update_model_types(provider, config_widgets)
         )
         
-        # Connect the AI provider selection to auto-save the setting if config_handler is provided
-        if config_handler and hasattr(config_handler, 'config'):
-            config_widgets['AI_PROVIDER'].currentTextChanged.connect(
-                lambda provider: config_handler.config.update_setting_and_save("AI_PROVIDER", provider)
-            )
-            # Also connect it to save the entire config
-            config_widgets['AI_PROVIDER'].currentTextChanged.connect(
-                lambda _: config_handler.save_config()
-            )
-        
         config_widgets['DEFAULT_MODEL_TYPE'] = QComboBox()
         config_widgets['DEFAULT_MODEL_TYPE'].addItems([
             'flash-latest', 'flash-latest-fast'
@@ -436,16 +431,6 @@ class UIComponents:
         label_model_type = QLabel("Default Model Type: ")
         label_model_type.setToolTip(tooltips['DEFAULT_MODEL_TYPE'])
         ai_layout.addRow(label_model_type, config_widgets['DEFAULT_MODEL_TYPE'])
-        
-        # Connect the model type selection to auto-save the setting if config_handler is provided
-        if config_handler and hasattr(config_handler, 'config'):
-            config_widgets['DEFAULT_MODEL_TYPE'].currentTextChanged.connect(
-                lambda model_type: config_handler.config.update_setting_and_save("DEFAULT_MODEL_TYPE", model_type)
-            )
-            # Also connect it to save the entire config
-            config_widgets['DEFAULT_MODEL_TYPE'].currentTextChanged.connect(
-                lambda _: config_handler.save_config()
-            )
         
         config_widgets['USE_CHAT_MEMORY'] = QCheckBox()
         label_use_chat_memory = QLabel("Use Chat Memory: ")
@@ -660,16 +645,13 @@ class UIComponents:
         group = QGroupBox("Controls")
         layout = QHBoxLayout(group)
         
-        controls_handler.save_config_btn = QPushButton("Save Config")
         controls_handler.start_btn = QPushButton("Start Crawler")
         controls_handler.stop_btn = QPushButton("Stop Crawler")
         controls_handler.stop_btn.setEnabled(False)
         
-        controls_handler.save_config_btn.clicked.connect(controls_handler.save_config)
         controls_handler.start_btn.clicked.connect(controls_handler.start_crawler)
         controls_handler.stop_btn.clicked.connect(controls_handler.stop_crawler)
         
-        layout.addWidget(controls_handler.save_config_btn)
         layout.addWidget(controls_handler.start_btn)
         layout.addWidget(controls_handler.stop_btn)
         

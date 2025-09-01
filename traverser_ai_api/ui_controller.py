@@ -37,7 +37,6 @@ class CrawlerControllerWindow(QMainWindow):
         # Initialize UI elements that will be created later
         self.health_app_dropdown = None
         self.refresh_apps_btn = None
-        self.save_config_btn = None
         self.start_btn = None
         self.stop_btn = None
         self.test_mobsf_conn_btn = None
@@ -214,10 +213,6 @@ class CrawlerControllerWindow(QMainWindow):
             else:
                 self.log_message("ERROR: refresh_apps_btn not available for connection", 'red')
                 logging.error("refresh_apps_btn not available for connection")
-            
-            # Connect control buttons
-            if self.save_config_btn and hasattr(self.save_config_btn, 'clicked'):
-                self.save_config_btn.clicked.connect(self.config_manager.save_config)
             
             if self.start_btn and hasattr(self.start_btn, 'clicked'):
                 self.start_btn.clicked.connect(self.crawler_manager.start_crawler)
@@ -418,7 +413,7 @@ class CrawlerControllerWindow(QMainWindow):
                 with open(api_config_path, 'r', encoding='utf-8') as f:
                     api_config = json.load(f)
                 
-                # Copy 'UI_MODE' from root to API config if it exists
+                # Copy 'UI_MODE' and 'AI_PROVIDER' from root to API config if it exists
                 if 'UI_MODE' in root_config and root_config['UI_MODE'] != api_config.get('UI_MODE'):
                     api_config['UI_MODE'] = root_config['UI_MODE']
                     # Save updated API config
@@ -426,6 +421,14 @@ class CrawlerControllerWindow(QMainWindow):
                         json.dump(api_config, f, indent=4, ensure_ascii=False)
                     self.log_message(f"Synchronized UI_MODE '{root_config['UI_MODE']}' to API config file", 'blue')
                     logging.info(f"Synchronized UI_MODE '{root_config['UI_MODE']}' to API config file: {api_config_path}")
+                
+                if 'AI_PROVIDER' in root_config and root_config['AI_PROVIDER'] != api_config.get('AI_PROVIDER'):
+                    api_config['AI_PROVIDER'] = root_config['AI_PROVIDER']
+                    # Save updated API config
+                    with open(api_config_path, 'w', encoding='utf-8') as f:
+                        json.dump(api_config, f, indent=4, ensure_ascii=False)
+                    self.log_message(f"Synchronized AI_PROVIDER '{root_config['AI_PROVIDER']}' to API config file", 'blue')
+                    logging.info(f"Synchronized AI_PROVIDER '{root_config['AI_PROVIDER']}' to API config file: {api_config_path}")
         except Exception as e:
             logging.error(f"Error synchronizing user config files: {e}", exc_info=True)
             if hasattr(self, 'log_output') and self.log_output:
@@ -452,7 +455,7 @@ class CrawlerControllerWindow(QMainWindow):
             'white': QColor('white'),
             'red': QColor('red'),
             'green': QColor('green'),
-            'blue': QColor('blue'),
+            'blue': QColor('cyan'),
             'orange': QColor('orange')
         }
         
@@ -510,11 +513,6 @@ class CrawlerControllerWindow(QMainWindow):
         super().closeEvent(event)
 
     # Delegate methods to appropriate managers
-    @slot()
-    def save_config(self):
-        """Save the current configuration."""
-        self.config_manager.save_config()
-    
     @slot()
     def start_crawler(self):
         """Start the crawler process."""
