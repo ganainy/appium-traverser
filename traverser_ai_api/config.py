@@ -96,17 +96,17 @@ class Config:
         self.ENABLE_MOBSF_ANALYSIS: bool = False
         
         # Store templates from defaults for dynamic resolution
-        self._OUTPUT_DATA_DIR_TEMPLATE: str = "output_data"
-        self._SESSION_DIR_TEMPLATE: str = "{output_data_dir}/{{device_id}}_{{app_package}}_{{timestamp}}"
-        self._APP_INFO_OUTPUT_DIR_TEMPLATE: str = "{session_dir}/app_info"
-        self._SCREENSHOTS_DIR_TEMPLATE: str = "{session_dir}/screenshots"
-        self._ANNOTATED_SCREENSHOTS_DIR_TEMPLATE: str = "{session_dir}/annotated_screenshots"
-        self._TRAFFIC_CAPTURE_OUTPUT_DIR_TEMPLATE: str = "{session_dir}/traffic_captures"
-        self._DB_NAME_TEMPLATE: str = "{session_dir}/database/{package}_crawl_data.db"
-        self._LOG_DIR_TEMPLATE: str = "{session_dir}/logs"
-        self._MOBSF_SCAN_DIR_TEMPLATE: str = "{session_dir}/mobsf_scan_results"
-        self._EXTRACTED_APK_DIR_TEMPLATE: str = "{session_dir}/extracted_apk"
-        self._PDF_REPORT_DIR_TEMPLATE: str = "{session_dir}/reports"
+        self._OUTPUT_DATA_DIR_TEMPLATE = "output_data"
+        self._SESSION_DIR_TEMPLATE = "{output_data_dir}/{{device_id}}_{{app_package}}_{{timestamp}}"
+        self._APP_INFO_OUTPUT_DIR_TEMPLATE = "{session_dir}/app_info/{device_id}"
+        self._SCREENSHOTS_DIR_TEMPLATE = "{session_dir}/screenshots"
+        self._ANNOTATED_SCREENSHOTS_DIR_TEMPLATE = "{session_dir}/annotated_screenshots"
+        self._TRAFFIC_CAPTURE_OUTPUT_DIR_TEMPLATE = "{session_dir}/traffic_captures"
+        self._DB_NAME_TEMPLATE = "{session_dir}/database/{package}_crawl_data.db"
+        self._LOG_DIR_TEMPLATE = "{session_dir}/logs"
+        self._MOBSF_SCAN_DIR_TEMPLATE = "{session_dir}/mobsf_scan_results"
+        self._EXTRACTED_APK_DIR_TEMPLATE = "{session_dir}/extracted_apk"
+        self._PDF_REPORT_DIR_TEMPLATE = "{session_dir}/reports"
 
         self._load_from_defaults_module()
         self._load_environment_variables()

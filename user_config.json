@@ -1,6 +1,6 @@
 {
-    "APP_PACKAGE": "de.deltacity.android.blutspende",
-    "APP_ACTIVITY": "de.deltacity.android.blutspende.activities.SplashScreenActivity",
+    "APP_PACKAGE": "com.google.android.apps.youtube.kids",
+    "APP_ACTIVITY": "com.google.android.apps.youtube.kids.splash.SplashScreenActivity",
     "ALLOWED_EXTERNAL_PACKAGES": [],
     "LOG_LEVEL": "INFO",
     "DB_CONNECT_TIMEOUT": 10,
@@ -35,11 +35,11 @@
     "PCAPDROID_PACKAGE": "com.emanuelef.remote_capture",
     "DEVICE_PCAP_DIR": "/sdcard/Download/PCAPdroid",
     "CLEANUP_DEVICE_PCAP_FILE": false,
-    "CURRENT_HEALTH_APP_LIST_FILE": "output_data\\app_info\\health_apps.json",
+    "CURRENT_HEALTH_APP_LIST_FILE": "output_data\\app_info\\279cb9b1\\health_apps.json",
     "LAST_SELECTED_APP": {
-        "package_name": "de.deltacity.android.blutspende",
-        "activity_name": "de.deltacity.android.blutspende.activities.SplashScreenActivity",
-        "app_name": "Blutspende"
+        "package_name": "com.google.android.apps.youtube.kids",
+        "activity_name": "com.google.android.apps.youtube.kids.splash.SplashScreenActivity",
+        "app_name": null
     },
     "UI_MODE": "Expert",
     "MOBSF_API_URL": "",

@@ -64,35 +64,15 @@ class HealthAppScanner(QObject):
             return "unknown_device"
             
     def _get_device_health_app_file_path(self, device_id=None):
-        """Get the path to the health app file for the current or specified device."""
+        """Get the path to the health app file for the current or specified device, now in a device-specific subfolder."""
         if not device_id:
             device_id = self._get_current_device_id()
-            
-        # Create app_info directory if it doesn't exist
-        app_info_dir = os.path.join(self.api_dir, getattr(self.config, 'OUTPUT_DATA_DIR', 'output_data'), "app_info")
+        # Create app_info/device_id directory if it doesn't exist
+        app_info_dir = os.path.join(self.api_dir, getattr(self.config, 'OUTPUT_DATA_DIR', 'output_data'), "app_info", device_id)
         os.makedirs(app_info_dir, exist_ok=True)
-        
-        # First, check if there's a direct match for the expected file (without timestamp)
-        direct_match_path = os.path.join(app_info_dir, f"{device_id}_app_info_health_filtered.json")
-        if os.path.exists(direct_match_path):
-            return direct_match_path
-            
-        # If no direct match, look for any file matching the device ID pattern
-        health_app_files = []
-        for filename in os.listdir(app_info_dir):
-            if filename.startswith(f"{device_id}_app_info_") and filename.endswith(".json"):
-                file_path = os.path.join(app_info_dir, filename)
-                health_app_files.append((file_path, os.path.getmtime(file_path)))
-                
-        # If we found files for this device, return the most recent one
-        if health_app_files:
-            # Sort by modification time (newest first)
-            health_app_files.sort(key=lambda x: x[1], reverse=True)
-            newest_file = health_app_files[0][0]
-            return newest_file
-            
-        # If no file exists for this device, return a default path where it will be created
-        return direct_match_path  # Use the direct match path as the default target
+        # The JSON file for this device
+        device_json_path = os.path.join(app_info_dir, "health_apps.json")
+        return device_json_path
 
     def trigger_scan_for_health_apps(self):
         """Starts the process of scanning for health apps, forcing a rescan."""
