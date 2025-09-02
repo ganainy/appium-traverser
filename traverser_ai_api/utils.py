@@ -140,17 +140,37 @@ def visual_hash_distance(hash1: str, hash2: str) -> int:
         logging.error(f"Error calculating hash distance between {hash1} and {hash2}: {e}")
         return 1000
 
-def simplify_xml_for_ai(xml_string: str, max_len: int) -> str:
+def simplify_xml_for_ai(xml_string: str, max_len: int, provider: str = "gemini") -> str:
     """
     Simplifies XML by removing non-essential attributes and potentially empty nodes,
     aiming to stay under max_len without arbitrary truncation.
+    
+    Args:
+        xml_string: The XML string to simplify
+        max_len: Maximum length in characters
+        provider: AI provider ("deepseek", "gemini", etc.) for provider-specific optimizations
     """
     if not xml_string:
         return ""
 
     original_len = len(xml_string)
     if original_len > 200:
-        logging.debug(f"Original XML length: {original_len}")
+        logging.debug(f"Original XML length: {original_len} (provider: {provider})")
+
+    # Get provider capabilities from config
+    try:
+        from .config import AI_PROVIDER_CAPABILITIES
+    except ImportError:
+        from config import AI_PROVIDER_CAPABILITIES
+    
+    capabilities = AI_PROVIDER_CAPABILITIES.get(provider.lower(), AI_PROVIDER_CAPABILITIES.get('gemini', {}))
+    provider_xml_limit = capabilities.get('xml_max_len', max_len)
+    
+    # Use the more restrictive limit between configured max_len and provider capability
+    effective_max_len = min(max_len, provider_xml_limit)
+    
+    if effective_max_len != max_len:
+        logging.debug(f"Applied {provider}-specific XML limit: {effective_max_len} (from configured {max_len})")
 
     possible_parse_errors = (std_etree.ParseError,)
     if USING_LXML and lxml_etree:
@@ -184,31 +204,31 @@ def simplify_xml_for_ai(xml_string: str, max_len: int) -> str:
             xml_bytes = std_etree.tostring(root)
         simplified_xml = xml_bytes.decode('utf-8')
 
-        if len(simplified_xml) > max_len:
-            logging.warning(f"Simplified XML still exceeds max_len ({len(simplified_xml)} > {max_len}). Performing final smart truncation.")
-            trunc_point = simplified_xml.rfind('</', 0, max_len)
+        if len(simplified_xml) > effective_max_len:
+            logging.warning(f"Simplified XML still exceeds max_len ({len(simplified_xml)} > {effective_max_len}) for {provider}. Performing final smart truncation.")
+            trunc_point = simplified_xml.rfind('</', 0, effective_max_len)
             if trunc_point != -1:
-                end_tag_point = simplified_xml.find('>', trunc_point, max_len + 30)
+                end_tag_point = simplified_xml.find('>', trunc_point, effective_max_len + 30)
                 if end_tag_point != -1:
                     simplified_xml = simplified_xml[:end_tag_point+1] + "\n... (truncated)"
                 else:
-                    simplified_xml = simplified_xml[:max_len] + "... (truncated)"
+                    simplified_xml = simplified_xml[:effective_max_len] + "... (truncated)"
             else:
-                simplified_xml = simplified_xml[:max_len] + "... (truncated)"
+                simplified_xml = simplified_xml[:effective_max_len] + "... (truncated)"
 
         simplified_xml = re.sub(r'>\s+<', '><', simplified_xml).strip()
 
         final_len = len(simplified_xml)
         if original_len > 200:
-            logging.debug(f"Simplified XML length: {final_len} (from {original_len})")
+            logging.debug(f"Simplified XML length: {final_len} (from {original_len}) for {provider}")
         return simplified_xml
 
     except possible_parse_errors + (ValueError, TypeError) as e:
-        logging.error(f"Failed to parse or simplify XML: {e}. Falling back to basic truncation.")
-        return xml_string[:max_len] + "\n... (fallback truncation)" if len(xml_string) > max_len else xml_string
+        logging.error(f"Failed to parse or simplify XML for {provider}: {e}. Falling back to basic truncation.")
+        return xml_string[:effective_max_len] + "\n... (fallback truncation)" if len(xml_string) > effective_max_len else xml_string
     except Exception as e:
-        logging.error(f"Unexpected error during XML simplification: {e}. Falling back.", exc_info=True)
-        return xml_string[:max_len] + "\n... (fallback truncation)" if len(xml_string) > max_len else xml_string
+        logging.error(f"Unexpected error during XML simplification for {provider}: {e}. Falling back.", exc_info=True)
+        return xml_string[:effective_max_len] + "\n... (fallback truncation)" if len(xml_string) > effective_max_len else xml_string
 
 def filter_xml_by_allowed_packages(xml_string: str, target_package: str, allowed_packages: List[str]) -> str:
     """

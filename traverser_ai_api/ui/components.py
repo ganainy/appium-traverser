@@ -32,17 +32,106 @@ class UIComponents:
         
         model_dropdown.clear()
         
-        if provider == 'gemini':
+        # Get provider capabilities from config
+        try:
+            from ..config import AI_PROVIDER_CAPABILITIES
+        except ImportError:
+            from config import AI_PROVIDER_CAPABILITIES
+        
+        capabilities = AI_PROVIDER_CAPABILITIES.get(provider.lower(), AI_PROVIDER_CAPABILITIES.get('gemini', {}))
+        
+        if provider.lower() == 'gemini':
             model_dropdown.addItems([
                 'flash-latest', 'flash-latest-fast'
             ])
-        elif provider == 'deepseek':
+            # Enable image context for Gemini
+            if 'ENABLE_IMAGE_CONTEXT' in config_widgets:
+                config_widgets['ENABLE_IMAGE_CONTEXT'].setEnabled(True)
+                config_widgets['ENABLE_IMAGE_CONTEXT'].setToolTip("Enable sending screenshots to AI for visual analysis. Disable for text-only analysis.")
+                
+                # Reset styling when enabling
+                config_widgets['ENABLE_IMAGE_CONTEXT'].setStyleSheet("")
+                
+                # Hide warning label
+                if 'IMAGE_CONTEXT_WARNING' in config_widgets:
+                    config_widgets['IMAGE_CONTEXT_WARNING'].setVisible(False)
+        elif provider.lower() == 'deepseek':
             model_dropdown.addItems([
                 'deepseek-vision', 'deepseek-vision-fast'
             ])
-            
+            # Handle image context based on provider capabilities
+            if 'ENABLE_IMAGE_CONTEXT' in config_widgets:
+                auto_disable = capabilities.get('auto_disable_image_context', False)
+                if auto_disable:
+                    config_widgets['ENABLE_IMAGE_CONTEXT'].setChecked(False)
+                    config_widgets['ENABLE_IMAGE_CONTEXT'].setEnabled(False)
+                    config_widgets['ENABLE_IMAGE_CONTEXT'].setToolTip(f"⚠️ DISABLED: {provider} has strict payload limits ({capabilities.get('payload_max_size_kb', 150)}KB max). Image context automatically disabled to prevent API errors.")
+                    
+                    # Add visual styling to make the disabled state more obvious
+                    config_widgets['ENABLE_IMAGE_CONTEXT'].setStyleSheet("""
+                        QCheckBox {
+                            color: #ff6b35;
+                            font-weight: bold;
+                        }
+                        QCheckBox::indicator {
+                            background-color: #ff6b35;
+                            border: 2px solid #ff6b35;
+                            border-radius: 3px;
+                        }
+                        QCheckBox::indicator:unchecked {
+                            background-color: #ffeaa7;
+                        }
+                    """)
+                    
+                    # Show warning label
+                    if 'IMAGE_CONTEXT_WARNING' in config_widgets:
+                        config_widgets['IMAGE_CONTEXT_WARNING'].setVisible(True)
+                    
+                    # Add visual warning indicator
+                    UIComponents._add_image_context_warning(provider, capabilities)
+                else:
+                    config_widgets['ENABLE_IMAGE_CONTEXT'].setEnabled(True)
+                    config_widgets['ENABLE_IMAGE_CONTEXT'].setToolTip("Enable sending screenshots to AI for visual analysis. Disable for text-only analysis.")
+                    
+                    # Reset styling when enabling
+                    config_widgets['ENABLE_IMAGE_CONTEXT'].setStyleSheet("")
+                    
+                    # Hide warning label
+                    if 'IMAGE_CONTEXT_WARNING' in config_widgets:
+                        config_widgets['IMAGE_CONTEXT_WARNING'].setVisible(False)
+        
         # Unblock signals after updating
         model_dropdown.blockSignals(False)
+    
+    @staticmethod
+    def _add_image_context_warning(provider: str, capabilities: Dict[str, Any]) -> None:
+        """Add visual warning when image context is auto-disabled."""
+        import logging
+        
+        try:
+            payload_limit = capabilities.get('payload_max_size_kb', 150)
+            warning_msg = f"⚠️ IMAGE CONTEXT AUTO-DISABLED: {provider} has strict payload limits ({payload_limit}KB max). Image context automatically disabled to prevent API errors."
+            
+            # Log the warning
+            logging.warning(f"Image context auto-disabled for {provider} due to payload limits")
+            
+            # Try to show warning in UI if main controller is available
+            try:
+                from PySide6.QtWidgets import QApplication
+                from ..ui_controller import CrawlerControllerWindow
+                
+                # Get the main window instance if it exists
+                app = QApplication.instance()
+                if app and isinstance(app, QApplication):
+                    for widget in app.topLevelWidgets():
+                        if isinstance(widget, CrawlerControllerWindow):
+                            widget.log_message(warning_msg, 'orange')
+                            break
+            except Exception as e:
+                logging.debug(f"Could not show UI warning: {e}")
+                
+        except Exception as e:
+            logging.error(f"Error adding image context warning: {e}")
     
     ADVANCED_FIELDS = {
         "APPIUM_SERVER_URL": True,  # True means hide in basic mode
@@ -59,7 +148,7 @@ class UIComponents:
         "MAX_CONSECUTIVE_AI_FAILURES": True,
         "MAX_CONSECUTIVE_MAP_FAILURES": True,
         "MAX_CONSECUTIVE_EXEC_FAILURES": True,
-        "ENABLE_XML_CONTEXT": True,
+        "ENABLE_IMAGE_CONTEXT": False,
         "ENABLE_TRAFFIC_CAPTURE": False,
         "CLEANUP_DEVICE_PCAP_FILE": True,
         "CONTINUE_EXISTING_RUN": False,
@@ -444,7 +533,7 @@ class UIComponents:
         ai_layout.addRow(label_max_chat_history, config_widgets['MAX_CHAT_HISTORY'])
         
         config_widgets['XML_SNIPPET_MAX_LEN'] = QSpinBox()
-        config_widgets['XML_SNIPPET_MAX_LEN'].setRange(0, 100000)
+        config_widgets['XML_SNIPPET_MAX_LEN'].setRange(5000, 500000)
         label_xml_snippet_max_len = QLabel("XML Snippet Max Length: ")
         label_xml_snippet_max_len.setToolTip(tooltips['XML_SNIPPET_MAX_LEN'])
         ai_layout.addRow(label_xml_snippet_max_len, config_widgets['XML_SNIPPET_MAX_LEN'])
@@ -557,10 +646,23 @@ class UIComponents:
         feature_toggle_group = QGroupBox("Feature Toggles")
         feature_toggle_layout = QFormLayout(feature_toggle_group)
         
-        config_widgets['ENABLE_XML_CONTEXT'] = QCheckBox()
-        label_enable_xml_context = QLabel("Enable XML Context: ")
-        label_enable_xml_context.setToolTip(tooltips['ENABLE_XML_CONTEXT'])
-        feature_toggle_layout.addRow(label_enable_xml_context, config_widgets['ENABLE_XML_CONTEXT'])
+        config_widgets['ENABLE_IMAGE_CONTEXT'] = QCheckBox()
+        label_enable_image_context = QLabel("Enable Image Context: ")
+        label_enable_image_context.setToolTip("Enable sending screenshots to AI for visual analysis. Disable for text-only analysis. Note: Automatically disabled for DeepSeek due to payload size limits.")
+        
+        # Create warning label (initially hidden)
+        config_widgets['IMAGE_CONTEXT_WARNING'] = QLabel("⚠️ Auto-disabled")
+        config_widgets['IMAGE_CONTEXT_WARNING'].setStyleSheet("color: #ff6b35; font-weight: bold;")
+        config_widgets['IMAGE_CONTEXT_WARNING'].setVisible(False)
+        
+        # Create horizontal layout for checkbox and warning
+        image_context_layout = QHBoxLayout()
+        image_context_layout.addWidget(label_enable_image_context)
+        image_context_layout.addWidget(config_widgets['ENABLE_IMAGE_CONTEXT'])
+        image_context_layout.addWidget(config_widgets['IMAGE_CONTEXT_WARNING'])
+        image_context_layout.addStretch()
+        
+        feature_toggle_layout.addRow(image_context_layout)
         
         config_widgets['ENABLE_TRAFFIC_CAPTURE'] = QCheckBox()
         label_enable_traffic_capture = QLabel("Enable Traffic Capture: ")

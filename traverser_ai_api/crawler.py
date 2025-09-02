@@ -49,8 +49,7 @@ class AppCrawler:
             'MAX_CRAWL_STEPS', 'MAX_CRAWL_DURATION_SECONDS',
             'MAX_CONSECUTIVE_AI_FAILURES', 'MAX_CONSECUTIVE_MAP_FAILURES',
             'MAX_CONSECUTIVE_EXEC_FAILURES', 'MAX_CONSECUTIVE_CONTEXT_FAILURES',
-            'WAIT_AFTER_ACTION', 'ALLOWED_EXTERNAL_PACKAGES', 'ENABLE_XML_CONTEXT',
-            'XML_SNIPPET_MAX_LEN', 'SCREENSHOTS_DIR', 'ANNOTATED_SCREENSHOTS_DIR',
+            'WAIT_AFTER_ACTION', 'ALLOWED_EXTERNAL_PACKAGES', 'XML_SNIPPET_MAX_LEN', 'SCREENSHOTS_DIR', 'ANNOTATED_SCREENSHOTS_DIR',
             'ENABLE_TRAFFIC_CAPTURE', 'CONTINUE_EXISTING_RUN', 'OUTPUT_DATA_DIR'
         ]
         for attr in required_attrs_for_crawler:
@@ -349,9 +348,12 @@ class AppCrawler:
         if ai_action_suggestion is None:
             xml_content = definitive_screen_repr.xml_content or ""
             filtered_xml = utils.filter_xml_by_allowed_packages(xml_content, str(self.cfg.APP_PACKAGE), self.cfg.ALLOWED_EXTERNAL_PACKAGES)
-            simplified_xml = utils.simplify_xml_for_ai(filtered_xml, int(self.cfg.XML_SNIPPET_MAX_LEN))
+            simplified_xml = utils.simplify_xml_for_ai(filtered_xml, int(self.cfg.XML_SNIPPET_MAX_LEN), self.cfg.AI_PROVIDER)
             
-            if definitive_screen_repr.screenshot_bytes and self.loop:
+            # Check if image context is enabled
+            enable_image_context = getattr(self.cfg, 'ENABLE_IMAGE_CONTEXT', True)
+            
+            if enable_image_context and definitive_screen_repr.screenshot_bytes and self.loop:
                 try:
                     # Use the agent-based approach
                     agent_result = None
@@ -395,6 +397,51 @@ class AppCrawler:
                             
                 except Exception as e:
                     logging.error(f"Error in agent-based execution: {e}", exc_info=True)
+            elif not enable_image_context:
+                # Use text-only analysis without image
+                if self.loop:
+                    try:
+                        agent_result = await self.loop.run_in_executor(
+                            self.default_executor,
+                            lambda: self.ai_assistant.plan_and_execute(
+                                None,  # No screenshot bytes
+                                simplified_xml,
+                                visit_info.get("previous_actions_on_this_state", []),
+                                visit_info.get("visit_count_this_run", 1),
+                                definitive_screen_repr.composite_hash,
+                                self.last_action_feedback_for_ai
+                            )
+                        )
+                        
+                        if agent_result:
+                            action_data, time_taken, success = agent_result
+                            ai_time_taken = time_taken
+                            
+                            # If the action was already executed by the agent, record the result
+                            if success:
+                                ai_action_suggestion = action_data
+                                action_str = utils.generate_action_description(
+                                    action_data.get('action', 'unknown'),
+                                    None,
+                                    action_data.get('input_text'),
+                                    action_data.get('target_identifier')
+                                )
+                                self.screen_state_manager.record_action_taken_from_screen(
+                                    definitive_screen_repr.composite_hash, 
+                                    f"{action_str} (Success: {success}) [Agent Executed - Text Only]"
+                                )
+                                # Reset the failure counters since the agent successfully executed an action
+                                self.consecutive_ai_failures = 0
+                                self.consecutive_map_failures = 0
+                                self.action_executor.reset_consecutive_failures()
+                            else:
+                                # If execution failed but we have a valid action, return it for standard execution
+                                ai_action_suggestion = action_data
+                                
+                    except Exception as e:
+                        logging.error(f"Error in agent-based execution (text-only): {e}", exc_info=True)
+                else:
+                    logging.error("Event loop not available, cannot call AI for text-only analysis.")
             elif not definitive_screen_repr.screenshot_bytes:
                 logging.error("Screenshot bytes are None, cannot call AI.")
             elif not self.loop:

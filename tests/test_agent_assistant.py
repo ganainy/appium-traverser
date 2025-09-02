@@ -53,7 +53,8 @@ class MockConfig:
                     'top_p': 0.95,
                     'top_k': 40,
                     'max_output_tokens': 1024
-                }
+                },
+                'online': True
             }
         }
         self.USE_CHAT_MEMORY = False

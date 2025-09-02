@@ -48,7 +48,7 @@ class Config:
         self.DEFAULT_MODEL_TYPE: str = 'flash-latest-fast'
         self.USE_CHAT_MEMORY: bool = False
         self.MAX_CHAT_HISTORY: int = 10
-        self.ENABLE_XML_CONTEXT: bool = True
+        self.ENABLE_IMAGE_CONTEXT: bool = True
         self.XML_SNIPPET_MAX_LEN: int = 500000
         self.MAX_APPS_TO_SEND_TO_AI: int = 200
         self.LOOP_DETECTION_VISIT_THRESHOLD: int = 1
@@ -288,6 +288,80 @@ class Config:
         else:
             logging.info(f"User configuration file ({file_path}) not found. Using defaults and environment variables.")
         self._resolve_all_paths()
+        
+        # Adjust XML limits based on AI provider
+        self._adjust_xml_limits_for_provider()
+        
+        # Adjust image context based on AI provider capabilities
+        self._adjust_image_context_for_provider()
+
+    def _get_provider_capabilities(self, provider: str) -> Dict[str, Any]:
+        """Get capabilities for a specific AI provider."""
+        provider = provider.lower()
+        # Access the module-level AI_PROVIDER_CAPABILITIES
+        capabilities = AI_PROVIDER_CAPABILITIES.get(provider, AI_PROVIDER_CAPABILITIES.get('gemini', {}))
+        return capabilities
+
+    def _adjust_xml_limits_for_provider(self):
+        """Automatically adjust XML_SNIPPET_MAX_LEN based on AI provider capabilities."""
+        provider = getattr(self, 'AI_PROVIDER', 'gemini').lower()
+        capabilities = self._get_provider_capabilities(provider)
+        
+        recommended_limit = capabilities.get('xml_max_len', 500000)
+        current_limit = getattr(self, 'XML_SNIPPET_MAX_LEN', 500000)
+        
+        # Only adjust if current limit is higher than recommended for this provider
+        if current_limit > recommended_limit:
+            logging.info(f"Adjusting XML_SNIPPET_MAX_LEN from {current_limit} to {recommended_limit} for {provider} provider")
+            self.XML_SNIPPET_MAX_LEN = recommended_limit
+            
+            # Update user config if it exists
+            if os.path.exists(self.USER_CONFIG_FILE_PATH):
+                try:
+                    with open(self.USER_CONFIG_FILE_PATH, 'r', encoding='utf-8') as f:
+                        user_data = json.load(f)
+                    
+                    user_data['XML_SNIPPET_MAX_LEN'] = recommended_limit
+                    
+                    with open(self.USER_CONFIG_FILE_PATH, 'w', encoding='utf-8') as f:
+                        json.dump(user_data, f, indent=4, ensure_ascii=False)
+                    
+                    logging.info(f"Updated XML_SNIPPET_MAX_LEN in user config to {recommended_limit}")
+                except Exception as e:
+                    logging.warning(f"Failed to update XML_SNIPPET_MAX_LEN in user config: {e}")
+        elif current_limit < recommended_limit:
+            logging.info(f"XML_SNIPPET_MAX_LEN ({current_limit}) is below recommended limit for {provider} ({recommended_limit}). Consider increasing for better AI context.")
+
+    def _adjust_image_context_for_provider(self):
+        """Automatically adjust ENABLE_IMAGE_CONTEXT based on AI provider capabilities."""
+        provider = getattr(self, 'AI_PROVIDER', 'gemini').lower()
+        capabilities = self._get_provider_capabilities(provider)
+        
+        auto_disable = capabilities.get('auto_disable_image_context', False)
+        
+        if auto_disable:
+            current_image_context = getattr(self, 'ENABLE_IMAGE_CONTEXT', True)
+            if current_image_context:
+                logging.info(f"Disabling ENABLE_IMAGE_CONTEXT for {provider} provider due to payload size limits")
+                self.ENABLE_IMAGE_CONTEXT = False
+                
+                # Update user config if it exists
+                if os.path.exists(self.USER_CONFIG_FILE_PATH):
+                    try:
+                        with open(self.USER_CONFIG_FILE_PATH, 'r', encoding='utf-8') as f:
+                            user_data = json.load(f)
+                        
+                        user_data['ENABLE_IMAGE_CONTEXT'] = False
+                        
+                        with open(self.USER_CONFIG_FILE_PATH, 'w', encoding='utf-8') as f:
+                            json.dump(user_data, f, indent=4, ensure_ascii=False)
+                        
+                        logging.info(f"Updated ENABLE_IMAGE_CONTEXT to False in user config for {provider} compatibility")
+                    except Exception as e:
+                        logging.warning(f"Failed to update ENABLE_IMAGE_CONTEXT in user config: {e}")
+        else:
+            # For providers that support images well, we can keep the user's preference
+            pass
 
     def _get_user_savable_config(self) -> Dict[str, Any]:
         savable_keys = [
@@ -297,7 +371,7 @@ class Config:
             "NEW_COMMAND_TIMEOUT", "APPIUM_IMPLICIT_WAIT", "APPIUM_SERVER_URL",
             "TARGET_DEVICE_UDID", "USE_COORDINATE_FALLBACK",
             "AI_PROVIDER", "DEFAULT_MODEL_TYPE", "USE_CHAT_MEMORY", "MAX_CHAT_HISTORY",
-            "ENABLE_XML_CONTEXT", "XML_SNIPPET_MAX_LEN", "MAX_APPS_TO_SEND_TO_AI",
+            "ENABLE_IMAGE_CONTEXT", "XML_SNIPPET_MAX_LEN", "MAX_APPS_TO_SEND_TO_AI",
             "USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY", "AI_SAFETY_SETTINGS",
             "CRAWL_MODE", "MAX_CRAWL_STEPS", "MAX_CRAWL_DURATION_SECONDS",
             "CONTINUE_EXISTING_RUN", "VISUAL_SIMILARITY_THRESHOLD", "THIRD_PARTY_APPS_ONLY",
@@ -480,12 +554,12 @@ APPIUM_SERVER_URL = "http://127.0.0.1:4723"
 TARGET_DEVICE_UDID = None
 USE_COORDINATE_FALLBACK = True
 
-AI_PROVIDER = 'gemini'  # 'gemini' or 'deepseek'
+AI_PROVIDER = 'gemini'  # 'gemini' or 'deepseek' - Gemini has generous free tier
 DEFAULT_MODEL_TYPE = 'flash-latest-fast'
 USE_CHAT_MEMORY = False
 MAX_CHAT_HISTORY = 10
-ENABLE_XML_CONTEXT = True
-XML_SNIPPET_MAX_LEN = 500000
+ENABLE_IMAGE_CONTEXT = True
+XML_SNIPPET_MAX_LEN = 50000
 MAX_APPS_TO_SEND_TO_AI = 200
 USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY = True
 AI_SAFETY_SETTINGS = {}
@@ -493,24 +567,28 @@ GEMINI_MODELS = {
     'flash-latest': {
         'name': 'gemini-2.5-flash-preview-05-20',
         'description': 'Latest Flash model (2.5): Optimized for speed, cost, and multimodal tasks.',
-        'generation_config': {'temperature': 0.7, 'top_p': 0.95, 'top_k': 40, 'max_output_tokens': 8192}
+        'generation_config': {'temperature': 0.7, 'top_p': 0.95, 'top_k': 40, 'max_output_tokens': 8192},
+        'online': True
     },
     'flash-latest-fast': {
         'name': 'gemini-2.5-flash-preview-05-20',
         'description': 'Latest Flash model (2.5) with settings optimized for faster responses.',
-        'generation_config': {'temperature': 0.3, 'top_p': 0.8, 'top_k': 20, 'max_output_tokens': 8192}
+        'generation_config': {'temperature': 0.3, 'top_p': 0.8, 'top_k': 20, 'max_output_tokens': 8192},
+        'online': True
     }
 }
 DEEPSEEK_MODELS = {
     'deepseek-vision': {
-        'name': 'deepseek-vl',
-        'description': 'DeepSeek Vision-Language model for multimodal tasks.',
-        'generation_config': {'temperature': 0.7, 'top_p': 0.95, 'max_output_tokens': 4096}
+        'name': 'deepseek-chat',
+        'description': 'DeepSeek Chat model with vision capabilities for multimodal tasks.',
+        'generation_config': {'temperature': 0.7, 'top_p': 0.95, 'max_output_tokens': 4096},
+        'online': True
     },
     'deepseek-vision-fast': {
-        'name': 'deepseek-vl',
-        'description': 'DeepSeek Vision-Language model with settings optimized for faster responses.',
-        'generation_config': {'temperature': 0.3, 'top_p': 0.8, 'max_output_tokens': 4096}
+        'name': 'deepseek-chat',
+        'description': 'DeepSeek Chat model with vision capabilities, optimized for faster responses.',
+        'generation_config': {'temperature': 0.3, 'top_p': 0.8, 'max_output_tokens': 4096},
+        'online': True
     }
 }
 
@@ -556,3 +634,53 @@ USE_ADB_INPUT_FALLBACK = True
 MOBSF_API_URL = "http://localhost:8000/api/v1"
 MOBSF_API_KEY = None  # Will be loaded from environment variable
 ENABLE_MOBSF_ANALYSIS = True
+
+# --- AI Provider Capabilities Configuration ---
+# This configuration makes it easy to add new AI providers with different capabilities
+AI_PROVIDER_CAPABILITIES = {
+    'gemini': {
+        'xml_max_len': 500000,  # Maximum XML characters
+        'image_supported': True,  # Whether images are supported
+        'image_max_width': 640,  # Reduced from 720 for better compression
+        'image_quality': 75,     # Reduced from 85 for smaller size while maintaining clarity
+        'image_format': 'JPEG',  # Image format for compression
+        'payload_max_size_kb': 1000,  # Maximum payload size in KB
+        'auto_disable_image_context': False,  # Whether to auto-disable image context
+        'description': 'Google Gemini - High capacity, supports large payloads and images',
+        'online': True  # Indicates this is an online/cloud provider
+    },
+    'deepseek': {
+        'xml_max_len': 30000,   # Conservative limit for DeepSeek
+        'image_supported': True,  # Technically supported but limited
+        'image_max_width': 480,  # Further reduced from 640 for maximum compression
+        'image_quality': 65,     # Lower quality for smaller payloads while keeping UI readable
+        'image_format': 'JPEG',  # Image format for compression
+        'payload_max_size_kb': 150,  # Strict payload limit
+        'auto_disable_image_context': True,  # Auto-disable due to payload limits
+        'description': 'DeepSeek - Strict payload limits, optimized for text analysis',
+        'online': True  # Indicates this is an online/cloud provider
+    }
+    # Future providers can be easily added here, e.g.:
+    # 'claude': {
+    #     'xml_max_len': 200000,
+    #     'image_supported': True,
+    #     'image_max_width': 600,
+    #     'image_quality': 70,
+    #     'image_format': 'JPEG',
+    #     'payload_max_size_kb': 500,
+    #     'auto_disable_image_context': False,
+    #     'description': 'Anthropic Claude - Balanced capabilities',
+    #     'online': True
+    # },
+    # 'ollama': {
+    #     'xml_max_len': 100000,
+    #     'image_supported': False,
+    #     'image_max_width': None,
+    #     'image_quality': None,
+    #     'image_format': None,
+    #     'payload_max_size_kb': None,
+    #     'auto_disable_image_context': False,
+    #     'description': 'Ollama - Local LLM provider',
+    #     'online': False  # Local provider
+    # }
+}

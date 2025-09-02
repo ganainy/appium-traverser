@@ -148,23 +148,83 @@ class AgentAssistant:
             logging.error(f"Failed to initialize AI model: {e}", exc_info=True)
             raise
 
-    def _prepare_image_part(self, screenshot_bytes: bytes) -> Optional[Image.Image]:
-        """Prepare an image for the agent."""
+    def _prepare_image_part(self, screenshot_bytes: Optional[bytes]) -> Optional[Image.Image]:
+        """Prepare an image for the agent with optimized compression for LLM understanding."""
+        if screenshot_bytes is None:
+            return None
+            
         try:
             img = Image.open(io.BytesIO(screenshot_bytes))
-
-            # --- Image Optimization Logic ---
-            max_width = 720
+            original_size = len(screenshot_bytes)
+            
+            # Get AI provider for provider-specific optimizations
+            ai_provider = getattr(self.cfg, 'AI_PROVIDER', 'gemini').lower()
+            
+            # Get provider capabilities from config
+            try:
+                from .config import AI_PROVIDER_CAPABILITIES
+            except ImportError:
+                from config import AI_PROVIDER_CAPABILITIES
+            
+            capabilities = AI_PROVIDER_CAPABILITIES.get(ai_provider, AI_PROVIDER_CAPABILITIES.get('gemini', {}))
+            
+            # Use provider-specific image settings
+            max_width = capabilities.get('image_max_width', 640)
+            quality = capabilities.get('image_quality', 75)
+            image_format = capabilities.get('image_format', 'JPEG')
+            
+            logging.debug(f"Applying {ai_provider}-specific image optimization: {max_width}px width, {quality}% quality, {image_format} format")
+            
+            # Resize if necessary (maintain aspect ratio)
             if img.width > max_width:
                 scale = max_width / img.width
                 new_height = int(img.height * scale)
                 img = img.resize((max_width, new_height), Image.Resampling.LANCZOS)
-                logging.debug(f"Resized screenshot to {img.size} for AI analysis.")
-
-            # --- FIX: Convert RGBA to RGB before saving as JPEG ---
-            if img.mode == 'RGBA':
-                img = img.convert('RGB')
-                logging.debug("Converted image from RGBA to RGB for JPEG compatibility.")
+                logging.debug(f"Resized screenshot from {img.size} to fit max width {max_width}px")
+            
+            # Convert to RGB if necessary (for JPEG compatibility and better compression)
+            if img.mode in ('RGBA', 'LA', 'P'):
+                # Create white background for transparent images
+                if img.mode == 'RGBA':
+                    background = Image.new('RGB', img.size, (255, 255, 255))
+                    background.paste(img, mask=img.split()[-1])  # Use alpha channel as mask
+                    img = background
+                else:
+                    img = img.convert('RGB')
+                logging.debug("Converted image to RGB format for optimal compression")
+            
+            # Apply sharpening to maintain text clarity after compression
+            from PIL import ImageFilter, ImageEnhance
+            # Mild sharpening to preserve text readability
+            img = img.filter(ImageFilter.UnsharpMask(radius=0.5, percent=150, threshold=3))
+            
+            # Compress with optimized settings
+            compressed_buffer = io.BytesIO()
+            
+            if image_format.upper() == 'JPEG':
+                # Use progressive JPEG with chroma subsampling for maximum compression
+                img.save(
+                    compressed_buffer, 
+                    format='JPEG', 
+                    quality=quality, 
+                    optimize=True,
+                    progressive=True,  # Progressive JPEG for better compression
+                    subsampling='4:2:0'  # Chroma subsampling reduces file size significantly
+                )
+            else:
+                # Fallback to PNG if specified (though JPEG is better for photos/screenshots)
+                img.save(compressed_buffer, format=image_format, optimize=True)
+            
+            compressed_buffer.seek(0)
+            compressed_size = compressed_buffer.tell()
+            
+            # Reload the compressed image
+            img = Image.open(compressed_buffer)
+            
+            # Calculate compression ratio
+            compression_ratio = original_size / compressed_size if compressed_size > 0 else 1
+            logging.debug(f"Compressed image: {original_size} -> {compressed_size} bytes ({compression_ratio:.1f}x compression)")
+            logging.info(f"Optimized image for {ai_provider}: {img.size}, {quality}% quality, {image_format} format")
             
             return img
             
@@ -240,6 +300,14 @@ class AgentAssistant:
         - If other navigation options exist (e.g., "Explore as Guest", "Skip"), prioritize those.
         """
 
+        # Check if image context is enabled
+        enable_image_context = getattr(self.cfg, 'ENABLE_IMAGE_CONTEXT', True)
+        
+        if enable_image_context:
+            context_description = "1. Screenshot: Provided as an image. This is your primary view.\n        2. XML Layout: Provided below (may be a snippet/absent). Use for attributes."
+        else:
+            context_description = "1. Screenshot: Not provided (image context disabled). Rely on XML layout for analysis.\n        2. XML Layout: Provided below. This is your primary source of UI information."
+        
         prompt = f"""
         You are an expert Android app tester. Your goal is to:
         1. Determine the BEST SINGLE action to perform based on the visual screenshot and XML context, 
@@ -250,8 +318,7 @@ class AgentAssistant:
         {visit_context}
 
         CONTEXT:
-        1. Screenshot: Provided as an image. This is your primary view.
-        2. XML Layout: Provided below (may be a snippet/absent). Use for attributes.
+        {context_description}
         3. Previous Actions Taken *From This Exact Screen State* (if any):
         {history_str}
 
@@ -313,7 +380,7 @@ class AgentAssistant:
         }
 
     def get_next_action(self,
-                        screenshot_bytes: bytes,
+                        screenshot_bytes: Optional[bytes],
                         xml_context: str,
                         previous_actions: List[str],
                         current_screen_visit_count: int,
@@ -327,11 +394,18 @@ class AgentAssistant:
         try:
             start_time = time.time()
             
-            # Prepare image
-            processed_image = self._prepare_image_part(screenshot_bytes)
-            if not processed_image:
-                logging.error("Failed to process screenshot for AI analysis")
-                return None
+            # Check if image context is enabled
+            enable_image_context = getattr(self.cfg, 'ENABLE_IMAGE_CONTEXT', True)
+            
+            processed_image = None
+            if enable_image_context:
+                # Prepare image
+                processed_image = self._prepare_image_part(screenshot_bytes)
+                if not processed_image:
+                    logging.error("Failed to process screenshot for AI analysis")
+                    return None
+            else:
+                logging.debug("Image context disabled, using text-only analysis")
                 
             # Build the system prompt
             available_actions = getattr(self.cfg, 'AVAILABLE_ACTIONS', [])
@@ -467,9 +541,13 @@ class AgentAssistant:
             logging.error("Cannot plan and execute: AgentTools not available")
             return None
             
-        if screenshot_bytes is None:
-            logging.error("Cannot plan and execute: Screenshot bytes is None")
+        # Check if image context is enabled and screenshot is available
+        enable_image_context = getattr(self.cfg, 'ENABLE_IMAGE_CONTEXT', True)
+        if enable_image_context and screenshot_bytes is None:
+            logging.error("Cannot plan and execute: Screenshot bytes is None but image context is enabled")
             return None
+        elif not enable_image_context and screenshot_bytes is None:
+            logging.debug("Image context disabled and no screenshot provided - using text-only analysis")
             
         # Get the next action suggestion from the model
         result = self.get_next_action(

@@ -149,6 +149,9 @@ class ConfigManager(QObject):
         else:
             # Fallback to saving all widgets if no key is provided
             for k, widget in self.main_controller.config_widgets.items():
+                # Skip UI indicator widgets that aren't actual config settings
+                if k in ['IMAGE_CONTEXT_WARNING']:
+                    continue
                 config_data[k] = self._get_widget_value(k, widget)
 
         # --- Always save these non-widget settings ---
@@ -217,6 +220,10 @@ class ConfigManager(QObject):
             
             for key, value in self.user_config.items():
                 if key in self.main_controller.config_widgets:
+                    # Skip UI indicator widgets that aren't actual config settings
+                    if key in ['IMAGE_CONTEXT_WARNING']:
+                        continue
+                        
                     widget = self.main_controller.config_widgets[key]
                     try:
                         if isinstance(widget, QLineEdit):
@@ -261,6 +268,12 @@ class ConfigManager(QObject):
                     self.ui_mode_dropdown.setCurrentIndex(index)
                     # Call toggle_ui_complexity directly to ensure UI is updated
                     UIComponents.toggle_ui_complexity(mode, self)
+            
+            # Update model types based on loaded AI_PROVIDER
+            if 'AI_PROVIDER' in self.user_config:
+                provider = self.user_config['AI_PROVIDER']
+                logging.info(f"Updating model types for loaded AI_PROVIDER: {provider}")
+                UIComponents._update_model_types(provider, self.main_controller.config_widgets)
             
             self._update_crawl_mode_inputs_state()
             self.main_controller.log_message("Configuration loaded successfully.", 'green')
@@ -327,6 +340,10 @@ class ConfigManager(QObject):
     def connect_widgets_for_auto_save(self):
         """Connect all config widgets to auto-save on change."""
         for key, widget in self.main_controller.config_widgets.items():
+            # Skip UI indicator widgets that aren't actual config settings
+            if key in ['IMAGE_CONTEXT_WARNING']:
+                continue
+                
             # Create a lambda that captures the current key
             save_lambda = lambda *args, k=key: self.save_config(key=k)
             
