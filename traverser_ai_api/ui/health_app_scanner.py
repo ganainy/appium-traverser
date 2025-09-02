@@ -69,7 +69,7 @@ class HealthAppScanner(QObject):
             device_id = self._get_current_device_id()
             
         # Create app_info directory if it doesn't exist
-        app_info_dir = os.path.join(self.api_dir, "output_data", "app_info")
+        app_info_dir = os.path.join(self.api_dir, getattr(self.config, 'OUTPUT_DATA_DIR', 'output_data'), "app_info")
         os.makedirs(app_info_dir, exist_ok=True)
         
         # First, check if there's a direct match for the expected file (without timestamp)
@@ -112,7 +112,7 @@ class HealthAppScanner(QObject):
         
         # Always use a generic path in the config
         if hasattr(self.config, 'update_setting_and_save'):
-            generic_path = os.path.join("output_data", "app_info", "health_apps.json")
+            generic_path = os.path.join(getattr(self.config, 'OUTPUT_DATA_DIR', 'output_data'), "app_info", "health_apps.json")
             self.config.update_setting_and_save("CURRENT_HEALTH_APP_LIST_FILE", generic_path)
             
         self.main_controller.log_message("DEBUG: About to execute scan", 'blue')
@@ -435,7 +435,7 @@ class HealthAppScanner(QObject):
                 self.main_controller.app_scan_status_label.setText(f"App Scan: Found {len(self.health_apps_data)} apps")
             else:
                 # Look for the generic path as a last resort
-                generic_path = os.path.join(self.api_dir, "output_data", "app_info", "health_apps.json")
+                generic_path = os.path.join(self.api_dir, getattr(self.config, 'OUTPUT_DATA_DIR', 'output_data'), "app_info", "health_apps.json")
                 if os.path.exists(generic_path):
                     self.main_controller.log_message(f"Trying to load from generic path: {generic_path}", 'orange')
                     try:

@@ -7,11 +7,11 @@ def analyze_databases(output_dir: Path):
     """
     Analyzes all crawl databases to generate aggregated metrics for the paper.
     """
-    db_files = list(output_dir.glob("**/database_output/**/*_crawl_data.db"))
+    db_files = list(output_dir.glob("**/*_crawl_data.db"))
 
     if not db_files:
         print(f"Error: No database files found in '{output_dir}'.")
-        print("Please ensure you have run the crawler and that .db files exist in the 'output_data/database_output/' subdirectories.")
+        print("Please ensure you have run the crawler and that .db files exist in the session directories.")
         return
 
     print(f"Found {len(db_files)} database files to analyze...")
@@ -149,7 +149,7 @@ Required Coordinate-Based Fallback & {total_coordinate_fallbacks} \\\\ \\hline
 
 if __name__ == '__main__':
     # The script assumes it's run from the project root.
-    # It will look for the database files inside './output_data/'
+    # It will look for the database files inside './output_data/' session directories
     project_root = Path(__file__).resolve().parent
     output_directory = project_root / 'output_data'
     analyze_databases(output_directory)

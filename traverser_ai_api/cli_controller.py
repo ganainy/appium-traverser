@@ -347,36 +347,33 @@ class CLIController:
             if not quiet_discovery: logging.error("OUTPUT_DATA_DIR is not configured.")
             return False
 
-        db_output_root = Path(self.cfg.OUTPUT_DATA_DIR) / "database_output"
+        db_output_root = Path(self.cfg.OUTPUT_DATA_DIR)
         if not db_output_root.is_dir():
-            if not quiet_discovery: logging.error(f"Database output directory not found: {db_output_root}")
+            if not quiet_discovery: logging.error(f"Output directory not found: {db_output_root}")
             return False
 
         self.discovered_analysis_targets = []
         target_idx = 1
-        db_filename_template = Path(self.cfg._DB_NAME_TEMPLATE.split('/')[-1]).name
 
-        for app_package_dir in db_output_root.iterdir():
-            if app_package_dir.is_dir():
-                app_package_name = app_package_dir.name
-                expected_db_filename = db_filename_template.replace("{package}", app_package_name)
-                db_file_path = app_package_dir / expected_db_filename
+        # Look for database files in session directories
+        for session_dir in db_output_root.iterdir():
+            if session_dir.is_dir() and "_" in session_dir.name:  # Session dirs have format device_package_timestamp
+                db_dir = session_dir / "database"
+                if db_dir.exists():
+                    for db_file in db_dir.glob("*_crawl_data.db"):
+                        # Extract app package from session directory name
+                        session_parts = session_dir.name.split("_")
+                        if len(session_parts) >= 2:
+                            app_package_name = session_parts[1]  # Second part is the app package
 
-                if not db_file_path.exists():
-                    found_dbs = list(app_package_dir.glob("*.db"))
-                    if found_dbs:
-                        db_file_path = found_dbs[0]
-                        expected_db_filename = db_file_path.name
-                    else:
-                        continue
-
-                self.discovered_analysis_targets.append({
-                    "index": target_idx,
-                    "app_package": app_package_name,
-                    "db_path": str(db_file_path.resolve()),
-                    "db_filename": expected_db_filename
-                })
-                target_idx += 1
+                            self.discovered_analysis_targets.append({
+                                "index": target_idx,
+                                "app_package": app_package_name,
+                                "db_path": str(db_file.resolve()),
+                                "db_filename": db_file.name,
+                                "session_dir": str(session_dir)
+                            })
+                            target_idx += 1
         return True
 
 
@@ -388,14 +385,15 @@ class CLIController:
         if not self.cfg.OUTPUT_DATA_DIR :
              print("Error: OUTPUT_DATA_DIR is not set in the configuration.")
              return False
-        db_output_root = Path(self.cfg.OUTPUT_DATA_DIR) / "database_output"
+        db_output_root = Path(self.cfg.OUTPUT_DATA_DIR)
 
         print(f"\nAvailable analysis targets in {db_output_root}:")
         if not self.discovered_analysis_targets:
             print("No app packages with database files found.")
         else:
             for target in self.discovered_analysis_targets:
-                print(f"{target['index']}. App Package: {target['app_package']}, DB File: {target['db_filename']}")
+                session_info = target.get('session_dir', 'Unknown session')
+                print(f"{target['index']}. App Package: {target['app_package']}, DB File: {target['db_filename']} (Session: {Path(session_info).name})")
             print(f"\nUse '--list-runs-for-target --target-index <NUMBER>' or '--list-runs-for-target --target-app-package <PKG_NAME>' to see runs.")
             print(f"Use '--generate-analysis-pdf --target-index <NUMBER> OR --target-app-package <PKG_NAME> [--pdf-output-name <name.pdf>]' to create PDF for the (latest) run.")
         return True
@@ -513,7 +511,7 @@ class CLIController:
             logging.error(f"Failed to determine a run_id for PDF generation for target {selected_target['app_package']}.")
             return False
 
-        analysis_reports_dir = Path(self.cfg.OUTPUT_DATA_DIR) / "analysis_reports"
+        analysis_reports_dir = Path(selected_target['session_dir']) / "reports"
         analysis_reports_dir.mkdir(parents=True, exist_ok=True)
 
         pdf_filename_suffix = Path(pdf_output_name).name if pdf_output_name else "analysis.pdf"

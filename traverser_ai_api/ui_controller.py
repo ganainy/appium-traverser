@@ -277,7 +277,7 @@ class CrawlerControllerWindow(QMainWindow):
                 self.health_app_scanner._load_health_apps_from_file(device_file_path)
                 
                 # Update the config with the generic path, not device-specific
-                generic_path = os.path.join("output_data", "app_info", "health_apps.json")
+                generic_path = os.path.join(getattr(self.config, 'OUTPUT_DATA_DIR', 'output_data'), "app_info", "health_apps.json")
                 self.config.update_setting_and_save("CURRENT_HEALTH_APP_LIST_FILE", generic_path)
                 return
             
@@ -287,7 +287,7 @@ class CrawlerControllerWindow(QMainWindow):
             self.current_health_app_list_file = device_file_path
             
             # Update config with generic path
-            generic_path = os.path.join("output_data", "app_info", "health_apps.json")
+            generic_path = os.path.join(getattr(self.config, 'OUTPUT_DATA_DIR', 'output_data'), "app_info", "health_apps.json")
             self.config.update_setting_and_save("CURRENT_HEALTH_APP_LIST_FILE", generic_path)
             
             # Clear dropdown if no valid cache
@@ -322,34 +322,16 @@ class CrawlerControllerWindow(QMainWindow):
     def _ensure_output_directories_exist(self):
         """Ensure that all necessary output directories exist."""
         try:
-            # Define the base output directory paths
-            output_base_dir = os.path.join(self.api_dir, "output_data")
-            
-            # Define all required subdirectories
-            subdirs = [
-                "app_info",
-                "screenshots",
-                "traffic_captures",
-                "logs",
-                "database_output",
-                "mobsf_scan_results",
-                "annotated_elements",
-                "analysis_reports",
-                "extracted_apks"
-            ]
+            # The config class now handles creating session-specific directories
+            # We just need to ensure the base output directory exists
+            output_base_dir = getattr(self.config, 'OUTPUT_DATA_DIR', os.path.join(self.api_dir, 'output_data'))
             
             # Create base output directory if it doesn't exist
             if not os.path.exists(output_base_dir):
                 os.makedirs(output_base_dir)
                 self.log_message(f"Created base output directory: {output_base_dir}", "blue")
             
-            # Create each subdirectory if it doesn't exist
-            for subdir in subdirs:
-                dir_path = os.path.join(output_base_dir, subdir)
-                if not os.path.exists(dir_path):
-                    os.makedirs(dir_path)
-                    self.log_message(f"Created output directory: {dir_path}", "blue")
-            
+            # The config class will create session-specific directories when paths are resolved
             # Update config with relative paths if using absolute paths
             self._update_relative_paths_in_config()
             
@@ -367,13 +349,10 @@ class CrawlerControllerWindow(QMainWindow):
             # Define the paths to check and update
             path_settings = [
                 "APP_INFO_OUTPUT_DIR",
-                "SCREENSHOTS_OUTPUT_DIR",
-                "TRAFFIC_CAPTURES_OUTPUT_DIR",
-                "DATABASE_DIR",
-                "MOBSF_SCAN_RESULTS_DIR",
-                "ANNOTATED_ELEMENTS_DIR",
-                "ANALYSIS_REPORTS_DIR",
-                "EXTRACTED_APKS_DIR",
+                "SCREENSHOTS_DIR",
+                "TRAFFIC_CAPTURE_OUTPUT_DIR",
+                "LOG_DIR",
+                "DB_NAME",
                 "CURRENT_HEALTH_APP_LIST_FILE"
             ]
             

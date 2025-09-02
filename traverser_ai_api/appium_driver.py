@@ -557,7 +557,8 @@ class AppiumDriver:
             logging.error(f"Unexpected error during scroll: {e}", exc_info=True)
             return False
 
-    def get_all_elements(self) -> List[WebElement]:
+    from typing import Sequence
+    def get_all_elements(self) -> Sequence[WebElement]:
         """Gets all elements on the current screen using XPath '//*'."""
         if not self.driver:
             logging.warning("Driver not available, cannot get all elements.")

@@ -2,6 +2,7 @@ import os
 import logging
 import sys
 import json
+from datetime import datetime
 from typing import Optional, Dict, Any, List, Union, get_type_hints
 from dotenv import load_dotenv
 
@@ -19,6 +20,7 @@ class Config:
         self.APP_ACTIVITY: Optional[str] = None
         self.ALLOWED_EXTERNAL_PACKAGES: List[str] = []
         self.OUTPUT_DATA_DIR: Optional[str] = None # This will be the resolved absolute path
+        self.SESSION_DIR: Optional[str] = None # Unique session directory for each run
         self.APP_INFO_OUTPUT_DIR: Optional[str] = None
         self.SCREENSHOTS_DIR: Optional[str] = None
         self.ANNOTATED_SCREENSHOTS_DIR: Optional[str] = None
@@ -27,6 +29,9 @@ class Config:
         self.LOG_LEVEL: str = 'INFO'
         self.LOG_FILE_NAME: str = "main_traverser_final.log"
         self.DB_NAME: Optional[str] = None
+        self.MOBSF_SCAN_DIR: Optional[str] = None
+        self.EXTRACTED_APK_DIR: Optional[str] = None
+        self.PDF_REPORT_DIR: Optional[str] = None
         self.DB_CONNECT_TIMEOUT: int = 10
         self.DB_BUSY_TIMEOUT: int = 5000
         self.WAIT_AFTER_ACTION: float = 2.0
@@ -92,12 +97,16 @@ class Config:
         
         # Store templates from defaults for dynamic resolution
         self._OUTPUT_DATA_DIR_TEMPLATE: str = "output_data"
-        self._APP_INFO_OUTPUT_DIR_TEMPLATE: str = "{output_data_dir}/app_info" # Shared
-        self._SCREENSHOTS_DIR_TEMPLATE: str = "{output_data_dir}/screenshots/crawl_screenshots_{package}"
-        self._ANNOTATED_SCREENSHOTS_DIR_TEMPLATE: str = "{output_data_dir}/screenshots/annotated_crawl_screenshots_{package}"
-        self._TRAFFIC_CAPTURE_OUTPUT_DIR_TEMPLATE: str = "{output_data_dir}/traffic_captures/{package}"
-        self._DB_NAME_TEMPLATE: str = "{output_data_dir}/database_output/{package}/{package}_crawl_data.db"
-        self._LOG_DIR_TEMPLATE: str = "{output_data_dir}/logs/{package}"
+        self._SESSION_DIR_TEMPLATE: str = "{output_data_dir}/{{device_id}}_{{app_package}}_{{timestamp}}"
+        self._APP_INFO_OUTPUT_DIR_TEMPLATE: str = "{session_dir}/app_info"
+        self._SCREENSHOTS_DIR_TEMPLATE: str = "{session_dir}/screenshots"
+        self._ANNOTATED_SCREENSHOTS_DIR_TEMPLATE: str = "{session_dir}/annotated_screenshots"
+        self._TRAFFIC_CAPTURE_OUTPUT_DIR_TEMPLATE: str = "{session_dir}/traffic_captures"
+        self._DB_NAME_TEMPLATE: str = "{session_dir}/database/{package}_crawl_data.db"
+        self._LOG_DIR_TEMPLATE: str = "{session_dir}/logs"
+        self._MOBSF_SCAN_DIR_TEMPLATE: str = "{session_dir}/mobsf_scan_results"
+        self._EXTRACTED_APK_DIR_TEMPLATE: str = "{session_dir}/extracted_apk"
+        self._PDF_REPORT_DIR_TEMPLATE: str = "{session_dir}/reports"
 
         self._load_from_defaults_module()
         self._load_environment_variables()
@@ -111,12 +120,16 @@ class Config:
 
             path_templates = {
                 "OUTPUT_DATA_DIR": "_OUTPUT_DATA_DIR_TEMPLATE",
+                "SESSION_DIR": "_SESSION_DIR_TEMPLATE",
                 "APP_INFO_OUTPUT_DIR": "_APP_INFO_OUTPUT_DIR_TEMPLATE",
                 "SCREENSHOTS_DIR": "_SCREENSHOTS_DIR_TEMPLATE",
                 "ANNOTATED_SCREENSHOTS_DIR": "_ANNOTATED_SCREENSHOTS_DIR_TEMPLATE",
                 "TRAFFIC_CAPTURE_OUTPUT_DIR": "_TRAFFIC_CAPTURE_OUTPUT_DIR_TEMPLATE",
                 "DB_NAME": "_DB_NAME_TEMPLATE",
-                "LOG_DIR": "_LOG_DIR_TEMPLATE"
+                "LOG_DIR": "_LOG_DIR_TEMPLATE",
+                "MOBSF_SCAN_DIR": "_MOBSF_SCAN_DIR_TEMPLATE",
+                "EXTRACTED_APK_DIR": "_EXTRACTED_APK_DIR_TEMPLATE",
+                "PDF_REPORT_DIR": "_PDF_REPORT_DIR_TEMPLATE"
             }
             
             for key in path_templates:
@@ -182,6 +195,38 @@ class Config:
         self.PCAPDROID_API_KEY = os.getenv("PCAPDROID_API_KEY", self.PCAPDROID_API_KEY)
         self.MOBSF_API_KEY = os.getenv("MOBSF_API_KEY", self.MOBSF_API_KEY)
         logging.info("Applied configuration from environment variables.")
+
+    def _generate_session_dir_name(self) -> str:
+        """Generate a unique session directory name with device_id, app_package, and timestamp.
+        Attempts to get the real device ID using ADB if not set in config.
+        """
+        import re
+        import subprocess
+        device_id = self.TARGET_DEVICE_UDID
+        if not device_id:
+            try:
+                result = subprocess.run(['adb', 'get-serialno'], capture_output=True, text=True, timeout=5)
+                if result.returncode == 0 and result.stdout.strip() and result.stdout.strip() != "unknown":
+                    device_id = result.stdout.strip()
+                else:
+                    # Fallback to 'adb devices' if get-serialno fails
+                    devices_result = subprocess.run(['adb', 'devices'], capture_output=True, text=True, timeout=5)
+                    if devices_result.returncode == 0:
+                        lines = devices_result.stdout.strip().splitlines()
+                        device_lines = [line for line in lines[1:] if line.strip() and '\tdevice' in line]
+                        if device_lines:
+                            device_id = device_lines[0].split('\t')[0].strip()
+            except Exception:
+                device_id = None
+        if not device_id:
+            device_id = "unknown_device"
+        # Clean device_id and app_package for filesystem compatibility
+        device_id = re.sub(r'[^\w\-.]', '_', device_id)
+        app_package = self.APP_PACKAGE or "unknown_package"
+        app_package = app_package.replace(".", "_")
+        # Generate timestamp in DD-MM-YY format
+        timestamp = datetime.now().strftime("%d-%m-%y")
+        return f"{device_id}_{app_package}_{timestamp}"
 
     def _update_attribute(self, key: str, new_value: Any, source: str, perform_type_conversion: bool = True):
         if not hasattr(self, key):
@@ -298,7 +343,7 @@ class Config:
         except Exception as e:
             logging.error(f"Failed to save user configuration to {file_path}: {e}", exc_info=True)
 
-    def _resolve_path_template(self, template: Optional[str], base_output_dir: str, app_package_for_path: Optional[str]) -> str:
+    def _resolve_path_template(self, template: Optional[str], session_dir: str, app_package_for_path: Optional[str]) -> str:
         if template is None: return ""
         
         # Use a placeholder if app_package is None to avoid errors in path formatting,
@@ -306,9 +351,9 @@ class Config:
         package_segment = app_package_for_path if app_package_for_path else "unknown_package"
 
         resolved_path = template
-        if "{output_data_dir}" in resolved_path:
-            resolved_path = resolved_path.replace("{output_data_dir}", base_output_dir)
-        if "{package}" in resolved_path: # This is the key change for subdirectories
+        if "{session_dir}" in resolved_path:
+            resolved_path = resolved_path.replace("{session_dir}", session_dir)
+        if "{package}" in resolved_path:
             resolved_path = resolved_path.replace("{package}", package_segment)
         
         if not os.path.isabs(resolved_path):
@@ -323,26 +368,29 @@ class Config:
             self.OUTPUT_DATA_DIR = os.path.abspath(self._OUTPUT_DATA_DIR_TEMPLATE)
         os.makedirs(self.OUTPUT_DATA_DIR, exist_ok=True)
 
+        # 2. Generate unique session directory name
+        session_dir_name = self._generate_session_dir_name()
+        self.SESSION_DIR = os.path.join(self.OUTPUT_DATA_DIR, session_dir_name)
+        os.makedirs(self.SESSION_DIR, exist_ok=True)
+
         current_app_pkg = getattr(self, 'APP_PACKAGE', None) # Get current app_package
 
-        # 2. Resolve other paths
-        # Shared directory, does not use {package} in its direct template definition
-        self.APP_INFO_OUTPUT_DIR = self._resolve_path_template(self._APP_INFO_OUTPUT_DIR_TEMPLATE, self.OUTPUT_DATA_DIR, None) # No package needed for shared app_info
+        # 3. Resolve all paths using the session directory
+        self.APP_INFO_OUTPUT_DIR = self._resolve_path_template(self._APP_INFO_OUTPUT_DIR_TEMPLATE, self.SESSION_DIR, current_app_pkg)
+        self.SCREENSHOTS_DIR = self._resolve_path_template(self._SCREENSHOTS_DIR_TEMPLATE, self.SESSION_DIR, current_app_pkg)
+        self.ANNOTATED_SCREENSHOTS_DIR = self._resolve_path_template(self._ANNOTATED_SCREENSHOTS_DIR_TEMPLATE, self.SESSION_DIR, current_app_pkg)
+        self.TRAFFIC_CAPTURE_OUTPUT_DIR = self._resolve_path_template(self._TRAFFIC_CAPTURE_OUTPUT_DIR_TEMPLATE, self.SESSION_DIR, current_app_pkg)
+        self.DB_NAME = self._resolve_path_template(self._DB_NAME_TEMPLATE, self.SESSION_DIR, current_app_pkg)
+        self.LOG_DIR = self._resolve_path_template(self._LOG_DIR_TEMPLATE, self.SESSION_DIR, current_app_pkg)
+        self.MOBSF_SCAN_DIR = self._resolve_path_template(self._MOBSF_SCAN_DIR_TEMPLATE, self.SESSION_DIR, current_app_pkg)
+        self.EXTRACTED_APK_DIR = self._resolve_path_template(self._EXTRACTED_APK_DIR_TEMPLATE, self.SESSION_DIR, current_app_pkg)
+        self.PDF_REPORT_DIR = self._resolve_path_template(self._PDF_REPORT_DIR_TEMPLATE, self.SESSION_DIR, current_app_pkg)
 
-        # Package-specific directory names (not subdirectories within a generic 'screenshots' folder)
-        self.SCREENSHOTS_DIR = self._resolve_path_template(self._SCREENSHOTS_DIR_TEMPLATE, self.OUTPUT_DATA_DIR, current_app_pkg)
-        self.ANNOTATED_SCREENSHOTS_DIR = self._resolve_path_template(self._ANNOTATED_SCREENSHOTS_DIR_TEMPLATE, self.OUTPUT_DATA_DIR, current_app_pkg)
-
-        # These create a {package} sub-directory
-        self.DB_NAME = self._resolve_path_template(self._DB_NAME_TEMPLATE, self.OUTPUT_DATA_DIR, current_app_pkg)
-        self.TRAFFIC_CAPTURE_OUTPUT_DIR = self._resolve_path_template(self._TRAFFIC_CAPTURE_OUTPUT_DIR_TEMPLATE, self.OUTPUT_DATA_DIR, current_app_pkg)
-        self.LOG_DIR = self._resolve_path_template(self._LOG_DIR_TEMPLATE, self.OUTPUT_DATA_DIR, current_app_pkg)
-
-
-        # Ensure directories that will contain files are created
+        # 4. Ensure all directories are created
         dirs_to_create = [
             self.APP_INFO_OUTPUT_DIR, self.SCREENSHOTS_DIR, self.ANNOTATED_SCREENSHOTS_DIR,
-            self.TRAFFIC_CAPTURE_OUTPUT_DIR, self.LOG_DIR
+            self.TRAFFIC_CAPTURE_OUTPUT_DIR, self.LOG_DIR, self.MOBSF_SCAN_DIR,
+            self.EXTRACTED_APK_DIR, self.PDF_REPORT_DIR
         ]
         if self.DB_NAME: # DB_NAME is a file path, so create its parent
             dirs_to_create.append(os.path.dirname(self.DB_NAME))
@@ -351,18 +399,21 @@ class Config:
             if dir_path: # Ensure dir_path is not empty
                 os.makedirs(dir_path, exist_ok=True)
 
-
         if self.PCAPDROID_PACKAGE:
             self.PCAPDROID_ACTIVITY = f"{self.PCAPDROID_PACKAGE}/.activities.CaptureCtrl"
 
         logging.info("Resolved dynamic configuration paths.")
         logging.debug(f"  OUTPUT_DATA_DIR: {self.OUTPUT_DATA_DIR}")
+        logging.debug(f"  SESSION_DIR: {self.SESSION_DIR}")
         logging.debug(f"  APP_INFO_OUTPUT_DIR: {self.APP_INFO_OUTPUT_DIR}")
         logging.debug(f"  SCREENSHOTS_DIR: {self.SCREENSHOTS_DIR}")
         logging.debug(f"  ANNOTATED_SCREENSHOTS_DIR: {self.ANNOTATED_SCREENSHOTS_DIR}")
         logging.debug(f"  DB_NAME: {self.DB_NAME}")
         logging.debug(f"  TRAFFIC_CAPTURE_OUTPUT_DIR: {self.TRAFFIC_CAPTURE_OUTPUT_DIR}")
         logging.debug(f"  LOG_DIR: {self.LOG_DIR}")
+        logging.debug(f"  MOBSF_SCAN_DIR: {self.MOBSF_SCAN_DIR}")
+        logging.debug(f"  EXTRACTED_APK_DIR: {self.EXTRACTED_APK_DIR}")
+        logging.debug(f"  PDF_REPORT_DIR: {self.PDF_REPORT_DIR}")
 
 
     def update_setting_and_save(self, key: str, value: Any):
@@ -402,16 +453,20 @@ ALLOWED_EXTERNAL_PACKAGES = [
 ]
 
 OUTPUT_DATA_DIR = "output_data" # This is a template name, Config class makes it a path
-APP_INFO_OUTPUT_DIR = "{output_data_dir}/app_info"
-SCREENSHOTS_DIR = "{output_data_dir}/screenshots/crawl_screenshots_{package}"
-ANNOTATED_SCREENSHOTS_DIR = "{output_data_dir}/screenshots/annotated_crawl_screenshots_{package}"
-TRAFFIC_CAPTURE_OUTPUT_DIR = "{output_data_dir}/traffic_captures/{package}"
-LOG_DIR = "{output_data_dir}/logs/{package}" # Template for app-specific log directory
+SESSION_DIR = "{output_data_dir}/{device_id}_{app_package}_{timestamp}"
+APP_INFO_OUTPUT_DIR = "{session_dir}/app_info"
+SCREENSHOTS_DIR = "{session_dir}/screenshots"
+ANNOTATED_SCREENSHOTS_DIR = "{session_dir}/annotated_screenshots"
+TRAFFIC_CAPTURE_OUTPUT_DIR = "{session_dir}/traffic_captures"
+LOG_DIR = "{session_dir}/logs"
 
 LOG_LEVEL = 'INFO'
 LOG_FILE_NAME = "main_traverser_final.log" # Actual file name, dir is separate
 
-DB_NAME = "{output_data_dir}/database_output/{package}/{package}_crawl_data.db"
+DB_NAME = "{session_dir}/database/{package}_crawl_data.db"
+MOBSF_SCAN_DIR = "{session_dir}/mobsf_scan_results"
+EXTRACTED_APK_DIR = "{session_dir}/extracted_apk"
+PDF_REPORT_DIR = "{session_dir}/reports"
 DB_CONNECT_TIMEOUT = 10
 DB_BUSY_TIMEOUT = 5000
 

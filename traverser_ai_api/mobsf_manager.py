@@ -32,7 +32,9 @@ class MobSFManager:
         
         # Ensure OUTPUT_DATA_DIR exists
         output_dir = str(getattr(self.cfg, 'OUTPUT_DATA_DIR', 'output_data'))
-        self.scan_results_dir = os.path.join(output_dir, 'mobsf_scan_results')
+        # Use session directory for MobSF results if available
+        session_dir = getattr(self.cfg, 'SESSION_DIR', output_dir)
+        self.scan_results_dir = os.path.join(session_dir, 'mobsf_scan_results')
         os.makedirs(self.scan_results_dir, exist_ok=True)
         logging.info(f"MobSFManager initialized with API URL: {self.api_url}")
 
@@ -137,7 +139,8 @@ class MobSFManager:
 
             # Create output directory if it doesn't exist
             output_dir_base = str(getattr(self.cfg, 'OUTPUT_DATA_DIR', 'output_data'))
-            output_dir = os.path.join(output_dir_base, 'extracted_apks')
+            session_dir = getattr(self.cfg, 'SESSION_DIR', output_dir_base)
+            output_dir = os.path.join(session_dir, 'extracted_apk')
             os.makedirs(output_dir, exist_ok=True)
             
             # Generate the local APK filename
