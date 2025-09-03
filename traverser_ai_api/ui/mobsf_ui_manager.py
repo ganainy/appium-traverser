@@ -130,7 +130,7 @@ import sys
 import logging
 
 # Set up logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Add the parent directory to sys.path to import the MobSF manager
 sys.path.insert(0, r'{api_dir_path}')
@@ -177,7 +177,7 @@ except Exception as e:
         with open(script_path, 'w', encoding='utf-8') as f:
             f.write(script_content)
         
-        logging.info(f"Created temporary MobSF analysis script: {script_path}")
+        logging.debug(f"Created temporary MobSF analysis script: {script_path}")
     
     @Slot()
     def _on_mobsf_analysis_output(self):
@@ -194,7 +194,7 @@ except Exception as e:
         if os.path.exists(script_path):
             try:
                 os.remove(script_path)
-                logging.info(f"Removed temporary MobSF analysis script: {script_path}")
+                logging.debug(f"Removed temporary MobSF analysis script: {script_path}")
             except Exception as e:
                 logging.warning(f"Could not remove temporary script: {e}")
                 

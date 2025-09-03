@@ -7,7 +7,10 @@ from selenium.common.exceptions import StaleElementReferenceException # Added fo
 
 if TYPE_CHECKING:
     from appium_driver import AppiumDriver
-from config import Config
+try:
+    from traverser_ai_api.config import Config
+except ImportError:
+    from config import Config
 
 class ActionExecutor:
     def __init__(self, driver: 'AppiumDriver', app_config: Config):
@@ -29,7 +32,7 @@ class ActionExecutor:
 
         self.consecutive_exec_failures = 0
         self.last_error_message: Optional[str] = None # Added attribute
-        logging.info(f"ActionExecutor initialized. Max exec failures: {self.max_exec_failures}. ADB input fallback: {self.use_adb_input_fallback}")
+        logging.debug(f"ActionExecutor initialized. Max exec failures: {self.max_exec_failures}. ADB input fallback: {self.use_adb_input_fallback}")
 
     def reset_consecutive_failures(self): # Added method
         """Resets the consecutive execution failure counter."""
@@ -68,10 +71,10 @@ class ActionExecutor:
                 coordinates = action_details.get("coordinates")
                 if isinstance(coordinates, tuple) and len(coordinates) == 2:
                     action_log_info += f", Coords: {coordinates}"
-                    logging.info(f"Executing coordinate-based tap at {coordinates}")
+                    logging.debug(f"Executing coordinate-based tap at {coordinates}")
                     success = self.driver.tap_at_coordinates(coordinates[0], coordinates[1])
                     if success and intended_input_text_for_coord_tap is not None:
-                        logging.info(f"Coordinate tap successful. Now attempting to input text: '{intended_input_text_for_coord_tap}'")
+                        logging.debug(f"Coordinate tap successful. Now attempting to input text: '{intended_input_text_for_coord_tap}'")
                         time.sleep(0.5)
                         active_el = self.driver.get_active_element()
                         input_via_active_el = False
@@ -123,7 +126,7 @@ class ActionExecutor:
                         time.sleep(0.5) # Allow time for keyboard/focus
                         adb_success = self.driver.type_text_by_adb(input_text)
                         if adb_success:
-                            logging.info("ADB input fallback succeeded.")
+                            logging.debug("ADB input fallback succeeded.")
                             success = True
                         else:
                             current_error_msg = f"Standard and ADB input fallbacks failed for element (ID: {getattr(element, 'id', 'N/A')})."
@@ -141,7 +144,7 @@ class ActionExecutor:
                         try:
                             element.clear()
                             success = True
-                            logging.info(f"Cleared element (ID: {getattr(element, 'id', 'N/A')}) as input_text was None.")
+                            logging.debug(f"Cleared element (ID: {getattr(element, 'id', 'N/A')}) as input_text was None.")
                         except Exception as e_clear:
                             current_error_msg = f"Failed to clear element (ID: {getattr(element, 'id', 'N/A')}): {e_clear}"
                             logging.warning(current_error_msg)
@@ -181,7 +184,7 @@ class ActionExecutor:
 
         if success:
             self.reset_consecutive_failures()
-            logging.info(f"Action execution successful: {action_log_info}")
+            logging.debug(f"Action execution successful: {action_log_info}")
         else:
             self._track_failure(current_error_msg or f"Unknown failure: {action_log_info}")
 

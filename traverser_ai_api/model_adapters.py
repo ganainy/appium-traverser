@@ -7,7 +7,23 @@ This module provides abstract interfaces and concrete implementations
 for different AI model providers, allowing the app crawler to use
 multiple model providers such as Google Gemini and DeepSeek.
 
-Each adapter implements a common interface to handle:
+Each adapter implements a common interfa            # Check if model is available before attempting to use it
+            try:
+                available_models = ollama.list()
+                model_names = []
+                if 'models' in available_models:
+                    for model in available_models['models']:
+                        model_name = model.get('model', model.get('name', ''))
+                        if model_name:
+                            model_names.append(model_name)
+                
+                if self.model_name not in model_names and f"{self.model_name}:latest" not in model_names:
+                    available_str = ", ".join(model_names) if model_names else "None"
+                    error_msg = f"Model '{self.model_name}' not found. Available models: {available_str}. Please run: ollama pull {self.model_name}"
+                    logging.error(error_msg)
+                    raise ValueError(error_msg)
+            except Exception as list_error:
+                logging.warning(f"Could not verify model availability: {list_error}. Proceeding anyway.")e:
 1. Model initialization and configuration
 2. Image processing and prompting
 3. Response parsing and formatting
@@ -36,8 +52,8 @@ class ModelAdapter(ABC):
     
     @abstractmethod
     def generate_response(self, 
-                         prompt: str, 
-                         image: Optional[Image.Image] = None,
+                        prompt: str, 
+                        image: Optional[Image.Image] = None,
                          **kwargs) -> Tuple[str, Dict[str, Any]]:
         """Generate a response from the model based on the prompt and optional image."""
         pass
@@ -90,7 +106,7 @@ class GeminiAdapter(ModelAdapter):
                 safety_settings=safety_settings
             )
             
-            logging.info(f"Gemini model initialized: {self.model_name}")
+            logging.debug(f"Gemini model initialized: {self.model_name}")
             
         except Exception as e:
             logging.error(f"Failed to initialize Gemini model: {e}", exc_info=True)
@@ -188,7 +204,7 @@ class DeepSeekAdapter(ModelAdapter):
             # Store generation parameters
             self.generation_params = model_config.get('generation_config', {})
             
-            logging.info(f"DeepSeek model initialized: {self.model_name}")
+            logging.debug(f"DeepSeek model initialized: {self.model_name}")
             
         except ImportError:
             error_msg = "OpenAI Python SDK not installed. Run: pip install openai"
@@ -247,7 +263,7 @@ class DeepSeekAdapter(ModelAdapter):
                 # If total estimated size > limit, skip image to prevent payload errors
                 if total_estimated_size > payload_max_bytes:
                     logging.warning(f"Estimated payload size ({total_estimated_size} bytes) too large for DeepSeek (limit: {payload_max_bytes}). Skipping image context.")
-                    logging.info(f"Prompt size: {estimated_prompt_size}, Image size: {estimated_image_size} -> {estimated_base64_size} (base64)")
+                    logging.debug(f"Prompt size: {estimated_prompt_size}, Image size: {estimated_image_size} -> {estimated_base64_size} (base64)")
                 else:
                     import base64
                     image_b64 = base64.b64encode(image_bytes).decode('utf-8')
@@ -337,6 +353,186 @@ class DeepSeekAdapter(ModelAdapter):
         return self._model_info
 
 
+# ------ Ollama Adapter ------
+
+class OllamaAdapter(ModelAdapter):
+    """Adapter for Ollama local models."""
+    
+    def __init__(self, api_key: str, model_name: str):
+        # Extract the actual model name from display name (remove "(local)" and vision indicator)
+        self.display_name = model_name
+        self.model_name = self._extract_model_name(model_name)
+        self.base_url = api_key  # For Ollama, api_key parameter contains the base URL
+        self.vision_supported = False  # Will be set during initialization
+        self._model_info = {
+            "provider": "Ollama",
+            "model_family": "Local LLM",
+            "model_name": self.model_name
+        }
+    
+    def _extract_model_name(self, display_name: str) -> str:
+        """Extract the actual model name from the display name."""
+        # Remove "(local)" suffix and vision indicator "👁️"
+        model_name = display_name.replace("(local)", "").replace("👁️", "").strip()
+        return model_name
+    
+    def _check_vision_support(self, model_name: str) -> bool:
+        """Check if the model supports vision capabilities based on its name."""
+        # Common vision-capable model patterns
+        vision_patterns = [
+            'vision', 'llava', 'bakllava', 'minicpm-v', 'moondream', 'gemma3', 'llama4', 'qwen2.5vl'
+        ]
+        base_name = model_name.split(':')[0].lower()  # Remove tag if present
+        return any(pattern in base_name for pattern in vision_patterns)
+    
+    def initialize(self, model_config: Dict[str, Any], safety_settings: Optional[Dict] = None) -> None:
+        """Initialize the Ollama model."""
+        try:
+            # Try to import ollama
+            import ollama
+            
+            # Set the base URL if provided
+            if self.base_url:
+                # Set the base URL using environment variable (Ollama SDK method)
+                os.environ['OLLAMA_HOST'] = self.base_url
+            
+            # Store generation parameters
+            self.generation_params = model_config.get('generation_config', {})
+            
+            # Check if this model supports vision based on the actual model name
+            self.vision_supported = self._check_vision_support(self.model_name)
+            
+            # Test connection to Ollama
+            try:
+                ollama.list()
+                logging.debug(f"Ollama connection successful. Using model: {self.model_name}")
+                if self.vision_supported:
+                    logging.debug(f"Model {self.model_name} supports vision capabilities")
+                else:
+                    logging.debug(f"Model {self.model_name} is text-only")
+            except Exception as conn_error:
+                logging.warning(f"Could not verify Ollama connection: {conn_error}. Make sure Ollama is running.")
+            
+            logging.debug(f"Ollama model initialized: {self.model_name}")
+            
+        except ImportError:
+            error_msg = "Ollama Python SDK not installed. Run: pip install ollama"
+            logging.error(error_msg)
+            raise ImportError(error_msg)
+        except Exception as e:
+            logging.error(f"Failed to initialize Ollama model: {e}", exc_info=True)
+            raise
+    
+    def generate_response(self, 
+                         prompt: str, 
+                         image: Optional[Image.Image] = None,
+                         **kwargs) -> Tuple[str, Dict[str, Any]]:
+        """Generate a response from Ollama."""
+        try:
+            import ollama
+            import base64
+            import io
+            start_time = time.time()
+            
+            # Check if model is available before attempting to use it
+            try:
+                available_models = ollama.list()
+                model_names = [model['name'].split(':')[0] for model in available_models.get('models', [])]
+                if self.model_name not in model_names and f"{self.model_name}:latest" not in [model['name'] for model in available_models.get('models', [])]:
+                    available_str = ", ".join([model['name'] for model in available_models.get('models', [])])
+                    error_msg = f"Model '{self.model_name}' not found. Available models: {available_str}. Please run: ollama pull {self.model_name}"
+                    logging.error(error_msg)
+                    raise ValueError(error_msg)
+            except Exception as list_error:
+                logging.warning(f"Could not verify model availability: {list_error}. Proceeding anyway.")
+            
+            # Prepare messages and images
+            messages = []
+            images = []
+            
+            # Check if the model supports vision
+            supports_vision = self.vision_supported
+            
+            # Handle image if provided and model supports vision
+            if image and supports_vision:
+                # Convert PIL Image to base64
+                image_buffer = io.BytesIO()
+                image_format = 'JPEG' if image.mode in ('RGB', 'L', 'P') else 'PNG'
+                image.save(image_buffer, format=image_format)
+                image_bytes = image_buffer.getvalue()
+                image_b64 = base64.b64encode(image_bytes).decode('utf-8')
+                
+                # For Ollama, images are passed separately
+                images.append(f"data:image/{image_format.lower()};base64,{image_b64}")
+                logging.debug(f"Added image to Ollama request (format: {image_format}, size: {len(image_b64)} chars)")
+            elif image and not supports_vision:
+                logging.warning(f"Model '{self.model_name}' does not support vision. Processing text-only.")
+            
+            # Add user message with simple string content (Ollama format)
+            user_message = {
+                "role": "user", 
+                "content": prompt
+            }
+            
+            messages.append(user_message)
+            
+            # Use different API based on whether model supports vision
+            if supports_vision and images:
+                # Use generate API for vision models
+                response = ollama.generate(
+                    model=self.model_name,
+                    prompt=prompt,
+                    images=images,
+                    options={
+                        "temperature": self.generation_params.get("temperature", 0.7),
+                        "top_p": self.generation_params.get("top_p", 0.95),
+                        "num_predict": self.generation_params.get("max_output_tokens", 1024)
+                    }
+                )
+                # Extract response text from generate response
+                response_text = response.get('response', '')
+            else:
+                # Use chat API for text-only models
+                response = ollama.chat(
+                    model=self.model_name,
+                    messages=messages,
+                    options={
+                        "temperature": self.generation_params.get("temperature", 0.7),
+                        "top_p": self.generation_params.get("top_p", 0.95),
+                        "num_predict": self.generation_params.get("max_output_tokens", 1024)
+                    }
+                )
+                # Extract response text from chat response
+                response_text = response.get('message', {}).get('content', '')
+            
+            # Prepare metadata
+            elapsed_time = time.time() - start_time
+            metadata = {
+                "processing_time": elapsed_time,
+                "model": self.model_name,
+                "provider": "Ollama"
+            }
+            
+            # Ollama doesn't provide token counts in the same way
+            # Make an estimate
+            metadata["token_count"] = {
+                "prompt": len(prompt) // 4,  # Rough estimate
+                "response": len(response_text) // 4,  # Rough estimate
+                "total": (len(prompt) + len(response_text)) // 4  # Rough estimate
+            }
+            
+            return response_text, metadata
+            
+        except Exception as e:
+            logging.error(f"Error generating response from Ollama: {e}", exc_info=True)
+            raise
+    
+    @property
+    def model_info(self) -> Dict[str, Any]:
+        """Return information about the model."""
+        return self._model_info
+
+
 # ------ Factory Function ------
 
 def check_dependencies(provider: str) -> tuple[bool, str]:
@@ -354,6 +550,12 @@ def check_dependencies(provider: str) -> tuple[bool, str]:
             return True, ""
         except ImportError:
             return False, "OpenAI Python SDK not installed. Run: pip install openai"
+    elif provider.lower() == "ollama":
+        try:
+            import ollama
+            return True, ""
+        except ImportError:
+            return False, "Ollama Python SDK not installed. Run: pip install ollama"
     return True, ""  # Default case
 
 def create_model_adapter(provider: str, api_key: str, model_name: str) -> ModelAdapter:
@@ -362,5 +564,7 @@ def create_model_adapter(provider: str, api_key: str, model_name: str) -> ModelA
         return GeminiAdapter(api_key, model_name)
     elif provider.lower() == "deepseek":
         return DeepSeekAdapter(api_key, model_name)
+    elif provider.lower() == "ollama":
+        return OllamaAdapter(api_key, model_name)
     else:
         raise ValueError(f"Unsupported model provider: {provider}")

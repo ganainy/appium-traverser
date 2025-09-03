@@ -1,15 +1,16 @@
 appium-python-client  # Mobile app automation framework for interaction with app UI
-google-generativeai>=0.7.0  # Google Gemini API for AI model integration
-deepseek>=1.0.0  # DeepSeek API for AI model integration (vision-language models)
-pillow>=10.0.0  # Image processing library for screenshot handling
+google-generativeai  # Google Gemini API for AI model integration
+deepseek  # DeepSeek API for AI model integration (vision-language models)
+ollama  # Ollama API for local LLM integration
+pillow  # Image processing library for screenshot handling
 imagehash  # Perceptual image hashing for screen state comparison
 lxml  # XML parsing library for UI hierarchy analysis
 colorlog  # Enhanced logging with colors for better readability
 python-dotenv  # Environment variable management for configuration
-PySide6>=6.6.0  # Qt-based GUI for crawler control
+PySide6  # Qt-based GUI for crawler control
 debugpy  # Remote debugging support for Visual Studio Code
 # Agent architecture dependencies
-langchain>=0.3.0  # Framework for building AI agents and chains
-langchain_google_genai>=2.1.0  # LangChain integration with Google Generative AI
-langchain-core>=0.3.0  # Core components for LangChain functionality
-langgraph>=0.1.0  # Graph-based orchestration for agent workflows
+langchain  # Framework for building AI agents and chains
+langchain-google-genai  # LangChain integration with Google Generative AI
+langchain-core  # Core components for LangChain functionality
+langgraph  # Graph-based orchestration for agent workflows

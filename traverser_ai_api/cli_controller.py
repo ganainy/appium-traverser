@@ -68,15 +68,15 @@ class CLIController:
         signal.signal(signal.SIGTERM, self._signal_handler)
 
         if self.cfg.CURRENT_HEALTH_APP_LIST_FILE and os.path.exists(self.cfg.CURRENT_HEALTH_APP_LIST_FILE):
-            logging.info(f"Attempting to auto-load health apps from: {self.cfg.CURRENT_HEALTH_APP_LIST_FILE}")
+            logging.debug(f"Attempting to auto-load health apps from: {self.cfg.CURRENT_HEALTH_APP_LIST_FILE}")
             self._load_health_apps_from_file(self.cfg.CURRENT_HEALTH_APP_LIST_FILE)
         else:
-            logging.info("No pre-existing health app list file found or file does not exist.")
+            logging.debug("No pre-existing health app list file found or file does not exist.")
 
     def _signal_handler(self, signum, frame):
         logging.warning(f"\nSignal {signal.Signals(signum).name} received. Initiating crawler shutdown...")
         self.stop_crawler()
-        logging.info("CLI shutdown signal handled.")
+        logging.debug("CLI shutdown signal handled.")
         sys.exit(0)
 
     def _is_process_running(self, pid: int) -> bool:
@@ -88,7 +88,7 @@ class CLIController:
         return True
 
     def save_all_changes(self) -> bool:
-        logging.info("Attempting to save all current configuration settings...")
+        logging.debug("Attempting to save all current configuration settings...")
         try:
             self.cfg.save_user_config()
             return True
@@ -106,7 +106,7 @@ class CLIController:
         print("============================")
 
     def set_config_value(self, key: str, value_str: str) -> bool:
-        logging.info(f"Attempting to set config: {key} = '{value_str}'")
+        logging.debug(f"Attempting to set config: {key} = '{value_str}'")
         try:
             self.cfg.update_setting_and_save(key, value_str)
             return True
@@ -117,13 +117,13 @@ class CLIController:
     def scan_apps(self, force_rescan: bool = False) -> bool:
         if not force_rescan and self.cfg.CURRENT_HEALTH_APP_LIST_FILE and \
            os.path.exists(self.cfg.CURRENT_HEALTH_APP_LIST_FILE):
-            logging.info(f"Using cached health app list: {self.cfg.CURRENT_HEALTH_APP_LIST_FILE}")
+            logging.debug(f"Using cached health app list: {self.cfg.CURRENT_HEALTH_APP_LIST_FILE}")
             return self._load_health_apps_from_file(self.cfg.CURRENT_HEALTH_APP_LIST_FILE)
 
         if not os.path.exists(self.find_app_info_script_path):
             logging.error(f"find_app_info.py script not found at {self.find_app_info_script_path}")
             return False
-        logging.info("Starting health app scan...")
+        logging.debug("Starting health app scan...")
         try:
             result = subprocess.run(
                 [sys.executable, '-u', self.find_app_info_script_path, '--mode', 'discover'],
@@ -153,7 +153,7 @@ class CLIController:
             with open(file_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             self.health_apps_data = data.get('apps', []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
-            logging.info(f"Loaded {len(self.health_apps_data)} health apps from {file_path}")
+            logging.debug(f"Loaded {len(self.health_apps_data)} health apps from {file_path}")
             return True
         except Exception as e:
             logging.error(f"Error loading health apps from {file_path}: {e}", exc_info=True)
@@ -162,7 +162,7 @@ class CLIController:
 
     def list_apps(self):
         if not self.health_apps_data:
-            logging.info("No health apps loaded. Run 'scan-apps'.")
+            logging.debug("No health apps loaded. Run 'scan-apps'.")
             return
         print(f"\n=== Available Health Apps ({len(self.health_apps_data)}) ===")
         for i, app in enumerate(self.health_apps_data):
@@ -184,7 +184,7 @@ class CLIController:
         if not selected_app: logging.error(f"App '{app_identifier}' not found."); return False
         pkg, act, name = selected_app.get('package_name'), selected_app.get('activity_name'), selected_app.get('app_name', 'Unknown')
         if not pkg or not act: logging.error(f"Selected app '{name}' missing package/activity."); return False
-        logging.info(f"Selecting app: '{name}' (Package: {pkg})")
+        logging.debug(f"Selecting app: '{name}' (Package: {pkg})")
         self.cfg.update_setting_and_save('APP_PACKAGE', pkg)
         self.cfg.update_setting_and_save('APP_ACTIVITY', act)
         self.cfg.update_setting_and_save('LAST_SELECTED_APP', {'package_name': pkg, 'activity_name': act, 'app_name': name})
@@ -192,29 +192,29 @@ class CLIController:
 
 
     def pause_crawler(self) -> bool:
-        logging.info("Signaling crawler to pause...")
+        logging.debug("Signaling crawler to pause...")
         if not self.cfg.PAUSE_FLAG_PATH:
             logging.error("PAUSE_FLAG_PATH not configured.")
             return False
         try:
             Path(self.cfg.PAUSE_FLAG_PATH).write_text("pause")
-            logging.info(f"Pause flag created: {self.cfg.PAUSE_FLAG_PATH}.")
+            logging.debug(f"Pause flag created: {self.cfg.PAUSE_FLAG_PATH}.")
             return True
         except Exception as e:
             logging.error(f"Failed to create pause flag: {e}", exc_info=True)
             return False
 
     def resume_crawler(self) -> bool:
-        logging.info("Signaling crawler to resume...")
+        logging.debug("Signaling crawler to resume...")
         if not self.cfg.PAUSE_FLAG_PATH:
             logging.error("PAUSE_FLAG_PATH not configured.")
             return False
         try:
             if Path(self.cfg.PAUSE_FLAG_PATH).exists():
                 Path(self.cfg.PAUSE_FLAG_PATH).unlink()
-                logging.info(f"Pause flag removed: {self.cfg.PAUSE_FLAG_PATH}.")
+                logging.debug(f"Pause flag removed: {self.cfg.PAUSE_FLAG_PATH}.")
             else:
-                logging.info("Pause flag not found, crawler is likely not paused.")
+                logging.debug("Pause flag not found, crawler is likely not paused.")
             return True
         except Exception as e:
             logging.error(f"Failed to remove pause flag: {e}", exc_info=True)
@@ -242,7 +242,7 @@ class CLIController:
         if not self.cfg.APP_PACKAGE or not self.cfg.APP_ACTIVITY:
             logging.error("APP_PACKAGE and APP_ACTIVITY must be set."); return False
 
-        logging.info("Starting crawler process...")
+        logging.debug("Starting crawler process...")
         try:
             env = os.environ.copy()
             env['PYTHONPATH'] = str(_project_root) + os.pathsep + env.get('PYTHONPATH', '')
@@ -252,7 +252,7 @@ class CLIController:
                 bufsize=1, universal_newlines=True, encoding='utf-8', errors='replace', env=env
             )
             Path(self.pid_file_path).write_text(str(self.crawler_process.pid))
-            logging.info(f"Crawler started (PID {self.crawler_process.pid}). PID written to {self.pid_file_path}.")
+            logging.debug(f"Crawler started (PID {self.crawler_process.pid}). PID written to {self.pid_file_path}.")
             threading.Thread(target=self._monitor_crawler_output, daemon=True).start()
             return True
         except Exception as e:
@@ -265,14 +265,14 @@ class CLIController:
         try:
             for line in iter(self.crawler_process.stdout.readline, ''): print(line, end='')
             rc = self.crawler_process.wait()
-            logging.info(f"Crawler (PID {pid}) exited with code {rc}.")
+            logging.debug(f"Crawler (PID {pid}) exited with code {rc}.")
         except Exception as e: logging.error(f"Error monitoring crawler (PID {pid}): {e}", exc_info=True)
         finally:
             self._cleanup_pid_file_if_matches(pid)
             if self.crawler_process and self.crawler_process.pid == pid: self.crawler_process = None
 
     def stop_crawler(self) -> bool:
-        logging.info("Signaling crawler to stop...")
+        logging.debug("Signaling crawler to stop...")
         if not self.cfg.SHUTDOWN_FLAG_PATH: logging.error("SHUTDOWN_FLAG_PATH not configured."); return False
 
         pid_to_signal = None
@@ -285,9 +285,9 @@ class CLIController:
 
         try:
             Path(self.cfg.SHUTDOWN_FLAG_PATH).write_text("stop")
-            logging.info(f"Shutdown flag created: {self.cfg.SHUTDOWN_FLAG_PATH}.")
-            if pid_to_signal: logging.info(f"Crawler (PID {pid_to_signal}) should detect flag.")
-            else: logging.info("No active crawler PID identified by CLI. Flag set for any running instance.")
+            logging.debug(f"Shutdown flag created: {self.cfg.SHUTDOWN_FLAG_PATH}.")
+            if pid_to_signal: logging.debug(f"Crawler (PID {pid_to_signal}) should detect flag.")
+            else: logging.debug("No active crawler PID identified by CLI. Flag set for any running instance.")
             return True
         except Exception as e:
             logging.error(f"Failed to create shutdown flag: {e}", exc_info=True)
@@ -301,7 +301,7 @@ class CLIController:
                 if (pid_to_check is not None and pid_in_file == pid_to_check and not self._is_process_running(pid_in_file)) or \
                    (pid_to_check is None and not self._is_process_running(pid_in_file)):
                     pid_file.unlink()
-                    logging.info(f"Removed PID file: {pid_file} (contained PID: {pid_in_file})")
+                    logging.debug(f"Removed PID file: {pid_file} (contained PID: {pid_in_file})")
             except (ValueError, OSError, Exception) as e:
                 logging.warning(f"Error during PID file cleanup for {pid_file}: {e}. Removing if invalid.")
                 try: pid_file.unlink()
@@ -335,7 +335,7 @@ class CLIController:
     def _ensure_analysis_targets_discovered(self, quiet: bool = False) -> bool:
         if not self.discovered_analysis_targets:
             if not quiet:
-                logging.info("Analysis targets not yet discovered in this session. Running discovery...")
+                logging.debug("Analysis targets not yet discovered in this session. Running discovery...")
             if not self._discover_analysis_targets_internal(quiet_discovery=quiet):
                 if not quiet:
                     logging.error("Failed to discover analysis targets.")
@@ -488,7 +488,7 @@ class CLIController:
             latest_run_row = cursor_temp.fetchone()
             if latest_run_row and latest_run_row[0] is not None:
                 actual_run_id = latest_run_row[0]
-                logging.info(f"Using Run ID: {actual_run_id} (latest/only) for target {selected_target['app_package']}.")
+                logging.debug(f"Using Run ID: {actual_run_id} (latest/only) for target {selected_target['app_package']}.")
             else: # Fallback if no runs or if query fails to return a run_id
                  # If there are runs but ORDER BY DESC LIMIT 1 fails, try to get any run_id
                 cursor_temp.execute("SELECT run_id FROM runs LIMIT 1")
@@ -519,7 +519,7 @@ class CLIController:
         final_pdf_filename = f"{selected_target['app_package']}_{pdf_filename_suffix}"
         final_pdf_path = str(analysis_reports_dir / final_pdf_filename)
 
-        logging.info(f"Generating PDF for Target: {selected_target['app_package']}, Run ID: {actual_run_id}, Output: {final_pdf_path}")
+        logging.debug(f"Generating PDF for Target: {selected_target['app_package']}, Run ID: {actual_run_id}, Output: {final_pdf_path}")
         try:
             analyzer = RunAnalyzer(
                 db_path=selected_target["db_path"],
@@ -616,7 +616,7 @@ def main_cli():
         datefmt='%H:%M:%S',
         handlers=[logging.StreamHandler(sys.stdout)]
     )
-    logging.info("CLI Bootstrap logging initialized.")
+    logging.debug("CLI Bootstrap logging initialized.")
 
     _cli_script_dir = Path(__file__).resolve().parent
     DEFAULT_CONFIG_MODULE_PATH_CLI = str(_cli_script_dir / 'config.py')
@@ -637,7 +637,7 @@ def main_cli():
         log_file_path = log_file_base / "logs" / "cli" / f"cli_{cli_cfg.LOG_FILE_NAME}"
         log_file_path.parent.mkdir(parents=True, exist_ok=True)
         logger_manager_cli.setup_logging(log_level_str=log_level, log_file=str(log_file_path))
-        logging.info(f"CLI Application Logging Initialized. Level: {log_level}. File: '{log_file_path}'")
+        logging.debug(f"CLI Application Logging Initialized. Level: {log_level}. File: '{log_file_path}'")
 
     except Exception as e:
         logging.critical(f"Failed to initialize Config or Logger: {e}", exc_info=True)
@@ -664,7 +664,7 @@ def main_cli():
             action_taken = True
             if controller.start_crawler() and controller.crawler_process:
                 try: controller.crawler_process.wait()
-                except KeyboardInterrupt: logging.info("Crawler wait interrupted."); controller.stop_crawler()
+                except KeyboardInterrupt: logging.debug("Crawler wait interrupted."); controller.stop_crawler()
             else: exit_code = 1
         elif args.stop: action_taken = True; controller.stop_crawler()
         elif args.pause: action_taken = True; controller.pause_crawler()
@@ -712,7 +712,7 @@ def main_cli():
             parser.print_help()
 
     except KeyboardInterrupt:
-        logging.info("CLI operation interrupted by user.")
+        logging.debug("CLI operation interrupted by user.")
         if hasattr(controller, 'crawler_process') and controller.crawler_process and controller.crawler_process.poll() is None:
             controller.stop_crawler()
         exit_code = 130
@@ -722,9 +722,9 @@ def main_cli():
     finally:
         if exit_code != 0 and exit_code != 130 and \
            hasattr(controller, 'crawler_process') and controller.crawler_process and controller.crawler_process.poll() is None:
-            logging.info("CLI exiting with error; ensuring managed crawler is stopped.")
+            logging.debug("CLI exiting with error; ensuring managed crawler is stopped.")
             controller.stop_crawler()
-        logging.info(f"CLI session finished with exit_code: {exit_code}")
+        logging.debug(f"CLI session finished with exit_code: {exit_code}")
         sys.exit(exit_code)
 
 if __name__ == '__main__':

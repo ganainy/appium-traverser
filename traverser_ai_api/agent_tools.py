@@ -56,7 +56,7 @@ class AgentTools:
             A dictionary containing the result of the action.
         """
         try:
-            logging.info(f"Agent tool: click_element({element_identifier})")
+            logging.debug(f"Agent tool: click_element({element_identifier})")
             
             # Create an action request for the mapper
             action_request = {
@@ -109,7 +109,7 @@ class AgentTools:
             A dictionary containing the result of the action.
         """
         try:
-            logging.info(f"Agent tool: input_text({element_identifier}, {text})")
+            logging.debug(f"Agent tool: input_text({element_identifier}, {text})")
             
             # Create an action request for the mapper
             action_request = {
@@ -163,7 +163,7 @@ class AgentTools:
             A dictionary containing the result of the action.
         """
         try:
-            logging.info(f"Agent tool: scroll({direction})")
+            logging.debug(f"Agent tool: scroll({direction})")
             
             # Validate direction
             valid_directions = ["up", "down", "left", "right"]
@@ -219,7 +219,7 @@ class AgentTools:
             A dictionary containing the result of the action.
         """
         try:
-            logging.info("Agent tool: press_back()")
+            logging.debug("Agent tool: press_back()")
             
             # Create an action request for the mapper
             action_request = {
@@ -271,7 +271,7 @@ class AgentTools:
             A dictionary containing the result of the action.
         """
         try:
-            logging.info(f"Agent tool: tap_coordinates({x}, {y}, normalized={normalized})")
+            logging.debug(f"Agent tool: tap_coordinates({x}, {y}, normalized={normalized})")
             
             # Convert normalized coordinates to absolute if needed
             if normalized:
@@ -328,7 +328,7 @@ class AgentTools:
             A dictionary containing information about the current screen.
         """
         try:
-            logging.info("Agent tool: get_screen_state()")
+            logging.debug("Agent tool: get_screen_state()")
             
             screen = self.screen_state_manager.get_current_screen_representation(run_id=0, step_number=0)
             if not screen or not screen.screenshot_bytes:
@@ -369,7 +369,7 @@ class AgentTools:
             A dictionary containing the action history.
         """
         try:
-            logging.info(f"Agent tool: get_action_history(limit={limit})")
+            logging.debug(f"Agent tool: get_action_history(limit={limit})")
             
             # Get the most recent actions up to the limit
             recent_actions = self.action_history[-limit:] if self.action_history else []
@@ -393,7 +393,7 @@ class AgentTools:
             A dictionary indicating whether the app is in the foreground.
         """
         try:
-            logging.info("Agent tool: check_app_context()")
+            logging.debug("Agent tool: check_app_context()")
             
             in_context = self.app_context_manager.ensure_in_app()
             

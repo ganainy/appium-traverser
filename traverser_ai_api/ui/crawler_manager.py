@@ -94,7 +94,7 @@ class CrawlerManager(QObject):
         if hasattr(self.main_controller, 'log_output'):
             self.main_controller.log_message("Starting crawler...", 'blue')
         else:
-            logging.info("Starting crawler...")
+            logging.debug("Starting crawler...")
 
         if not self.crawler_process or self.crawler_process.state() == QProcess.ProcessState.NotRunning:
             # Configure and start the process
@@ -179,7 +179,7 @@ class CrawlerManager(QObject):
         if hasattr(self.main_controller, 'log_output'):
             self.main_controller.log_message(f"Crawler process {status_text}", 'blue')
         else:
-            logging.info(f"Crawler process {status_text}")
+            logging.debug(f"Crawler process {status_text}")
         
         if hasattr(self.main_controller, 'status_label'):
             self.main_controller.status_label.setText(final_msg)

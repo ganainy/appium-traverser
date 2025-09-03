@@ -32,11 +32,11 @@ class AgentAssistant:
         self.cfg = app_config
         self.response_cache: Dict[str, Tuple[Dict[str, Any], float, int]] = {}
         self.tools = agent_tools  # May be None initially and set later
-        logging.info("AI response cache initialized.")
+        logging.debug("AI response cache initialized.")
 
         # Determine which AI provider to use
         self.ai_provider = getattr(self.cfg, 'AI_PROVIDER', 'gemini').lower()
-        logging.info(f"Using AI provider: {self.ai_provider}")
+        logging.debug(f"Using AI provider: {self.ai_provider}")
 
         # Get the appropriate API key based on the provider
         if self.ai_provider == 'gemini':
@@ -47,6 +47,9 @@ class AgentAssistant:
             if not self.cfg.DEEPSEEK_API_KEY:
                 raise ValueError("DEEPSEEK_API_KEY is not set in the provided application configuration.")
             self.api_key = self.cfg.DEEPSEEK_API_KEY
+        elif self.ai_provider == 'ollama':
+            # For Ollama, we use the base URL instead of API key
+            self.api_key = getattr(self.cfg, 'OLLAMA_BASE_URL', 'http://localhost:11434')
         else:
             raise ValueError(f"Unsupported AI provider: {self.ai_provider}")
 
@@ -63,6 +66,10 @@ class AgentAssistant:
             models_config = self.cfg.DEEPSEEK_MODELS
             if not models_config or not isinstance(models_config, dict):
                 raise ValueError("DEEPSEEK_MODELS must be defined in app_config and be a non-empty dictionary.")
+        elif self.ai_provider == 'ollama':
+            models_config = self.cfg.OLLAMA_MODELS
+            if not models_config or not isinstance(models_config, dict):
+                raise ValueError("OLLAMA_MODELS must be defined in app_config and be a non-empty dictionary.")
         else:
             raise ValueError(f"Unsupported AI provider: {self.ai_provider}")
 
@@ -79,7 +86,7 @@ class AgentAssistant:
             # Also update the config to match
             if hasattr(self.cfg, 'update_setting_and_save'):
                 self.cfg.update_setting_and_save("DEFAULT_MODEL_TYPE", model_alias)
-                logging.info(f"Updated DEFAULT_MODEL_TYPE setting to '{model_alias}' to match {self.ai_provider} provider")
+                logging.debug(f"Updated DEFAULT_MODEL_TYPE setting to '{model_alias}' to match {self.ai_provider} provider")
 
         model_config_from_file = models_config.get(model_alias)
         if not model_config_from_file or not isinstance(model_config_from_file, dict):
@@ -106,11 +113,11 @@ class AgentAssistant:
             if self.max_history is None:
                 logging.warning("MAX_CHAT_HISTORY not in app_config, defaulting to 10.")
                 self.max_history = 10
-            logging.info(f"Chat memory enabled (max history: {self.max_history} exchanges)")
+            logging.debug(f"Chat memory enabled (max history: {self.max_history} exchanges)")
             # Initialize chat history
             self.chat_history = {}
         else:
-            logging.info("Chat memory is disabled.")
+            logging.debug("Chat memory is disabled.")
 
     def _initialize_model(self, model_config, safety_settings_override):
         """Initialize the AI model with appropriate settings using the adapter."""
@@ -140,9 +147,9 @@ class AgentAssistant:
             # Initialize the model adapter
             self.model_adapter.initialize(model_config, safety_settings)
             
-            logging.info(f"AI Assistant initialized with model alias: {self.model_alias} (actual: {self.actual_model_name})")
-            logging.info(f"Model description: {model_config.get('description', 'N/A')}")
-            logging.info(f"Model provider: {self.ai_provider}")
+            logging.debug(f"AI Assistant initialized with model alias: {self.model_alias} (actual: {self.actual_model_name})")
+            logging.debug(f"Model description: {model_config.get('description', 'N/A')}")
+            logging.debug(f"Model provider: {self.ai_provider}")
 
         except Exception as e:
             logging.error(f"Failed to initialize AI model: {e}", exc_info=True)
@@ -224,7 +231,7 @@ class AgentAssistant:
             # Calculate compression ratio
             compression_ratio = original_size / compressed_size if compressed_size > 0 else 1
             logging.debug(f"Compressed image: {original_size} -> {compressed_size} bytes ({compression_ratio:.1f}x compression)")
-            logging.info(f"Optimized image for {ai_provider}: {img.size}, {quality}% quality, {image_format} format")
+            logging.debug(f"Optimized image for {ai_provider}: {img.size}, {quality}% quality, {image_format} format")
             
             return img
             
@@ -574,83 +581,236 @@ class AgentAssistant:
         # Return the action data, time taken, and success status
         return action_data, elapsed_time, success
             
+    def _clean_and_parse_json(self, json_str: str) -> Optional[Dict[str, Any]]:
+        """Clean and parse potentially malformed JSON from AI responses."""
+        cleaned = json_str.strip()  # Initialize cleaned variable
+        try:
+            # First, try direct parsing
+            return json.loads(json_str)
+        except json.JSONDecodeError:
+            # If direct parsing fails, try to fix common issues
+            try:
+                # More robust single quote to double quote conversion
+                # Use a more careful approach to avoid breaking apostrophes in text
+
+                # First, handle object keys: 'key': -> "key":
+                cleaned = re.sub(r"'([^']+)'\s*:", r'"\1":', cleaned)
+
+                # Then handle string values: : 'value' -> : "value"
+                # But be careful not to replace apostrophes within the string
+                cleaned = re.sub(r":\s*'([^']*)'", r': "\1"', cleaned)
+                cleaned = re.sub(r":\s*'([^']*)'\s*,", r': "\1",', cleaned)
+                cleaned = re.sub(r":\s*'([^']*)'\s*}", r': "\1"}', cleaned)
+                cleaned = re.sub(r":\s*'([^']*)'\s*]", r': "\1"]', cleaned)
+
+                # Handle arrays: ['item1', 'item2'] -> ["item1", "item2"]
+                cleaned = re.sub(r"\[\s*'([^']*)'\s*\]", r'["\1"]', cleaned)
+                cleaned = re.sub(r"'([^']*)'\s*,", r'"\1",', cleaned)
+                cleaned = re.sub(r"'([^']*)'\s*]", r'"\1"]', cleaned)
+
+                # Remove trailing commas before closing braces/brackets
+                cleaned = re.sub(r',(\s*[}\]])', r'\1', cleaned)
+
+                # Fix any remaining single quotes that might be in the middle of strings
+                # This is a last resort and might break some cases
+                cleaned = re.sub(r"'([^']*)'", r'"\1"', cleaned)
+
+                # Try parsing the cleaned JSON
+                return json.loads(cleaned)
+            except (json.JSONDecodeError, Exception) as e:
+                logging.debug(f"Failed to clean and parse JSON: {e}. Original: {json_str[:200]}...")
+                logging.debug(f"Cleaned version: {cleaned[:200]}...")
+                return None
+
     def _parse_action_from_response(self, response_text: str) -> Optional[Dict[str, Any]]:
         """Parse the action data from the model's response text."""
         try:
+            # Log the raw response for debugging
+            logging.debug(f"Raw AI response (first 500 chars): {response_text[:500]}")
+            
             # Look for JSON pattern in the response
             json_pattern = r'```json\s*(.*?)\s*```'
             json_match = re.search(json_pattern, response_text, re.DOTALL)
             
             if json_match:
                 json_str = json_match.group(1)
-                action_data = json.loads(json_str)
+                logging.debug(f"Found JSON in code block: {json_str[:200]}...")
+                action_data = self._clean_and_parse_json(json_str)
+                if action_data:
+                    logging.debug("Successfully parsed JSON from code block")
+                else:
+                    logging.warning("Failed to parse JSON from code block, trying fallback methods")
             else:
                 # Try to find any JSON-like structure
                 potential_json = re.search(r'({[\s\S]*?})', response_text)
                 if potential_json:
                     json_str = potential_json.group(1)
-                    action_data = json.loads(json_str)
+                    logging.debug(f"Found potential JSON structure: {json_str[:200]}...")
+                    action_data = self._clean_and_parse_json(json_str)
+                    if action_data:
+                        logging.debug("Successfully parsed JSON from regex match")
+                    else:
+                        logging.warning("Failed to parse JSON from regex match, trying manual parsing")
                 else:
-                    # Manually parse the response for key action fields
-                    action_type = None
-                    if "click" in response_text.lower():
-                        action_type = "click"
-                    elif "input" in response_text.lower():
-                        action_type = "input"
-                    elif "scroll_down" in response_text.lower():
-                        action_type = "scroll_down"
-                    elif "scroll_up" in response_text.lower():
-                        action_type = "scroll_up"
-                    elif "swipe_left" in response_text.lower():
-                        action_type = "swipe_left"
-                    elif "swipe_right" in response_text.lower():
-                        action_type = "swipe_right"
-                    elif "back" in response_text.lower():
-                        action_type = "back"
-                        
-                    if not action_type:
-                        return None
-                        
-                    # Extract reasoning
-                    reasoning_match = re.search(r'reasoning["\s:]+([^"]+)', response_text, re.IGNORECASE)
-                    reasoning = reasoning_match.group(1).strip() if reasoning_match else "No explicit reasoning provided"
-                    
-                    # Create basic action data
-                    action_data = {
-                        "action": action_type,
-                        "reasoning": reasoning
-                    }
-                    
-                    # Try to extract other fields if present
-                    target_id_match = re.search(r'target_identifier["\s:]+([^",\s]+)', response_text, re.IGNORECASE)
-                    if target_id_match:
-                        action_data["target_identifier"] = target_id_match.group(1).strip()
-                        
-                    # Try to extract bounding box
-                    bbox_match = re.search(r'target_bounding_box["\s:]+({[^}]+})', response_text, re.IGNORECASE)
-                    if bbox_match:
-                        try:
-                            bbox_str = bbox_match.group(1).strip()
-                            action_data["target_bounding_box"] = json.loads(bbox_str)
-                        except:
-                            pass
-                            
-                    # Try to extract input text
-                    if action_type == "input":
-                        input_match = re.search(r'input_text["\s:]+([^"]+)', response_text, re.IGNORECASE)
-                        if input_match:
-                            action_data["input_text"] = input_match.group(1).strip()
+                    action_data = None
+                    logging.debug("No JSON structure found in response, will try manual parsing")
+            
+            # If JSON parsing failed, try manual parsing as fallback
+            if not action_data:
+                logging.debug("Attempting manual parsing of AI response")
+                action_data = self._manual_parse_action_response(response_text)
             
             # Validate the action data
-            required_fields = ["action", "reasoning"]
-            if not all(field in action_data for field in required_fields):
-                logging.warning(f"Missing required fields in action data: {action_data}")
-                # Add default reasoning if missing
-                if "reasoning" not in action_data:
-                    action_data["reasoning"] = "No explicit reasoning provided"
+            if action_data:
+                required_fields = ["action", "reasoning"]
+                if not all(field in action_data for field in required_fields):
+                    logging.warning(f"Missing required fields in action data: {action_data}")
+                    # Add default reasoning if missing
+                    if "reasoning" not in action_data:
+                        action_data["reasoning"] = "No explicit reasoning provided"
                 
+                return action_data
+            else:
+                logging.error("Failed to parse action data from AI response")
+                logging.error(f"Full AI response: {response_text}")
+                return None
+            
             return action_data
             
         except Exception as e:
             logging.error(f"Error parsing action from response: {e}", exc_info=True)
+            logging.error(f"Response text that caused error: {response_text[:1000]}...")
+            return None
+    
+    def _manual_parse_action_response(self, response_text: str) -> Optional[Dict[str, Any]]:
+        """Manually parse action data from AI response when JSON parsing fails."""
+        try:
+            # Determine action type with more comprehensive patterns
+            action_type = None
+            response_lower = response_text.lower()
+            
+            # More comprehensive action detection
+            action_patterns = [
+                (r'\bclick\b', "click"),
+                (r'\binput\b|\btype\b|\benter\b', "input"),
+                (r'\bscroll_down\b|\bscroll down\b|\bscroll\b.*down', "scroll_down"),
+                (r'\bscroll_up\b|\bscroll up\b', "scroll_up"),
+                (r'\bswipe_left\b|\bswipe left\b|\bswipe\b.*left', "swipe_left"),
+                (r'\bswipe_right\b|\bswipe right\b|\bswipe\b.*right', "swipe_right"),
+                (r'\bback\b|\bgo back\b|\bnavigate back\b', "back")
+            ]
+            
+            for pattern, action in action_patterns:
+                if re.search(pattern, response_lower):
+                    action_type = action
+                    break
+            
+            if not action_type:
+                logging.warning("Could not determine action type from response")
+                logging.debug(f"Response text: {response_text[:300]}...")
+                return None
+            
+            # Extract reasoning with multiple patterns
+            reasoning = "AI determined action"
+            reasoning_patterns = [
+                r'reasoning["\s:]+([^"]+)',
+                r'reason["\s:]+([^"]+)',
+                r'reasoning:\s*([^\n]+)',
+                r'reason:\s*([^\n]+)',
+                r'because\s+([^.\n]+)',
+                r'to\s+([^.\n]+)',
+                r'I\s+([^.\n]+)',
+                r'action:\s*([^\n]+)'
+            ]
+            
+            for pattern in reasoning_patterns:
+                match = re.search(pattern, response_text, re.IGNORECASE)
+                if match:
+                    reasoning = match.group(1).strip()
+                    # Clean up the reasoning
+                    reasoning = re.sub(r'^["\']|["\']$', '', reasoning)  # Remove quotes
+                    reasoning = re.sub(r'[.]$', '', reasoning)  # Remove trailing period
+                    break
+            
+            # Create basic action data
+            action_data: Dict[str, Any] = {
+                "action": action_type,
+                "reasoning": reasoning
+            }
+            
+            # Try to extract target identifier with multiple patterns
+            target_patterns = [
+                r'target_identifier["\s:]+([^",\s]+)',
+                r'target["\s:]+([^",\s]+)',
+                r'target_id["\s:]+([^",\s]+)',
+                r'id["\s:]+([^",\s]+)',
+                r'element["\s:]+([^",\s]+)',
+                r'on\s+["\']([^"\']+)["\']',
+                r'["\']([^"\']+)["\']\s+element',
+                r'button\s+["\']([^"\']+)["\']',
+                r'field\s+["\']([^"\']+)["\']'
+            ]
+            
+            for pattern in target_patterns:
+                match = re.search(pattern, response_text, re.IGNORECASE)
+                if match:
+                    action_data["target_identifier"] = match.group(1).strip()
+                    break
+            
+            # Try to extract bounding box with more patterns
+            bbox_patterns = [
+                r'target_bounding_box["\s:]+({[^}]+})',
+                r'bounding_box["\s:]+({[^}]+})',
+                r'bbox["\s:]+({[^}]+})',
+                r'coordinates["\s:]+({[^}]+})',
+                r'box["\s:]+({[^}]+})',
+                r'position["\s:]+({[^}]+})'
+            ]
+            
+            for pattern in bbox_patterns:
+                match = re.search(pattern, response_text, re.IGNORECASE)
+                if match:
+                    try:
+                        bbox_str = match.group(1).strip()
+                        parsed_bbox = self._clean_and_parse_json(bbox_str)
+                        if parsed_bbox:
+                            action_data["target_bounding_box"] = parsed_bbox
+                            break
+                    except:
+                        continue
+            
+            # Try to extract input text for input actions with more patterns
+            if action_type == "input":
+                input_patterns = [
+                    r'input_text["\s:]+([^"]+)',
+                    r'text["\s:]+([^"]+)',
+                    r'input["\s:]+([^"]+)',
+                    r'value["\s:]+([^"]+)',
+                    r'type\s+["\']([^"\']+)["\']',
+                    r'enter\s+["\']([^"\']+)["\']',
+                    r'["\']([^"\']+)["\']\s+into',
+                    r'with\s+["\']([^"\']+)["\']'
+                ]
+                
+                for pattern in input_patterns:
+                    match = re.search(pattern, response_text, re.IGNORECASE)
+                    if match:
+                        action_data["input_text"] = match.group(1).strip()
+                        break
+                
+                # If no input text found, try to extract from general text
+                if "input_text" not in action_data:
+                    text_match = re.search(r'(?:type|enter|input)\s+["\']([^"\']+)["\']', response_text, re.IGNORECASE)
+                    if text_match:
+                        action_data["input_text"] = text_match.group(1).strip()
+            
+            logging.debug(f"Manually parsed action: {action_type}, reasoning: {reasoning}")
+            if "target_identifier" in action_data:
+                logging.debug(f"Target identifier: {action_data['target_identifier']}")
+            if "input_text" in action_data:
+                logging.debug(f"Input text: {action_data['input_text']}")
+            return action_data
+            
+        except Exception as e:
+            logging.error(f"Error in manual parsing: {e}", exc_info=True)
             return None

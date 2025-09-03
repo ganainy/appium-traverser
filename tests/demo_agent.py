@@ -34,7 +34,7 @@ from traverser_ai_api.agent_assistant import AgentAssistant
 from traverser_ai_api.config import Config
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, 
+logging.basicConfig(level=logging.DEBUG, 
                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 def load_sample_screenshot(path):
@@ -104,7 +104,7 @@ def run_agent_demo(api_key, screenshot_path=None, xml_path=None):
     try:
         config = SimpleConfig(api_key)
         agent = AgentAssistant(config)
-        logging.info("AgentAssistant initialized successfully")
+        logging.debug("AgentAssistant initialized successfully")
     except Exception as e:
         logging.error(f"Failed to initialize AgentAssistant: {e}")
         return False
@@ -115,7 +115,7 @@ def run_agent_demo(api_key, screenshot_path=None, xml_path=None):
     
     # Create a default screenshot if none was provided
     if not screenshot_bytes:
-        logging.info("Creating default test image...")
+        logging.debug("Creating default test image...")
         img = Image.new('RGB', (300, 500), color=(255, 255, 255))
         from PIL import ImageDraw
         draw = ImageDraw.Draw(img)
@@ -164,23 +164,23 @@ def run_agent_demo(api_key, screenshot_path=None, xml_path=None):
         action_data, elapsed_time, token_count = result
         
         # Display the results
-        logging.info(f"\n{'='*50}")
-        logging.info("AGENT ASSISTANT DEMO RESULTS")
-        logging.info(f"{'='*50}")
-        logging.info(f"Processing time: {elapsed_time:.2f} seconds")
-        logging.info(f"Estimated token count: {token_count}")
-        logging.info(f"Action to perform: {action_data['action_to_perform']['action']}")
-        logging.info(f"Reasoning: {action_data['action_to_perform'].get('reasoning', 'N/A')}")
+        logging.debug(f"\n{'='*50}")
+        logging.debug("AGENT ASSISTANT DEMO RESULTS")
+        logging.debug(f"{'='*50}")
+        logging.debug(f"Processing time: {elapsed_time:.2f} seconds")
+        logging.debug(f"Estimated token count: {token_count}")
+        logging.debug(f"Action to perform: {action_data['action_to_perform']['action']}")
+        logging.debug(f"Reasoning: {action_data['action_to_perform'].get('reasoning', 'N/A')}")
         
         # Display target details if available
         if 'target_identifier' in action_data['action_to_perform']:
-            logging.info(f"Target identifier: {action_data['action_to_perform']['target_identifier']}")
+            logging.debug(f"Target identifier: {action_data['action_to_perform']['target_identifier']}")
         if 'target_bounding_box' in action_data['action_to_perform']:
-            logging.info(f"Target bounding box: {action_data['action_to_perform']['target_bounding_box']}")
+            logging.debug(f"Target bounding box: {action_data['action_to_perform']['target_bounding_box']}")
         if 'input_text' in action_data['action_to_perform']:
-            logging.info(f"Input text: {action_data['action_to_perform']['input_text']}")
+            logging.debug(f"Input text: {action_data['action_to_perform']['input_text']}")
             
-        logging.info(f"{'='*50}\n")
+        logging.debug(f"{'='*50}\n")
         return True
         
     except Exception as e:

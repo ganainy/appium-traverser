@@ -12,7 +12,10 @@ from selenium.common.exceptions import NoSuchElementException, InvalidSelectorEx
 # Adjust paths based on your project structure
 if TYPE_CHECKING: # For type hinting to avoid circular imports if AppiumDriver imports ActionMapper
     from appium_driver import AppiumDriver 
-from config import Config # Assuming Config class is in config.py in the same package
+try:
+    from traverser_ai_api.config import Config # Assuming Config class is in config.py in the same package
+except ImportError:
+    from config import Config # Assuming Config class is in config.py in the same package
 
 
 class ActionMapper:
@@ -47,7 +50,7 @@ class ActionMapper:
             
         self.consecutive_map_failures = 0
         
-        logging.info(
+        logging.debug(
             f"ActionMapper initialized. Coordinate fallback: {'ENABLED' if self.use_coordinate_fallback else 'DISABLED'}. "
             f"Max map failures: {self.max_map_failures}"
         )
@@ -67,12 +70,13 @@ class ActionMapper:
              return None
 
 
-        logging.info(f"Attempting to find element using identifier: '{identifier}'")
+        logging.debug(f"Attempting to find element using identifier: '{identifier}'")
         total_start_time = time.perf_counter()
 
         for index, (strategy_key, appium_by_strategy_str, log_name) in enumerate(self.element_finding_strategies):
             element: Optional[Any] = None # WebElement
             start_time = time.perf_counter()
+            duration = 0.0  # Initialize duration
             xpath_generated = ""
 
             try:
@@ -83,6 +87,7 @@ class ActionMapper:
                 if strategy_key in ['id', 'acc_id'] and actual_appium_by:
                     logging.debug(f"Trying {log_name}: '{identifier}' using AppiumBy strategy '{actual_appium_by}'")
                     element = self.driver.find_element(by=actual_appium_by, value=identifier) # Assumes AppiumDriver.find_element handles string 'by'
+                    duration = time.perf_counter() - start_time
                 elif strategy_key == 'xpath_exact':
                     # Robust quote handling for XPath
                     if "'" in identifier and '"' in identifier: # Contains both single and double
@@ -100,6 +105,7 @@ class ActionMapper:
                     xpath_generated = f"//*[@text={xpath_text_expression} or @content-desc={xpath_text_expression} or @resource-id='{identifier}']"
                     logging.debug(f"Trying {log_name} (Quote Safe): {xpath_generated}")
                     element = self.driver.find_element(by=AppiumBy.XPATH, value=xpath_generated)
+                    duration = time.perf_counter() - start_time
                 elif strategy_key == 'xpath_contains':
                     # Simpler quote handling for contains, as exact match is less critical
                     if "'" in identifier: xpath_safe_identifier = f'"{identifier}"'
@@ -128,9 +134,36 @@ class ActionMapper:
                         logging.debug(f"No suitable (displayed/enabled) element found by '{log_name}' XPath after filtering {found_count} candidates.")
                     elif found_count == 0:
                         logging.debug(f"No elements found by '{log_name}' XPath.")
+                    duration = time.perf_counter() - start_time
 
-
-                duration = time.perf_counter() - start_time
+                elif strategy_key == 'id_partial':
+                    # Try partial ID matching for cases where ID might be truncated
+                    xpath_generated = f"//*[contains(@resource-id, '{identifier}')]"
+                    logging.debug(f"Trying {log_name}: {xpath_generated}")
+                    element = self.driver.find_element(by=AppiumBy.XPATH, value=xpath_generated)
+                    duration = time.perf_counter() - start_time
+                elif strategy_key == 'text_case_insensitive':
+                    # Case-insensitive text matching
+                    xpath_generated = f"//*[translate(@text, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz') = translate('{identifier.lower()}', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')]"
+                    logging.debug(f"Trying {log_name}: {xpath_generated}")
+                    element = self.driver.find_element(by=AppiumBy.XPATH, value=xpath_generated)
+                    duration = time.perf_counter() - start_time
+                elif strategy_key == 'class_contains':
+                    # Class-based matching
+                    xpath_generated = f"//*[contains(@class, '{identifier}')]"
+                    logging.debug(f"Trying {log_name}: {xpath_generated}")
+                    element = self.driver.find_element(by=AppiumBy.XPATH, value=xpath_generated)
+                    duration = time.perf_counter() - start_time
+                elif strategy_key == 'xpath_flexible':
+                    # More flexible XPath that tries multiple attributes
+                    xpath_generated = (
+                        f"//*[@text='{identifier}' or @content-desc='{identifier}' or "
+                        f"@resource-id='{identifier}' or contains(@text, '{identifier}') or "
+                        f"contains(@content-desc, '{identifier}') or contains(@resource-id, '{identifier}')]"
+                    )
+                    logging.debug(f"Trying {log_name}: {xpath_generated}")
+                    element = self.driver.find_element(by=AppiumBy.XPATH, value=xpath_generated)
+                    duration = time.perf_counter() - start_time
 
                 if element:
                     is_displayed = False
@@ -143,11 +176,11 @@ class ActionMapper:
                         element = None # Treat as not found if stale immediately
 
                     if element and is_displayed and is_enabled:
-                        logging.info(f"Found suitable element by {log_name}: '{identifier}' (took {duration:.4f}s)")
+                        logging.debug(f"Found suitable element by {log_name}: '{identifier}' (took {duration:.4f}s)")
                         if index > 0: # Promote successful strategy
                             promoted_strategy = self.element_finding_strategies.pop(index)
                             self.element_finding_strategies.insert(0, promoted_strategy)
-                            logging.info(f"Promoted strategy '{log_name}'. New order: {[s[2] for s in self.element_finding_strategies]}")
+                            logging.debug(f"Promoted strategy '{log_name}'. New order: {[s[2] for s in self.element_finding_strategies]}")
                         return element
                     elif element:
                         logging.debug(f"Element found by {log_name} but not suitable (Displayed: {is_displayed}, Enabled: {is_enabled}). Took {duration:.4f}s.")
@@ -214,7 +247,7 @@ class ActionMapper:
             center_x = int((x1 + x2) / 2)
             center_y = int((y1 + y2) / 2)
             
-            logging.info(f"Calculated absolute tap coordinates ({center_x}, {center_y}) from normalized bbox {target_bounding_box} and screen size {screen_width}x{screen_height}")
+            logging.debug(f"Calculated absolute tap coordinates ({center_x}, {center_y}) from normalized bbox {target_bounding_box} and screen size {screen_width}x{screen_height}")
             return center_x, center_y
         except Exception as e:
             logging.error(f"Error processing bounding box {target_bounding_box} for coordinate action: {e}", exc_info=True)
@@ -227,7 +260,7 @@ class ActionMapper:
         input_text = ai_response.get("input_text")
         target_bounding_box = ai_response.get("target_bounding_box")
 
-        logging.info(
+        logging.debug(
             f"Mapping AI suggestion: Action='{action_type}', Identifier='{target_identifier}', "
             f"Input='{input_text}', BBox='{target_bounding_box is not None}'"
         )
@@ -278,10 +311,10 @@ class ActionMapper:
                 else:
                     action_details["text"] = str(input_text)
             self.consecutive_map_failures = 0
-            logging.info(f"Successfully mapped action '{action_type}' to element (ID: {element_info.get('id', 'N/A')}) found by identifier.")
+            logging.debug(f"Successfully mapped action '{action_type}' to element (ID: {element_info.get('id', 'N/A')}) found by identifier.")
             return action_details
         
-        logging.info(f"Element not found by identifier '{target_identifier}'. Checking coordinate fallback (Enabled: {self.use_coordinate_fallback}).")
+        logging.debug(f"Element not found by identifier '{target_identifier}'. Checking coordinate fallback (Enabled: {self.use_coordinate_fallback}).")
         if self.use_coordinate_fallback and target_bounding_box and isinstance(target_bounding_box, dict):
             coordinates = self._extract_coordinates_from_bbox(target_bounding_box)
             if coordinates:
@@ -291,9 +324,9 @@ class ActionMapper:
                 action_details["original_bbox"] = target_bounding_box
                 if action_type == "input" and input_text is not None:
                     action_details["intended_input_text"] = str(input_text)
-                    logging.info(f"Coordinate fallback for INPUT action: will tap at ({center_x},{center_y}), then try to input '{input_text}' (likely via ADB).")
+                    logging.debug(f"Coordinate fallback for INPUT action: will tap at ({center_x},{center_y}), then try to input '{input_text}' (likely via ADB).")
                 else:
-                     logging.info(f"Coordinate fallback for {action_type}: will tap at ({center_x},{center_y}).")
+                     logging.debug(f"Coordinate fallback for {action_type}: will tap at ({center_x},{center_y}).")
                 
                 self.consecutive_map_failures = 0
                 return action_details

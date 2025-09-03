@@ -201,7 +201,7 @@ class UIElementAnnotator:
         failed_images = []
 
         for img_path in input_path.glob("*.png"):
-            logging.info(f"Processing {img_path.name}...")
+            logging.debug(f"Processing {img_path.name}...")
             elements = self.annotate_image(str(img_path))
             if elements:
                 results[img_path.name] = elements
@@ -217,7 +217,7 @@ class UIElementAnnotator:
                 
                 with open(output_file, 'w', encoding='utf-8') as f:
                     json.dump(results, f, indent=2, ensure_ascii=False)
-                logging.info(f"Results saved to {output_file}")
+                logging.debug(f"Results saved to {output_file}")
             except Exception as e:
                 logging.error(f"Error saving results to {output_file}: {e}")
         
@@ -228,7 +228,7 @@ class UIElementAnnotator:
             try:
                 with open(failed_list_file, 'w', encoding='utf-8') as f:
                     f.write('\n'.join(failed_images))
-                logging.info(f"List of failed images saved to {failed_list_file}")
+                logging.debug(f"List of failed images saved to {failed_list_file}")
             except Exception as e:
                 logging.error(f"Error saving failed images list: {e}")
 
@@ -239,7 +239,7 @@ def main():
     parser.add_argument('--app-identifier', required=True, help='App identifier (e.g., package name) for naming the output file')
     args = parser.parse_args()
 
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.DEBUG)
     load_dotenv()
     
     api_key = os.getenv('GEMINI_API_KEY')
@@ -257,13 +257,13 @@ def main():
     # Create output directory if it doesn't exist
     os.makedirs(os.path.dirname(output_file), exist_ok=True)
 
-    logging.info(f"Using input directory: {input_dir}")
-    logging.info(f"Output will be saved to: {output_file}")
+    logging.debug(f"Using input directory: {input_dir}")
+    logging.debug(f"Output will be saved to: {output_file}")
 
     if not os.path.exists(input_dir):
         logging.error(f"Input directory does not exist: {input_dir}")
-        logging.info("Note: Paths should be relative to project root directory")
-        logging.info(f"Project root detected as: {project_root}")
+        logging.debug("Note: Paths should be relative to project root directory")
+        logging.debug(f"Project root detected as: {project_root}")
         return
 
     annotator = UIElementAnnotator(api_key)

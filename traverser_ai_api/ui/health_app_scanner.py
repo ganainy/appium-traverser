@@ -78,7 +78,7 @@ class HealthAppScanner(QObject):
         """Starts the process of scanning for health apps, forcing a rescan."""
         # Add debug logging
         self.main_controller.log_message("DEBUG: trigger_scan_for_health_apps called", 'blue')
-        logging.info("DEBUG: trigger_scan_for_health_apps called")
+        logging.debug("DEBUG: trigger_scan_for_health_apps called")
         
         # Get the current device ID first to update main_controller.current_health_app_list_file
         device_id = self._get_current_device_id()
@@ -93,7 +93,7 @@ class HealthAppScanner(QObject):
         # Always use a generic path in the config
         if hasattr(self.config, 'update_setting_and_save'):
             generic_path = os.path.join(getattr(self.config, 'OUTPUT_DATA_DIR', 'output_data'), "app_info", "health_apps.json")
-            self.config.update_setting_and_save("CURRENT_HEALTH_APP_LIST_FILE", generic_path)
+            self.config.update_setting_and_save("CURRENT_HEALTH_APP_LIST_FILE", generic_path, self.main_controller._sync_user_config_files)
             
         self.main_controller.log_message("DEBUG: About to execute scan", 'blue')
         self._execute_scan_for_health_apps(force_rescan=True)
@@ -102,7 +102,7 @@ class HealthAppScanner(QObject):
         """Execute the health app scan process."""
         # Add debug logging
         self.main_controller.log_message("DEBUG: _execute_scan_for_health_apps called", 'blue')
-        logging.info("DEBUG: _execute_scan_for_health_apps called")
+        logging.debug("DEBUG: _execute_scan_for_health_apps called")
         
         # Get the device ID and determine the file path for this device
         device_id = self._get_current_device_id()
@@ -406,7 +406,7 @@ class HealthAppScanner(QObject):
                 # Use a relative path in the config if possible
                 rel_path = os.path.relpath(output_file, self.api_dir)
                 if hasattr(self.config, 'update_setting_and_save'):
-                    self.config.update_setting_and_save("CURRENT_HEALTH_APP_LIST_FILE", rel_path)
+                    self.config.update_setting_and_save("CURRENT_HEALTH_APP_LIST_FILE", rel_path, self.main_controller._sync_user_config_files)
                 
                 self.main_controller.log_message(f"Found {len(self.health_apps_data)} health apps for device {device_id}", 'green')
                 
@@ -428,7 +428,7 @@ class HealthAppScanner(QObject):
                             # Use a relative path in the config if possible
                             rel_path = os.path.relpath(generic_path, self.api_dir)
                             if hasattr(self.config, 'update_setting_and_save'):
-                                self.config.update_setting_and_save("CURRENT_HEALTH_APP_LIST_FILE", rel_path)
+                                self.config.update_setting_and_save("CURRENT_HEALTH_APP_LIST_FILE", rel_path, self.main_controller._sync_user_config_files)
                                 
                             self.main_controller.log_message(f"Successfully loaded {len(self.health_apps_data)} health apps from generic path", 'green')
                             self._populate_app_dropdown()

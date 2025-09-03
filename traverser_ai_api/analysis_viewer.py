@@ -11,7 +11,7 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 if not logger.handlers:
-    logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(asctime)s %(module)s: %(message)s')
+    logging.basicConfig(level=logging.DEBUG, format='[%(levelname)s] %(asctime)s %(module)s: %(message)s')
 
 try:
     logger.info("Attempting to import xhtml2pdf.pisa in analysis_viewer.py...")

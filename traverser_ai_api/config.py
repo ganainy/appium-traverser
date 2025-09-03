@@ -3,7 +3,7 @@ import logging
 import sys
 import json
 from datetime import datetime
-from typing import Optional, Dict, Any, List, Union, get_type_hints
+from typing import Optional, Dict, Any, List, Union, get_type_hints, Callable
 from dotenv import load_dotenv
 
 # --- Centralized Configuration Class ---
@@ -44,7 +44,8 @@ class Config:
         self.USE_COORDINATE_FALLBACK: bool = True
         self.GEMINI_API_KEY: Optional[str] = None
         self.DEEPSEEK_API_KEY: Optional[str] = None
-        self.AI_PROVIDER: str = 'gemini'  # 'gemini' or 'deepseek'
+        self.OLLAMA_BASE_URL: Optional[str] = None
+        self.AI_PROVIDER: str = 'gemini'  # 'gemini', 'deepseek', or 'ollama'
         self.DEFAULT_MODEL_TYPE: str = 'flash-latest-fast'
         self.USE_CHAT_MEMORY: bool = False
         self.MAX_CHAT_HISTORY: int = 10
@@ -56,6 +57,7 @@ class Config:
         self.AI_SAFETY_SETTINGS: Dict[str, Any] = {}
         self.GEMINI_MODELS: Dict[str, Any] = {}
         self.DEEPSEEK_MODELS: Dict[str, Any] = {}
+        self.OLLAMA_MODELS: Dict[str, Any] = {}
         self.CRAWL_MODE: str = 'steps'
         self.MAX_CRAWL_STEPS: int = 10
         self.MAX_CRAWL_DURATION_SECONDS: int = 600
@@ -156,7 +158,7 @@ class Config:
                                 logging.warning(f"Config key '{key}' in {self.DEFAULTS_MODULE_PATH} has type {type(value)} but expected {type(expected_attr)}. Assigning anyway.")
                     setattr(self, key, value)
 
-            logging.info(f"Loaded base defaults from: {self.DEFAULTS_MODULE_PATH}")
+            logging.debug(f"Loaded base defaults from: {self.DEFAULTS_MODULE_PATH}")
         except Exception as e:
             logging.critical(f"Failed to load base defaults from '{self.DEFAULTS_MODULE_PATH}': {e}", exc_info=True)
             raise
@@ -178,7 +180,7 @@ class Config:
                             value = value.strip().strip('"\'')
                             os.environ[key] = value
                             logging.debug(f"Loaded environment variable: {key}=****")
-                logging.info(f"Manually loaded environment variables from: {project_root_env_path}")
+                logging.debug(f"Manually loaded environment variables from: {project_root_env_path}")
             else:
                 logging.warning(f"No .env file found at expected location: {project_root_env_path}")
                 # Fallback to default dotenv behavior
@@ -192,9 +194,10 @@ class Config:
             
         self.GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", self.GEMINI_API_KEY)
         self.DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", self.DEEPSEEK_API_KEY)
+        self.OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", self.OLLAMA_BASE_URL)
         self.PCAPDROID_API_KEY = os.getenv("PCAPDROID_API_KEY", self.PCAPDROID_API_KEY)
         self.MOBSF_API_KEY = os.getenv("MOBSF_API_KEY", self.MOBSF_API_KEY)
-        logging.info("Applied configuration from environment variables.")
+        logging.debug("Applied configuration from environment variables.")
 
     def _generate_session_dir_name(self) -> str:
         """Generate a unique session directory name with device_id, app_package, and timestamp.
@@ -264,7 +267,7 @@ class Config:
 
         if old_value != converted_value:
             setattr(self, key, converted_value)
-            logging.info(f"Config changed by {source}: {key} = {converted_value} (was: {old_value})")
+            logging.debug(f"Config changed by {source}: {key} = {converted_value} (was: {old_value})")
         return True
 
     def load_user_config(self, path: Optional[str] = None):
@@ -273,7 +276,7 @@ class Config:
             try:
                 with open(file_path, 'r', encoding='utf-8') as f:
                     user_data = json.load(f)
-                logging.info(f"Loading user configuration from: {file_path}")
+                logging.debug(f"Loading user configuration from: {file_path}")
                 for key, value in user_data.items():
                     # Handle the OUTPUT_DATA_DIR specifically if it's in user_config
                     # to update the template before resolving all paths.
@@ -286,7 +289,7 @@ class Config:
             except Exception as e:
                 logging.warning(f"Failed to load or apply user config from {file_path}: {e}", exc_info=True)
         else:
-            logging.info(f"User configuration file ({file_path}) not found. Using defaults and environment variables.")
+            logging.debug(f"User configuration file ({file_path}) not found. Using defaults and environment variables.")
         self._resolve_all_paths()
         
         # Adjust XML limits based on AI provider
@@ -312,7 +315,7 @@ class Config:
         
         # Only adjust if current limit is higher than recommended for this provider
         if current_limit > recommended_limit:
-            logging.info(f"Adjusting XML_SNIPPET_MAX_LEN from {current_limit} to {recommended_limit} for {provider} provider")
+            logging.debug(f"Adjusting XML_SNIPPET_MAX_LEN from {current_limit} to {recommended_limit} for {provider} provider")
             self.XML_SNIPPET_MAX_LEN = recommended_limit
             
             # Update user config if it exists
@@ -326,11 +329,11 @@ class Config:
                     with open(self.USER_CONFIG_FILE_PATH, 'w', encoding='utf-8') as f:
                         json.dump(user_data, f, indent=4, ensure_ascii=False)
                     
-                    logging.info(f"Updated XML_SNIPPET_MAX_LEN in user config to {recommended_limit}")
+                    logging.debug(f"Updated XML_SNIPPET_MAX_LEN in user config to {recommended_limit}")
                 except Exception as e:
                     logging.warning(f"Failed to update XML_SNIPPET_MAX_LEN in user config: {e}")
         elif current_limit < recommended_limit:
-            logging.info(f"XML_SNIPPET_MAX_LEN ({current_limit}) is below recommended limit for {provider} ({recommended_limit}). Consider increasing for better AI context.")
+            logging.debug(f"XML_SNIPPET_MAX_LEN ({current_limit}) is below recommended limit for {provider} ({recommended_limit}). Consider increasing for better AI context.")
 
     def _adjust_image_context_for_provider(self):
         """Automatically adjust ENABLE_IMAGE_CONTEXT based on AI provider capabilities."""
@@ -342,7 +345,7 @@ class Config:
         if auto_disable:
             current_image_context = getattr(self, 'ENABLE_IMAGE_CONTEXT', True)
             if current_image_context:
-                logging.info(f"Disabling ENABLE_IMAGE_CONTEXT for {provider} provider due to payload size limits")
+                logging.debug(f"Disabling ENABLE_IMAGE_CONTEXT for {provider} provider due to payload size limits")
                 self.ENABLE_IMAGE_CONTEXT = False
                 
                 # Update user config if it exists
@@ -356,7 +359,7 @@ class Config:
                         with open(self.USER_CONFIG_FILE_PATH, 'w', encoding='utf-8') as f:
                             json.dump(user_data, f, indent=4, ensure_ascii=False)
                         
-                        logging.info(f"Updated ENABLE_IMAGE_CONTEXT to False in user config for {provider} compatibility")
+                        logging.debug(f"Updated ENABLE_IMAGE_CONTEXT to False in user config for {provider} compatibility")
                     except Exception as e:
                         logging.warning(f"Failed to update ENABLE_IMAGE_CONTEXT in user config: {e}")
         else:
@@ -413,7 +416,7 @@ class Config:
             os.makedirs(os.path.dirname(file_path), exist_ok=True)
             with open(file_path, 'w', encoding='utf-8') as f:
                 json.dump(data_to_save, f, indent=4, ensure_ascii=False)
-            logging.info(f"User configuration saved to: {file_path}")
+            logging.debug(f"User configuration saved to: {file_path}")
         except Exception as e:
             logging.error(f"Failed to save user configuration to {file_path}: {e}", exc_info=True)
 
@@ -476,7 +479,7 @@ class Config:
         if self.PCAPDROID_PACKAGE:
             self.PCAPDROID_ACTIVITY = f"{self.PCAPDROID_PACKAGE}/.activities.CaptureCtrl"
 
-        logging.info("Resolved dynamic configuration paths.")
+        logging.debug("Resolved dynamic configuration paths.")
         logging.debug(f"  OUTPUT_DATA_DIR: {self.OUTPUT_DATA_DIR}")
         logging.debug(f"  SESSION_DIR: {self.SESSION_DIR}")
         logging.debug(f"  APP_INFO_OUTPUT_DIR: {self.APP_INFO_OUTPUT_DIR}")
@@ -490,7 +493,7 @@ class Config:
         logging.debug(f"  PDF_REPORT_DIR: {self.PDF_REPORT_DIR}")
 
 
-    def update_setting_and_save(self, key: str, value: Any):
+    def update_setting_and_save(self, key: str, value: Any, sync_callback: Optional[Callable[[], None]] = None):
         """Public method to update a setting and persist to user_config.json"""
         # Special handling if OUTPUT_DATA_DIR is being set directly
         # to update the underlying template.
@@ -509,6 +512,13 @@ class Config:
                 self._resolve_all_paths()
             
             self.save_user_config()
+            
+            # Call synchronization callback if provided
+            if sync_callback:
+                try:
+                    sync_callback()
+                except Exception as e:
+                    logging.warning(f"Failed to execute synchronization callback: {e}")
 
             if key in ["LOG_LEVEL", "LOG_FILE_NAME"]: # LOG_DIR might also be relevant
                 logging.warning(f"Logging setting '{key}' changed. Logger re-initialization might be needed by the application.")
@@ -591,6 +601,151 @@ DEEPSEEK_MODELS = {
         'online': True
     }
 }
+OLLAMA_MODELS = {
+    # Text-only models
+    'llama3.2': {
+        'name': 'llama3.2',
+        'description': 'Llama 3.2 model running locally via Ollama (text-only).',
+        'generation_config': {'temperature': 0.7, 'top_p': 0.95, 'max_output_tokens': 1024},
+        'online': False,
+        'vision_supported': False
+    },
+    'llama3.2-fast': {
+        'name': 'llama3.2',
+        'description': 'Llama 3.2 model with optimized settings for faster responses (text-only).',
+        'generation_config': {'temperature': 0.3, 'top_p': 0.8, 'max_output_tokens': 1024},
+        'online': False,
+        'vision_supported': False
+    },
+    'mistral': {
+        'name': 'mistral',
+        'description': 'Mistral 7B model running locally via Ollama (text-only).',
+        'generation_config': {'temperature': 0.7, 'top_p': 0.95, 'max_output_tokens': 1024},
+        'online': False,
+        'vision_supported': False
+    },
+    'mistral-small': {
+        'name': 'mistral-small',
+        'description': 'Mistral Small model running locally via Ollama (text-only).',
+        'generation_config': {'temperature': 0.7, 'top_p': 0.95, 'max_output_tokens': 1024},
+        'online': False,
+        'vision_supported': False
+    },
+    'qwen2.5': {
+        'name': 'qwen2.5',
+        'description': 'Qwen 2.5 model running locally via Ollama (text-only).',
+        'generation_config': {'temperature': 0.7, 'top_p': 0.95, 'max_output_tokens': 1024},
+        'online': False,
+        'vision_supported': False
+    },
+    'granite3.2': {
+        'name': 'granite3.2',
+        'description': 'Granite 3.2 model running locally via Ollama (text-only).',
+        'generation_config': {'temperature': 0.7, 'top_p': 0.95, 'max_output_tokens': 1024},
+        'online': False,
+        'vision_supported': False
+    },
+
+    # Vision-capable models
+    'llama3.2-vision': {
+        'name': 'llama3.2-vision',
+        'description': 'Llama 3.2 Vision model with multimodal capabilities.',
+        'generation_config': {'temperature': 0.7, 'top_p': 0.95, 'max_output_tokens': 1024},
+        'online': False,
+        'vision_supported': True
+    },
+    'llama3.2-vision-fast': {
+        'name': 'llama3.2-vision',
+        'description': 'Llama 3.2 Vision model with optimized settings for faster responses.',
+        'generation_config': {'temperature': 0.3, 'top_p': 0.8, 'max_output_tokens': 1024},
+        'online': False,
+        'vision_supported': True
+    },
+    'llava': {
+        'name': 'llava',
+        'description': 'LLaVA model for vision-language tasks.',
+        'generation_config': {'temperature': 0.7, 'top_p': 0.95, 'max_output_tokens': 1024},
+        'online': False,
+        'vision_supported': True
+    },
+    'llava-llama3': {
+        'name': 'llava-llama3',
+        'description': 'LLaVA model with Llama 3 backbone for vision-language tasks.',
+        'generation_config': {'temperature': 0.7, 'top_p': 0.95, 'max_output_tokens': 1024},
+        'online': False,
+        'vision_supported': True
+    },
+    'llava-phi3': {
+        'name': 'llava-phi3',
+        'description': 'LLaVA model with Phi-3 backbone for vision-language tasks.',
+        'generation_config': {'temperature': 0.7, 'top_p': 0.95, 'max_output_tokens': 1024},
+        'online': False,
+        'vision_supported': True
+    },
+    'bakllava': {
+        'name': 'bakllava',
+        'description': 'BakLLaVA model for vision-language tasks.',
+        'generation_config': {'temperature': 0.7, 'top_p': 0.95, 'max_output_tokens': 1024},
+        'online': False,
+        'vision_supported': True
+    },
+    'minicpm-v': {
+        'name': 'minicpm-v',
+        'description': 'MiniCPM-V model for vision-language tasks.',
+        'generation_config': {'temperature': 0.7, 'top_p': 0.95, 'max_output_tokens': 1024},
+        'online': False,
+        'vision_supported': True
+    },
+    'moondream': {
+        'name': 'moondream',
+        'description': 'Moondream model for vision-language tasks.',
+        'generation_config': {'temperature': 0.7, 'top_p': 0.95, 'max_output_tokens': 1024},
+        'online': False,
+        'vision_supported': True
+    },
+    'gemma3': {
+        'name': 'gemma3',
+        'description': 'Gemma 3 model with multimodal capabilities.',
+        'generation_config': {'temperature': 0.7, 'top_p': 0.95, 'max_output_tokens': 1024},
+        'online': False,
+        'vision_supported': True
+    },
+    'llama4': {
+        'name': 'llama4',
+        'description': 'Llama 4 model with multimodal capabilities.',
+        'generation_config': {'temperature': 0.7, 'top_p': 0.95, 'max_output_tokens': 1024},
+        'online': False,
+        'vision_supported': True
+    },
+    'qwen2.5vl': {
+        'name': 'qwen2.5vl',
+        'description': 'Qwen 2.5 VL model for vision-language tasks.',
+        'generation_config': {'temperature': 0.7, 'top_p': 0.95, 'max_output_tokens': 1024},
+        'online': False,
+        'vision_supported': True
+    },
+    'granite3.2-vision': {
+        'name': 'granite3.2-vision',
+        'description': 'Granite 3.2 Vision model with multimodal capabilities.',
+        'generation_config': {'temperature': 0.7, 'top_p': 0.95, 'max_output_tokens': 1024},
+        'online': False,
+        'vision_supported': True
+    },
+    'mistral-small3.1': {
+        'name': 'mistral-small3.1',
+        'description': 'Mistral Small 3.1 model with multimodal capabilities.',
+        'generation_config': {'temperature': 0.7, 'top_p': 0.95, 'max_output_tokens': 1024},
+        'online': False,
+        'vision_supported': True
+    },
+    'mistral-small3.2': {
+        'name': 'mistral-small3.2',
+        'description': 'Mistral Small 3.2 model with multimodal capabilities.',
+        'generation_config': {'temperature': 0.7, 'top_p': 0.95, 'max_output_tokens': 1024},
+        'online': False,
+        'vision_supported': True
+    }
+}
 
 CRAWL_MODE = 'steps'
 MAX_CRAWL_STEPS = 10
@@ -659,6 +814,17 @@ AI_PROVIDER_CAPABILITIES = {
         'auto_disable_image_context': True,  # Auto-disable due to payload limits
         'description': 'DeepSeek - Strict payload limits, optimized for text analysis',
         'online': True  # Indicates this is an online/cloud provider
+    },
+    'ollama': {
+        'xml_max_len': 100000,  # Higher limit for local models
+        'image_supported': True,  # Ollama supports images with vision-capable models
+        'image_max_width': 640,   # Standard image size for vision models
+        'image_quality': 75,      # Good quality for vision processing
+        'image_format': 'JPEG',   # JPEG format for efficient transmission
+        'payload_max_size_kb': None,  # No payload limits for local models
+        'auto_disable_image_context': False,  # Don't auto-disable since vision models exist
+        'description': 'Ollama - Local LLM provider with vision support for compatible models',
+        'online': False  # Local provider
     }
     # Future providers can be easily added here, e.g.:
     # 'claude': {

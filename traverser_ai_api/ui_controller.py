@@ -78,12 +78,12 @@ class CrawlerControllerWindow(QMainWindow):
         # This is done after load_user_config to not overwrite existing setting
         if not hasattr(self.config, 'UI_MODE'):
             # Use update_setting_and_save which handles attribute creation
-            logging.info(f"Setting default UI_MODE to Expert in config file: {user_config_json_path}")
-            self.config.update_setting_and_save('UI_MODE', 'Expert')
+            logging.debug(f"Setting default UI_MODE to Expert in config file: {user_config_json_path}")
+            self.config.update_setting_and_save('UI_MODE', 'Expert', self._sync_user_config_files)
             
         # Log current UI_MODE setting
         ui_mode = getattr(self.config, 'UI_MODE', 'Unknown')
-        logging.info(f"Current UI_MODE setting: {ui_mode}")
+        logging.debug(f"Current UI_MODE setting: {ui_mode}")
         
         # Initialize instance variables
         self.config_widgets = {}
@@ -154,7 +154,7 @@ class CrawlerControllerWindow(QMainWindow):
         if hasattr(self, 'log_output') and self.log_output:
             self.log_output.append(log_message)
         else:
-            logging.info(log_message)
+            logging.debug(log_message)
 
     def _create_tooltips(self) -> Dict[str, str]:
         """Create tooltips for UI elements."""
@@ -200,7 +200,7 @@ class CrawlerControllerWindow(QMainWindow):
             
             # Connect the refresh apps button - now using self.refresh_apps_btn which has the correct reference
             if self.refresh_apps_btn and hasattr(self.refresh_apps_btn, 'clicked'):
-                logging.info("Connecting refresh_apps_btn.clicked to trigger_scan_for_health_apps")
+                logging.debug("Connecting refresh_apps_btn.clicked to trigger_scan_for_health_apps")
                 self.log_message("DEBUG: Connecting refresh button signal", 'blue')
                 try:
                     self.refresh_apps_btn.clicked.connect(
@@ -278,7 +278,7 @@ class CrawlerControllerWindow(QMainWindow):
                 
                 # Update the config with the generic path, not device-specific
                 generic_path = os.path.join(getattr(self.config, 'OUTPUT_DATA_DIR', 'output_data'), "app_info", "health_apps.json")
-                self.config.update_setting_and_save("CURRENT_HEALTH_APP_LIST_FILE", generic_path)
+                self.config.update_setting_and_save("CURRENT_HEALTH_APP_LIST_FILE", generic_path, self._sync_user_config_files)
                 return
             
             # If no file exists for this device
@@ -288,7 +288,7 @@ class CrawlerControllerWindow(QMainWindow):
             
             # Update config with generic path
             generic_path = os.path.join(getattr(self.config, 'OUTPUT_DATA_DIR', 'output_data'), "app_info", "health_apps.json")
-            self.config.update_setting_and_save("CURRENT_HEALTH_APP_LIST_FILE", generic_path)
+            self.config.update_setting_and_save("CURRENT_HEALTH_APP_LIST_FILE", generic_path, self._sync_user_config_files)
             
             # Clear dropdown if no valid cache
             if self.health_app_dropdown and hasattr(self.health_app_dropdown, 'clear'):
@@ -313,7 +313,7 @@ class CrawlerControllerWindow(QMainWindow):
                 self.setWindowIcon(app_icon)
                 # Set application icon (used by Windows taskbar)
                 QApplication.setWindowIcon(app_icon)
-                logging.info("Application icon set successfully")
+                logging.debug("Application icon set successfully")
             else:
                 logging.warning("Failed to get application icon")
         except Exception as e:
@@ -365,8 +365,8 @@ class CrawlerControllerWindow(QMainWindow):
                         rel_path = os.path.relpath(current_value, self.api_dir)
                         # Only update if it's inside the api_dir hierarchy
                         if not rel_path.startswith('..'):
-                            self.config.update_setting_and_save(setting_name, rel_path)
-                            logging.info(f"Updated {setting_name} to use relative path: {rel_path}")
+                            self.config.update_setting_and_save(setting_name, rel_path, self._sync_user_config_files)
+                            logging.debug(f"Updated {setting_name} to use relative path: {rel_path}")
                     except ValueError:
                         # Different drives, can't make relative
                         pass
@@ -375,14 +375,14 @@ class CrawlerControllerWindow(QMainWindow):
             logging.error(f"Error updating relative paths in config: {e}", exc_info=True)
             
     def _sync_user_config_files(self):
-        """Synchronize the user_config.json in API directory with the root user_config.json file."""
+        """Synchronize ALL settings from the root user_config.json to the API directory user_config.json file."""
         try:
             # Path to the API directory user_config.json
             api_config_path = os.path.join(self.api_dir, "user_config.json")
             # Path to the root user_config.json (already set in self.config.USER_CONFIG_FILE_PATH)
             root_config_path = self.config.USER_CONFIG_FILE_PATH
             
-            # If both files exist, make sure they have the same settings
+            # If both files exist, synchronize all settings from root to API
             if os.path.exists(api_config_path) and os.path.exists(root_config_path):
                 # Read root config file
                 with open(root_config_path, 'r', encoding='utf-8') as f:
@@ -392,22 +392,42 @@ class CrawlerControllerWindow(QMainWindow):
                 with open(api_config_path, 'r', encoding='utf-8') as f:
                     api_config = json.load(f)
                 
-                # Copy 'UI_MODE' and 'AI_PROVIDER' from root to API config if it exists
-                if 'UI_MODE' in root_config and root_config['UI_MODE'] != api_config.get('UI_MODE'):
-                    api_config['UI_MODE'] = root_config['UI_MODE']
-                    # Save updated API config
-                    with open(api_config_path, 'w', encoding='utf-8') as f:
-                        json.dump(api_config, f, indent=4, ensure_ascii=False)
-                    self.log_message(f"Synchronized UI_MODE '{root_config['UI_MODE']}' to API config file", 'blue')
-                    logging.info(f"Synchronized UI_MODE '{root_config['UI_MODE']}' to API config file: {api_config_path}")
+                # Synchronize ALL settings from root to API config
+                changes_made = False
+                synchronized_settings = []
                 
-                if 'AI_PROVIDER' in root_config and root_config['AI_PROVIDER'] != api_config.get('AI_PROVIDER'):
-                    api_config['AI_PROVIDER'] = root_config['AI_PROVIDER']
-                    # Save updated API config
+                for key, value in root_config.items():
+                    # Skip certain settings that should not be synchronized or are handled differently
+                    skip_keys = [
+                        'CURRENT_HEALTH_APP_LIST_FILE',  # This is device-specific and managed separately
+                        'LAST_SELECTED_APP'  # This is also managed separately
+                    ]
+                    
+                    if key in skip_keys:
+                        continue
+                    
+                    # Check if the value is different or missing in API config
+                    if key not in api_config or api_config[key] != value:
+                        api_config[key] = value
+                        synchronized_settings.append(key)
+                        changes_made = True
+                
+                # Save the updated API config if changes were made
+                if changes_made:
                     with open(api_config_path, 'w', encoding='utf-8') as f:
                         json.dump(api_config, f, indent=4, ensure_ascii=False)
-                    self.log_message(f"Synchronized AI_PROVIDER '{root_config['AI_PROVIDER']}' to API config file", 'blue')
-                    logging.info(f"Synchronized AI_PROVIDER '{root_config['AI_PROVIDER']}' to API config file: {api_config_path}")
+                    
+                    # Log the synchronization
+                    if len(synchronized_settings) <= 5:
+                        settings_str = ", ".join(synchronized_settings)
+                        self.log_message(f"Synchronized settings to API config: {settings_str}", 'blue')
+                        logging.debug(f"Synchronized settings to API config file: {settings_str}")
+                    else:
+                        self.log_message(f"Synchronized {len(synchronized_settings)} settings to API config file", 'blue')
+                        logging.debug(f"Synchronized {len(synchronized_settings)} settings to API config file: {api_config_path}")
+                else:
+                    logging.debug("No settings needed synchronization between root and API config files")
+                    
         except Exception as e:
             logging.error(f"Error synchronizing user config files: {e}", exc_info=True)
             if hasattr(self, 'log_output') and self.log_output:
@@ -415,9 +435,6 @@ class CrawlerControllerWindow(QMainWindow):
             
     def log_message(self, message: str, color: str = 'white'):
         """Append a message to the log output with a specified color."""
-        # Always log to console for backup
-        logging.info(message)
-        
         # Check if log_output exists and is properly initialized
         if not self.log_output:
             return
@@ -427,7 +444,7 @@ class CrawlerControllerWindow(QMainWindow):
         if app and app.thread() != QThread.currentThread():
             # If we are not in the main thread, we cannot directly update the UI.
             # For now, just log to console.
-            logging.info(f"LOG (from thread): {message}")
+            logging.debug(f"LOG (from thread): {message}")
             return
 
         color_map = {
@@ -519,9 +536,23 @@ class CrawlerControllerWindow(QMainWindow):
 
 
 if __name__ == '__main__':
-    logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+    # Import LoggerManager for proper logging setup
+    try:
+        from .utils import LoggerManager
+    except ImportError:
+        from utils import LoggerManager
+
     app = QApplication(sys.argv)
     window = CrawlerControllerWindow()
+
+    # Set up logging with LoggerManager
+    logger_manager = LoggerManager()
+    
+    # Set the UI controller reference in LoggerManager for colored logging BEFORE setup_logging
+    logger_manager.set_ui_controller(window)
+    
+    logger_manager.setup_logging(log_level_str='INFO')
+
     # Start in full screen mode but allow resizing
     window.showMaximized()
     sys.exit(app.exec())

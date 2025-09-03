@@ -7,7 +7,10 @@ from typing import TYPE_CHECKING, Optional, List
 # Adjust paths based on your project structure
 if TYPE_CHECKING:
     from appium_driver import AppiumDriver # For type hinting
-from config import Config # Assuming Config class is in config.py in the same package
+try:
+    from traverser_ai_api.config import Config # Assuming Config class is in config.py in the same package
+except ImportError:
+    from config import Config # Assuming Config class is in config.py in the same package
 
 class AppContextManager:
     """Manages the application context, including launching and ensuring the app is in focus,
@@ -48,7 +51,7 @@ class AppContextManager:
              raise ValueError("AppContextManager: APP_PACKAGE and APP_ACTIVITY cannot be empty in Config.")
 
         self.consecutive_context_failures: int = 0
-        logging.info(f"AppContextManager initialized for target: {self.cfg.APP_PACKAGE}")
+        logging.debug(f"AppContextManager initialized for target: {self.cfg.APP_PACKAGE}")
 
     def reset_context_failures(self):
         """Resets the consecutive context failure counter."""

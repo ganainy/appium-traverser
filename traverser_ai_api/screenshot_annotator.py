@@ -7,8 +7,14 @@ import json # For annotations.json
 
 if TYPE_CHECKING:
     from appium_driver import AppiumDriver
-from config import Config
-import utils
+try:
+    from traverser_ai_api.config import Config
+except ImportError:
+    from config import Config
+try:
+    from traverser_ai_api import utils
+except ImportError:
+    import utils
 
 class ScreenshotAnnotator:
     def __init__(self, driver: 'AppiumDriver', app_config: Config):
@@ -32,9 +38,9 @@ class ScreenshotAnnotator:
             # Potentially raise an error or set a flag indicating this annotator is partially non-functional
             self.master_annotation_file_path = None # Or some other indicator of a problem
 
-        logging.info(f"ScreenshotAnnotator initialized. Annotated screenshots will be saved to: {self.cfg.ANNOTATED_SCREENSHOTS_DIR}")
+        logging.debug(f"ScreenshotAnnotator initialized. Annotated screenshots will be saved to: {self.cfg.ANNOTATED_SCREENSHOTS_DIR}")
         if self.master_annotation_file_path:
-            logging.info(f"Master UI element annotation file will be managed at: {self.master_annotation_file_path}")
+            logging.debug(f"Master UI element annotation file will be managed at: {self.master_annotation_file_path}")
         else:
             logging.error("Master annotation file path could not be determined due to missing SCREENSHOTS_DIR config.")
 

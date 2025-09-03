@@ -42,7 +42,7 @@ class ConfigManager(QObject):
         
         # Use the USER_CONFIG_FILE_PATH from the config object which should be set to the root config file
         self.config_file_path = self.config.USER_CONFIG_FILE_PATH
-        logging.info(f"ConfigManager initialized with config file path: {self.config_file_path}")
+        logging.debug(f"ConfigManager initialized with config file path: {self.config_file_path}")
     
     def _apply_defaults_from_config_to_widgets(self):
         """Apply default values from the config module to UI widgets."""
@@ -176,7 +176,10 @@ class ConfigManager(QObject):
         
         # Update the config object with the new data
         for k, value in config_data.items():
-            self.config.update_setting_and_save(k, value)
+            self.config.update_setting_and_save(k, value, self.main_controller._sync_user_config_files)
+
+        # Synchronize the changes to the API config file
+        # Note: Synchronization is now handled automatically by the callback in update_setting_and_save
 
         self.main_controller.log_message("Configuration auto-saved successfully.", 'green')
 
@@ -210,10 +213,10 @@ class ConfigManager(QObject):
             
             # Log important config values for debugging
             if 'ENABLE_MOBSF_ANALYSIS' in self.user_config:
-                logging.info(f"Loading ENABLE_MOBSF_ANALYSIS state: {self.user_config['ENABLE_MOBSF_ANALYSIS']}")
+                logging.debug(f"Loading ENABLE_MOBSF_ANALYSIS state: {self.user_config['ENABLE_MOBSF_ANALYSIS']}")
             
             if 'UI_MODE' in self.user_config:
-                logging.info(f"Loading UI_MODE from user_config.json: {self.user_config['UI_MODE']}")
+                logging.debug(f"Loading UI_MODE from user_config.json: {self.user_config['UI_MODE']}")
                 # Update the config object with UI_MODE
                 if hasattr(self.config, 'UI_MODE'):
                     self.config.UI_MODE = self.user_config['UI_MODE']
@@ -233,7 +236,7 @@ class ConfigManager(QObject):
                         elif isinstance(widget, QCheckBox):
                             widget.setChecked(bool(value))
                             if key == 'ENABLE_MOBSF_ANALYSIS':
-                                logging.info(f"Set ENABLE_MOBSF_ANALYSIS checkbox to: {bool(value)}")
+                                logging.debug(f"Set ENABLE_MOBSF_ANALYSIS checkbox to: {bool(value)}")
                         elif isinstance(widget, QComboBox):
                             if isinstance(value, str):
                                 index = widget.findText(value)
@@ -262,7 +265,7 @@ class ConfigManager(QObject):
             # Apply specific config settings that aren't directly tied to widgets
             if 'UI_MODE' in self.user_config and hasattr(self, 'ui_mode_dropdown'):
                 mode = self.user_config['UI_MODE']
-                logging.info(f"Setting ui_mode_dropdown to {mode} based on user_config")
+                logging.debug(f"Setting ui_mode_dropdown to {mode} based on user_config")
                 index = self.ui_mode_dropdown.findText(mode)
                 if index >= 0:
                     self.ui_mode_dropdown.setCurrentIndex(index)
@@ -272,7 +275,7 @@ class ConfigManager(QObject):
             # Update model types based on loaded AI_PROVIDER
             if 'AI_PROVIDER' in self.user_config:
                 provider = self.user_config['AI_PROVIDER']
-                logging.info(f"Updating model types for loaded AI_PROVIDER: {provider}")
+                logging.debug(f"Updating model types for loaded AI_PROVIDER: {provider}")
                 UIComponents._update_model_types(provider, self.main_controller.config_widgets)
             
             self._update_crawl_mode_inputs_state()
@@ -287,25 +290,29 @@ class ConfigManager(QObject):
         try:
             # Update the run_mobsf_analysis_btn and test_mobsf_conn_btn state
             is_enabled = bool(state)
-            logging.info(f"MobSF enabled state changed: {is_enabled}")
+            logging.debug(f"MobSF enabled state changed: {is_enabled}")
             
             # Update button states - checking both hasattr and that the button is not None
             if hasattr(self.main_controller, 'run_mobsf_analysis_btn') and self.main_controller.run_mobsf_analysis_btn is not None:
                 self.main_controller.run_mobsf_analysis_btn.setEnabled(is_enabled)
-                logging.info(f"Set run_mobsf_analysis_btn enabled: {is_enabled}")
+                logging.debug(f"Set run_mobsf_analysis_btn enabled: {is_enabled}")
             else:
                 logging.warning("run_mobsf_analysis_btn is not available")
                 
             if hasattr(self.main_controller, 'test_mobsf_conn_btn') and self.main_controller.test_mobsf_conn_btn is not None:
                 self.main_controller.test_mobsf_conn_btn.setEnabled(is_enabled)
-                logging.info(f"Set test_mobsf_conn_btn enabled: {is_enabled}")
+                logging.debug(f"Set test_mobsf_conn_btn enabled: {is_enabled}")
             else:
                 logging.warning("test_mobsf_conn_btn is not available")
                 
             # Save the state to config immediately
             if hasattr(self.config, 'ENABLE_MOBSF_ANALYSIS'):
                 self.config.ENABLE_MOBSF_ANALYSIS = is_enabled
-                self.config.update_setting_and_save('ENABLE_MOBSF_ANALYSIS', is_enabled)
+                self.config.update_setting_and_save('ENABLE_MOBSF_ANALYSIS', is_enabled, self.main_controller._sync_user_config_files)
+                
+                # Synchronize the changes to the API config file
+                # Note: Synchronization is now handled automatically by the callback in update_setting_and_save
+                
                 self.main_controller.log_message(f"MobSF analysis {'enabled' if is_enabled else 'disabled'}.", 'blue')
         except Exception as e:
             logging.error(f"Error handling MobSF enabled state change: {e}", exc_info=True)
@@ -362,4 +369,4 @@ class ConfigManager(QObject):
                 # but that requires event filtering. For now, we'll omit auto-save
                 # on QTextEdit to avoid excessive saving.
                 pass
-        logging.info("Connected widgets for auto-saving.")
+        logging.debug("Connected widgets for auto-saving.")

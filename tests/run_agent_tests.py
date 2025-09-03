@@ -28,14 +28,14 @@ import argparse
 import logging
 
 # Configure logging
-logging.basicConfig(level=logging.INFO,
+logging.basicConfig(level=logging.DEBUG,
                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 def run_tests(api_key=None, test_pattern=None, verbosity=2):
     """Run the agent assistant tests with the provided API key."""
     if api_key:
         os.environ['GOOGLE_API_KEY'] = api_key
-        logging.info(f"Using provided API key: {api_key[:5]}***")
+        logging.debug(f"Using provided API key: {api_key[:5]}***")
     else:
         logging.warning("No API key provided. Some tests will be skipped.")
     

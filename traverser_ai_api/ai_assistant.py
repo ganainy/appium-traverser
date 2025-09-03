@@ -117,7 +117,7 @@ class AIAssistant:
                  safety_settings_override: Optional[Dict] = None):
         self.cfg = app_config
         self.response_cache: Dict[str, Tuple[Dict[str, Any], float, int]] = {}
-        logging.info("AI response cache initialized.")
+        logging.debug("AI response cache initialized.")
 
         if not self.cfg.GEMINI_API_KEY:
             raise ValueError("GEMINI_API_KEY is not set in the provided application configuration.")
@@ -162,7 +162,7 @@ class AIAssistant:
         if not self.processed_safety_settings and raw_safety_settings_source:
             logging.warning("Safety settings provided but could not be processed.")
         elif not raw_safety_settings_source:
-            logging.info("No safety settings provided; using API defaults.")
+            logging.debug("No safety settings provided; using API defaults.")
 
         try:
             genai_configure(api_key=self.api_key)
@@ -194,11 +194,11 @@ class AIAssistant:
                 safety_settings=self.processed_safety_settings
             )
 
-            logging.info(f"AI Assistant initialized with model alias: {self.model_alias} (actual: {self.actual_model_name})")
-            logging.info(f"Model description: {model_config_from_file.get('description', 'N/A')}")
-            logging.info("Structured JSON output schema (for action and all_ui_elements) is ENABLED.")
+            logging.debug(f"AI Assistant initialized with model alias: {self.model_alias} (actual: {self.actual_model_name})")
+            logging.debug(f"Model description: {model_config_from_file.get('description', 'N/A')}")
+            logging.debug("Structured JSON output schema (for action and all_ui_elements) is ENABLED.")
             if self.processed_safety_settings:
-                logging.info(f"Applied safety settings: {self.processed_safety_settings}")
+                logging.debug(f"Applied safety settings: {self.processed_safety_settings}")
 
             self.use_chat = self.cfg.USE_CHAT_MEMORY
             if self.use_chat is None:
@@ -211,21 +211,21 @@ class AIAssistant:
                     if self.max_history is None:
                         logging.warning("MAX_CHAT_HISTORY not in app_config, defaulting to 10.")
                         self.max_history = 10
-                    logging.info(f"Chat memory enabled (max history: {self.max_history} exchanges)")
+                    logging.debug(f"Chat memory enabled (max history: {self.max_history} exchanges)")
                 except Exception as e:
                     logging.warning(f"Failed to initialize chat: {e}. Disabling chat memory.")
                     self.chat = None # type: ignore
                     self.use_chat = False
             else:
                 self.chat = None # type: ignore
-                logging.info("Chat memory is disabled.")
+                logging.debug("Chat memory is disabled.")
         except Exception as e:
             logging.error(f"Failed to initialize GenerativeModel or AIAssistant: {e}", exc_info=True)
             raise
 
     def _log_empty_response_details(self, response) -> None:
         # ... (This method remains the same as in your provided code)
-        logging.info("Detailed AI Response Analysis:")
+        logging.debug("Detailed AI Response Analysis:")
         try:
             if not response:
                 logging.warning("  Response object itself is None.")
@@ -234,22 +234,22 @@ class AIAssistant:
             if hasattr(response, "usage_metadata"):
                 metadata = response.usage_metadata
                 if metadata:
-                    logging.info("  Usage Metadata:")
+                    logging.debug("  Usage Metadata:")
                     for m_attr in ["prompt_token_count", "candidates_token_count", "total_token_count"]:
                         if hasattr(metadata, m_attr):
-                            logging.info(f"    {m_attr}: {getattr(metadata, m_attr)}")
+                            logging.debug(f"    {m_attr}: {getattr(metadata, m_attr)}")
             if hasattr(response, "candidates") and response.candidates:
                 candidate = response.candidates[0]
-                logging.info("  First Candidate Details:")
+                logging.debug("  First Candidate Details:")
                 if hasattr(candidate, "finish_reason"):
-                    logging.info(f"    finish_reason: {candidate.finish_reason}")
+                    logging.debug(f"    finish_reason: {candidate.finish_reason}")
                 if hasattr(candidate, "safety_ratings"):
-                    logging.info(f"    safety_ratings: {candidate.safety_ratings}")
+                    logging.debug(f"    safety_ratings: {candidate.safety_ratings}")
                 if hasattr(candidate, "content") and hasattr(candidate.content, "parts"):
                     for i, part in enumerate(candidate.content.parts):
-                        logging.info(f"    Content Part {i}: {type(part).__name__}")
+                        logging.debug(f"    Content Part {i}: {type(part).__name__}")
                         if hasattr(part, "text"):
-                            logging.info(f"      Text: {part.text[:200]}...") # Log snippet
+                            logging.debug(f"      Text: {part.text[:200]}...") # Log snippet
         except Exception as e:
             logging.error(f"Error analyzing response details: {e}", exc_info=True)
 
@@ -506,7 +506,7 @@ Based on this feedback, you MUST choose a different action to avoid getting stuc
 
         # Check cache before making the API call
         if cache_key in self.response_cache:
-            logging.info(f"CACHE HIT: Found cached AI response for key: {cache_key[:70]}...")
+            logging.debug(f"CACHE HIT: Found cached AI response for key: {cache_key[:70]}...")
             # Return a copy of the cached response with a simulated time of 0
             cached_response, _, cached_tokens = self.response_cache[cache_key]
             return dict(cached_response), 0.0, cached_tokens
@@ -518,7 +518,7 @@ Based on this feedback, you MUST choose a different action to avoid getting stuc
             logging.warning("cfg.AVAILABLE_ACTIONS invalid. Using default actions.")
             current_available_actions = ["click", "input", "scroll_up", "scroll_down", "swipe_left", "swipe_right", "back"]
 
-        logging.info(f"get_next_action: xml_len={len(xml_context)}, prev_actions={len(previous_actions)}, avail_actions={current_available_actions}, visits={current_screen_visit_count}, hash={current_composite_hash}")
+        logging.debug(f"get_next_action: xml_len={len(xml_context)}, prev_actions={len(previous_actions)}, avail_actions={current_available_actions}, visits={current_screen_visit_count}, hash={current_composite_hash}")
 
         image_content_part = self._prepare_image_part(screenshot_bytes)
         if not image_content_part:
@@ -549,7 +549,7 @@ Based on this feedback, you MUST choose a different action to avoid getting stuc
                         num_pairs_to_trim = (len(self.chat.history) // 2) - self.max_history
                         if num_pairs_to_trim > 0:
                             self.chat.history = self.chat.history[2 * num_pairs_to_trim:]
-                            logging.info(f"Trimmed chat history to ~{len(self.chat.history)//2} exchanges.")
+                            logging.debug(f"Trimmed chat history to ~{len(self.chat.history)//2} exchanges.")
                 else:
                     response = self.model.generate_content(content_for_api)
 
@@ -557,9 +557,9 @@ Based on this feedback, you MUST choose a different action to avoid getting stuc
                 total_tokens = 0
                 if hasattr(response, 'usage_metadata') and response.usage_metadata:
                     total_tokens = getattr(response.usage_metadata, 'total_token_count', 0)
-                    logging.info(f"Token Usage: Prompt={getattr(response.usage_metadata, 'prompt_token_count', 'N/A')}, Candidates={getattr(response.usage_metadata, 'candidates_token_count', 'N/A')}, Total={total_tokens}")
+                    logging.debug(f"Token Usage: Prompt={getattr(response.usage_metadata, 'prompt_token_count', 'N/A')}, Candidates={getattr(response.usage_metadata, 'candidates_token_count', 'N/A')}, Total={total_tokens}")
 
-                logging.info(f"AI API call completed. Processing Time: {elapsed_time:.2f} seconds")
+                logging.debug(f"AI API call completed. Processing Time: {elapsed_time:.2f} seconds")
 
                 if not hasattr(response, 'candidates') or not response.candidates:
                     logging.error("AI response contains no candidates.")
@@ -602,7 +602,7 @@ Based on this feedback, you MUST choose a different action to avoid getting stuc
 
                 try:
                     parsed_main_response = json.loads(json_str_to_parse)
-                    logging.info("Successfully parsed AI main JSON response.")                    
+                    logging.debug("Successfully parsed AI main JSON response.")                    
 
                     if not isinstance(parsed_main_response.get("action_to_perform"), dict):
                         logging.error(f"Parsed JSON lacks 'action_to_perform' dictionary. Data: {parsed_main_response}")

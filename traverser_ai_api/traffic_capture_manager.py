@@ -12,7 +12,10 @@ if TYPE_CHECKING:
     from appium_driver import AppiumDriver
 
 # Import your main Config class
-from config import Config # Adjust path as necessary
+try:
+    from traverser_ai_api.config import Config # Adjust path as necessary
+except ImportError:
+    from config import Config # Adjust path as necessary
 
 class TrafficCaptureManager:
     def __init__(self, driver: 'AppiumDriver', app_config: Config):
@@ -45,9 +48,9 @@ class TrafficCaptureManager:
                     if cfg_key == 'DEVICE_PCAP_DIR' and getattr(self.cfg, cfg_key, None) is None:
                         continue
                     raise ValueError(f"TrafficCaptureManager: Required config '{cfg_key}' not found or is None.")
-            logging.info("TrafficCaptureManager initialized and enabled.")
+            logging.debug("TrafficCaptureManager initialized and enabled.")
         else:
-            logging.info("TrafficCaptureManager initialized but traffic capture is DISABLED in config.")
+            logging.debug("TrafficCaptureManager initialized but traffic capture is DISABLED in config.")
 
     async def _run_adb_command_async(self, command_list: List[str], suppress_stderr: bool = False) -> Tuple[str, int]:
         """
@@ -59,7 +62,7 @@ class TrafficCaptureManager:
         try:
             full_command = [adb_executable] + command_list
             
-            logging.info(f"--- Running ADB for Capture (async_wrapper): {' '.join(full_command)}")
+            logging.debug(f"--- Running ADB for Capture (async_wrapper): {' '.join(full_command)}")
             
             # subprocess.run is blocking, use asyncio.to_thread for non-blocking behavior in async context
             # Or, for simpler cases where the ADB command is quick, direct run might be acceptable,
@@ -134,10 +137,10 @@ class TrafficCaptureManager:
         )
         os.makedirs(str(self.cfg.TRAFFIC_CAPTURE_OUTPUT_DIR), exist_ok=True)
 
-        logging.info(f"Attempting to start traffic capture for app: {target_app_package}")
-        logging.info(f"PCAPdroid filename on device (pcap_name extra): {self.pcap_filename_on_device}")
-        logging.info(f"Local save path after pull: {self.local_pcap_file_path}")
-        logging.info("Ensure PCAPdroid is installed, granted remote control & VPN permissions.")
+        logging.debug(f"Attempting to start traffic capture for app: {target_app_package}")
+        logging.debug(f"PCAPdroid filename on device (pcap_name extra): {self.pcap_filename_on_device}")
+        logging.debug(f"Local save path after pull: {self.local_pcap_file_path}")
+        logging.debug("Ensure PCAPdroid is installed, granted remote control & VPN permissions.")
 
         start_command_args = [
             'shell', 'am', 'start',
@@ -154,7 +157,7 @@ class TrafficCaptureManager:
 
         if self.cfg.PCAPDROID_API_KEY:
             start_command_args.extend(['-e', 'api_key', str(self.cfg.PCAPDROID_API_KEY)])
-            logging.info("Using PCAPdroid API key.")
+            logging.debug("Using PCAPdroid API key.")
         else:
             logging.warning("PCAPDROID_API_KEY not configured. User consent on device may be required.")
 
@@ -167,7 +170,7 @@ class TrafficCaptureManager:
             self._is_currently_capturing = False
             return False
 
-        logging.info(f"PCAPdroid 'start' command sent successfully for {target_app_package}. Capture should be initializing.")
+        logging.debug(f"PCAPdroid 'start' command sent successfully for {target_app_package}. Capture should be initializing.")
         self._is_currently_capturing = True
         
         # Wait for PCAPdroid to initialize (configurable)
@@ -191,7 +194,7 @@ class TrafficCaptureManager:
              pcapdroid_pkg = str(self.cfg.PCAPDROID_PACKAGE)
              pcapdroid_activity = f"{pcapdroid_pkg}/.activities.CaptureCtrl"
 
-        logging.info("Attempting to stop PCAPdroid traffic capture...")
+        logging.debug("Attempting to stop PCAPdroid traffic capture...")
         stop_command_args = ['shell', 'am', 'start', '-n', pcapdroid_activity, '-e', 'action', 'stop']
         if self.cfg.PCAPDROID_API_KEY:
             stop_command_args.extend(['-e', 'api_key', str(self.cfg.PCAPDROID_API_KEY)])
@@ -202,7 +205,7 @@ class TrafficCaptureManager:
         if retcode_stop != 0:
             logging.warning(f"PCAPdroid 'stop' command may have failed. ADB retcode: {retcode_stop}. Output: {stdout_stop}. Proceeding with pull attempt.")
         else:
-            logging.info("PCAPdroid 'stop' command sent successfully.")
+            logging.debug("PCAPdroid 'stop' command sent successfully.")
 
         # Wait for file finalization (configurable)
         finalize_wait = float(getattr(self.cfg, 'PCAPDROID_FINALIZE_WAIT', 2.0)) # Default 2s
@@ -219,7 +222,7 @@ class TrafficCaptureManager:
         device_pcap_base_dir = str(self.cfg.DEVICE_PCAP_DIR) # e.g., "/sdcard/Download/PCAPdroid"
         device_pcap_full_path = os.path.join(device_pcap_base_dir, self.pcap_filename_on_device).replace("\\", "/")
         
-        logging.info(f"Attempting to pull PCAP file: '{device_pcap_full_path}' to '{self.local_pcap_file_path}'")
+        logging.debug(f"Attempting to pull PCAP file: '{device_pcap_full_path}' to '{self.local_pcap_file_path}'")
         pull_command_args = ['pull', device_pcap_full_path, self.local_pcap_file_path]
         stdout_pull, retcode_pull = await self._run_adb_command_async(pull_command_args)
 
@@ -230,7 +233,7 @@ class TrafficCaptureManager:
 
         if os.path.exists(self.local_pcap_file_path):
             if os.path.getsize(self.local_pcap_file_path) > 0:
-                logging.info(f"PCAP file pulled successfully: {os.path.abspath(self.local_pcap_file_path)}")
+                logging.debug(f"PCAP file pulled successfully: {os.path.abspath(self.local_pcap_file_path)}")
                 if bool(self.cfg.CLEANUP_DEVICE_PCAP_FILE):
                     await self._cleanup_device_pcap_file_async(device_pcap_full_path)
                 return os.path.abspath(self.local_pcap_file_path)
@@ -246,11 +249,11 @@ class TrafficCaptureManager:
             
     async def _cleanup_device_pcap_file_async(self, device_pcap_full_path: str):
         """Deletes the PCAP file from the device."""
-        logging.info(f"Cleaning up device PCAP file: {device_pcap_full_path}")
+        logging.debug(f"Cleaning up device PCAP file: {device_pcap_full_path}")
         rm_command_args = ['shell', 'rm', device_pcap_full_path]
         stdout_rm, retcode_rm = await self._run_adb_command_async(rm_command_args, suppress_stderr=True)
         if retcode_rm == 0:
-            logging.info(f"Device PCAP file '{device_pcap_full_path}' deleted successfully.")
+            logging.debug(f"Device PCAP file '{device_pcap_full_path}' deleted successfully.")
         else:
             logging.warning(f"Failed to delete device PCAP file '{device_pcap_full_path}'. ADB retcode: {retcode_rm}. Output: {stdout_rm}")
 
@@ -278,5 +281,5 @@ class TrafficCaptureManager:
         # Directly parsing complex status from 'am start' stdout is unreliable.
         # The 'running' status here is based on our manager's internal flag.
         # True status would require monitoring broadcast intents or logcat.
-        logging.info("PCAPdroid 'get_status' command sent. Output (may not be full status): %s", stdout)
+        logging.debug("PCAPdroid 'get_status' command sent. Output (may not be full status): %s", stdout)
         return {"status": "query_sent", "running": self._is_currently_capturing, "raw_output": stdout}

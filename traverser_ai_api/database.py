@@ -5,7 +5,10 @@ import logging
 import threading # Added for thread identification
 from typing import List, Tuple, Optional, Union, Any
 
-from config import Config
+try:
+    from traverser_ai_api.config import Config
+except ImportError:
+    from config import Config
 
 class DatabaseManager:
     SCREENS_TABLE = "screens"
@@ -53,7 +56,7 @@ class DatabaseManager:
             db_dir = os.path.dirname(self.db_path)
             if db_dir and not os.path.exists(db_dir):
                 os.makedirs(db_dir, exist_ok=True)
-                logging.info(f"Created database directory: {db_dir}")
+                logging.debug(f"Created database directory: {db_dir}")
 
             connect_timeout_seconds = float(self.cfg.DB_CONNECT_TIMEOUT)
             busy_timeout_ms = int(self.cfg.DB_BUSY_TIMEOUT)
@@ -71,7 +74,7 @@ class DatabaseManager:
                 self.close() # This will also clear _conn_thread_ident
                 return False
 
-            logging.info(f"Successfully connected to database and verified tables: {self.db_path} (Thread ID: {self._conn_thread_ident})")
+            logging.debug(f"Successfully connected to database and verified tables: {self.db_path} (Thread ID: {self._conn_thread_ident})")
             return True
         except sqlite3.Error as e:
             logging.error(f"SQLite error connecting to database {self.db_path} in thread {current_thread_id}: {e}", exc_info=True)
@@ -96,7 +99,7 @@ class DatabaseManager:
             # Regardless of which thread is calling close, try to close it.
             try:
                 self.conn.close()
-                logging.info(f"Database connection closed: {self.db_path} (Closed by thread: {current_thread_id}, Owned by: {self._conn_thread_ident})")
+                logging.debug(f"Database connection closed: {self.db_path} (Closed by thread: {current_thread_id}, Owned by: {self._conn_thread_ident})")
             except Exception as e: # Catch generic Exception as sqlite3.Error might not cover all scenarios if conn is weird
                 logging.error(f"Error closing database connection in thread {current_thread_id}: {e}", exc_info=True)
             finally:
@@ -239,13 +242,13 @@ class DatabaseManager:
         result = self._execute_sql(sql_find_started, (app_package,), fetch_one=True, commit=False)
         if result and result[0] is not None:
             run_id = result[0]
-            logging.info(f"Continuing existing 'STARTED' run ID: {run_id} for {app_package}")
+            logging.debug(f"Continuing existing 'STARTED' run ID: {run_id} for {app_package}")
             return run_id
 
         sql_insert_run = "INSERT INTO runs (app_package, start_activity) VALUES (?, ?)"
         run_id = self._execute_sql(sql_insert_run, (app_package, start_activity), commit=True)
         if run_id is not None:
-            logging.info(f"Created new run ID: {run_id} for {app_package}")
+            logging.debug(f"Created new run ID: {run_id} for {app_package}")
             return run_id
         else:
             logging.error(f"Failed to create new run entry for {app_package}")
@@ -361,7 +364,7 @@ class DatabaseManager:
             self._execute_sql(f"DELETE FROM sqlite_sequence WHERE name='{self.SCREENS_TABLE}';", commit=True)
             self._execute_sql(f"DELETE FROM sqlite_sequence WHERE name='{self.TRANSITIONS_TABLE}';", commit=True)
             self._execute_sql(f"DELETE FROM sqlite_sequence WHERE name='steps_log';", commit=True)
-            logging.info("Screens, Transitions, and Steps Log tables cleared successfully.")
+            logging.debug("Screens, Transitions, and Steps Log tables cleared successfully.")
             return True
         except Exception as e:
             logging.error(f"Failed to clear tables for fresh run: {e}", exc_info=True)

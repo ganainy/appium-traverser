@@ -99,6 +99,76 @@ class UIComponents:
                     # Hide warning label
                     if 'IMAGE_CONTEXT_WARNING' in config_widgets:
                         config_widgets['IMAGE_CONTEXT_WARNING'].setVisible(False)
+        elif provider.lower() == 'ollama':
+            # Get available Ollama models dynamically
+            try:
+                import ollama
+                available_models = ollama.list()
+                model_items = []
+                vision_models = []
+                
+                for model_info in available_models.get('models', []):
+                    model_name = model_info.get('model', model_info.get('name', ''))
+                    if not model_name:
+                        continue
+                        
+                    # Remove tag if present (e.g., "llama3.2:latest" -> "llama3.2")
+                    base_name = model_name.split(':')[0]
+                    
+                    # Check if this model supports vision by looking at the name
+                    # Common vision-capable model patterns
+                    vision_supported = any(pattern in base_name.lower() for pattern in [
+                        'vision', 'llava', 'bakllava', 'minicpm-v', 'moondream', 'gemma3', 'llama4', 'qwen2.5vl'
+                    ])
+                    
+                    # Add local indicator and vision indicator
+                    display_name = f"{model_name}(local)"
+                    if vision_supported:
+                        display_name += " 👁️"
+                        vision_models.append(display_name)
+                    
+                    model_items.append(display_name)
+                
+                # If no models found, show a message
+                if not model_items:
+                    model_items = ["No Ollama models available - run 'ollama pull <model>'"]
+                
+                model_dropdown.addItems(model_items)
+                
+                # Set default to first vision-capable model if available, otherwise first model
+                if vision_models:
+                    model_dropdown.setCurrentText(vision_models[0])
+                elif model_items and model_items[0] != "No Ollama models available - run 'ollama pull <model>'":
+                    model_dropdown.setCurrentText(model_items[0])
+                
+                logging.debug(f"Loaded {len(model_items)} Ollama models: {model_items}")
+                
+            except ImportError:
+                # Fallback if ollama package not installed
+                model_dropdown.addItems([
+                    'Ollama not installed - run "pip install ollama"'
+                ])
+                logging.warning("Ollama package not installed")
+            except Exception as e:
+                # Fallback if Ollama is not running or other error
+                logging.warning(f"Could not fetch Ollama models: {e}")
+                model_dropdown.addItems([
+                    'Ollama not running - start Ollama service',
+                    'llama3.2(local)',
+                    'llama3.2-vision(local) 👁️'
+                ])
+            
+            # Enable image context for Ollama (vision models will handle it)
+            if 'ENABLE_IMAGE_CONTEXT' in config_widgets:
+                config_widgets['ENABLE_IMAGE_CONTEXT'].setEnabled(True)
+                config_widgets['ENABLE_IMAGE_CONTEXT'].setToolTip("Enable sending screenshots to AI for visual analysis. Vision-capable models will process images, others will use text-only.")
+                
+                # Reset styling when enabling
+                config_widgets['ENABLE_IMAGE_CONTEXT'].setStyleSheet("")
+                
+                # Hide warning label
+                if 'IMAGE_CONTEXT_WARNING' in config_widgets:
+                    config_widgets['IMAGE_CONTEXT_WARNING'].setVisible(False)
         
         # Unblock signals after updating
         model_dropdown.blockSignals(False)
@@ -190,13 +260,13 @@ class UIComponents:
         # Check if the user_config has a UI_MODE (loaded from user_config.json)
         if hasattr(config_handler, 'user_config') and 'UI_MODE' in config_handler.user_config:
             initial_mode = config_handler.user_config['UI_MODE']
-            logging.info(f"Setting initial UI mode from user_config: {initial_mode}")
+            logging.debug(f"Setting initial UI mode from user_config: {initial_mode}")
         # Fallback to config attribute if it exists
         elif hasattr(config_handler.main_controller.config, 'UI_MODE'):
             initial_mode = config_handler.main_controller.config.UI_MODE
-            logging.info(f"Setting initial UI mode from config attribute: {initial_mode}")
+            logging.debug(f"Setting initial UI mode from config attribute: {initial_mode}")
         
-        logging.info(f"Initial UI mode determined as: {initial_mode}")
+        logging.debug(f"Initial UI mode determined as: {initial_mode}")
         
         # Set the dropdown to the initial mode
         mode_index = config_handler.ui_mode_dropdown.findText(initial_mode)
@@ -351,12 +421,16 @@ class UIComponents:
                 config_handler.ui_mode_dropdown.setCurrentIndex(index)
         
         # Save the current mode to user config
-        config_handler.config.update_setting_and_save("UI_MODE", mode)
+        config_handler.config.update_setting_and_save("UI_MODE", mode, config_handler.main_controller._sync_user_config_files)
+        
+        # Synchronize the changes to the API config file
+        # Note: Synchronization is now handled automatically by the callback in update_setting_and_save
+        
         # Ensure the config.UI_MODE attribute is updated
         if hasattr(config_handler.config, 'UI_MODE'):
             config_handler.config.UI_MODE = mode
-        logging.info(f"UI mode switched to and saved: {mode}")
-        logging.info(f"Config file location: {config_handler.config.USER_CONFIG_FILE_PATH}")
+        logging.debug(f"UI mode switched to and saved: {mode}")
+        logging.debug(f"Config file location: {config_handler.config.USER_CONFIG_FILE_PATH}")
         config_handler.main_controller.log_message(f"Switched to {mode} mode", 'blue')
     
     @staticmethod
@@ -503,7 +577,7 @@ class UIComponents:
         
         # AI Provider Selection
         config_widgets['AI_PROVIDER'] = QComboBox()
-        config_widgets['AI_PROVIDER'].addItems(['gemini', 'deepseek'])
+        config_widgets['AI_PROVIDER'].addItems(['gemini', 'deepseek', 'ollama'])
         label_ai_provider = QLabel("AI Provider: ")
         label_ai_provider.setToolTip("The AI model provider to use for analysis and decision making.")
         ai_layout.addRow(label_ai_provider, config_widgets['AI_PROVIDER'])
@@ -702,7 +776,7 @@ class UIComponents:
         # Get current enabled state (default to False if not set)
         is_mobsf_enabled = getattr(config_handler.config, 'ENABLE_MOBSF_ANALYSIS', False)
         config_widgets['ENABLE_MOBSF_ANALYSIS'].setChecked(is_mobsf_enabled)
-        logging.info(f"Setting initial MobSF checkbox state: {is_mobsf_enabled}")
+        logging.debug(f"Setting initial MobSF checkbox state: {is_mobsf_enabled}")
         
         # API URL field
         config_widgets['MOBSF_API_URL'] = QLineEdit()
@@ -722,11 +796,11 @@ class UIComponents:
         main_controller = config_handler.main_controller
         main_controller.test_mobsf_conn_btn = QPushButton("Test MobSF Connection")
         mobsf_layout.addRow(main_controller.test_mobsf_conn_btn)
-        logging.info("Created test_mobsf_conn_btn directly on main_controller")
+        logging.debug("Created test_mobsf_conn_btn directly on main_controller")
         
         main_controller.run_mobsf_analysis_btn = QPushButton("Run MobSF Analysis")
         mobsf_layout.addRow(main_controller.run_mobsf_analysis_btn)
-        logging.info("Created run_mobsf_analysis_btn directly on main_controller")
+        logging.debug("Created run_mobsf_analysis_btn directly on main_controller")
         
         # Set initial button states based on checkbox
         main_controller.test_mobsf_conn_btn.setEnabled(is_mobsf_enabled)

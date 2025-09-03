@@ -21,7 +21,10 @@ import time
 # from your_project.config import Config # Example if Config is in your_project/config.py
 # Assuming it's in a config.py file at the same level or accessible in PYTHONPATH
 # For the AppCrawler example, we used 'from .config import Config' implying it's in the same package.
-from config import Config # This assumes AppiumDriver is in the same package as config.py
+try:
+    from traverser_ai_api.config import Config # This assumes AppiumDriver is in the same package as config.py
+except ImportError:
+    from config import Config # This assumes AppiumDriver is in the same package as config.py
 
 class AppiumDriver:
     """Wrapper for Appium WebDriver interactions, using a centralized Config object."""
@@ -59,7 +62,7 @@ class AppiumDriver:
         if not self.cfg.APPIUM_SERVER_URL: # Specific check for non-empty server URL
             raise ValueError("AppiumDriver: APPIUM_SERVER_URL cannot be empty.")
 
-        logging.info(f"AppiumDriver initialized for server: {self.cfg.APPIUM_SERVER_URL}")
+        logging.debug(f"AppiumDriver initialized for server: {self.cfg.APPIUM_SERVER_URL}")
 
     def connect(self) -> bool:
         """Establishes connection to the Appium server."""
@@ -86,13 +89,13 @@ class AppiumDriver:
         options.load_capabilities(caps)
 
         try:
-            logging.info(f"Connecting to Appium server at {self.cfg.APPIUM_SERVER_URL} with capabilities: {caps}")
+            logging.debug(f"Connecting to Appium server at {self.cfg.APPIUM_SERVER_URL} with capabilities: {caps}")
             self.driver = AppiumRemote(command_executor=str(self.cfg.APPIUM_SERVER_URL), options=options) # Ensure string
 
             implicit_wait_time = int(self.cfg.APPIUM_IMPLICIT_WAIT) # Ensure int
             self.driver.implicitly_wait(implicit_wait_time)
-            logging.info(f"Set Appium implicit wait to {implicit_wait_time} seconds.")
-            logging.info("Appium session established successfully.")
+            logging.debug(f"Set Appium implicit wait to {implicit_wait_time} seconds.")
+            logging.debug("Appium session established successfully.")
             return True
 
         except WebDriverException as e:
@@ -108,7 +111,7 @@ class AppiumDriver:
         """Quits the Appium driver session."""
         if self.driver:
             try:
-                logging.info("Attempting to quit Appium session...")
+                logging.debug("Attempting to quit Appium session...")
                 self.driver.quit()
             except WebDriverException as e: # Catch more specific driver errors
                 logging.error(f"WebDriverException during Appium session quit: {e}")
@@ -116,9 +119,9 @@ class AppiumDriver:
                 logging.error(f"Unexpected error closing Appium session: {e}", exc_info=True)
             finally:
                 self.driver = None
-                logging.info("Appium session resources released (driver set to None).")
+                logging.debug("Appium session resources released (driver set to None).")
         else:
-            logging.info("No active Appium session to disconnect.")
+            logging.debug("No active Appium session to disconnect.")
 
 
     def get_page_source(self) -> Optional[str]:
@@ -205,7 +208,7 @@ class AppiumDriver:
 
         try:
             # Step 1: Terminate app if running
-            logging.info(f"Attempting to terminate {app_package} if running...")
+            logging.debug(f"Attempting to terminate {app_package} if running...")
             try:
                 self.driver.terminate_app(app_package)
                 time.sleep(2)  # Brief wait after termination
@@ -213,7 +216,7 @@ class AppiumDriver:
                 logging.warning("App termination failed (may not be running)")
 
             # Step 2: Clear app data via ADB
-            logging.info(f"Clearing app data for {app_package}...")
+            logging.debug(f"Clearing app data for {app_package}...")
             try:
                 self.driver.execute_script(
                     "mobile: shell",
@@ -227,12 +230,12 @@ class AppiumDriver:
                 logging.warning("Failed to clear app data")
 
             # Step 3: Use Appium's activate_app
-            logging.info(f"Activating app: {app_package}")
+            logging.debug(f"Activating app: {app_package}")
             self.driver.activate_app(app_package)
 
             # Step 4: Wait and verify
             launch_wait = float(self.cfg.APP_LAUNCH_WAIT_TIME)
-            logging.info(f"Waiting {launch_wait}s for app to stabilize...")
+            logging.debug(f"Waiting {launch_wait}s for app to stabilize...")
             time.sleep(launch_wait)
 
             # Final verification
@@ -240,10 +243,10 @@ class AppiumDriver:
             current_act_after_launch = self.get_current_activity()
 
             if current_pkg_after_launch == app_package:
-                logging.info(f"App {app_package} is now in foreground (Activity: {current_act_after_launch})")
+                logging.debug(f"App {app_package} is now in foreground (Activity: {current_act_after_launch})")
                 return True
             elif self.cfg.ALLOWED_EXTERNAL_PACKAGES and current_pkg_after_launch in self.cfg.ALLOWED_EXTERNAL_PACKAGES:
-                logging.info(f"Allowed external package '{current_pkg_after_launch}' present after launch attempt")
+                logging.debug(f"Allowed external package '{current_pkg_after_launch}' present after launch attempt")
                 return True
             else:
                 logging.warning(f"App launch failed - Current foreground app is '{current_pkg_after_launch}' "
@@ -312,7 +315,7 @@ class AppiumDriver:
             from selenium.webdriver.common.actions.pointer_input import PointerInput
 
             actual_duration = duration if duration is not None else 100  # Default tap duration in milliseconds
-            logging.info(f"Attempting tap at coordinates: ({x}, {y}), duration: {actual_duration}ms")
+            logging.debug(f"Attempting tap at coordinates: ({x}, {y}), duration: {actual_duration}ms")
 
             # Create touch pointer action
             actions = ActionBuilder(self.driver, mouse=PointerInput(interaction.POINTER_TOUCH, "touch"))
@@ -328,7 +331,7 @@ class AppiumDriver:
 
             # Execute the action sequence
             actions.perform()
-            logging.info(f"Successfully tapped at coordinates: ({x}, {y})")
+            logging.debug(f"Successfully tapped at coordinates: ({x}, {y})")
 
             # Add a small pause after tap to ensure it's registered
             time.sleep(0.1)
@@ -352,7 +355,7 @@ class AppiumDriver:
             size = element.size
             center_x = location['x'] + size['width'] // 2
             center_y = location['y'] + size['height'] // 2
-            logging.info(f"Tapping center of element (ID: {element.id}) at coordinates ({center_x}, {center_y})")
+            logging.debug(f"Tapping center of element (ID: {element.id}) at coordinates ({center_x}, {center_y})")
             return self.tap_at_coordinates(center_x, center_y)
         except StaleElementReferenceException:
             logging.warning(f"Element became stale before center could be calculated for tap.")
@@ -405,7 +408,7 @@ class AppiumDriver:
                 active_element = self.get_active_element()
                 if not active_element or active_element.id != element.id:
                     logging.warning(f"Focus check failed. Element (ID: {element_id_str}) is not the active element after click. Active element ID: {getattr(active_element, 'id', 'None')}.")
-                    logging.info(f"Attempting fallback tap on element (ID: {element_id_str}) to enforce focus.")
+                    logging.debug(f"Attempting fallback tap on element (ID: {element_id_str}) to enforce focus.")
 
                     if self.tap_element_center(element):
                         time.sleep(0.5)  # Wait again after tap
@@ -414,12 +417,12 @@ class AppiumDriver:
                             logging.error(f"Focus check failed again after tap fallback. Cannot safely input text. Active element ID: {getattr(active_element, 'id', 'None')}.")
                             return False
                         else:
-                            logging.info("Focus successfully established after tap fallback.")
+                            logging.debug("Focus successfully established after tap fallback.")
                     else:
                         logging.error("Tap fallback also failed. Cannot safely input text.")
                         return False
                 else:
-                    logging.info(f"Focus confirmed on correct element (ID: {element_id_str}).")
+                    logging.debug(f"Focus confirmed on correct element (ID: {element_id_str}).")
                 # --- End of New Logic ---
 
             if clear_first:
@@ -441,7 +444,7 @@ class AppiumDriver:
 
             logging.debug(f"Sending keys '{text}' to element (ID: {element_id_str})")
             element.send_keys(text)
-            logging.info(f"Successfully sent keys '{text}' to element (ID: {element_id_str})")
+            logging.debug(f"Successfully sent keys '{text}' to element (ID: {element_id_str})")
 
             try:
                 if self.is_keyboard_shown():
@@ -469,7 +472,7 @@ class AppiumDriver:
             logging.error("Driver not available, cannot press back button.")
             return False
         try:
-            logging.info("Pressing Android back button (keycode 4).")
+            logging.debug("Pressing Android back button (keycode 4).")
             self.driver.press_keycode(4)
             return True
         except WebDriverException as e:
@@ -544,7 +547,7 @@ class AppiumDriver:
                 logging.warning(f"Scroll calculation resulted in zero distance for direction '{direction}'. Skipping swipe.")
                 return False
 
-            logging.info(f"Scrolling {direction} from ({start_x},{start_y}) to ({end_x},{end_y})")
+            logging.debug(f"Scrolling {direction} from ({start_x},{start_y}) to ({end_x},{end_y})")
             self.driver.swipe(start_x, start_y, end_x, end_y, duration=max(200, int(800 * distance_ratio)))
             return True
         except StaleElementReferenceException:
@@ -632,7 +635,7 @@ class AppiumDriver:
             return False
         try:
             # Using 'args' parameter for mobile: shell is generally safer for special characters
-            logging.info(f"Executing ADB input text: '{text}'")
+            logging.debug(f"Executing ADB input text: '{text}'")
             self.driver.execute_script("mobile: shell", {
                 'command': 'input',
                 'args': ['text', text]
@@ -688,7 +691,7 @@ class AppiumDriver:
 
         success = False
         action_type_lower = action_type.lower()
-        logging.info(f"Attempting to perform action: Type='{action_type_lower}', Target='{str(target)[:50]}', Input='{input_text}'")
+        logging.debug(f"Attempting to perform action: Type='{action_type_lower}', Target='{str(target)[:50]}', Input='{input_text}'")
 
         try:
             if action_type_lower == "click":
@@ -723,7 +726,7 @@ class AppiumDriver:
             success = False
 
         if success:
-            logging.info(f"Action '{action_type_lower}' performed successfully on target '{str(target)[:50]}'.")
+            logging.debug(f"Action '{action_type_lower}' performed successfully on target '{str(target)[:50]}'.")
         else:
             logging.warning(f"Action '{action_type_lower}' failed or was not supported with target '{str(target)[:50]}'.")
 
@@ -744,7 +747,7 @@ class AppiumDriver:
                 return False
 
             if self.driver.terminate_app(package_name):
-                logging.info(f"Successfully terminated app: {package_name}")
+                logging.debug(f"Successfully terminated app: {package_name}")
                 return True
             else:
                 logging.warning(f"App termination returned False for: {package_name}")

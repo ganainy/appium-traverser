@@ -3,11 +3,20 @@ import os
 import time
 from typing import Optional, Dict, List, Tuple, Set, Any, TYPE_CHECKING
 
-import utils
-from database import DatabaseManager
+try:
+    from traverser_ai_api import utils
+except ImportError:
+    import utils
+try:
+    from traverser_ai_api.database import DatabaseManager
+except ImportError:
+    from database import DatabaseManager
 
 # Import your main Config class
-from config import Config # Assuming config.py (with Config class) is in the same package
+try:
+    from traverser_ai_api.config import Config # Assuming Config class is in config.py in the same package
+except ImportError:
+    from config import Config # Assuming Config class is in config.py in the same package
 
 if TYPE_CHECKING:
     from appium_driver import AppiumDriver
@@ -74,7 +83,7 @@ class ScreenStateManager:
         self.current_run_visit_counts: Dict[str, int] = {}
         self.current_run_action_history: Dict[str, List[str]] = {}
         self._next_screen_db_id_counter: int = 1
-        logging.info("ScreenStateManager initialized.")
+        logging.debug("ScreenStateManager initialized.")
 
     def initialize_for_run(self, run_id: int, app_package: str, start_activity: str, is_continuation: bool):
         self.current_run_id = run_id
@@ -87,9 +96,9 @@ class ScreenStateManager:
         self._load_all_known_screens_from_db()
         if is_continuation:
             self._populate_run_specific_history(run_id) # This will set current_run_latest_step_number
-            logging.info(f"ScreenStateManager initialized for CONTINUED Run ID: {run_id}. Known screens: {len(self.known_screens_cache)}. Latest step from history: {self.current_run_latest_step_number}. History for this run populated.")
+            logging.debug(f"ScreenStateManager initialized for CONTINUED Run ID: {run_id}. Known screens: {len(self.known_screens_cache)}. Latest step from history: {self.current_run_latest_step_number}. History for this run populated.")
         else:
-            logging.info(f"ScreenStateManager initialized for NEW Run ID: {run_id}. Known screens: {len(self.known_screens_cache)}. Visit counts/history reset for this run. Latest step set to 0.")
+            logging.debug(f"ScreenStateManager initialized for NEW Run ID: {run_id}. Known screens: {len(self.known_screens_cache)}. Visit counts/history reset for this run. Latest step set to 0.")
 
     def _load_all_known_screens_from_db(self):
         self.known_screens_cache.clear()
@@ -222,7 +231,7 @@ class ScreenStateManager:
                     if utils.are_visual_hashes_valid(candidate_screen.visual_hash, existing_screen.visual_hash):
                         dist = utils.visual_hash_distance(candidate_screen.visual_hash, existing_screen.visual_hash)
                         if dist <= similarity_threshold:
-                            logging.info(f"Screen visually similar (dist={dist}<={similarity_threshold}) to existing Screen ID {existing_screen.id}. Using existing state.")
+                            logging.debug(f"Screen visually similar (dist={dist}<={similarity_threshold}) to existing Screen ID {existing_screen.id}. Using existing state.")
                             found_similar_screen = existing_screen
                             break
 
@@ -238,7 +247,7 @@ class ScreenStateManager:
                 try:
                     if candidate_screen.screenshot_bytes:
                         with open(candidate_screen.screenshot_path, "wb") as f: f.write(candidate_screen.screenshot_bytes)
-                        logging.info(f"Saved new screen screenshot: {candidate_screen.screenshot_path}")
+                        logging.debug(f"Saved new screen screenshot: {candidate_screen.screenshot_path}")
                     else: raise IOError("Screenshot bytes missing for new screen.")
                 except Exception as e:
                     logging.error(f"Failed to save screenshot {candidate_screen.screenshot_path}: {e}", exc_info=True)
@@ -258,7 +267,7 @@ class ScreenStateManager:
 
                 self.known_screens_cache[candidate_screen.composite_hash] = candidate_screen
                 self._next_screen_db_id_counter = max(self._next_screen_db_id_counter, candidate_screen.id + 1)
-                logging.info(f"Recorded new screen to DB & cache: ID {candidate_screen.id} (Hash: {candidate_screen.composite_hash})")
+                logging.debug(f"Recorded new screen to DB & cache: ID {candidate_screen.id} (Hash: {candidate_screen.composite_hash})")
                 final_screen_to_use = candidate_screen
 
         if not final_screen_to_use:

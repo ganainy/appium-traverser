@@ -54,9 +54,80 @@ python traverser_ai_api/ui_controller.py  # Opens graphical interface
 - **Traffic Capture** - Optional network monitoring
 - **Automation Ready** - Perfect for CI/CD and scripting workflows
 
-## Agent-Based Architecture
+## AI Model Support
 
-This project implements an agent-based architecture for the Android app crawler using Google Generative AI (Gemini). The agent follows the ReAct (Reason-Act-Observe) pattern for intelligent app exploration.
+This project supports multiple AI providers for intelligent app exploration:
+
+### Supported Providers
+
+1. **Google Gemini** (Default)
+   - Cloud-based multimodal model
+   - Excellent image understanding
+   - Requires API key
+
+2. **DeepSeek**
+   - Cloud-based model with vision capabilities
+   - Cost-effective alternative
+   - Requires API key
+
+3. **Ollama** (Local)
+   - Run models locally on your machine
+   - Supports both text-only and vision-capable models
+   - No API costs, privacy-focused
+
+### Using Ollama with Vision Support
+
+To use Ollama with vision-capable models:
+
+1. **Install Ollama:**
+   ```bash
+   # Download from https://ollama.ai/download
+   # Or on Linux/Mac:
+   curl -fsSL https://ollama.ai/install.sh | sh
+   ```
+
+2. **Pull vision-capable models:**
+   ```bash
+   # Llama 3.2 Vision (recommended)
+   ollama pull llama3.2-vision
+   
+   # Other vision models
+   ollama pull llava
+   ollama pull bakllava
+   ```
+
+3. **Configure the crawler:**
+   ```json
+   {
+     "AI_PROVIDER": "ollama",
+     "DEFAULT_MODEL_TYPE": "llama3.2-vision",
+     "OLLAMA_BASE_URL": "http://localhost:11434"
+   }
+   ```
+
+4. **Available Ollama Models:**
+   - `llama3.2` - Text-only model
+   - `llama3.2-vision` - Vision-capable model ⭐
+   - `llama3.2-fast` - Fast text-only model
+   - `llama3.2-vision-fast` - Fast vision model ⭐
+   - `mistral` - Text-only model
+   - `llava` - Vision model ⭐
+   - `bakllava` - Vision model ⭐
+
+**Note:** Models marked with ⭐ support image input for better UI analysis.
+
+### Switching Between Providers
+
+You can easily switch between providers by updating your `user_config.json`:
+
+```json
+{
+  "AI_PROVIDER": "ollama",  // or "gemini" or "deepseek"
+  "DEFAULT_MODEL_TYPE": "llama3.2-vision"
+}
+```
+
+For cloud providers, make sure to set the appropriate API keys in your environment variables or `.env` file.
 
 ### How It Works
 

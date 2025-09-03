@@ -36,9 +36,8 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from traverser_ai_api.agent_assistant import AgentAssistant
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, 
-                   format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-
+logging.basicConfig(level=logging.DEBUG, 
+                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 class MockConfig:
     """Mock configuration for testing the AgentAssistant."""
     def __init__(self, api_key=None):
@@ -95,7 +94,7 @@ class TestAgentAssistant(unittest.TestCase):
         try:
             agent = AgentAssistant(self.config)
             self.assertIsNotNone(agent)
-            logging.info("AgentAssistant initialized successfully")
+            logging.debug("AgentAssistant initialized successfully")
         except Exception as e:
             if not self.api_key:
                 self.skipTest("Skipping test_initialization as no API key is available")
@@ -110,7 +109,7 @@ class TestAgentAssistant(unittest.TestCase):
         with patch('os.environ', {}) as mock_environ:
             agent = AgentAssistant(self.config)
             self.assertEqual(mock_environ.get('GOOGLE_API_KEY'), self.api_key)
-            logging.info("API key correctly set in environment variables")
+            logging.debug("API key correctly set in environment variables")
     
     def test_prepare_image_part(self):
         """Test image preparation functionality."""
@@ -122,7 +121,7 @@ class TestAgentAssistant(unittest.TestCase):
         self.assertIsNotNone(processed_image)
         self.assertIsInstance(processed_image, Image.Image)
         if processed_image:
-            logging.info(f"Image processed successfully, size: {processed_image.size}")
+            logging.debug(f"Image processed successfully, size: {processed_image.size}")
         
         # Test with an oversized image
         large_image_bytes = self.create_test_image(width=1200, height=2000)
@@ -130,7 +129,7 @@ class TestAgentAssistant(unittest.TestCase):
         self.assertIsNotNone(processed_large_image)
         if processed_large_image:
             self.assertLessEqual(processed_large_image.width, 720)  # Check resizing
-            logging.info(f"Large image correctly resized to: {processed_large_image.size}")
+            logging.debug(f"Large image correctly resized to: {processed_large_image.size}")
     
     @patch('google.generativeai.generative_models.GenerativeModel')
     def test_model_initialization(self, mock_generative_model):
@@ -146,8 +145,7 @@ class TestAgentAssistant(unittest.TestCase):
         mock_generative_model.assert_called_once()
         args, kwargs = mock_generative_model.call_args
         self.assertEqual(kwargs['model_name'], 'gemini-2.5-flash-preview-05-20')
-        logging.info("Model initialized with correct parameters")
-    
+        logging.debug("Model initialized with correct parameters")
     @patch('google.generativeai.generative_models.GenerativeModel')
     def test_get_next_action(self, mock_generative_model):
         """Test get_next_action with a mocked model response."""
@@ -195,7 +193,7 @@ class TestAgentAssistant(unittest.TestCase):
             self.assertIsNotNone(action_data)
             self.assertIn('action_to_perform', action_data)
             self.assertEqual(action_data['action_to_perform']['action'], 'click')
-            logging.info(f"Successfully parsed action: {action_data['action_to_perform']}")
+            logging.debug(f"Successfully parsed action: {action_data['action_to_perform']}")
     
     @unittest.skipIf(not os.environ.get('GOOGLE_API_KEY'), "Skipping full integration test without API key")
     def test_full_integration(self):
@@ -249,8 +247,8 @@ class TestAgentAssistant(unittest.TestCase):
                 self.assertIsNotNone(action_data)
                 self.assertIn('action_to_perform', action_data)
                 self.assertIn('action', action_data['action_to_perform'])
-                logging.info(f"Full integration test successful. Action: {action_data['action_to_perform']['action']}")
-                logging.info(f"Processing time: {elapsed_time:.2f}s, estimated tokens: {token_count}")
+                logging.debug(f"Full integration test successful. Action: {action_data['action_to_perform']['action']}")
+                logging.debug(f"Processing time: {elapsed_time:.2f}s, estimated tokens: {token_count}")
             
         except Exception as e:
             self.fail(f"Full integration test failed: {e}")

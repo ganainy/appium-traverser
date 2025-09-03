@@ -11,18 +11,51 @@ from typing import Optional, Tuple, List, Dict, Any
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 
-from config import Config
-import utils
+try:
+    from traverser_ai_api.config import Config
+except ImportError:
+    from config import Config
+try:
+    from traverser_ai_api import utils
+except ImportError:
+    import utils
 
-from agent_assistant import AgentAssistant
-from appium_driver import AppiumDriver
-from screen_state_manager import ScreenStateManager, ScreenRepresentation
-from database import DatabaseManager
-from action_mapper import ActionMapper
-from traffic_capture_manager import TrafficCaptureManager
-from action_executor import ActionExecutor
-from app_context_manager import AppContextManager
-from screenshot_annotator import ScreenshotAnnotator
+try:
+    from traverser_ai_api.agent_assistant import AgentAssistant
+except ImportError:
+    from agent_assistant import AgentAssistant
+try:
+    from traverser_ai_api.appium_driver import AppiumDriver
+except ImportError:
+    from appium_driver import AppiumDriver
+try:
+    from traverser_ai_api.screen_state_manager import ScreenStateManager, ScreenRepresentation
+except ImportError:
+    from screen_state_manager import ScreenStateManager, ScreenRepresentation
+try:
+    from traverser_ai_api.database import DatabaseManager
+except ImportError:
+    from database import DatabaseManager
+try:
+    from traverser_ai_api.action_mapper import ActionMapper
+except ImportError:
+    from action_mapper import ActionMapper
+try:
+    from traverser_ai_api.traffic_capture_manager import TrafficCaptureManager
+except ImportError:
+    from traffic_capture_manager import TrafficCaptureManager
+try:
+    from traverser_ai_api.action_executor import ActionExecutor
+except ImportError:
+    from action_executor import ActionExecutor
+try:
+    from traverser_ai_api.app_context_manager import AppContextManager
+except ImportError:
+    from app_context_manager import AppContextManager
+try:
+    from traverser_ai_api.screenshot_annotator import ScreenshotAnnotator
+except ImportError:
+    from screenshot_annotator import ScreenshotAnnotator
 
 from selenium.webdriver.remote.webelement import WebElement
 from appium.webdriver.common.appiumby import AppiumBy
@@ -39,7 +72,7 @@ UI_END_PREFIX = "UI_END:"
 class AppCrawler:
     def __init__(self, app_config: Config):
         self.cfg = app_config
-        logging.info(f"AppCrawler initializing with App Package: {self.cfg.APP_PACKAGE}")
+        logging.debug(f"AppCrawler initializing with App Package: {self.cfg.APP_PACKAGE}")
 
         required_attrs_for_crawler = [
             'APPIUM_SERVER_URL', 'NEW_COMMAND_TIMEOUT', 'APPIUM_IMPLICIT_WAIT',
@@ -71,7 +104,11 @@ class AppCrawler:
             ('id', AppiumBy.ID, "ID"),
             ('acc_id', AppiumBy.ACCESSIBILITY_ID, "Accessibility ID"),
             ('xpath_exact', AppiumBy.XPATH, "XPath Exact Match"),
-            ('xpath_contains', AppiumBy.XPATH, "XPath Contains Match")
+            ('xpath_contains', AppiumBy.XPATH, "XPath Contains Match"),
+            ('id_partial', AppiumBy.XPATH, "ID Partial Match"),
+            ('text_case_insensitive', AppiumBy.XPATH, "Text Case Insensitive"),
+            ('class_contains', AppiumBy.XPATH, "Class Contains Match"),
+            ('xpath_flexible', AppiumBy.XPATH, "XPath Flexible Match")
         ]
         self.action_mapper = ActionMapper(driver=self.driver, element_finding_strategies=self.element_finding_strategies, app_config=self.cfg)
         self.traffic_capture_manager = TrafficCaptureManager(driver=self.driver, app_config=self.cfg)
@@ -122,21 +159,21 @@ class AppCrawler:
         ]
         self._ai_csv_header_written = False
 
-        logging.info("AppCrawler initialized successfully.")
+        logging.debug("AppCrawler initialized successfully.")
 
     def _should_terminate(self) -> bool:
         if self.is_shutting_down:
-            logging.info("Termination check: Shutdown already initiated.")
+            logging.debug("Termination check: Shutdown already initiated.")
             return True
         if self.cfg.SHUTDOWN_FLAG_PATH and os.path.exists(self.cfg.SHUTDOWN_FLAG_PATH):
-            logging.info(f"Termination check: External shutdown flag found: {self.cfg.SHUTDOWN_FLAG_PATH}.")
+            logging.debug(f"Termination check: External shutdown flag found: {self.cfg.SHUTDOWN_FLAG_PATH}.")
             self.is_shutting_down = True
             print(f"{UI_END_PREFIX}SHUTDOWN_FLAG_DETECTED")
             return True
 
         if self.cfg.CRAWL_MODE == 'steps':
             if self.cfg.MAX_CRAWL_STEPS is not None and self.crawl_steps_taken >= self.cfg.MAX_CRAWL_STEPS:
-                logging.info(f"Termination check: Reached max steps ({self.cfg.MAX_CRAWL_STEPS}) in 'steps' mode.")
+                logging.debug(f"Termination check: Reached max steps ({self.cfg.MAX_CRAWL_STEPS}) in 'steps' mode.")
                 if not self.is_shutting_down: print(f"{UI_END_PREFIX}MAX_STEPS_REACHED")
                 self.is_shutting_down = True
                 return True
@@ -144,20 +181,20 @@ class AppCrawler:
             # Adjust elapsed time calculation to account for pause time
             effective_elapsed_time = (time.time() - self.crawl_start_time) - self.total_paused_time
             if self.cfg.MAX_CRAWL_DURATION_SECONDS is not None and effective_elapsed_time >= self.cfg.MAX_CRAWL_DURATION_SECONDS:
-                logging.info(f"Termination check: Reached max duration ({self.cfg.MAX_CRAWL_DURATION_SECONDS}s) in 'time' mode. Effective elapsed time: {effective_elapsed_time:.2f}s")
+                logging.debug(f"Termination check: Reached max duration ({self.cfg.MAX_CRAWL_DURATION_SECONDS}s) in 'time' mode. Effective elapsed time: {effective_elapsed_time:.2f}s")
                 if not self.is_shutting_down: print(f"{UI_END_PREFIX}MAX_DURATION_REACHED")
                 self.is_shutting_down = True
                 return True
         else:
             logging.warning(f"Unknown CRAWL_MODE: '{self.cfg.CRAWL_MODE}'. Checking both step and time limits as a fallback.")
             if self.cfg.MAX_CRAWL_STEPS is not None and self.crawl_steps_taken >= self.cfg.MAX_CRAWL_STEPS:
-                logging.info(f"Termination check (fallback): Reached max steps ({self.cfg.MAX_CRAWL_STEPS}).")
+                logging.debug(f"Termination check (fallback): Reached max steps ({self.cfg.MAX_CRAWL_STEPS}).")
                 if not self.is_shutting_down: print(f"{UI_END_PREFIX}MAX_STEPS_REACHED")
                 self.is_shutting_down = True
                 return True
             effective_elapsed_time = (time.time() - self.crawl_start_time) - self.total_paused_time
             if self.cfg.MAX_CRAWL_DURATION_SECONDS is not None and effective_elapsed_time >= self.cfg.MAX_CRAWL_DURATION_SECONDS:
-                logging.info(f"Termination check (fallback): Reached max duration ({self.cfg.MAX_CRAWL_DURATION_SECONDS}s).")
+                logging.debug(f"Termination check (fallback): Reached max duration ({self.cfg.MAX_CRAWL_DURATION_SECONDS}s).")
                 if not self.is_shutting_down: print(f"{UI_END_PREFIX}MAX_DURATION_REACHED")
                 self.is_shutting_down = True
                 return True
@@ -207,12 +244,12 @@ class AppCrawler:
             logging.debug("Cleanup already called.")
             return
 
-        logging.info("Performing full cleanup for AppCrawler...")
+        logging.debug("Performing full cleanup for AppCrawler...")
         self.is_shutting_down = True
         self._cleanup_called = True
 
         if self.cfg.ENABLE_TRAFFIC_CAPTURE and self.traffic_capture_manager and self.traffic_capture_manager.is_capturing():
-            logging.info("Ensuring traffic capture stopped and pulled...")
+            logging.debug("Ensuring traffic capture stopped and pulled...")
             try:
                 loop_exists = False
                 try:
@@ -232,7 +269,7 @@ class AppCrawler:
 
         if self.driver: # Check if driver object exists
             try:
-                logging.info("Quitting Appium driver session...")
+                logging.debug("Quitting Appium driver session...")
                 self.driver.disconnect()
             except Exception as e_driver:
                 logging.error(f"Error during Appium driver quit: {e_driver}", exc_info=True)
@@ -240,7 +277,7 @@ class AppCrawler:
                 self.driver = None
         if self.db_manager:
             try:
-                logging.info("Closing database connection...")
+                logging.debug("Closing database connection...")
                 self.db_manager.close()
             except Exception as e_db:
                 logging.error(f"Error closing database: {e_db}", exc_info=True)
@@ -249,7 +286,7 @@ class AppCrawler:
         if self.cfg.SHUTDOWN_FLAG_PATH and os.path.exists(self.cfg.SHUTDOWN_FLAG_PATH):
             try:
                 os.remove(self.cfg.SHUTDOWN_FLAG_PATH)
-                logging.info(f"Cleaned up shutdown flag: {self.cfg.SHUTDOWN_FLAG_PATH}")
+                logging.debug(f"Cleaned up shutdown flag: {self.cfg.SHUTDOWN_FLAG_PATH}")
             except OSError as e_flag:
                 logging.warning(f"Could not remove shutdown flag: {e_flag}")
 
@@ -259,7 +296,7 @@ class AppCrawler:
             elif self.consecutive_map_failures >= self.cfg.MAX_CONSECUTIVE_MAP_FAILURES: current_status_for_db = "TERMINATED_MAX_MAP_FAIL_CLEANUP"
             self.db_manager.update_run_status(self.run_id, current_status_for_db, time.strftime("%Y-%m-%d %H:%M:%S"))
 
-        logging.info("AppCrawler full cleanup process finished.")
+        logging.debug("AppCrawler full cleanup process finished.")
 
 
     async def _initialize_run(self) -> bool:
@@ -278,7 +315,7 @@ class AppCrawler:
             return False
             
         self.db_manager.update_run_status(self.run_id, "INITIALIZING")
-        logging.info(f"Starting/Continuing crawl run ID: {self.run_id} for app: {self.cfg.APP_PACKAGE}")
+        logging.debug(f"Starting/Continuing crawl run ID: {self.run_id} for app: {self.cfg.APP_PACKAGE}")
         print(f"{UI_STATUS_PREFIX}INITIALIZING_CRAWL_RUN_{self.run_id}")
 
         is_continuation_run = bool(self.cfg.CONTINUE_EXISTING_RUN and self.db_manager.get_step_count_for_run(self.run_id) > 0)
@@ -287,7 +324,7 @@ class AppCrawler:
             start_activity=str(self.cfg.APP_ACTIVITY), is_continuation=is_continuation_run
         )
         self.crawl_steps_taken = self.screen_state_manager.current_run_latest_step_number
-        logging.info(f"Crawl start step count set to {self.crawl_steps_taken}.")
+        logging.debug(f"Crawl start step count set to {self.crawl_steps_taken}.")
 
         self.crawl_start_time = time.time()
         self.is_shutting_down = False
@@ -304,7 +341,7 @@ class AppCrawler:
             if not await self.traffic_capture_manager.start_capture_async(filename_template=pcap_filename_template):
                 logging.warning("Failed to start traffic capture.")
             else:
-                logging.info("Traffic capture started.")
+                logging.debug("Traffic capture started.")
         
         self.db_manager.update_run_status(self.run_id, "RUNNING")
         return True
@@ -313,7 +350,7 @@ class AppCrawler:
         """Checks for the pause flag and holds execution while it exists."""
         if self.cfg.PAUSE_FLAG_PATH and os.path.exists(self.cfg.PAUSE_FLAG_PATH):
             pause_start_time = time.time()
-            logging.info("Pause flag detected. Pausing execution...")
+            logging.debug("Pause flag detected. Pausing execution...")
             print(f"{UI_STATUS_PREFIX}PAUSED")
             while os.path.exists(self.cfg.PAUSE_FLAG_PATH):
                 if self.driver:
@@ -323,7 +360,7 @@ class AppCrawler:
             
             pause_duration = time.time() - pause_start_time
             self.total_paused_time += pause_duration
-            logging.info(f"Resume signal received. Paused for {pause_duration:.2f}s. Total paused time: {self.total_paused_time:.2f}s. Resuming execution...")
+            logging.debug(f"Resume signal received. Paused for {pause_duration:.2f}s. Total paused time: {self.total_paused_time:.2f}s. Resuming execution...")
             print(f"{UI_STATUS_PREFIX}RESUMING")
 
     async def _get_next_action(self, definitive_screen_repr: ScreenRepresentation, visit_info: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], Optional[float], Optional[int]]:
@@ -341,7 +378,7 @@ class AppCrawler:
                 ai_action_suggestion = action_to_try.copy()
                 ai_action_suggestion['reasoning'] = f"FALLBACK ACTION: Triggered after {self.consecutive_no_op_failures} consecutive failures."
                 self.fallback_action_index += 1
-                logging.info(f"Selected fallback action: {ai_action_suggestion}")
+                logging.debug(f"Selected fallback action: {ai_action_suggestion}")
             else:
                 logging.error("Fallback sequence triggered, but FALLBACK_ACTIONS_SEQUENCE is empty in config.")
         
@@ -500,7 +537,7 @@ class AppCrawler:
         """Executes a single step of the crawl, from state capture to action execution."""
         self.crawl_steps_taken += 1
         current_step_for_log = self.crawl_steps_taken
-        logging.info(f"--- Crawl Step {current_step_for_log} (Run ID: {self.run_id}) ---")
+        logging.debug(f"--- Crawl Step {current_step_for_log} (Run ID: {self.run_id}) ---")
         print(f"{UI_STEP_PREFIX}{current_step_for_log}\n{UI_STATUS_PREFIX}Step {current_step_for_log}: Checking app context...")
 
         if not self.run_id:
@@ -525,7 +562,7 @@ class AppCrawler:
         screen, visit_info = self.screen_state_manager.process_and_record_state(screen, self.run_id, current_step_for_log)
         if screen.screenshot_path: print(f"{UI_SCREENSHOT_PREFIX}{screen.screenshot_path}")
         self.previous_composite_hash = screen.composite_hash
-        logging.info(f"Step {current_step_for_log}: State Processed. Screen ID: {screen.id}, Hash: '{screen.composite_hash}'")
+        logging.debug(f"Step {current_step_for_log}: State Processed. Screen ID: {screen.id}, Hash: '{screen.composite_hash}'")
         
         print(f"{UI_STATUS_PREFIX}Step {current_step_for_log}: Deciding next action...")
         ai_suggestion, ai_time, tokens = await self._get_next_action(screen, visit_info)
@@ -539,7 +576,7 @@ class AppCrawler:
         self.consecutive_ai_failures = 0
         
         action_str = utils.generate_action_description(ai_suggestion.get('action', 'unknown'), None, ai_suggestion.get('input_text'), ai_suggestion.get('target_identifier'))
-        logging.info(f"Step {current_step_for_log}: AI suggested: {action_str}. Reasoning: {ai_suggestion.get('reasoning')}")
+        logging.debug(f"Step {current_step_for_log}: AI suggested: {action_str}. Reasoning: {ai_suggestion.get('reasoning')}")
         print(f"{UI_ACTION_PREFIX}{action_str}\n{UI_STATUS_PREFIX}Step {current_step_for_log}: Mapping and executing...")
 
         action_details = self.action_mapper.map_ai_action_to_appium(ai_suggestion, screen.xml_content)
@@ -566,18 +603,18 @@ class AppCrawler:
 
     async def _finalize_run(self, status: str):
         """Wraps up the crawl run by stopping services and updating status."""
-        logging.info(f"Finalizing run. Status: {status}")
+        logging.debug(f"Finalizing run. Status: {status}")
         print(f"{UI_STATUS_PREFIX}Crawl loop ended. Finalizing run {self.run_id} with status {status}...")
 
         if self.cfg.ENABLE_TRAFFIC_CAPTURE and self.traffic_capture_manager.is_capturing():
-            logging.info("Stopping and pulling final traffic capture...")
+            logging.debug("Stopping and pulling final traffic capture...")
             pcap_file = await self.traffic_capture_manager.stop_capture_and_pull_async(self.run_id or 0, self.crawl_steps_taken)
-            if pcap_file: logging.info(f"Final traffic capture saved to: {pcap_file}")
+            if pcap_file: logging.debug(f"Final traffic capture saved to: {pcap_file}")
             else: logging.warning("Failed to save final traffic capture.")
             
             # MobSF Integration - Run static analysis at the end of the crawl if enabled
         if hasattr(self.cfg, 'ENABLE_MOBSF_ANALYSIS') and self.cfg.ENABLE_MOBSF_ANALYSIS:
-            logging.info("MobSF static analysis enabled. Starting analysis...")
+            logging.debug("MobSF static analysis enabled. Starting analysis...")
             print(f"{UI_STATUS_PREFIX}Starting MobSF static analysis...")
             
             try:
@@ -603,7 +640,7 @@ class AppCrawler:
                     success, result = mobsf_manager.perform_complete_scan(str(self.cfg.APP_PACKAGE))
                 
                 if success:
-                    logging.info(f"MobSF analysis completed successfully. PDF report: {result.get('pdf_report')}")
+                    logging.debug(f"MobSF analysis completed successfully. PDF report: {result.get('pdf_report')}")
                     print(f"{UI_STATUS_PREFIX}MobSF analysis completed successfully.")
                     
                     # Update the run status with MobSF results if we have a database connection
@@ -626,7 +663,7 @@ class AppCrawler:
                             
                             # Save meta data to database
                             self.db_manager.update_run_meta(self.run_id, json.dumps(meta_data))
-                            logging.info("MobSF analysis results saved to database.")
+                            logging.debug("MobSF analysis results saved to database.")
                         except Exception as e:
                             logging.error(f"Error saving MobSF results to database: {e}")
                 else:
@@ -640,7 +677,7 @@ class AppCrawler:
             self.db_manager.update_run_status(self.run_id, status, time.strftime("%Y-%m-%d %H:%M:%S"))
         
         self.perform_full_cleanup()
-        logging.info(f"AppCrawler run_async finished for Run ID: {self.run_id}. Final DB status: {status}")
+        logging.debug(f"AppCrawler run_async finished for Run ID: {self.run_id}. Final DB status: {status}")
 
     def _determine_completion_status(self) -> str:
         """Determines the final status string if the loop completes without a failure-based termination."""
@@ -701,11 +738,11 @@ class AppCrawler:
     def run(self):
         """Public synchronous entry point to start the crawler."""
         try:
-            logging.info(f"AppCrawler run initiated for {self.cfg.APP_PACKAGE}.")
+            logging.debug(f"AppCrawler run initiated for {self.cfg.APP_PACKAGE}.")
             asyncio.run(self.run_async())
-            logging.info(f"AppCrawler run completed for {self.cfg.APP_PACKAGE}.")
+            logging.debug(f"AppCrawler run completed for {self.cfg.APP_PACKAGE}.")
         except SystemExit as se:
-            logging.info(f"SystemExit caught by AppCrawler.run() wrapper: {se.code}")
+            logging.debug(f"SystemExit caught by AppCrawler.run() wrapper: {se.code}")
             raise
         except KeyboardInterrupt:
             logging.warning("KeyboardInterrupt caught by AppCrawler.run() wrapper. Cleanup should have been handled.")
@@ -714,4 +751,4 @@ class AppCrawler:
             if not self.is_shutting_down and not (hasattr(self, '_cleanup_called') and self._cleanup_called):
                 self.perform_full_cleanup()
         finally:
-            logging.info("AppCrawler.run() synchronous wrapper finished.")
+            logging.debug("AppCrawler.run() synchronous wrapper finished.")

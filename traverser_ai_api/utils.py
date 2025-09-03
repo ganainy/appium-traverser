@@ -39,10 +39,68 @@ class ElapsedTimeFormatter(logging.Formatter):
         ms = int((elapsed_seconds - (h * 3600 + m * 60 + s)) * 1000)
         return f"{h:02d}:{m:02d}:{s:02d}.{ms:03d}"
 
+class UIColoredLogHandler(logging.Handler):
+    """Custom logging handler that routes log messages to the UI with appropriate colors."""
+
+    def __init__(self, ui_controller):
+        super().__init__()
+        self.ui_controller = ui_controller
+
+    def emit(self, record):
+        """Emit a log record to the UI with color based on log level."""
+        try:
+            message = self.format(record)
+
+            # Map log levels to colors
+            if record.levelno >= logging.ERROR:
+                color = 'red'
+            elif record.levelno >= logging.WARNING:
+                color = 'orange'
+            elif record.levelno >= logging.INFO:
+                color = 'green'
+            else:
+                color = 'white'  # DEBUG and below
+
+            # Send to UI controller if available
+            if self.ui_controller and hasattr(self.ui_controller, 'log_message'):
+                self.ui_controller.log_message(message, color=color)
+        except Exception:
+            # Don't let logging errors crash the application
+            pass
 class LoggerManager:
     def __init__(self):
         self.handlers: List[logging.Handler] = []
         self.stdout_wrapper: Optional[io.TextIOWrapper] = None
+        self.ui_controller = None  # Reference to UI controller for colored logging
+
+    def set_ui_controller(self, ui_controller):
+        """Set the UI controller reference for routing colored log messages."""
+        self.ui_controller = ui_controller
+        
+        # If logging is already set up, add the UI handler now
+        if self.handlers:  # Check if setup_logging has been called
+            logger = logging.getLogger()
+            
+            # Check if UI handler is already added
+            has_ui_handler = any(isinstance(handler, UIColoredLogHandler) for handler in logger.handlers)
+            
+            if not has_ui_handler and self.ui_controller:
+                # Get the current log level from the logger
+                current_level = logger.level
+                
+                # Create and add UI handler
+                ui_handler = UIColoredLogHandler(self.ui_controller)
+                ui_handler.setLevel(current_level)
+                
+                # Use the same formatter as other handlers
+                for handler in logger.handlers:
+                    if hasattr(handler, 'formatter') and handler.formatter:
+                        ui_handler.setFormatter(handler.formatter)
+                        break
+                
+                logger.addHandler(ui_handler)
+                self.handlers.append(ui_handler)
+                logging.debug("UIColoredLogHandler added to existing logger configuration")
 
     def setup_logging(self, log_level_str: str, log_file: Optional[str] = None) -> logging.Logger:
         numeric_level = getattr(logging, log_level_str.upper(), None)
@@ -75,6 +133,14 @@ class LoggerManager:
         console_handler.setFormatter(log_formatter)
         logger.addHandler(console_handler)
         self.handlers.append(console_handler)
+
+        # Add UI handler for colored logging if UI controller is available
+        if self.ui_controller:
+            ui_handler = UIColoredLogHandler(self.ui_controller)
+            ui_handler.setLevel(numeric_level)
+            ui_handler.setFormatter(log_formatter)
+            logger.addHandler(ui_handler)
+            self.handlers.append(ui_handler)
 
         if log_file:
             try:
