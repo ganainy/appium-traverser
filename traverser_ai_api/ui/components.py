@@ -249,6 +249,15 @@ class UIComponents:
         panel = QWidget()
         layout = QVBoxLayout(panel)
         
+        # Add Pre-Check button at the top
+        pre_check_layout = QHBoxLayout()
+        pre_check_btn = QPushButton("🔍 Pre-Check Services")
+        pre_check_btn.setToolTip("Check the status of all required services (Appium, Ollama, MobSF) before starting")
+        pre_check_btn.clicked.connect(controls_handler.perform_pre_crawl_validation)
+        pre_check_layout.addWidget(pre_check_btn)
+        pre_check_layout.addStretch()
+        layout.addLayout(pre_check_layout)
+        
         # Create UI mode switch (Basic/Expert)
         mode_layout = QHBoxLayout()
         mode_label = QLabel("UI Mode:")
@@ -889,10 +898,16 @@ class UIComponents:
         controls_handler.stop_btn = QPushButton("Stop Crawler")
         controls_handler.stop_btn.setEnabled(False)
         
+        # Add status check button
+        controls_handler.check_status_btn = QPushButton("Check Status")
+        controls_handler.check_status_btn.setToolTip("Check pre-crawl validation status for all services and requirements")
+        controls_handler.check_status_btn.clicked.connect(controls_handler.check_pre_crawl_status)
+        
         controls_handler.start_btn.clicked.connect(controls_handler.start_crawler)
         controls_handler.stop_btn.clicked.connect(controls_handler.stop_crawler)
         
         layout.addWidget(controls_handler.start_btn)
         layout.addWidget(controls_handler.stop_btn)
+        layout.addWidget(controls_handler.check_status_btn)
         
         return group

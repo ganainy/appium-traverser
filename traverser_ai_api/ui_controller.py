@@ -581,6 +581,48 @@ class CrawlerControllerWindow(QMainWindow):
         self.crawler_manager.stop_crawler()
     
     @slot()
+    def perform_pre_crawl_validation(self):
+        """Perform pre-crawl validation checks."""
+        self.crawler_manager.perform_pre_crawl_validation()
+    
+    @slot()
+    def check_pre_crawl_status(self):
+        """Check and display pre-crawl validation status."""
+        self.log_message("🔍 Checking pre-crawl validation status...", 'blue')
+        self.show_pre_crawl_validation_details()
+    
+    def show_pre_crawl_validation_details(self):
+        """Show detailed pre-crawl validation status."""
+        try:
+            status_details = self.crawler_manager.get_service_status_details()
+            
+            self.log_message("🔍 Pre-Crawl Validation Details:", 'blue')
+            self.log_message("=" * 50, 'blue')
+            
+            for service_name, details in status_details.items():
+                status_icon = "✅" if details.get('running', details.get('valid', details.get('selected', False))) else "❌"
+                self.log_message(f"{status_icon} {details['message']}", 'green' if details.get('running', details.get('valid', details.get('selected', False))) else 'red')
+                
+                # Show additional details for API keys
+                if service_name == 'api_keys' and details.get('issues'):
+                    for issue in details['issues']:
+                        self.log_message(f"   {issue}", 'orange')
+            
+            self.log_message("=" * 50, 'blue')
+            
+            # Count total issues
+            total_issues = sum(1 for details in status_details.values() 
+                             if not details.get('running', details.get('valid', details.get('selected', False))))
+            
+            if total_issues == 0:
+                self.log_message("🎉 All systems are ready for crawling!", 'green')
+            else:
+                self.log_message(f"⚠️ {total_issues} issue(s) found. You can still start the crawler.", 'orange')
+                
+        except Exception as e:
+            self.log_message(f"Error getting validation details: {e}", 'red')
+    
+    @slot()
     def trigger_scan_for_health_apps(self):
         """Trigger the health app scanning process."""
         self.health_app_scanner.trigger_scan_for_health_apps()
