@@ -97,6 +97,9 @@ class Config:
         self.MOBSF_API_KEY: Optional[str] = None
         self.ENABLE_MOBSF_ANALYSIS: bool = False
         
+        # Focus areas for AI agent behavior
+        self.FOCUS_AREAS: List[Dict[str, Any]] = []
+        
         # Store templates from defaults for dynamic resolution
         self._OUTPUT_DATA_DIR_TEMPLATE = "output_data"
         self._SESSION_DIR_TEMPLATE = "{output_data_dir}/{{device_id}}_{{app_package}}_{{timestamp}}"
@@ -383,6 +386,7 @@ class Config:
             "DEVICE_PCAP_DIR", "CLEANUP_DEVICE_PCAP_FILE",
             "CURRENT_HEALTH_APP_LIST_FILE", "LAST_SELECTED_APP", "UI_MODE",
             "MOBSF_API_URL", "ENABLE_MOBSF_ANALYSIS",
+            "FOCUS_AREAS",  # Add focus areas to savable config
             # Save the template for OUTPUT_DATA_DIR so user can change base output loc
             # The actual key in user_config.json will be "OUTPUT_DATA_DIR"
         ]

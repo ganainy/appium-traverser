@@ -370,3 +370,30 @@ class ConfigManager(QObject):
                 # on QTextEdit to avoid excessive saving.
                 pass
         logging.debug("Connected widgets for auto-saving.")
+    
+    def update_focus_areas(self, focus_areas):
+        """Update focus areas configuration and save to user config."""
+        # Convert FocusArea objects to dictionaries for JSON serialization
+        focus_areas_dict = []
+        for area in focus_areas:
+            if hasattr(area, '__dict__'):
+                # It's a FocusArea object
+                focus_areas_dict.append({
+                    'id': area.id,
+                    'name': area.name,
+                    'description': area.description,
+                    'prompt_modifier': area.prompt_modifier,
+                    'enabled': area.enabled,
+                    'priority': area.priority
+                })
+            else:
+                # It's already a dict
+                focus_areas_dict.append(area)
+        
+        # Update the config object
+        self.config.FOCUS_AREAS = focus_areas_dict
+        
+        # Save to user config
+        self.config.update_setting_and_save('FOCUS_AREAS', focus_areas_dict, self.main_controller._sync_user_config_files)
+        
+        logging.debug(f"Updated focus areas configuration with {len(focus_areas_dict)} areas")

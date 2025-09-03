@@ -470,6 +470,67 @@ class CrawlerControllerWindow(QMainWindow):
             logging.error(f"Error updating log output: {e}")
             return
 
+    def log_action_with_focus(self, action_data: Dict[str, Any]):
+        """Log action with focus area attribution."""
+        # Handle both old format (from direct callback) and new format (from stdout parsing)
+        if 'focus_ids' in action_data:
+            # New format from stdout parsing
+            action_type = action_data.get('action', 'unknown')
+            reasoning = action_data.get('reasoning', 'No reasoning provided')
+            focus_ids = action_data.get('focus_ids', [])
+            focus_names = action_data.get('focus_names', [])
+        else:
+            # Old format from direct callback
+            action_type = action_data.get('action', 'unknown')
+            reasoning = action_data.get('reasoning', 'No reasoning provided')
+            focus_influence = action_data.get('focus_influence', [])
+            
+            # Get focus area names
+            focus_names = []
+            for focus_id in focus_influence:
+                focus_name = self.get_focus_area_name(focus_id)
+                if focus_name:
+                    focus_names.append(focus_name)
+            focus_ids = focus_influence
+        
+        # Format display
+        if focus_names:
+            focus_text = f" [Focus: {', '.join(focus_names)}]"
+        elif focus_ids:
+            focus_text = f" [Focus IDs: {', '.join(focus_ids)}]"
+        else:
+            focus_text = " [No focus influence specified]"
+        
+        # Log to UI
+        log_message = f"Action: {action_type}{focus_text}\nReasoning: {reasoning}"
+        
+        # Check if log_output exists and is properly initialized
+        if hasattr(self, 'log_output') and self.log_output:
+            self.log_output.append(log_message)
+        else:
+            logging.debug(f"Log output not available, logging to console: {log_message}")
+        
+        # Also update status if last_action_label exists
+        if hasattr(self, 'last_action_label') and self.last_action_label:
+            self.last_action_label.setText(f"Last Action: {action_type}{focus_text}")
+        
+        # Color-code based on focus areas
+        color = 'green'  # Default color
+        if any(fid in ['privacy_policy', 'data_collection'] for fid in focus_ids):
+            color = 'blue'  # Privacy-related actions
+        elif any(fid in ['third_party', 'advertising_tracking'] for fid in focus_ids):
+            color = 'orange'  # Tracking-related actions
+        
+        self.log_message(log_message, color)
+
+    def get_focus_area_name(self, focus_id: str) -> Optional[str]:
+        """Get human-readable name for focus area ID."""
+        focus_areas = getattr(self.config, 'FOCUS_AREAS', [])
+        for area in focus_areas:
+            if isinstance(area, dict) and area.get('id') == focus_id:
+                return area.get('name', focus_id)
+        return None
+
     def update_screenshot(self, file_path: str) -> None:
         """Update the screenshot displayed in the UI."""
         try:

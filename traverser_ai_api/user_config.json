@@ -22,7 +22,7 @@
     "MAX_APPS_TO_SEND_TO_AI": 200,
     "USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY": true,
     "AI_SAFETY_SETTINGS": {},
-    "CRAWL_MODE": "steps",
+    "CRAWL_MODE": "time",
     "MAX_CRAWL_STEPS": 4,
     "MAX_CRAWL_DURATION_SECONDS": 600,
     "CONTINUE_EXISTING_RUN": false,
@@ -37,8 +37,90 @@
     "CLEANUP_DEVICE_PCAP_FILE": false,
     "CURRENT_HEALTH_APP_LIST_FILE": "output_data\\app_info\\health_apps.json",
     "LAST_SELECTED_APP": null,
-    "UI_MODE": "Basic",
+    "UI_MODE": "Expert",
     "MOBSF_API_URL": "",
     "ENABLE_MOBSF_ANALYSIS": false,
+    "FOCUS_AREAS": [
+        {
+            "id": "permissions",
+            "name": "App Permissions",
+            "description": "Focus on permission requests and privacy settings",
+            "prompt_modifier": "**PRIVACY FOCUS: Permissions** - Pay special attention to permission requests (location, camera, microphone, contacts, storage, phone). Test how the app handles permission denials and privacy settings. Look for granular permission controls.",
+            "enabled": true,
+            "priority": 0
+        },
+        {
+            "id": "advertising_tracking",
+            "name": "Advertising & Tracking",
+            "description": "Identify advertising networks and tracking mechanisms",
+            "prompt_modifier": "**PRIVACY FOCUS: Advertising & Tracking** - Look for advertising networks, tracking pixels, and behavioral data collection. Find opt-out mechanisms, ad personalization controls, and tracking consent options.",
+            "enabled": true,
+            "priority": 1
+        },
+        {
+            "id": "privacy_policy",
+            "name": "Privacy Policies & Terms",
+            "description": "Prioritize exploring privacy policies, terms of service, and data usage disclosures",
+            "prompt_modifier": "**PRIVACY FOCUS: Policy Documents** - Actively seek out and thoroughly explore privacy policies, terms of service, data processing agreements, and any legal documents. Read and analyze all privacy-related content for data collection practices, third-party sharing, and user rights.",
+            "enabled": true,
+            "priority": 2
+        },
+        {
+            "id": "data_collection",
+            "name": "Data Collection Forms",
+            "description": "Prioritize forms that collect personal information",
+            "prompt_modifier": "**PRIVACY FOCUS: Data Collection** - Focus on forms and input fields that collect personal data (name, email, phone, address, payment info, health data). Test data validation, storage indications, and sharing disclosures. Look for data minimization practices.",
+            "enabled": true,
+            "priority": 3
+        },
+        {
+            "id": "third_party",
+            "name": "Third-Party Integrations",
+            "description": "Identify and analyze third-party services and trackers",
+            "prompt_modifier": "**PRIVACY FOCUS: Third-Party Services** - Look for integrations with analytics services, advertising networks, social media platforms, and other third-party services. Note any data sharing with external companies and tracking mechanisms.",
+            "enabled": true,
+            "priority": 4
+        },
+        {
+            "id": "network_requests",
+            "name": "Network Communications",
+            "description": "Monitor and analyze app's network requests and data transmission",
+            "prompt_modifier": "**PRIVACY FOCUS: Network Activity** - Be alert to network requests and data transmissions. Look for API calls, data uploads, and server communications. Identify what data is being sent to which servers and for what purposes.",
+            "enabled": true,
+            "priority": 5
+        },
+        {
+            "id": "account_privacy",
+            "name": "Account & Profile Privacy",
+            "description": "Focus on account creation, profile data, and privacy controls",
+            "prompt_modifier": "**PRIVACY FOCUS: Account Privacy** - Examine account creation processes, profile data collection, and privacy control options. Test data sharing settings, account deletion processes, and privacy dashboard features.",
+            "enabled": true,
+            "priority": 6
+        },
+        {
+            "id": "data_rights",
+            "name": "Data Subject Rights",
+            "description": "Focus on GDPR/CCPA compliance and user data rights",
+            "prompt_modifier": "**PRIVACY FOCUS: Data Rights** - Search for data export options, account deletion features, data portability tools, and consent management. Test compliance with data protection regulations and user rights.",
+            "enabled": true,
+            "priority": 7
+        },
+        {
+            "id": "security_features",
+            "name": "Security & Authentication",
+            "description": "Analyze security measures and authentication methods",
+            "prompt_modifier": "**PRIVACY FOCUS: Security Measures** - Examine authentication methods, encryption indicators, security settings, and data protection measures. Look for secure data transmission (HTTPS) and proper credential handling.",
+            "enabled": true,
+            "priority": 8
+        },
+        {
+            "id": "location_tracking",
+            "name": "Location & Device Data",
+            "description": "Focus on location services and device data collection",
+            "prompt_modifier": "**PRIVACY FOCUS: Location & Device Data** - Pay attention to location services, device identifiers, sensor data collection, and background tracking. Test location permission handling and data retention policies.",
+            "enabled": true,
+            "priority": 9
+        }
+    ],
     "OUTPUT_DATA_DIR": "output_data"
 }

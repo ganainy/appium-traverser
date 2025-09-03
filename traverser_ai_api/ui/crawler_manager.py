@@ -285,11 +285,20 @@ class CrawlerManager(QObject):
                 status_text = status_match.group(1).strip()
                 self.main_controller.status_label.setText(f"Status: {status_text}")
                 
-            # Check for UI_END_PREFIX:reason
-            end_match = re.search(r'UI_END:(.*?)($|\n)', output)
-            if end_match:
-                end_reason = end_match.group(1).strip()
-                self.main_controller.log_message(f"Crawler ended: {end_reason}", 'orange')
+            # Check for UI_FOCUS_PREFIX:focus_info
+            focus_match = re.search(r'UI_FOCUS:(.*?)($|\n)', output)
+            if focus_match:
+                try:
+                    focus_data_str = focus_match.group(1).strip()
+                    # Parse the focus data (it's a dict converted to string)
+                    import ast
+                    focus_data = ast.literal_eval(focus_data_str)
+                    
+                    # Log the focus attribution
+                    self.main_controller.log_action_with_focus(focus_data)
+                except Exception as e:
+                    self.main_controller.log_message(f"Error parsing focus data: {e}", 'red')
+                    logging.error(f"Error parsing focus data: {e}")
         except Exception as e:
             self.main_controller.log_message(f"Error processing crawler output: {e}", 'red')
             logging.error(f"Error processing crawler output: {e}")

@@ -28,10 +28,12 @@ class AgentAssistant:
                  app_config, # Type hint with your actual Config class
                  model_alias_override: Optional[str] = None,
                  safety_settings_override: Optional[Dict] = None,
-                 agent_tools=None):
+                 agent_tools=None,
+                 ui_callback=None):
         self.cfg = app_config
         self.response_cache: Dict[str, Tuple[Dict[str, Any], float, int]] = {}
         self.tools = agent_tools  # May be None initially and set later
+        self.ui_callback = ui_callback  # Callback for UI updates
         logging.debug("AI response cache initialized.")
 
         # Determine which AI provider to use
@@ -315,12 +317,16 @@ class AgentAssistant:
         else:
             context_description = "1. Screenshot: Not provided (image context disabled). Rely on XML layout for analysis.\n        2. XML Layout: Provided below. This is your primary source of UI information."
         
+        # Build focus areas section
+        focus_areas_section = self._build_focus_areas_section()
+        
         prompt = f"""
         You are an expert Android app tester. Your goal is to:
         1. Determine the BEST SINGLE action to perform based on the visual screenshot and XML context, 
            prioritizing PROGRESSION and IN-APP feature discovery.
 
         {feedback_section}
+        {focus_areas_section}
 
         {visit_context}
 
@@ -347,7 +353,8 @@ class AgentAssistant:
             "target_identifier": "optional identifier for the target element",
             "target_bounding_box": {{"top_left": [y1, x1], "bottom_right": [y2, x2]}},
             "input_text": "text to input if action is input",
-            "reasoning": "brief explanation for choosing this action"
+            "reasoning": "brief explanation for choosing this action",
+            "focus_influence": ["focus_area_id1", "focus_area_id2"]  // Array of focus area IDs that influenced this decision
         }}
 
         XML CONTEXT:
@@ -356,6 +363,36 @@ class AgentAssistant:
         ```
         """
         return prompt.strip()
+
+    def _build_focus_areas_section(self) -> str:
+        """Build the focus areas section of the prompt."""
+        focus_areas = getattr(self.cfg, 'FOCUS_AREAS', [])
+        
+        if not focus_areas:
+            return ""
+        
+        # Sort by priority and filter enabled
+        enabled_areas = [area for area in focus_areas if area.get('enabled', True)]
+        enabled_areas.sort(key=lambda x: x.get('priority', 0))
+        
+        if not enabled_areas:
+            return ""
+        
+        # Create focus area reference list
+        focus_reference = "\n".join([
+            f"- {area['id']}: {area['name']}" 
+            for area in enabled_areas
+        ])
+        
+        focus_text = "\n".join([area['prompt_modifier'] for area in enabled_areas])
+        
+        return f"""
+        **ACTIVE FOCUS AREAS:**
+        {focus_text}
+        
+        **FOCUS AREA IDs (use these in focus_influence):**
+        {focus_reference}
+        """
 
     def _analyze_action_history(self, actions: List[str]) -> dict:
         """Analyze the action history to detect loops."""
@@ -469,6 +506,8 @@ class AgentAssistant:
             return False
             
         try:
+            success = False
+            
             if action_type == "click":
                 target_id = action_data.get("target_identifier")
                 if not target_id:
@@ -481,12 +520,14 @@ class AgentAssistant:
                             center_y = (top_left[0] + bottom_right[0]) / 2
                             center_x = (top_left[1] + bottom_right[1]) / 2
                             result = self.tools.tap_coordinates(center_x, center_y)
-                            return result.get("success", False)
-                    logging.error("Cannot execute click: No target identifier or valid bounding box provided")
-                    return False
-                result = self.tools.click_element(target_id)
-                return result.get("success", False)
-                
+                            success = result.get("success", False)
+                    else:
+                        logging.error("Cannot execute click: No target identifier or valid bounding box provided")
+                        return False
+                else:
+                    result = self.tools.click_element(target_id)
+                    success = result.get("success", False)
+                    
             elif action_type == "input":
                 target_id = action_data.get("target_identifier")
                 input_text = action_data.get("input_text")
@@ -496,32 +537,64 @@ class AgentAssistant:
                 if input_text is None:
                     input_text = ""  # Empty string for clear operations
                 result = self.tools.input_text(target_id, input_text)
-                return result.get("success", False)
+                success = result.get("success", False)
                 
             elif action_type == "scroll_down":
                 result = self.tools.scroll("down")
-                return result.get("success", False)
+                success = result.get("success", False)
                 
             elif action_type == "scroll_up":
                 result = self.tools.scroll("up")
-                return result.get("success", False)
+                success = result.get("success", False)
                 
             elif action_type == "swipe_left":
                 result = self.tools.scroll("left")
-                return result.get("success", False)
+                success = result.get("success", False)
                 
             elif action_type == "swipe_right":
                 result = self.tools.scroll("right")
-                return result.get("success", False)
+                success = result.get("success", False)
                 
             elif action_type == "back":
                 result = self.tools.press_back()
-                return result.get("success", False)
+                success = result.get("success", False)
                 
             else:
                 logging.error(f"Unknown action type: {action_type}")
                 return False
                 
+            # If execution was successful and we have a UI callback, notify the UI
+            if success and self.ui_callback:
+                try:
+                    self.ui_callback(action_data)
+                except Exception as e:
+                    logging.error(f"Error calling UI callback: {e}")
+                    
+            # Output focus attribution to stdout for UI monitoring
+            if success and action_data.get('focus_influence'):
+                focus_ids = action_data.get('focus_influence', [])
+                if focus_ids:
+                    # Get focus area names for better readability
+                    focus_names = []
+                    focus_areas = getattr(self.cfg, 'FOCUS_AREAS', [])
+                    for focus_id in focus_ids:
+                        for area in focus_areas:
+                            if isinstance(area, dict) and area.get('id') == focus_id:
+                                focus_names.append(area.get('name', focus_id))
+                                break
+                    
+                    focus_info = {
+                        'action': action_data.get('action', 'unknown'),
+                        'focus_ids': focus_ids,
+                        'focus_names': focus_names,
+                        'reasoning': action_data.get('reasoning', '')
+                    }
+                    
+                    # Output to stdout with UI_FOCUS prefix for UI to capture
+                    print(f"UI_FOCUS:{focus_info}")
+                    
+            return success
+            
         except Exception as e:
             logging.error(f"Error executing action: {e}", exc_info=True)
             return False
@@ -638,6 +711,8 @@ class AgentAssistant:
                 action_data = self._clean_and_parse_json(json_str)
                 if action_data:
                     logging.debug("Successfully parsed JSON from code block")
+                    # Validate and clean focus_influence
+                    action_data = self._validate_and_clean_action_data(action_data)
                 else:
                     logging.warning("Failed to parse JSON from code block, trying fallback methods")
             else:
@@ -649,6 +724,8 @@ class AgentAssistant:
                     action_data = self._clean_and_parse_json(json_str)
                     if action_data:
                         logging.debug("Successfully parsed JSON from regex match")
+                        # Validate and clean focus_influence
+                        action_data = self._validate_and_clean_action_data(action_data)
                     else:
                         logging.warning("Failed to parse JSON from regex match, trying manual parsing")
                 else:
@@ -681,6 +758,37 @@ class AgentAssistant:
             logging.error(f"Error parsing action from response: {e}", exc_info=True)
             logging.error(f"Response text that caused error: {response_text[:1000]}...")
             return None
+
+    def _validate_and_clean_action_data(self, action_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Validate and clean action data, including focus_influence."""
+        if not action_data:
+            return action_data
+        
+        # Validate focus_influence field
+        if 'focus_influence' not in action_data:
+            logging.debug("AI response missing focus_influence field, setting to empty list")
+            action_data['focus_influence'] = []
+        elif not isinstance(action_data['focus_influence'], list):
+            logging.warning("focus_influence should be a list, converting")
+            action_data['focus_influence'] = [action_data['focus_influence']]
+        
+        # Validate focus area IDs exist
+        valid_ids = self._get_valid_focus_area_ids()
+        original_influence = action_data['focus_influence']
+        action_data['focus_influence'] = [
+            fid for fid in action_data['focus_influence'] 
+            if isinstance(fid, str) and fid in valid_ids
+        ]
+        
+        if len(original_influence) != len(action_data['focus_influence']):
+            logging.warning(f"Filtered invalid focus area IDs from {original_influence} to {action_data['focus_influence']}")
+        
+        return action_data
+
+    def _get_valid_focus_area_ids(self) -> List[str]:
+        """Get list of valid focus area IDs from configuration."""
+        focus_areas = getattr(self.cfg, 'FOCUS_AREAS', [])
+        return [area.get('id', '') for area in focus_areas if area.get('enabled', True)]
     
     def _manual_parse_action_response(self, response_text: str) -> Optional[Dict[str, Any]]:
         """Manually parse action data from AI response when JSON parsing fails."""

@@ -19,7 +19,8 @@ class UIComponents:
     # These will be hidden in basic mode
     ADVANCED_GROUPS = [
         "appium_settings_group",
-        "error_handling_group"
+        "error_handling_group",
+        "focus_areas_group"  # Focus areas can be advanced for basic users
     ]
     
     @staticmethod
@@ -309,6 +310,11 @@ class UIComponents:
         )
         ai_group.setObjectName("ai_settings_group")
         
+        focus_areas_group = UIComponents._create_focus_areas_group(
+            scroll_layout, config_widgets, tooltips, config_handler
+        )
+        focus_areas_group.setObjectName("focus_areas_group")
+        
         crawler_group = UIComponents._create_crawler_settings_group(scroll_layout, config_widgets, tooltips)
         crawler_group.setObjectName("crawler_settings_group")
         
@@ -332,6 +338,7 @@ class UIComponents:
             "appium_settings_group": appium_group,
             "app_settings_group": app_group,
             "ai_settings_group": ai_group,
+            "focus_areas_group": focus_areas_group,
             "crawler_settings_group": crawler_group,
             "error_handling_group": error_handling_group,
             "feature_toggles_group": feature_toggle_group,
@@ -614,6 +621,63 @@ class UIComponents:
         
         layout.addRow(ai_group)
         return ai_group
+    
+    @staticmethod
+    def _create_focus_areas_group(
+        layout: QFormLayout, 
+        config_widgets: Dict[str, Any],
+        tooltips: Dict[str, str],
+        config_handler: Any
+    ) -> QGroupBox:
+        """Create the Focus Areas group."""
+        focus_group = QGroupBox("AI Privacy Focus Areas")
+        focus_layout = QVBoxLayout(focus_group)
+        
+        # Import the focus areas widget
+        try:
+            from .focus_areas_widget import FocusAreasWidget
+        except ImportError:
+            from focus_areas_widget import FocusAreasWidget
+        
+        # Load focus areas from config or use defaults
+        focus_areas_data = getattr(config_handler.config, 'FOCUS_AREAS', None)
+        
+        # Check if focus areas have been loaded from user config
+        # If FOCUS_AREAS is None or empty list, use defaults
+        if focus_areas_data is None or len(focus_areas_data) == 0:
+            # Import defaults if not set or empty
+            try:
+                from .focus_areas_widget import DEFAULT_PRIVACY_FOCUS_AREAS
+            except ImportError:
+                from focus_areas_widget import DEFAULT_PRIVACY_FOCUS_AREAS
+            focus_areas_data = DEFAULT_PRIVACY_FOCUS_AREAS
+            # Convert dataclass objects to dictionaries for consistency
+            focus_areas_data = [
+                {
+                    'id': area.id,
+                    'name': area.name,
+                    'description': area.description,
+                    'prompt_modifier': area.prompt_modifier,
+                    'enabled': area.enabled,
+                    'priority': area.priority
+                }
+                for area in focus_areas_data
+            ]
+        
+        # Create the focus areas widget
+        focus_widget = FocusAreasWidget(focus_areas_data)
+        focus_layout.addWidget(focus_widget)
+        
+        # Connect to config changes
+        focus_widget.focus_areas_changed.connect(
+            lambda areas: config_handler.update_focus_areas(areas)
+        )
+        
+        # Store reference for later access
+        config_handler.focus_areas_widget = focus_widget
+        
+        layout.addRow(focus_group)
+        return focus_group
     
     @staticmethod
     def _create_crawler_settings_group(
