@@ -99,11 +99,11 @@ class AppiumDriver:
             return True
 
         except WebDriverException as e:
-            logging.error(f"Failed to connect to Appium server or start session: {e}")
+            logging.error(f"🔴 Failed to connect to Appium server or start session: {e}")
             self.driver = None
             return False
         except Exception as e:
-            logging.error(f"An unexpected error occurred during Appium connection: {e}", exc_info=True)
+            logging.error(f"🔴 An unexpected error occurred during Appium connection: {e}", exc_info=True)
             self.driver = None
             return False
 
@@ -114,9 +114,9 @@ class AppiumDriver:
                 logging.debug("Attempting to quit Appium session...")
                 self.driver.quit()
             except WebDriverException as e: # Catch more specific driver errors
-                logging.error(f"WebDriverException during Appium session quit: {e}")
+                logging.error(f"🔴 WebDriverException during Appium session quit: {e}")
             except Exception as e:
-                logging.error(f"Unexpected error closing Appium session: {e}", exc_info=True)
+                logging.error(f"🔴 Unexpected error closing Appium session: {e}", exc_info=True)
             finally:
                 self.driver = None
                 logging.debug("Appium session resources released (driver set to None).")
@@ -127,15 +127,15 @@ class AppiumDriver:
     def get_page_source(self) -> Optional[str]:
         """Retrieves the XML page source."""
         if not self.driver:
-            logging.warning("Driver not available, cannot get page source.")
+            logging.warning("⚠️ Driver not available, cannot get page source.")
             return None
         try:
             return self.driver.page_source
         except WebDriverException as e:
-            logging.error(f"Error getting page source: {e}")
+            logging.error(f"🔴 Error getting page source: {e}")
             return None
         except Exception as e: # Catch any other unexpected errors
-            logging.error(f"Unexpected error getting page source: {e}", exc_info=True)
+            logging.error(f"🔴 Unexpected error getting page source: {e}", exc_info=True)
             return None
 
 

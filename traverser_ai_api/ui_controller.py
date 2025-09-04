@@ -447,15 +447,41 @@ class CrawlerControllerWindow(QMainWindow):
             logging.debug(f"LOG (from thread): {message}")
             return
 
-        color_map = {
-            'white': QColor('white'),
-            'red': QColor('red'),
-            'green': QColor('green'),
-            'blue': QColor('cyan'),
-            'orange': QColor('orange')
-        }
+        # Since colors aren't working well, we'll use white text with emoji indicators
+        text_color = QColor('white')
         
-        text_color = color_map.get(color, QColor('black'))
+        # Add emoji indicators if not already present
+        message_lower = message.lower()
+        has_emoji = any(emoji in message[:4] for emoji in ["🔴", "⚠️", "ℹ️", "✅", "🔧", "📌", "🚀", "🔍", "🟢", "🔒", "📍", "👁️", "🔐", "👆", "⌨️", "📜", "👈", "⬅️", "⚡"])
+        
+        if not has_emoji:
+            # Add emoji based on severity/content
+            if color.lower() == 'red' or 'error' in message_lower or 'fail' in message_lower or 'failure' in message_lower or 'termination' in message_lower:
+                emoji_prefix = "🔴 "  # Red circle for errors and failures
+            elif color.lower() == 'orange' or 'warning' in message_lower or 'warn' in message_lower:
+                emoji_prefix = "⚠️ "  # Warning sign
+            elif color.lower() == 'green' or 'success' in message_lower or 'completed' in message_lower:
+                emoji_prefix = "✅ "  # Green checkmark for success
+            elif color.lower() == 'blue' or 'info' in message_lower:
+                emoji_prefix = "ℹ️ "  # Info symbol
+            elif color.lower() == 'gray' or 'debug' in message_lower:
+                emoji_prefix = "🔧 "  # Wrench for debug
+            elif 'important' in message_lower:
+                emoji_prefix = "📌 "  # Pushpin for important
+            elif 'starting' in message_lower or 'initializing' in message_lower:
+                emoji_prefix = "🚀 "  # Rocket for starting
+            elif 'detecting' in message_lower or 'checking' in message_lower:
+                emoji_prefix = "🔍 "  # Magnifying glass for checking
+            elif 'connected' in message_lower or 'ready' in message_lower:
+                emoji_prefix = "🟢 "  # Green circle for ready
+            elif 'privacy' in message_lower:
+                emoji_prefix = "🔒 "  # Lock for privacy
+            else:
+                emoji_prefix = ""  # No emoji if no match
+            
+            # Only add the prefix if we determined one
+            if emoji_prefix:
+                message = f"{emoji_prefix}{message}"
         
         try:
             if hasattr(self.log_output, 'setTextColor'):
@@ -501,8 +527,50 @@ class CrawlerControllerWindow(QMainWindow):
         else:
             focus_text = " [No focus influence specified]"
         
-        # Log to UI
-        log_message = f"Action: {action_type}{focus_text}\nReasoning: {reasoning}"
+        # Create prefix emoji based on focus areas and action types
+        if focus_ids:
+            # Privacy-focused actions
+            if any(fid in ['privacy_policy', 'data_rights', 'data_collection'] for fid in focus_ids):
+                prefix = "🔒 "  # Privacy-related actions
+                color = 'magenta'
+            # Security-focused actions
+            elif any(fid in ['security_features', 'account_privacy'] for fid in focus_ids):
+                prefix = "🔐 "  # Security-related actions
+                color = 'cyan'
+            # Tracking-related actions
+            elif any(fid in ['third_party', 'advertising_tracking', 'network_requests'] for fid in focus_ids):
+                prefix = "👁️ "  # Tracking-related actions
+                color = 'orange'
+            # Location and permissions-related actions
+            elif any(fid in ['location_tracking', 'permissions'] for fid in focus_ids):
+                prefix = "📍 "  # Location-related actions
+                color = 'yellow'
+            else:
+                prefix = "🔎 "  # Default for other focus areas
+                color = 'green'
+        else:
+            # Prefix by action type if no focus areas
+            if action_type == 'click':
+                prefix = "👆 "  # Click action
+                color = 'blue'
+            elif action_type == 'input':
+                prefix = "⌨️ "  # Input action
+                color = 'cyan'
+            elif action_type == 'scroll_down' or action_type == 'scroll_up':
+                prefix = "📜 "  # Scroll action
+                color = 'gray'
+            elif action_type == 'swipe_left' or action_type == 'swipe_right':
+                prefix = "👈 "  # Swipe action
+                color = 'gray'
+            elif action_type == 'back':
+                prefix = "⬅️ "  # Back action
+                color = 'orange'
+            else:
+                prefix = "⚡ "  # Default for unknown actions
+                color = 'white'
+        
+        # Log to UI with prefix
+        log_message = f"{prefix}Action: {action_type}{focus_text}\nReasoning: {reasoning}"
         
         # Check if log_output exists and is properly initialized
         if hasattr(self, 'log_output') and self.log_output:
@@ -512,14 +580,7 @@ class CrawlerControllerWindow(QMainWindow):
         
         # Also update status if last_action_label exists
         if hasattr(self, 'last_action_label') and self.last_action_label:
-            self.last_action_label.setText(f"Last Action: {action_type}{focus_text}")
-        
-        # Color-code based on focus areas
-        color = 'green'  # Default color
-        if any(fid in ['privacy_policy', 'data_collection'] for fid in focus_ids):
-            color = 'blue'  # Privacy-related actions
-        elif any(fid in ['third_party', 'advertising_tracking'] for fid in focus_ids):
-            color = 'orange'  # Tracking-related actions
+            self.last_action_label.setText(f"{prefix}Last Action: {action_type}{focus_text}")
         
         self.log_message(log_message, color)
 

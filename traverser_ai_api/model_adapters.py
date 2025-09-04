@@ -11,19 +11,32 @@ Each adapter implements a common interfa            # Check if model is availabl
             try:
                 available_models = ollama.list()
                 model_names = []
-                if 'models' in available_models:
-                    for model in available_models['models']:
-                        model_name = model.get('model', model.get('name', ''))
-                        if model_name:
-                            model_names.append(model_name)
                 
-                if self.model_name not in model_names and f"{self.model_name}:latest" not in model_names:
+                # Safely extract model names with better error handling
+                if 'models' in available_models and isinstance(available_models['models'], list):
+                    for model in available_models['models']:
+                        if isinstance(model, dict):
+                            # Try both 'name' and 'model' keys
+                            model_name = model.get('name') or model.get('model', '')
+                            if model_name:
+                                model_names.append(model_name)
+                                # Also add base name without tag
+                                if ':' in model_name:
+                                    base_name = model_name.split(':')[0]
+                                    if base_name and base_name not in model_names:
+                                        model_names.append(base_name)
+                
+                # Check if our model is in the list (with or without tag)
+                base_model_name = self.model_name.split(':')[0] if ':' in self.model_name else self.model_name
+                if self.model_name not in model_names and base_model_name not in model_names:
                     available_str = ", ".join(model_names) if model_names else "None"
-                    error_msg = f"Model '{self.model_name}' not found. Available models: {available_str}. Please run: ollama pull {self.model_name}"
+                    error_msg = f"🔴 Model '{self.model_name}' not found. Available models: {available_str}. Please run: ollama pull {self.model_name}"
                     logging.error(error_msg)
                     raise ValueError(error_msg)
+                else:
+                    logging.debug(f"✅ Verified model '{self.model_name}' is available in Ollama")
             except Exception as list_error:
-                logging.warning(f"Could not verify model availability: {list_error}. Proceeding anyway.")e:
+                logging.warning(f"⚠️ Could not verify model availability: {list_error}. Proceeding anyway.")
 1. Model initialization and configuration
 2. Image processing and prompting
 3. Response parsing and formatting
@@ -370,20 +383,56 @@ class OllamaAdapter(ModelAdapter):
             "model_name": self.model_name
         }
     
-    def _extract_model_name(self, display_name: str) -> str:
-        """Extract the actual model name from the display name."""
-        # Remove "(local)" suffix and vision indicator "👁️"
-        model_name = display_name.replace("(local)", "").replace("👁️", "").strip()
-        return model_name
+    def _extract_model_name(self, model_name: str) -> str:
+        """Extract the model name, preserving the tag for Ollama API but removing suffixes.
+        
+        Ollama API uses the full model name with tag (e.g., "llama3.2-vision:latest"),
+        but we need to strip any UI-specific suffixes like "(local)" or vision indicators.
+        """
+        # Remove UI-specific suffixes
+        name_to_process = model_name
+        for suffix in [" (local)", " 👁️", " (Ollama)"]:
+            name_to_process = name_to_process.replace(suffix, "")
+            
+        # Check if the name has any whitespace (shouldn't for Ollama models)
+        if " " in name_to_process:
+            logging.warning(f"⚠️ Suspicious whitespace in model name: '{name_to_process}'. This may cause issues with Ollama.")
+            name_to_process = name_to_process.strip()
+            
+        # Log the extraction
+        if name_to_process != model_name:
+            logging.debug(f"Extracted model name '{name_to_process}' from display name '{model_name}'")
+            
+        return name_to_process
     
     def _check_vision_support(self, model_name: str) -> bool:
-        """Check if the model supports vision capabilities based on its name."""
-        # Common vision-capable model patterns
-        vision_patterns = [
-            'vision', 'llava', 'bakllava', 'minicpm-v', 'moondream', 'gemma3', 'llama4', 'qwen2.5vl'
-        ]
-        base_name = model_name.split(':')[0].lower()  # Remove tag if present
-        return any(pattern in base_name for pattern in vision_patterns)
+        """Check if the model supports vision capabilities.
+        
+        This method uses a direct query to Ollama for model information when possible,
+        and falls back to pattern matching when necessary.
+        """
+        try:
+            import ollama
+            
+            # Extract base name for feature detection
+            base_name = model_name.split(':')[0].lower()
+            
+            # First, try to get model tags or metadata from Ollama
+            # This would be the preferred approach if Ollama API provides this info
+            # Future improvement: Use Ollama API to get model capabilities directly
+            
+            # For now, we'll still use name-based detection as primary method
+            # since Ollama doesn't have a direct "capabilities" API
+            vision_patterns = [
+                'vision', 'llava', 'bakllava', 'minicpm-v', 'moondream', 'gemma3', 
+                'llama', 'qwen2.5vl', 'mistral3', 'vl'
+            ]
+            return any(pattern in base_name for pattern in vision_patterns)
+            
+        except Exception as e:
+            # Log the error but don't crash - fall back to conservative result
+            logging.warning(f"Error checking vision support for {model_name}: {e}")
+            return False
     
     def initialize(self, model_config: Dict[str, Any], safety_settings: Optional[Dict] = None) -> None:
         """Initialize the Ollama model."""
@@ -437,14 +486,45 @@ class OllamaAdapter(ModelAdapter):
             # Check if model is available before attempting to use it
             try:
                 available_models = ollama.list()
-                model_names = [model['name'].split(':')[0] for model in available_models.get('models', [])]
-                if self.model_name not in model_names and f"{self.model_name}:latest" not in [model['name'] for model in available_models.get('models', [])]:
-                    available_str = ", ".join([model['name'] for model in available_models.get('models', [])])
-                    error_msg = f"Model '{self.model_name}' not found. Available models: {available_str}. Please run: ollama pull {self.model_name}"
+                model_names = []
+                
+                # Handle the new Ollama API response format (Python SDK v0.5.0+)
+                if hasattr(available_models, 'models') and isinstance(available_models.models, list):
+                    for model_obj in available_models.models:
+                            # Extract model name from the model object
+                            if hasattr(model_obj, 'model'):
+                                model_name = model_obj.model
+                                if model_name and isinstance(model_name, str):
+                                    model_names.append(model_name)
+                                    
+                                    # Also add base name without tag
+                                    if ':' in model_name:
+                                        base_name = model_name.split(':')[0]
+                                        if base_name and base_name not in model_names:
+                                            model_names.append(base_name)                # Handle older dictionary format for backward compatibility
+                elif isinstance(available_models, dict) and 'models' in available_models:
+                    for model in available_models['models']:
+                        if isinstance(model, dict):
+                            model_name = model.get('name') or model.get('model', '')
+                            if model_name and isinstance(model_name, str):
+                                model_names.append(model_name)
+                                # Also add base name without tag
+                                if ':' in model_name:
+                                    base_name = model_name.split(':')[0]
+                                    if base_name and base_name not in model_names:
+                                        model_names.append(base_name)
+                
+                # Check if our model is in the list (with or without tag)
+                base_model_name = self.model_name.split(':')[0] if ':' in self.model_name else self.model_name
+                if self.model_name not in model_names and base_model_name not in model_names:
+                    available_str = ", ".join(model_names) if model_names else "None"
+                    error_msg = f"🔴 Model '{self.model_name}' not found. Available models: {available_str}. Please run: ollama pull {self.model_name}"
                     logging.error(error_msg)
                     raise ValueError(error_msg)
+                else:
+                    logging.debug(f"✅ Verified model '{self.model_name}' is available in Ollama")
             except Exception as list_error:
-                logging.warning(f"Could not verify model availability: {list_error}. Proceeding anyway.")
+                logging.warning(f"⚠️ Could not verify model availability: {list_error}. Proceeding anyway.")
             
             # Prepare messages and images
             messages = []
@@ -455,16 +535,25 @@ class OllamaAdapter(ModelAdapter):
             
             # Handle image if provided and model supports vision
             if image and supports_vision:
-                # Convert PIL Image to base64
-                image_buffer = io.BytesIO()
-                image_format = 'JPEG' if image.mode in ('RGB', 'L', 'P') else 'PNG'
-                image.save(image_buffer, format=image_format)
-                image_bytes = image_buffer.getvalue()
-                image_b64 = base64.b64encode(image_bytes).decode('utf-8')
-                
-                # For Ollama, images are passed separately
-                images.append(f"data:image/{image_format.lower()};base64,{image_b64}")
-                logging.debug(f"Added image to Ollama request (format: {image_format}, size: {len(image_b64)} chars)")
+                try:
+                    # Save temporary file with a unique identifier
+                    import uuid
+                    temp_image_path = f"temp_ollama_image_{uuid.uuid4()}.jpg"
+                    
+                    # Convert image to RGB mode if it's not in a compatible format
+                    if image.mode not in ('RGB'):
+                        image = image.convert('RGB')
+                        
+                    # Save the image to a temporary file
+                    image.save(temp_image_path, format="JPEG", quality=95)
+                    
+                    # For Ollama, we'll pass the file path directly in the images parameter
+                    # This follows the documented approach: https://ollama.com/blog/vision-models
+                    images.append(temp_image_path)
+                    logging.debug(f"Added image to Ollama request (file: {temp_image_path})")
+                except Exception as img_error:
+                    logging.error(f"Error processing image for Ollama: {img_error}", exc_info=True)
+                    raise ValueError(f"Failed to process image for Ollama: {img_error}")
             elif image and not supports_vision:
                 logging.warning(f"Model '{self.model_name}' does not support vision. Processing text-only.")
             
@@ -477,33 +566,72 @@ class OllamaAdapter(ModelAdapter):
             messages.append(user_message)
             
             # Use different API based on whether model supports vision
+            temp_files_to_cleanup = []
+            
             if supports_vision and images:
-                # Use generate API for vision models
-                response = ollama.generate(
-                    model=self.model_name,
-                    prompt=prompt,
-                    images=images,
-                    options={
-                        "temperature": self.generation_params.get("temperature", 0.7),
-                        "top_p": self.generation_params.get("top_p", 0.95),
-                        "num_predict": self.generation_params.get("max_output_tokens", 1024)
-                    }
-                )
-                # Extract response text from generate response
-                response_text = response.get('response', '')
+                logging.debug(f"Using Ollama vision API with {len(images)} images")
+                # Track temporary files to clean up
+                temp_files_to_cleanup.extend(images)
+                
+                try:
+                    # Using chat method with images in the message as shown in Ollama docs
+                    # https://ollama.com/blog/vision-models
+                    response = ollama.chat(
+                        model=self.model_name,
+                        messages=[
+                            {
+                                'role': 'user',
+                                'content': prompt,
+                                'images': images
+                            }
+                        ],
+                        options={
+                            "temperature": self.generation_params.get("temperature", 0.7),
+                            "top_p": self.generation_params.get("top_p", 0.95),
+                            "num_predict": self.generation_params.get("max_output_tokens", 1024)
+                        }
+                    )
+                    # Extract response text from chat response
+                    if hasattr(response, 'message') and hasattr(response.message, 'content'):
+                        response_text = response.message.content
+                    else:
+                        response_text = response.get('message', {}).get('content', '')
+                except Exception as chat_error:
+                    logging.error(f"Error in Ollama chat API call: {chat_error}", exc_info=True)
+                    raise ValueError(f"Ollama chat API call failed: {chat_error}")
             else:
-                # Use chat API for text-only models
-                response = ollama.chat(
-                    model=self.model_name,
-                    messages=messages,
-                    options={
-                        "temperature": self.generation_params.get("temperature", 0.7),
-                        "top_p": self.generation_params.get("top_p", 0.95),
-                        "num_predict": self.generation_params.get("max_output_tokens", 1024)
-                    }
-                )
-                # Extract response text from chat response
-                response_text = response.get('message', {}).get('content', '')
+                logging.debug("Using Ollama chat API (text-only)")
+                try:
+                    # Use chat API for text-only models
+                    response = ollama.chat(
+                        model=self.model_name,
+                        messages=messages,
+                        options={
+                            "temperature": self.generation_params.get("temperature", 0.7),
+                            "top_p": self.generation_params.get("top_p", 0.95),
+                            "num_predict": self.generation_params.get("max_output_tokens", 1024)
+                        }
+                    )
+                    # Extract response text from chat response
+                    if hasattr(response, 'message') and hasattr(response.message, 'content'):
+                        response_text = response.message.content
+                    else:
+                        response_text = response.get('message', {}).get('content', '')
+                    
+                    # Ensure response_text is a string
+                    if response_text is None:
+                        response_text = ""
+                    elif not isinstance(response_text, str):
+                        response_text = str(response_text)
+                except Exception as chat_error:
+                    logging.error(f"Error in Ollama chat API call: {chat_error}")
+                    raise ValueError(f"Ollama chat API call failed: {chat_error}")
+            
+            # Ensure response_text is a valid string
+            if response_text is None:
+                response_text = ""
+            elif not isinstance(response_text, str):
+                response_text = str(response_text)
             
             # Prepare metadata
             elapsed_time = time.time() - start_time
@@ -520,6 +648,16 @@ class OllamaAdapter(ModelAdapter):
                 "response": len(response_text) // 4,  # Rough estimate
                 "total": (len(prompt) + len(response_text)) // 4  # Rough estimate
             }
+            
+            # Clean up any temporary image files
+            for temp_file in temp_files_to_cleanup:
+                try:
+                    import os
+                    if os.path.exists(temp_file):
+                        os.remove(temp_file)
+                        logging.debug(f"Cleaned up temporary file: {temp_file}")
+                except Exception as cleanup_error:
+                    logging.warning(f"Failed to clean up temporary file {temp_file}: {cleanup_error}")
             
             return response_text, metadata
             

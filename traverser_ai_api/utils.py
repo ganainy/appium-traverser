@@ -23,7 +23,7 @@ try:
 except ImportError as e:
     lxml_etree = None
     USING_LXML = False
-    logging.warning(f"lxml not available, falling back to xml.etree.ElementTree. Error: {e}")
+    logging.warning(f"⚠️ lxml not available, falling back to xml.etree.ElementTree. Error: {e}")
 import re
 
 # --- Global Script Start Time (for ElapsedTimeFormatter) ---
@@ -40,26 +40,69 @@ class ElapsedTimeFormatter(logging.Formatter):
         return f"{h:02d}:{m:02d}:{s:02d}.{ms:03d}"
 
 class UIColoredLogHandler(logging.Handler):
-    """Custom logging handler that routes log messages to the UI with appropriate colors."""
+    """Custom logging handler that routes log messages to the UI with emoji indicators for better visibility."""
 
     def __init__(self, ui_controller):
         super().__init__()
         self.ui_controller = ui_controller
 
     def emit(self, record):
-        """Emit a log record to the UI with color based on log level."""
+        """Emit a log record to the UI with emoji indicators based on log level and content."""
         try:
             message = self.format(record)
-
-            # Map log levels to colors
-            if record.levelno >= logging.ERROR:
+            message_lower = message.lower()
+            color = 'white'  # Default color
+            
+            # Check if the message already has an emoji prefix
+            has_emoji = any(emoji in message[:4] for emoji in ["🔴", "⚠️", "ℹ️", "✅", "🔧", "📌", "🚀", "🔍", "🟢", "🔒", "📍", "👁️", "🔐", "👆", "⌨️", "📜", "👈", "⬅️", "⚡"])
+            
+            # Add emoji indicators based on log level and message content
+            if record.levelno >= logging.CRITICAL:
+                if not has_emoji:
+                    message = f"🔴 CRITICAL: {message}"  # Critical errors
+                color = 'red'
+            elif record.levelno >= logging.ERROR:
+                if not has_emoji:
+                    message = f"🔴 {message}"  # Regular errors
                 color = 'red'
             elif record.levelno >= logging.WARNING:
+                if not has_emoji:
+                    message = f"⚠️ {message}"  # Warnings
                 color = 'orange'
             elif record.levelno >= logging.INFO:
-                color = 'green'
-            else:
-                color = 'white'  # DEBUG and below
+                if not has_emoji:
+                    # Add specific indicators based on message content
+                    if 'success' in message_lower or 'completed' in message_lower:
+                        message = f"✅ {message}"
+                        color = 'green'
+                    elif 'connected' in message_lower or 'ready' in message_lower:
+                        message = f"🟢 {message}"
+                        color = 'green'
+                    elif 'important' in message_lower:
+                        message = f"📌 {message}"
+                        color = 'magenta'
+                    elif 'privacy' in message_lower:
+                        message = f"🔒 {message}"
+                        color = 'blue'
+                    elif 'detecting' in message_lower or 'checking' in message_lower:
+                        message = f"🔍 {message}"
+                        color = 'cyan'
+                    elif 'starting' in message_lower or 'initializing' in message_lower:
+                        message = f"🚀 {message}"
+                        color = 'blue'
+                    elif 'failure' in message_lower or 'fail' in message_lower:
+                        message = f"🔴 {message}"  # Failures need red indicator
+                        color = 'red'
+                    elif 'termination' in message_lower or 'terminated' in message_lower:
+                        message = f"🔴 {message}"  # Termination messages need red indicator
+                        color = 'red'
+                    else:
+                        message = f"ℹ️ {message}"  # Default info indicator
+                        color = 'blue'
+            elif record.levelno >= logging.DEBUG:
+                if not has_emoji:
+                    message = f"🔧 {message}"  # Debug messages
+                color = 'gray'
 
             # Send to UI controller if available
             if self.ui_controller and hasattr(self.ui_controller, 'log_message'):
@@ -188,7 +231,7 @@ def calculate_visual_hash(screenshot_bytes: bytes) -> str:
         v_hash = str(imagehash.phash(img))
         return v_hash
     except Exception as e:
-        logging.error(f"Error calculating visual hash: {e}")
+        logging.error(f"🔴 Error calculating visual hash: {e}")
         return "hash_error"
 
 def visual_hash_distance(hash1: str, hash2: str) -> int:
@@ -203,7 +246,7 @@ def visual_hash_distance(hash1: str, hash2: str) -> int:
         h2 = imagehash.hex_to_hash(hash2)
         return h1 - h2
     except Exception as e:
-        logging.error(f"Error calculating hash distance between {hash1} and {hash2}: {e}")
+        logging.error(f"🔴 Error calculating hash distance between {hash1} and {hash2}: {e}")
         return 1000
 
 def simplify_xml_for_ai(xml_string: str, max_len: int, provider: str = "gemini") -> str:
@@ -271,7 +314,7 @@ def simplify_xml_for_ai(xml_string: str, max_len: int, provider: str = "gemini")
         simplified_xml = xml_bytes.decode('utf-8')
 
         if len(simplified_xml) > effective_max_len:
-            logging.warning(f"Simplified XML still exceeds max_len ({len(simplified_xml)} > {effective_max_len}) for {provider}. Performing final smart truncation.")
+            logging.warning(f"⚠️ Simplified XML still exceeds max_len ({len(simplified_xml)} > {effective_max_len}) for {provider}. Performing final smart truncation.")
             trunc_point = simplified_xml.rfind('</', 0, effective_max_len)
             if trunc_point != -1:
                 end_tag_point = simplified_xml.find('>', trunc_point, effective_max_len + 30)
@@ -290,10 +333,10 @@ def simplify_xml_for_ai(xml_string: str, max_len: int, provider: str = "gemini")
         return simplified_xml
 
     except possible_parse_errors + (ValueError, TypeError) as e:
-        logging.error(f"Failed to parse or simplify XML for {provider}: {e}. Falling back to basic truncation.")
+        logging.error(f"🔴 Failed to parse or simplify XML for {provider}: {e}. Falling back to basic truncation.")
         return xml_string[:effective_max_len] + "\n... (fallback truncation)" if len(xml_string) > effective_max_len else xml_string
     except Exception as e:
-        logging.error(f"Unexpected error during XML simplification for {provider}: {e}. Falling back.", exc_info=True)
+        logging.error(f"🔴 Unexpected error during XML simplification for {provider}: {e}. Falling back.", exc_info=True)
         return xml_string[:effective_max_len] + "\n... (fallback truncation)" if len(xml_string) > effective_max_len else xml_string
 
 def filter_xml_by_allowed_packages(xml_string: str, target_package: str, allowed_packages: List[str]) -> str:
@@ -341,10 +384,10 @@ def filter_xml_by_allowed_packages(xml_string: str, target_package: str, allowed
         return xml_bytes.decode('utf-8')
 
     except possible_parse_errors + (ValueError, TypeError) as e:
-        logging.error(f"XML ParseError during package filtering: {e}. Returning original XML.")
+        logging.error(f"🔴 XML ParseError during package filtering: {e}. Returning original XML.")
         return xml_string
     except Exception as e:
-        logging.error(f"Unexpected error during XML filtering: {e}", exc_info=True)
+        logging.error(f"🔴 Unexpected error during XML filtering: {e}", exc_info=True)
         return xml_string
 
 
@@ -363,7 +406,7 @@ def draw_indicator_on_image(image_bytes: bytes, coordinates: Tuple[int, int], co
         img.save(output_buffer, format="PNG")
         return output_buffer.getvalue()
     except Exception as e:
-        logging.error(f"Error drawing indicator at {coordinates}: {e}")
+        logging.error(f"🔴 Error drawing indicator at {coordinates}: {e}")
         return None
 
 def generate_action_description(action_type: str, target_obj: Optional[Any], input_text: Optional[str], ai_target_identifier: Optional[str]) -> str:
@@ -387,13 +430,13 @@ def draw_rectangle_on_image(
 ) -> Optional[bytes]:
     """Draws a rectangle (bounding box) with a contrasting border on an image."""
     if not image_bytes or not box_coords:
-        logging.warning("draw_rectangle_on_image: Missing image_bytes or box_coords.")
+        logging.warning("⚠️ draw_rectangle_on_image: Missing image_bytes or box_coords.")
         return None
     if line_thickness <= 0:
-        logging.warning("draw_rectangle_on_image: line_thickness must be positive.")
+        logging.warning("⚠️ draw_rectangle_on_image: line_thickness must be positive.")
         return image_bytes
     if border_size < 0:
-        logging.warning("draw_rectangle_on_image: border_size cannot be negative.")
+        logging.warning("⚠️ draw_rectangle_on_image: border_size cannot be negative.")
         return image_bytes
 
     try:
@@ -404,7 +447,7 @@ def draw_rectangle_on_image(
         if not (0 <= x1 < img.width and 0 <= y1 < img.height and \
                 x1 < x2 <= img.width and y1 < y2 <= img.height):
             logging.warning(
-                f"draw_rectangle_on_image: Invalid or out-of-bounds box_coords ({x1},{y1},{x2},{y2}) "
+                f"⚠️ draw_rectangle_on_image: Invalid or out-of-bounds box_coords ({x1},{y1},{x2},{y2}) "
                 f"for image size ({img.width}x{img.height}). Skipping drawing."
             )
             return image_bytes
@@ -420,7 +463,7 @@ def draw_rectangle_on_image(
         img.save(output_buffer, format="PNG")
         return output_buffer.getvalue()
     except Exception as e:
-        logging.error(f"Error in draw_rectangle_on_image with box {box_coords}: {e}", exc_info=True)
+        logging.error(f"🔴 Error in draw_rectangle_on_image with box {box_coords}: {e}", exc_info=True)
         return None
 
 def are_visual_hashes_valid(hash1: Optional[str], hash2: Optional[str]) -> bool:

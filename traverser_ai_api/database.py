@@ -33,20 +33,20 @@ class DatabaseManager:
                     logging.debug(f"Database connection is active for current thread {current_thread_id}.")
                     return True
                 except sqlite3.Error as e:
-                    logging.warning(f"Existing database connection for thread {current_thread_id} is not usable ({e}). Reconnecting.")
+                    logging.warning(f"⚠️ Existing database connection for thread {current_thread_id} is not usable ({e}). Reconnecting.")
                     self.conn = None
                     self._conn_thread_ident = None
             else:
                 # Connection exists but was created by a different thread. This is the problematic case.
                 logging.warning(
-                    f"Database connection found (owned by thread {self._conn_thread_ident}) "
+                    f"⚠️ Database connection found (owned by thread {self._conn_thread_ident}) "
                     f"but current operation is in thread {current_thread_id}. "
                     f"Closing old connection and creating a new one for current thread."
                 )
                 try:
                     self.conn.close() # Attempt to close the old connection
                 except sqlite3.Error as e_close:
-                    logging.warning(f"Error closing connection from thread {self._conn_thread_ident} in thread {current_thread_id}: {e_close}")
+                    logging.warning(f"⚠️ Error closing connection from thread {self._conn_thread_ident} in thread {current_thread_id}: {e_close}")
                 finally:
                     self.conn = None
                     self._conn_thread_ident = None
@@ -92,7 +92,7 @@ class DatabaseManager:
         if self.conn:
             if self._conn_thread_ident is not None and self._conn_thread_ident != current_thread_id:
                 logging.warning(
-                    f"Attempting to close DB connection from thread {current_thread_id}, "
+                    f"⚠️ Attempting to close DB connection from thread {current_thread_id}, "
                     f"but it was created by/owned by thread {self._conn_thread_ident}. "
                     f"This might lead to issues if the original thread still expects to use it."
                 )
@@ -117,14 +117,14 @@ class DatabaseManager:
         if not self.conn or self._conn_thread_ident != current_thread_id:
             logging.debug(f"_execute_sql in thread {current_thread_id}: Connection is None or owned by another thread ({self._conn_thread_ident}). Re-evaluating connection.")
             if not self.connect(): # connect() now ensures conn is for current_thread_id or fails
-                logging.error(f"Failed to establish/validate DB connection for thread {current_thread_id} from _execute_sql.")
+                logging.error(f"🔴 Failed to establish/validate DB connection for thread {current_thread_id} from _execute_sql.")
                 if fetch_all: return []
                 return None
 
         # At this point, self.conn should be valid and owned by current_thread_id
         try:
             if not self.conn:
-                logging.error("Database connection is None")
+                logging.error("🔴 Database connection is None")
                 if fetch_all: return []
                 return None
             cursor = self.conn.cursor()
@@ -137,19 +137,19 @@ class DatabaseManager:
                 self.conn.commit()
             return cursor.lastrowid
         except sqlite3.Error as e: # sqlite3.Error includes ProgrammingError
-            logging.error(f"Database error executing SQL in thread {current_thread_id}: {sql} | Params: {params} | Error: {e}", exc_info=True)
+            logging.error(f"🔴 Database error executing SQL in thread {current_thread_id}: {sql} | Params: {params} | Error: {e}", exc_info=True)
             if "thread" in str(e).lower(): # Heuristic for threading error
-                logging.warning("Detected potential threading error during SQL execution. Invalidating connection for this manager instance.")
+                logging.warning("⚠️ Detected potential threading error during SQL execution. Invalidating connection for this manager instance.")
                 self.conn = None # Invalidate the connection
                 self._conn_thread_ident = None
             elif self.conn: # If not a threading error and conn exists
                  try: self.conn.rollback()
-                 except Exception as rb_err: logging.error(f"Error during rollback: {rb_err}")
+                 except Exception as rb_err: logging.error(f"🔴 Error during rollback: {rb_err}")
 
             if fetch_all: return []
             return None
         except Exception as e: # Catch other unexpected errors
-            logging.error(f"Unexpected error executing SQL in thread {current_thread_id}: {sql} | Error: {e}", exc_info=True)
+            logging.error(f"🔴 Unexpected error executing SQL in thread {current_thread_id}: {sql} | Error: {e}", exc_info=True)
             if fetch_all: return []
             return None
 
@@ -234,7 +234,7 @@ class DatabaseManager:
             logging.debug("Database tables created/verified successfully.")
             return True
         except Exception as e:
-            logging.error(f"Failed to create one or more database tables or indexes: {e}", exc_info=True)
+            logging.error(f"🔴 Failed to create one or more database tables or indexes: {e}", exc_info=True)
             return False
 
     def get_or_create_run_info(self, app_package: str, start_activity: str) -> Optional[int]:
@@ -251,7 +251,7 @@ class DatabaseManager:
             logging.debug(f"Created new run ID: {run_id} for {app_package}")
             return run_id
         else:
-            logging.error(f"Failed to create new run entry for {app_package}")
+            logging.error(f"🔴 Failed to create new run entry for {app_package}")
             return None
 
     def update_run_status(self, run_id: int, status: str, end_time: Optional[str] = None) -> bool:
@@ -356,7 +356,7 @@ class DatabaseManager:
         return result if isinstance(result, list) else []
 
     def initialize_db_for_fresh_run(self) -> bool:
-        logging.warning("Clearing Screens, Simplified Transitions, and Steps Log for a fresh run...")
+        logging.warning("⚠️ Clearing Screens, Simplified Transitions, and Steps Log for a fresh run...")
         try:
             self._execute_sql(f"DELETE FROM {self.TRANSITIONS_TABLE};", commit=True)
             self._execute_sql(f"DELETE FROM steps_log;", commit=True)
@@ -367,7 +367,7 @@ class DatabaseManager:
             logging.debug("Screens, Transitions, and Steps Log tables cleared successfully.")
             return True
         except Exception as e:
-            logging.error(f"Failed to clear tables for fresh run: {e}", exc_info=True)
+            logging.error(f"🔴 Failed to clear tables for fresh run: {e}", exc_info=True)
             return False
             
     def update_run_meta(self, run_id: int, meta_json: str) -> Optional[int]:

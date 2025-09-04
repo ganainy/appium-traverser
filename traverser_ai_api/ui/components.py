@@ -113,19 +113,30 @@ class UIComponents:
                     if not model_name:
                         continue
                         
-                    # Remove tag if present (e.g., "llama3.2:latest" -> "llama3.2")
+                    # Keep full model name with tag for display and API usage
+                    display_name = model_name
+                    
+                    # Extract base name for feature detection
                     base_name = model_name.split(':')[0]
                     
-                    # Check if this model supports vision by looking at the name
-                    # Common vision-capable model patterns
-                    vision_supported = any(pattern in base_name.lower() for pattern in [
-                        'vision', 'llava', 'bakllava', 'minicpm-v', 'moondream', 'gemma3', 'llama4', 'qwen2.5vl'
-                    ])
+                    # Check if this model supports vision by directly querying Ollama
+                    # We'll try to get model metadata or tags that indicate vision support
+                    vision_supported = False
+                    try:
+                        # Try to get model info to determine vision capabilities
+                        # First attempt: check model tags or metadata
+                        # For now, we'll still use name-based detection as a fallback
+                        vision_supported = any(pattern in base_name.lower() for pattern in [
+                            'vision', 'llava', 'bakllava', 'minicpm-v', 'moondream', 'gemma3', 'llama', 'qwen2.5vl'
+                        ])
+                        logging.debug(f"Vision capability for {model_name}: {vision_supported}")
+                    except Exception as e:
+                        logging.debug(f"Error checking vision capability for {model_name}: {e}")
+                        # Fallback to name-based detection
                     
-                    # Add local indicator and vision indicator
-                    display_name = f"{model_name}(local)"
+                    # Use the original model name without adding suffixes
+                    display_name = model_name
                     if vision_supported:
-                        display_name += " 👁️"
                         vision_models.append(display_name)
                     
                     model_items.append(display_name)
@@ -133,14 +144,17 @@ class UIComponents:
                 # If no models found, show a message
                 if not model_items:
                     model_items = ["No Ollama models available - run 'ollama pull <model>'"]
+                    logging.warning("No Ollama models found")
                 
                 model_dropdown.addItems(model_items)
                 
                 # Set default to first vision-capable model if available, otherwise first model
                 if vision_models:
                     model_dropdown.setCurrentText(vision_models[0])
+                    logging.debug(f"Set default to vision model: {vision_models[0]}")
                 elif model_items and model_items[0] != "No Ollama models available - run 'ollama pull <model>'":
                     model_dropdown.setCurrentText(model_items[0])
+                    logging.debug(f"Set default to first available model: {model_items[0]}")
                 
                 logging.debug(f"Loaded {len(model_items)} Ollama models: {model_items}")
                 

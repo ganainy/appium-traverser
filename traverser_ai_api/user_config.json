@@ -14,7 +14,7 @@
     "TARGET_DEVICE_UDID": "",
     "USE_COORDINATE_FALLBACK": true,
     "AI_PROVIDER": "ollama",
-    "DEFAULT_MODEL_TYPE": "llama3.2",
+    "DEFAULT_MODEL_TYPE": "llama3.2-vision:latest",
     "USE_CHAT_MEMORY": false,
     "MAX_CHAT_HISTORY": 0,
     "ENABLE_IMAGE_CONTEXT": true,
