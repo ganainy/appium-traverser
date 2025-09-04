@@ -8,7 +8,39 @@ import re
 import requests
 import subprocess
 from typing import Optional, Dict, Any, List, Tuple
-from PySide6.QtCore import QObject, QProcess, QTimer, Slot, Signal
+from PySide6.QtCore import QObject, QProcess, QTimer, Slot, Signal, QThread, QRunnable, QThreadPool
+from PySide6.QtWidgets import QApplication
+
+
+class ValidationWorker(QRunnable):
+    """Worker class to run validation checks asynchronously."""
+    
+    def __init__(self, crawler_manager):
+        super().__init__()
+        self.crawler_manager = crawler_manager
+        self.signals = ValidationSignals()
+    
+    def run(self):
+        """Run the validation checks in a background thread."""
+        try:
+            # Perform validation
+            is_valid, messages = self.crawler_manager.validate_pre_crawl_requirements()
+            
+            # Get detailed status
+            status_details = self.crawler_manager.get_service_status_details()
+            
+            # Emit results
+            self.signals.validation_completed.emit(is_valid, messages, status_details)
+            
+        except Exception as e:
+            logging.error(f"Error in validation worker: {e}")
+            self.signals.validation_error.emit(str(e))
+
+
+class ValidationSignals(QObject):
+    """Signals for validation worker communication."""
+    validation_completed = Signal(bool, list, dict)  # is_valid, messages, status_details
+    validation_error = Signal(str)  # error_message
 
 
 class CrawlerManager(QObject):
@@ -37,6 +69,10 @@ class CrawlerManager(QObject):
         self.shutdown_timer = QTimer(self)
         self.shutdown_timer.setSingleShot(True)
         self.shutdown_timer.timeout.connect(self.force_stop_crawler_on_timeout)
+        
+        # Initialize thread pool for async validation
+        self.thread_pool = QThreadPool()
+        self.validation_worker = None
     
     def validate_pre_crawl_requirements(self) -> Tuple[bool, List[str]]:
         """
@@ -46,15 +82,17 @@ class CrawlerManager(QObject):
             Tuple of (is_valid, list_of_issues)
         """
         issues = []
+        warnings = []
         
         # 1. Check Appium server
         if not self._check_appium_server():
             issues.append("❌ Appium server is not running or not accessible")
         
-        # 2. Check MobSF (if enabled)
-        if getattr(self.config, 'ENABLE_MOBSF_ANALYSIS', False):
-            if not self._check_mobsf_server():
-                issues.append("❌ MobSF server is not running or not accessible")
+        # 2. Check MobSF server (always check, but only warn if not running)
+        mobsf_running = self._check_mobsf_server()
+        if not mobsf_running:
+            # Add as a warning, not a blocking issue
+            warnings.append("⚠️ MobSF server is not running (MobSF analysis will be skipped)")
         
         # 3. Check Ollama (if selected as AI provider)
         ai_provider = getattr(self.config, 'AI_PROVIDER', 'gemini').lower()
@@ -63,21 +101,25 @@ class CrawlerManager(QObject):
                 issues.append("❌ Ollama service is not running")
         
         # 4. Check API keys and required environment variables
-        api_key_issues = self._check_api_keys_and_env()
-        issues.extend(api_key_issues)
+        api_issues, api_warnings = self._check_api_keys_and_env()
+        issues.extend(api_issues)
+        warnings.extend(api_warnings)
         
         # 5. Check target app is selected
         if not getattr(self.config, 'APP_PACKAGE', None):
             issues.append("❌ No target app selected")
         
-        return len(issues) == 0, issues
+        # Combine issues and warnings for display
+        all_messages = issues + warnings
+        
+        return len(issues) == 0, all_messages
     
     def _check_appium_server(self) -> bool:
         """Check if Appium server is running and accessible."""
         try:
             appium_url = getattr(self.config, 'APPIUM_SERVER_URL', 'http://127.0.0.1:4723')
-            # Try to connect to Appium status endpoint
-            response = requests.get(f"{appium_url}/status", timeout=5)
+            # Try to connect to Appium status endpoint with shorter timeout
+            response = requests.get(f"{appium_url}/status", timeout=3)
             if response.status_code == 200:
                 status_data = response.json()
                 # Check for 'ready' field, handling both direct and nested formats
@@ -92,8 +134,8 @@ class CrawlerManager(QObject):
         """Check if MobSF server is running and accessible."""
         try:
             mobsf_url = getattr(self.config, 'MOBSF_API_URL', 'http://localhost:8000/api/v1')
-            # Try to connect to MobSF API
-            response = requests.get(f"{mobsf_url}/server_status", timeout=5)
+            # Try to connect to MobSF API with shorter timeout
+            response = requests.get(f"{mobsf_url}/server_status", timeout=3)
             if response.status_code == 200:
                 return True
         except Exception as e:
@@ -102,21 +144,51 @@ class CrawlerManager(QObject):
         return False
     
     def _check_ollama_service(self) -> bool:
-        """Check if Ollama service is running."""
+        """Check if Ollama service is running using HTTP API first, then subprocess fallback."""
+        # First try HTTP API check (fast and non-blocking)
+        ollama_url = getattr(self.config, 'OLLAMA_BASE_URL', 'http://localhost:11434')
+        
         try:
-            # Try to run ollama list command
-            result = subprocess.run(['ollama', 'list'], 
-                                  capture_output=True, 
-                                  text=True, 
-                                  timeout=10)
-            return result.returncode == 0
-        except (subprocess.TimeoutExpired, FileNotFoundError, subprocess.SubprocessError) as e:
-            logging.debug(f"Ollama service check failed: {e}")
-            return False
+            # Try to connect to Ollama API endpoint with shorter timeout
+            response = requests.get(f"{ollama_url}/api/tags", timeout=1.5)
+            if response.status_code == 200:
+                logging.debug("Ollama service detected via HTTP API")
+                return True
+        except requests.RequestException as e:
+            logging.debug(f"Ollama HTTP API check failed: {e}")
+        except Exception as e:
+            logging.debug(f"Unexpected error during Ollama HTTP check: {e}")
+        
+        # Fallback to subprocess check if HTTP fails
+        try:
+            result = subprocess.run(['ollama', 'list'],
+                                capture_output=True,
+                                text=True,
+                                timeout=2,  # Reduced from 3 seconds
+                                creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0)
+            if result.returncode == 0:
+                logging.debug("Ollama service detected via subprocess")
+                return True
+        except subprocess.TimeoutExpired:
+            logging.debug("Ollama subprocess check timed out")
+        except FileNotFoundError:
+            logging.debug("Ollama executable not found")
+        except subprocess.SubprocessError as e:
+            logging.debug(f"Ollama subprocess check failed: {e}")
+        except Exception as e:
+            logging.debug(f"Unexpected error during Ollama subprocess check: {e}")
+        
+        logging.debug("Ollama service not detected")
+        return False
     
-    def _check_api_keys_and_env(self) -> List[str]:
-        """Check if required API keys and environment variables are provided."""
+    def _check_api_keys_and_env(self) -> Tuple[List[str], List[str]]:
+        """Check if required API keys and environment variables are provided.
+        
+        Returns:
+            Tuple of (blocking_issues, warnings)
+        """
         issues = []
+        warnings = []
         ai_provider = getattr(self.config, 'AI_PROVIDER', 'gemini').lower()
         
         if ai_provider == 'gemini':
@@ -129,7 +201,7 @@ class CrawlerManager(QObject):
         
         elif ai_provider == 'ollama':
             if not getattr(self.config, 'OLLAMA_BASE_URL', None):
-                issues.append("⚠️ Ollama base URL not set (using default localhost:11434)")
+                warnings.append("⚠️ Ollama base URL not set (using default localhost:11434)")
         
         # Check PCAPdroid API key if traffic capture is enabled
         if getattr(self.config, 'ENABLE_TRAFFIC_CAPTURE', False):
@@ -141,7 +213,7 @@ class CrawlerManager(QObject):
             if not getattr(self.config, 'MOBSF_API_KEY', None):
                 issues.append("❌ MobSF API key is not set (check MOBSF_API_KEY in .env file)")
         
-        return issues
+        return issues, warnings
     
     def get_service_status_details(self) -> Dict[str, Dict[str, Any]]:
         """
@@ -162,17 +234,17 @@ class CrawlerManager(QObject):
             'message': f"Appium server at {appium_url}" + (" is running ✅" if appium_running else " is not accessible ❌")
         }
         
-        # MobSF status
+        # MobSF status (always check, but mark as optional)
+        mobsf_running = self._check_mobsf_server()
+        mobsf_url = getattr(self.config, 'MOBSF_API_URL', 'http://localhost:8000/api/v1')
         mobsf_enabled = getattr(self.config, 'ENABLE_MOBSF_ANALYSIS', False)
-        if mobsf_enabled:
-            mobsf_running = self._check_mobsf_server()
-            mobsf_url = getattr(self.config, 'MOBSF_API_URL', 'http://localhost:8000/api/v1')
-            details['mobsf'] = {
-                'running': mobsf_running,
-                'url': mobsf_url,
-                'required': True,
-                'message': f"MobSF server at {mobsf_url}" + (" is running ✅" if mobsf_running else " is not accessible ❌")
-            }
+        details['mobsf'] = {
+            'running': mobsf_running,
+            'url': mobsf_url,
+            'required': False,  # MobSF is now optional
+            'enabled': mobsf_enabled,
+            'message': f"MobSF server at {mobsf_url}" + (" is running ✅" if mobsf_running else " is not accessible ⚠️")
+        }
         
         # Ollama status
         ai_provider = getattr(self.config, 'AI_PROVIDER', 'gemini').lower()
@@ -185,12 +257,13 @@ class CrawlerManager(QObject):
             }
         
         # API Keys status
-        api_issues = self._check_api_keys_and_env()
+        api_issues, api_warnings = self._check_api_keys_and_env()
+        all_api_messages = api_issues + api_warnings
         details['api_keys'] = {
-            'valid': len(api_issues) == 0,
-            'issues': api_issues,
+            'valid': len(api_issues) == 0,  # Only blocking issues make it invalid
+            'issues': all_api_messages,
             'required': True,
-            'message': f"API keys: {len(api_issues)} issues found" if api_issues else "API keys: All required keys present ✅"
+            'message': f"API keys: {len(api_issues)} issue(s), {len(api_warnings)} warning(s)" if all_api_messages else "API keys: All required keys present ✅"
         }
         
         # Target app
@@ -233,24 +306,104 @@ class CrawlerManager(QObject):
 
     @Slot()
     def perform_pre_crawl_validation(self):
-        """Perform pre-crawl validation checks and display results."""
+        """Perform pre-crawl validation checks asynchronously."""
         self.main_controller.log_message("🔍 Performing pre-crawl validation checks...", 'blue')
-
-        is_valid, issues = self.validate_pre_crawl_requirements()
+        self.main_controller.log_message("⏳ Checking services (this may take a few seconds)...", 'blue')
+        
+        # Create and start validation worker
+        self.validation_worker = ValidationWorker(self)
+        self.validation_worker.signals.validation_completed.connect(self._on_validation_completed)
+        self.validation_worker.signals.validation_error.connect(self._on_validation_error)
+        
+        # Start the worker in the thread pool
+        self.thread_pool.start(self.validation_worker)
+    
+    @Slot(bool, list, dict)
+    def _on_validation_completed(self, is_valid: bool, messages: List[str], status_details: Dict[str, Any]):
+        """Handle validation completion."""
+        # Separate blocking issues from warnings
+        blocking_issues = [msg for msg in messages if msg.startswith("❌")]
+        warnings = [msg for msg in messages if msg.startswith("⚠️")]
 
         if not is_valid:
             self.main_controller.log_message("❌ Pre-crawl validation failed:", 'red')
-            for issue in issues:
+            for issue in blocking_issues:
                 self.main_controller.log_message(f"   {issue}", 'red')
-
-            self.main_controller.log_message("", 'white')  # Empty line
-            self.main_controller.log_message("⚠️ Some requirements are not met.", 'orange')
-            self.main_controller.log_message("💡 You can still start the crawler, but it may fail if services are not available.", 'blue')
+        elif warnings:
+            self.main_controller.log_message("⚠️ Pre-crawl validation completed with warnings:", 'orange')
         else:
             self.main_controller.log_message("✅ All pre-crawl checks passed!", 'green')
 
-        # Show detailed status regardless of validation result
-        self.main_controller.show_pre_crawl_validation_details()
+        # Show warnings if any
+        if warnings:
+            for warning in warnings:
+                self.main_controller.log_message(f"   {warning}", 'orange')
+
+        if blocking_issues:
+            self.main_controller.log_message("", 'white')  # Empty line
+            self.main_controller.log_message("⚠️ Some requirements are not met.", 'orange')
+            self.main_controller.log_message("💡 You can still start the crawler, but it may fail if services are not available.", 'blue')
+        elif warnings:
+            self.main_controller.log_message("", 'white')  # Empty line
+            self.main_controller.log_message("✅ Core requirements met. Warnings shown above.", 'green')
+
+        # Show detailed status
+        self._display_validation_details(status_details)
+    
+    @Slot(str)
+    def _on_validation_error(self, error_message: str):
+        """Handle validation error."""
+        self.main_controller.log_message(f"❌ Validation error: {error_message}", 'red')
+        logging.error(f"Validation error: {error_message}")
+    
+    def _display_validation_details(self, status_details: Dict[str, Any]):
+        """Display detailed validation status."""
+        try:
+            self.main_controller.log_message("🔍 Pre-Crawl Validation Details:", 'blue')
+            self.main_controller.log_message("=" * 50, 'blue')
+            
+            for service_name, details in status_details.items():
+                if service_name == 'mobsf':
+                    # Special handling for MobSF - use warning icon for non-required service
+                    if details.get('running', False):
+                        status_icon = "✅"
+                        color = 'green'
+                    else:
+                        status_icon = "⚠️"
+                        color = 'orange'
+                    self.main_controller.log_message(f"{status_icon} {details['message']}", color)
+                else:
+                    # Standard handling for other services
+                    status_icon = "✅" if details.get('running', details.get('valid', details.get('selected', False))) else "❌"
+                    color = 'green' if details.get('running', details.get('valid', details.get('selected', False))) else 'red'
+                    self.main_controller.log_message(f"{status_icon} {details['message']}", color)
+                
+                # Show additional details for API keys
+                if service_name == 'api_keys' and details.get('issues'):
+                    for issue in details['issues']:
+                        self.main_controller.log_message(f"   {issue}", 'orange')
+            
+            self.main_controller.log_message("=" * 50, 'blue')
+            
+            # Count blocking issues (required services that are not running)
+            blocking_issues = sum(1 for details in status_details.values() 
+                                if details.get('required', True) and 
+                                not details.get('running', details.get('valid', details.get('selected', False))))
+            
+            # Count warnings (non-required services that are not running)
+            warnings = sum(1 for details in status_details.values() 
+                          if not details.get('required', True) and 
+                          not details.get('running', details.get('valid', details.get('selected', False))))
+            
+            if blocking_issues == 0 and warnings == 0:
+                self.main_controller.log_message("🎉 All systems are ready for crawling!", 'green')
+            elif blocking_issues == 0:
+                self.main_controller.log_message(f"✅ Core requirements met. {warnings} warning(s) shown above.", 'green')
+            else:
+                self.main_controller.log_message(f"⚠️ {blocking_issues} blocking issue(s), {warnings} warning(s). You can still start the crawler.", 'orange')
+                
+        except Exception as e:
+            self.main_controller.log_message(f"Error displaying validation details: {e}", 'red')
     
     def force_start_crawler(self):
         """Force start the crawler process without validation checks."""

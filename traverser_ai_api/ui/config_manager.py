@@ -47,6 +47,10 @@ class ConfigManager(QObject):
     def _apply_defaults_from_config_to_widgets(self):
         """Apply default values from the config module to UI widgets."""
         for key, widget in self.main_controller.config_widgets.items():
+            # Skip UI indicator widgets that aren't actual config settings
+            if key in ['IMAGE_CONTEXT_WARNING']:
+                continue
+                
             if not hasattr(self.config, key):
                 logging.warning(f"Config key '{key}' not found in config module.")
                 continue
@@ -80,6 +84,10 @@ class ConfigManager(QObject):
         """Load configuration values from config.py module."""
         missing_configs = []
         for key, widget in self.main_controller.config_widgets.items():
+            # Skip UI indicator widgets that aren't actual config settings
+            if key in ['IMAGE_CONTEXT_WARNING']:
+                continue
+                
             if not hasattr(self.config, key):
                 missing_configs.append(f"{key}: Not found in config module.")
                 continue

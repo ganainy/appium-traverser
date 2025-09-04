@@ -42,7 +42,7 @@
         "app_name": null
     },
     "UI_MODE": "Expert",
-    "MOBSF_API_URL": "",
+    "MOBSF_API_URL": "http://localhost:8000/api/v1",
     "ENABLE_MOBSF_ANALYSIS": false,
     "FOCUS_AREAS": [
         {
