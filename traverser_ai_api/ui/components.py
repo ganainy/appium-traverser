@@ -837,6 +837,10 @@ class UIComponents:
         label_continue_run = QLabel("Continue Existing Run: ")
         label_continue_run.setToolTip(tooltips['CONTINUE_EXISTING_RUN'])
         feature_toggle_layout.addRow(label_continue_run, config_widgets['CONTINUE_EXISTING_RUN'])
+
+        config_widgets['ENABLE_VIDEO_RECORDING'] = QCheckBox()
+        label_enable_video = QLabel("Enable Video Recording: ")
+        feature_toggle_layout.addRow(label_enable_video, config_widgets['ENABLE_VIDEO_RECORDING'])
         
         layout.addRow(feature_toggle_group)
         return feature_toggle_group

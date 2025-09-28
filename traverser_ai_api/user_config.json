@@ -14,9 +14,9 @@
     "LOG_LEVEL": "INFO",
     "DB_CONNECT_TIMEOUT": 10,
     "DB_BUSY_TIMEOUT": 5000,
-    "WAIT_AFTER_ACTION": 3.0,
+    "WAIT_AFTER_ACTION": 4,
     "STABILITY_WAIT": 1.0,
-    "APP_LAUNCH_WAIT_TIME": 5,
+    "APP_LAUNCH_WAIT_TIME": 3,
     "NEW_COMMAND_TIMEOUT": 300,
     "APPIUM_IMPLICIT_WAIT": 2,
     "APPIUM_SERVER_URL": "http://127.0.0.1:4723",
@@ -32,7 +32,7 @@
     "USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY": true,
     "AI_SAFETY_SETTINGS": {},
     "CRAWL_MODE": "steps",
-    "MAX_CRAWL_STEPS": 10,
+    "MAX_CRAWL_STEPS": 1,
     "MAX_CRAWL_DURATION_SECONDS": 600,
     "CONTINUE_EXISTING_RUN": false,
     "VISUAL_SIMILARITY_THRESHOLD": 5,
@@ -48,7 +48,8 @@
     "LAST_SELECTED_APP": null,
     "UI_MODE": "Expert",
     "MOBSF_API_URL": "http://localhost:8000/api/v1",
-    "ENABLE_MOBSF_ANALYSIS": true,
+    "ENABLE_MOBSF_ANALYSIS": false,
     "FOCUS_AREAS": [],
-    "OUTPUT_DATA_DIR": "output_data"
+    "OUTPUT_DATA_DIR": "output_data",
+    "ENABLE_VIDEO_RECORDING": true
 }

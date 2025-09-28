@@ -32,6 +32,8 @@ class Config:
         self.MOBSF_SCAN_DIR: Optional[str] = None
         self.EXTRACTED_APK_DIR: Optional[str] = None
         self.PDF_REPORT_DIR: Optional[str] = None
+        self.VIDEO_RECORDING_DIR: Optional[str] = None
+        self.ENABLE_VIDEO_RECORDING: bool = False
         self.DB_CONNECT_TIMEOUT: int = 10
         self.DB_BUSY_TIMEOUT: int = 5000
         self.WAIT_AFTER_ACTION: float = 2.0
@@ -112,6 +114,7 @@ class Config:
         self._MOBSF_SCAN_DIR_TEMPLATE = "{session_dir}/mobsf_scan_results"
         self._EXTRACTED_APK_DIR_TEMPLATE = "{session_dir}/extracted_apk"
         self._PDF_REPORT_DIR_TEMPLATE = "{session_dir}/reports"
+        self._VIDEO_RECORDING_DIR_TEMPLATE = "{session_dir}/video"
 
         self._load_from_defaults_module()
         self._load_environment_variables()
@@ -134,7 +137,8 @@ class Config:
                 "LOG_DIR": "_LOG_DIR_TEMPLATE",
                 "MOBSF_SCAN_DIR": "_MOBSF_SCAN_DIR_TEMPLATE",
                 "EXTRACTED_APK_DIR": "_EXTRACTED_APK_DIR_TEMPLATE",
-                "PDF_REPORT_DIR": "_PDF_REPORT_DIR_TEMPLATE"
+                "PDF_REPORT_DIR": "_PDF_REPORT_DIR_TEMPLATE",
+                "VIDEO_RECORDING_DIR": "_VIDEO_RECORDING_DIR_TEMPLATE"
             }
             
             for key in path_templates:
@@ -384,6 +388,7 @@ class Config:
             "MAX_CONSECUTIVE_AI_FAILURES", "MAX_CONSECUTIVE_MAP_FAILURES", "MAX_CONSECUTIVE_EXEC_FAILURES",
             "ENABLE_TRAFFIC_CAPTURE", "PCAPDROID_PACKAGE",
             "DEVICE_PCAP_DIR", "CLEANUP_DEVICE_PCAP_FILE",
+            "ENABLE_VIDEO_RECORDING",
             "CURRENT_HEALTH_APP_LIST_FILE", "LAST_SELECTED_APP", "UI_MODE",
             "MOBSF_API_URL", "ENABLE_MOBSF_ANALYSIS",
             "FOCUS_AREAS",  # Add focus areas to savable config
@@ -466,12 +471,13 @@ class Config:
         self.MOBSF_SCAN_DIR = self._resolve_path_template(self._MOBSF_SCAN_DIR_TEMPLATE, self.SESSION_DIR, current_app_pkg)
         self.EXTRACTED_APK_DIR = self._resolve_path_template(self._EXTRACTED_APK_DIR_TEMPLATE, self.SESSION_DIR, current_app_pkg)
         self.PDF_REPORT_DIR = self._resolve_path_template(self._PDF_REPORT_DIR_TEMPLATE, self.SESSION_DIR, current_app_pkg)
+        self.VIDEO_RECORDING_DIR = self._resolve_path_template(self._VIDEO_RECORDING_DIR_TEMPLATE, self.SESSION_DIR, current_app_pkg)
 
         # 4. Ensure all directories are created
         dirs_to_create = [
             self.APP_INFO_OUTPUT_DIR, self.SCREENSHOTS_DIR, self.ANNOTATED_SCREENSHOTS_DIR,
             self.TRAFFIC_CAPTURE_OUTPUT_DIR, self.LOG_DIR, self.MOBSF_SCAN_DIR,
-            self.EXTRACTED_APK_DIR, self.PDF_REPORT_DIR
+            self.EXTRACTED_APK_DIR, self.PDF_REPORT_DIR, self.VIDEO_RECORDING_DIR
         ]
         if self.DB_NAME: # DB_NAME is a file path, so create its parent
             dirs_to_create.append(os.path.dirname(self.DB_NAME))
@@ -793,6 +799,10 @@ USE_ADB_INPUT_FALLBACK = True
 MOBSF_API_URL = "http://localhost:8000/api/v1"
 MOBSF_API_KEY = None  # Will be loaded from environment variable
 ENABLE_MOBSF_ANALYSIS = True
+
+# Video Recording Settings
+ENABLE_VIDEO_RECORDING = False
+VIDEO_RECORDING_DIR = "{session_dir}/video"
 
 # --- AI Provider Capabilities Configuration ---
 # This configuration makes it easy to add new AI providers with different capabilities

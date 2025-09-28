@@ -195,7 +195,8 @@ class CrawlerControllerWindow(QMainWindow):
             'CONTINUE_EXISTING_RUN': "Enable to resume a previous crawl session, using its existing database and screenshots. Disable to start a fresh run.",
             'ENABLE_MOBSF_ANALYSIS': "Enable to perform static analysis of the app using MobSF.",
             'MOBSF_API_URL': "URL of the MobSF API (e.g., http://localhost:8000/api/v1)",
-            'MOBSF_API_KEY': "API Key for authenticating with MobSF. This can be found in the MobSF web interface or in the config file."
+            'MOBSF_API_KEY': "API Key for authenticating with MobSF. This can be found in the MobSF web interface or in the config file.",
+            'ENABLE_VIDEO_RECORDING': "Enable to record the entire crawl session as an MP4 video."
         }
 
     def _connect_signals(self):

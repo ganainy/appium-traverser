@@ -2,6 +2,7 @@ import logging
 import shlex # For escaping text in ADB commands
 import subprocess
 import re
+import base64
 from typing import Optional, List, Dict, Any, Tuple
 
 from appium.webdriver.webdriver import WebDriver as AppiumRemote
@@ -715,6 +716,44 @@ class AppiumDriver:
             logging.warning(f"Error hiding keyboard (might be expected if not shown or not supported): {e}")
         except Exception as e:
             logging.error(f"Unexpected error hiding keyboard: {e}", exc_info=True)
+
+    def start_video_recording(self, **kwargs):
+        """Starts recording the screen."""
+        if not self.driver:
+            logging.error("Driver not available, cannot start video recording.")
+            return
+        try:
+            self.driver.start_recording_screen(**kwargs)
+            logging.info("Started video recording.")
+        except WebDriverException as e:
+            logging.error(f"Failed to start video recording: {e}")
+
+    def stop_video_recording(self) -> Optional[str]:
+        """Stops recording the screen and returns the video data."""
+        if not self.driver:
+            logging.error("Driver not available, cannot stop video recording.")
+            return None
+        try:
+            video_data = self.driver.stop_recording_screen()
+            logging.info("Stopped video recording.")
+            return video_data
+        except WebDriverException as e:
+            logging.error(f"Failed to stop video recording: {e}")
+            return None
+
+    def save_video_recording(self, video_data: str, file_path: str) -> bool:
+        """Saves the video data to a file."""
+        if not video_data:
+            logging.error("Video data is empty, cannot save video.")
+            return False
+        try:
+            with open(file_path, "wb") as f:
+                f.write(base64.b64decode(video_data))
+            logging.info(f"Video saved to: {file_path}")
+            return True
+        except Exception as e:
+            logging.error(f"Failed to save video to {file_path}: {e}")
+            return False
 
     def perform_action(self, action_type: str, target: Optional[Any], input_text: Optional[str] = None) -> bool:
         """

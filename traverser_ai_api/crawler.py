@@ -7,6 +7,7 @@ import re
 import json
 import csv # For AI output logging
 import threading # For logging thread IDs if needed
+from datetime import datetime
 from typing import Optional, Tuple, List, Dict, Any
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
@@ -139,6 +140,7 @@ class AppCrawler:
         self.crawl_steps_taken: int = 0
         self.crawl_start_time: float = 0.0
         self.total_paused_time: float = 0.0
+        self._is_video_recording: bool = False
 
         self.last_action_feedback_for_ai: Optional[str] = None
         self.consecutive_no_op_failures: int = 0
@@ -336,6 +338,14 @@ class AppCrawler:
         if not self.app_context_manager.launch_and_verify_app():
             logging.critical("Failed to launch/verify target app.")
             return False
+
+        if self.cfg.ENABLE_VIDEO_RECORDING:
+            try:
+                self.driver.start_video_recording()
+                self._is_video_recording = True
+            except Exception as e:
+                logging.error(f"Failed to start video recording: {e}")
+                self._is_video_recording = False
 
         if self.cfg.ENABLE_TRAFFIC_CAPTURE:
             pcap_filename_template = f"{self.cfg.APP_PACKAGE}_run{self.run_id}_step{{step_num}}.pcap"
@@ -606,6 +616,23 @@ class AppCrawler:
         """Wraps up the crawl run by stopping services and updating status."""
         logging.debug(f"Finalizing run. Status: {status}")
         print(f"{UI_STATUS_PREFIX}Crawl loop ended. Finalizing run {self.run_id} with status {status}...")
+
+        if self._is_video_recording:
+            logging.info("Stopping video recording...")
+            try:
+                video_data = self.driver.stop_video_recording()
+                if video_data:
+                    video_filename = f"crawl_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4"
+                    if self.cfg.VIDEO_RECORDING_DIR:
+                        video_path = os.path.join(self.cfg.VIDEO_RECORDING_DIR, video_filename)
+                        self.driver.save_video_recording(video_data, video_path)
+                        logging.info(f"Video saved to {video_path}")
+                    else:
+                        logging.error("VIDEO_RECORDING_DIR not set, cannot save video.")
+                else:
+                    logging.warning("Video recording data was empty.")
+            except Exception as e:
+                logging.error(f"Error stopping or saving video recording: {e}")
 
         if self.cfg.ENABLE_TRAFFIC_CAPTURE and self.traffic_capture_manager.is_capturing():
             logging.debug("Stopping and pulling final traffic capture...")
