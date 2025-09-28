@@ -88,24 +88,18 @@ class CrawlerManager(QObject):
         if not self._check_appium_server():
             issues.append("❌ Appium server is not running or not accessible")
         
-        # 2. Check MobSF server (always check, but only warn if not running)
-        mobsf_running = self._check_mobsf_server()
-        if not mobsf_running:
-            # Add as a warning, not a blocking issue
-            warnings.append("⚠️ MobSF server is not running (MobSF analysis will be skipped)")
-        
-        # 3. Check Ollama (if selected as AI provider)
+        # 2. Check Ollama (if selected as AI provider)
         ai_provider = getattr(self.config, 'AI_PROVIDER', 'gemini').lower()
         if ai_provider == 'ollama':
             if not self._check_ollama_service():
                 issues.append("❌ Ollama service is not running")
         
-        # 4. Check API keys and required environment variables
+        # 3. Check API keys and required environment variables
         api_issues, api_warnings = self._check_api_keys_and_env()
         issues.extend(api_issues)
         warnings.extend(api_warnings)
         
-        # 5. Check target app is selected
+        # 4. Check target app is selected
         if not getattr(self.config, 'APP_PACKAGE', None):
             issues.append("❌ No target app selected")
         

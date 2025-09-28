@@ -745,8 +745,8 @@ class AgentAssistant:
             
             # First Approach: Check for JSON patterns in the response
             
-            # Look for JSON in code blocks
-            json_pattern = r'```json\s*(.*?)\s*```'
+            # Look for JSON in code blocks (support both ```json and bare ```)
+            json_pattern = r'```(?:json|JSON)?\s*([\s\S]*?)\s*```'
             json_match = re.search(json_pattern, response_text, re.DOTALL)
             
             if json_match:
@@ -761,6 +761,7 @@ class AgentAssistant:
                     logging.warning("⚠️ Failed to parse JSON from code block, trying other methods")
             
             # Try to find any JSON-like structure in the response
+            # 1) Quick regex-based attempt
             potential_json = re.search(r'({[\s\S]*?})', response_text)
             if potential_json:
                 json_str = potential_json.group(1)
@@ -772,6 +773,15 @@ class AgentAssistant:
                     return self._validate_and_clean_action_data(action_data)
                 else:
                     logging.warning("⚠️ Failed to parse JSON from regex match")
+
+            # 2) Balanced-brace scan to extract the most likely JSON object
+            candidate = self._extract_balanced_json(response_text)
+            if candidate:
+                logging.debug(f"Attempting balanced-brace JSON parse, candidate starts: {candidate[:200]}...")
+                action_data = self._clean_and_parse_json(candidate)
+                if action_data:
+                    logging.debug("✅ Successfully parsed JSON via balanced-brace extraction")
+                    return self._validate_and_clean_action_data(action_data)
             
             # Second Approach: It's likely a narrative response, make a second call to the model
             
@@ -799,8 +809,9 @@ class AgentAssistant:
             if not is_narrative and any(re.search(pattern, response_text.lower()) for pattern in action_patterns):
                 is_narrative = True
                 
-            if is_narrative:
-                logging.info("📝 Received narrative response instead of structured JSON. Making second call to extract action.")
+            # If heuristics say narrative OR if we still failed to parse JSON, attempt second-call extraction
+            if is_narrative or True:
+                logging.info("📝 Attempting structured extraction via second model call.")
                 action_data = self._make_second_call_for_action_extraction(response_text)
                 if action_data:
                     logging.info("✅ Successfully extracted action through second call to model")
@@ -817,6 +828,41 @@ class AgentAssistant:
         except Exception as e:
             logging.error(f"🔴 Error parsing action from response: {e}", exc_info=True)
             logging.debug(f"Response text that caused error: {response_text[:1000]}...")
+            return None
+
+    def _extract_balanced_json(self, text: str) -> Optional[str]:
+        """Attempt to extract a top-level JSON object using balanced braces.
+        Scans the text for the first '{' and returns the shortest substring that
+        forms a balanced JSON object, ignoring braces inside string literals.
+        """
+        try:
+            start = text.find('{')
+            if start == -1:
+                return None
+            depth = 0
+            in_string = False
+            escape = False
+            for i in range(start, len(text)):
+                ch = text[i]
+                if in_string:
+                    if escape:
+                        escape = False
+                    elif ch == '\\':
+                        escape = True
+                    elif ch == '"':
+                        in_string = False
+                else:
+                    if ch == '"':
+                        in_string = True
+                    elif ch == '{':
+                        depth += 1
+                    elif ch == '}':
+                        depth -= 1
+                        if depth == 0:
+                            return text[start:i+1]
+            return None
+        except Exception as e:
+            logging.debug(f"Balanced JSON extraction failed: {e}")
             return None
     
     def _make_second_call_for_action_extraction(self, narrative_response: str) -> Optional[Dict[str, Any]]:
