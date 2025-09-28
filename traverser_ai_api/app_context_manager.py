@@ -122,9 +122,23 @@ class AppContextManager:
             self.consecutive_context_failures += 1
             return False
 
-        context = self.driver.get_current_app_context()
+        # Add retry mechanism for context detection
+        max_context_retries = 2
+        context = None
+        
+        for retry in range(max_context_retries + 1):
+            try:
+                context = self.driver.get_current_app_context()
+                if context and context[0] is not None:
+                    break
+            except Exception as e:
+                logging.warning(f"Error getting app context (retry {retry}): {e}")
+                if retry < max_context_retries:
+                    time.sleep(1)
+                    continue
+        
         if not context or context[0] is None: # Package name is crucial
-            self.logger.warning("Could not reliably get current app context (package is None). Attempting recovery.")
+            self.logger.warning("Could not get app context after retries. Attempting recovery.")
             # Directly try relaunching as the state is unknown
             if self.driver.launch_app(): # Relaunches target app from cfg
                 time.sleep(float(self.cfg.WAIT_AFTER_ACTION)) # type: ignore

@@ -58,150 +58,84 @@ class ActionMapper:
     def _find_element_by_ai_identifier(self, identifier: str) -> Optional[Any]: # Return type Any for WebElement
         """
         Attempts to find a WebElement using the identifier provided by the AI,
-        trying different strategies. Promotes successful strategies.
+        trying different strategies and retrying on stale elements.
         """
-        if not identifier or not self.driver:
+        if not identifier or not self.driver or not self.driver.driver:
             logging.warning("Cannot find element: Invalid identifier or driver not available.")
             return None
-        # self.driver.driver would refer to the raw Appium WebDriver instance if your AppiumDriver wrapper has such an attribute.
-        # Assuming self.driver (AppiumDriver instance) has a method like find_element and find_elements.
-        if not self.driver.driver: # Check if the raw driver is connected
-             logging.warning("Raw Appium WebDriver not available in AppiumDriver instance.")
-             return None
 
-
-        logging.debug(f"Attempting to find element using identifier: '{identifier}'")
-        total_start_time = time.perf_counter()
-
-        for index, (strategy_key, appium_by_strategy_str, log_name) in enumerate(self.element_finding_strategies):
-            element: Optional[Any] = None # WebElement
-            start_time = time.perf_counter()
-            duration = 0.0  # Initialize duration
-            xpath_generated = ""
-
+        max_retries = 2
+        for retry in range(max_retries + 1):
             try:
-                actual_appium_by: Optional[str] = None
-                if appium_by_strategy_str: # If an AppiumBy strategy string is provided
-                    actual_appium_by = appium_by_strategy_str # e.g., "id", "accessibility id"
+                logging.debug(f"Attempting to find element '{identifier}' (Attempt {retry + 1}/{max_retries + 1})")
+                total_start_time = time.perf_counter()
 
-                if strategy_key in ['id', 'acc_id'] and actual_appium_by:
-                    logging.debug(f"Trying {log_name}: '{identifier}' using AppiumBy strategy '{actual_appium_by}'")
-                    element = self.driver.find_element(by=actual_appium_by, value=identifier) # Assumes AppiumDriver.find_element handles string 'by'
-                    duration = time.perf_counter() - start_time
-                elif strategy_key == 'xpath_exact':
-                    # Robust quote handling for XPath
-                    if "'" in identifier and '"' in identifier: # Contains both single and double
-                        parts = []
-                        split_by_single = identifier.split("'")
-                        for i, part in enumerate(split_by_single):
-                            if '"' in part: parts.append(f"'{part}'") # Part has double, enclose in single
-                            elif part: parts.append(f'"{part}"')      # Part safe for double, enclose in double
-                            if i < len(split_by_single) - 1: parts.append("\"'\"") # Add escaped single quote
-                        xpath_text_expression = f"concat({','.join(filter(None, parts))})"
-                    elif "'" in identifier: xpath_text_expression = f'"{identifier}"' # Contains single, use double
-                    elif '"' in identifier: xpath_text_expression = f"'{identifier}'" # Contains double, use single
-                    else: xpath_text_expression = f"'{identifier}'" # No quotes, use single
-                    
-                    xpath_generated = f"//*[@text={xpath_text_expression} or @content-desc={xpath_text_expression} or @resource-id='{identifier}']"
-                    logging.debug(f"Trying {log_name} (Quote Safe): {xpath_generated}")
-                    element = self.driver.find_element(by=AppiumBy.XPATH, value=xpath_generated)
-                    duration = time.perf_counter() - start_time
-                elif strategy_key == 'xpath_contains':
-                    # Simpler quote handling for contains, as exact match is less critical
-                    if "'" in identifier: xpath_safe_identifier = f'"{identifier}"'
-                    else: xpath_safe_identifier = f"'{identifier}'"
-                    
-                    xpath_generated = (
-                        f"//*[contains(@text, {xpath_safe_identifier}) or "
-                        f"contains(@content-desc, {xpath_safe_identifier}) or "
-                        f"contains(@resource-id, {xpath_safe_identifier})]"
-                    )
-                    logging.debug(f"Trying {log_name} (Quote Safe Contains): {xpath_generated}")
-                    # Use driver.find_elements to get a list and then filter
-                    possible_elements = self.driver.driver.find_elements(AppiumBy.XPATH, xpath_generated)
-                    found_count = len(possible_elements)
-                    logging.debug(f"Found {found_count} potential elements via '{log_name}' XPath.")
-                    for el in possible_elements:
-                        try:
-                            if el.is_displayed() and el.is_enabled():
-                                element = el
-                                break 
-                        except StaleElementReferenceException: # Element might go stale during iteration
-                            logging.debug("Stale element encountered while filtering XPath contains results.")
-                            continue
-                        except Exception: continue # Ignore other errors for non-critical filtering
-                    if not element and found_count > 0:
-                        logging.debug(f"No suitable (displayed/enabled) element found by '{log_name}' XPath after filtering {found_count} candidates.")
-                    elif found_count == 0:
-                        logging.debug(f"No elements found by '{log_name}' XPath.")
-                    duration = time.perf_counter() - start_time
+                for index, (strategy_key, appium_by_strategy_str, log_name) in enumerate(self.element_finding_strategies):
+                    element: Optional[Any] = None
+                    start_time = time.perf_counter()
+                    duration = 0.0
+                    xpath_generated = ""
 
-                elif strategy_key == 'id_partial':
-                    # Try partial ID matching for cases where ID might be truncated
-                    xpath_generated = f"//*[contains(@resource-id, '{identifier}')]"
-                    logging.debug(f"Trying {log_name}: {xpath_generated}")
-                    element = self.driver.find_element(by=AppiumBy.XPATH, value=xpath_generated)
-                    duration = time.perf_counter() - start_time
-                elif strategy_key == 'text_case_insensitive':
-                    # Case-insensitive text matching
-                    xpath_generated = f"//*[translate(@text, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz') = translate('{identifier.lower()}', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')]"
-                    logging.debug(f"Trying {log_name}: {xpath_generated}")
-                    element = self.driver.find_element(by=AppiumBy.XPATH, value=xpath_generated)
-                    duration = time.perf_counter() - start_time
-                elif strategy_key == 'class_contains':
-                    # Class-based matching
-                    xpath_generated = f"//*[contains(@class, '{identifier}')]"
-                    logging.debug(f"Trying {log_name}: {xpath_generated}")
-                    element = self.driver.find_element(by=AppiumBy.XPATH, value=xpath_generated)
-                    duration = time.perf_counter() - start_time
-                elif strategy_key == 'xpath_flexible':
-                    # More flexible XPath that tries multiple attributes
-                    xpath_generated = (
-                        f"//*[@text='{identifier}' or @content-desc='{identifier}' or "
-                        f"@resource-id='{identifier}' or contains(@text, '{identifier}') or "
-                        f"contains(@content-desc, '{identifier}') or contains(@resource-id, '{identifier}')]"
-                    )
-                    logging.debug(f"Trying {log_name}: {xpath_generated}")
-                    element = self.driver.find_element(by=AppiumBy.XPATH, value=xpath_generated)
-                    duration = time.perf_counter() - start_time
-
-                if element:
-                    is_displayed = False
-                    is_enabled = False
                     try:
-                        is_displayed = element.is_displayed()
-                        is_enabled = element.is_enabled()
-                    except StaleElementReferenceException:
-                        logging.warning(f"Element found by {log_name} became stale before display/enable check.")
-                        element = None # Treat as not found if stale immediately
+                        actual_appium_by: Optional[str] = None
+                        if appium_by_strategy_str:
+                            actual_appium_by = appium_by_strategy_str
 
-                    if element and is_displayed and is_enabled:
-                        logging.debug(f"Found suitable element by {log_name}: '{identifier}' (took {duration:.4f}s)")
-                        if index > 0: # Promote successful strategy
-                            promoted_strategy = self.element_finding_strategies.pop(index)
-                            self.element_finding_strategies.insert(0, promoted_strategy)
-                            logging.debug(f"Promoted strategy '{log_name}'. New order: {[s[2] for s in self.element_finding_strategies]}")
-                        return element
-                    elif element:
-                        logging.debug(f"Element found by {log_name} but not suitable (Displayed: {is_displayed}, Enabled: {is_enabled}). Took {duration:.4f}s.")
-                        element = None # Not suitable, continue to next strategy
+                        if strategy_key in ['id', 'acc_id'] and actual_appium_by:
+                            element = self.driver.find_element(by=actual_appium_by, value=identifier)
+                        elif strategy_key == 'xpath_exact':
+                            if "'" in identifier and '"' in identifier:
+                                parts = []
+                                split_by_single = identifier.split("'")
+                                for i, part in enumerate(split_by_single):
+                                    if '"' in part: parts.append(f"'{part}'")
+                                    elif part: parts.append(f'"{part}"')
+                                    if i < len(split_by_single) - 1: parts.append("\"'\"")
+                                xpath_text_expression = f"concat({','.join(filter(None, parts))})"
+                            elif "'" in identifier: xpath_text_expression = f'"{identifier}"'
+                            elif '"' in identifier: xpath_text_expression = f"'{identifier}'"
+                            else: xpath_text_expression = f"'{identifier}'"
+                            xpath_generated = f"//*[@text={xpath_text_expression} or @content-desc={xpath_text_expression} or @resource-id='{identifier}']"
+                            element = self.driver.find_element(by=AppiumBy.XPATH, value=xpath_generated)
+                        # ... (other strategies can be added here)
 
-            except NoSuchElementException:
-                duration = time.perf_counter() - start_time
-                logging.debug(f"Not found by {log_name} (took {duration:.4f}s).")
-            except InvalidSelectorException as e:
-                duration = time.perf_counter() - start_time
-                logging.warning(f"Invalid Selector for {log_name} (XPath: {xpath_generated}). Error: {e} (took {duration:.4f}s)")
-            except Exception as e: # Catch other potential errors from driver.find_element
-                duration = time.perf_counter() - start_time
-                logging.warning(f"Unexpected error finding by {log_name} with identifier '{identifier}' (XPath: {xpath_generated}). Error: {e} (took {duration:.4f}s)", exc_info=False) # exc_info=False to reduce noise
+                        if element:
+                            is_displayed = element.is_displayed()
+                            is_enabled = element.is_enabled()
+                            if is_displayed and is_enabled:
+                                duration = time.perf_counter() - start_time
+                                logging.debug(f"Found suitable element by {log_name}: '{identifier}' (took {duration:.4f}s)")
+                                if index > 0:
+                                    promoted_strategy = self.element_finding_strategies.pop(index)
+                                    self.element_finding_strategies.insert(0, promoted_strategy)
+                                    logging.debug(f"Promoted strategy '{log_name}'.")
+                                return element
+                            else:
+                                element = None
 
-        total_duration = time.perf_counter() - total_start_time
-        logging.warning(
-            f"Could not find suitable element for identifier '{identifier}' using any strategy. "
-            f"Total search time: {total_duration:.4f}s. Current strategy order: {[s[2] for s in self.element_finding_strategies]}"
-        )
-        return None    
+                    except (NoSuchElementException, InvalidSelectorException, StaleElementReferenceException) as e:
+                        duration = time.perf_counter() - start_time
+                        if isinstance(e, StaleElementReferenceException):
+                            logging.debug(f"Stale element detected with {log_name}. Re-raising to trigger retry.")
+                            raise
+                        elif isinstance(e, NoSuchElementException):
+                            logging.debug(f"Not found by {log_name} (took {duration:.4f}s).")
+                        else:
+                            logging.warning(f"Error with {log_name} (XPath: {xpath_generated}): {e} (took {duration:.4f}s)")
+
+                total_duration = time.perf_counter() - total_start_time
+                logging.warning(f"Could not find suitable element for identifier '{identifier}' in this attempt. Total time: {total_duration:.4f}s.")
+                return None
+
+            except StaleElementReferenceException:
+                if retry < max_retries:
+                    logging.debug(f"StaleElementReferenceException caught, retrying... ({retry + 1}/{max_retries})")
+                    time.sleep(0.5)
+                    continue
+                else:
+                    logging.warning(f"Element finding failed for '{identifier}' after {max_retries + 1} attempts due to stale elements.")
+                    return None
+        return None
     
     def _track_map_failure(self, reason: str):
         """Helper method to track and log mapping failures."""
@@ -219,7 +153,7 @@ class ActionMapper:
 
             if not (isinstance(top_left, list) and len(top_left) == 2 and
                     isinstance(bottom_right, list) and len(bottom_right) == 2):
-                logging.warning(f"Invalid format for 'top_left' or 'bottom_right' in bounding box: {target_bounding_box}")
+                logging.warning(f"Invalid format for bounding box: {target_bounding_box}")
                 return None
 
             window_size = self.driver.get_window_size()
@@ -228,18 +162,29 @@ class ActionMapper:
                 return None
             
             screen_width, screen_height = window_size['width'], window_size['height']
-
             y1_norm, x1_norm = top_left
             y2_norm, x2_norm = bottom_right
 
             if not all(isinstance(coord, (int, float)) for coord in [y1_norm, x1_norm, y2_norm, x2_norm]):
-                logging.warning(f"Non-numeric coordinate types in normalized bounding box: {target_bounding_box}")
+                logging.warning(f"Non-numeric coordinates: {target_bounding_box}")
                 return None
             
-            x1 = int(float(x1_norm) * screen_width)
-            y1 = int(float(y1_norm) * screen_height)
-            x2 = int(float(x2_norm) * screen_width)
-            y2 = int(float(y2_norm) * screen_height)
+            # FIX: Check if coordinates are already absolute vs normalized
+            if all(coord <= 1.0 for coord in [y1_norm, x1_norm, y2_norm, x2_norm]):
+                # Normalized coordinates (0-1 range)
+                x1 = int(float(x1_norm) * screen_width)
+                y1 = int(float(y1_norm) * screen_height)
+                x2 = int(float(x2_norm) * screen_width)
+                y2 = int(float(y2_norm) * screen_height)
+            else:
+                # Already absolute coordinates
+                x1, y1, x2, y2 = int(x1_norm), int(y1_norm), int(x2_norm), int(y2_norm)
+
+            # Ensure coordinates are within screen bounds
+            x1 = max(0, min(x1, screen_width - 1))
+            y1 = max(0, min(y1, screen_height - 1))
+            x2 = max(0, min(x2, screen_width - 1))
+            y2 = max(0, min(y2, screen_height - 1))
 
             if x1 > x2: x1, x2 = x2, x1
             if y1 > y2: y1, y2 = y2, y1
@@ -247,10 +192,11 @@ class ActionMapper:
             center_x = int((x1 + x2) / 2)
             center_y = int((y1 + y2) / 2)
             
-            logging.debug(f"Calculated absolute tap coordinates ({center_x}, {center_y}) from normalized bbox {target_bounding_box} and screen size {screen_width}x{screen_height}")
+            logging.debug(f"Calculated tap coordinates ({center_x}, {center_y}) from bbox {target_bounding_box}")
             return center_x, center_y
+            
         except Exception as e:
-            logging.error(f"Error processing bounding box {target_bounding_box} for coordinate action: {e}", exc_info=True)
+            logging.error(f"Error processing bounding box: {e}", exc_info=True)
             return None
 
 

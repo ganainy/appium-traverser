@@ -42,6 +42,26 @@ class ActionExecutor:
         self.last_error_message = None
 
     def execute_action(self, action_details: Dict[str, Any]) -> bool:
+        # Add validation at the start
+        if action_details.get('type') == 'tap_coords':
+            coordinates = action_details.get('coordinates')
+            if not coordinates or not isinstance(coordinates, tuple) or len(coordinates) != 2:
+                logging.error(f"Invalid coordinates for tap_coords: {coordinates}")
+                self._track_failure("Invalid coordinates format")
+                return False
+                
+            x, y = coordinates
+            if not all(isinstance(coord, int) for coord in [x, y]):
+                logging.error(f"Non-integer coordinates: {coordinates}")
+                self._track_failure("Non-integer coordinates")
+                return False
+                
+            # Additional bounds checking
+            if x < 0 or y < 0 or x > 5000 or y > 5000:  # Reasonable upper bounds
+                logging.error(f"Coordinates out of reasonable bounds: {coordinates}")
+                self._track_failure("Coordinates out of bounds")
+                return False
+
         if not isinstance(action_details, dict) or 'type' not in action_details:
             error_msg = f"Invalid action_details: expected dict with 'type' key, got {action_details}"
             logging.error(error_msg)

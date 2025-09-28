@@ -311,7 +311,7 @@ class UIComponents:
         config_handler.scroll_content = scroll_content
         
         # Create the config inputs sections
-        appium_group = UIComponents._create_appium_settings_group(scroll_layout, config_widgets, tooltips)
+        appium_group = UIComponents._create_appium_settings_group(scroll_layout, config_widgets, tooltips, controls_handler)
         appium_group.setObjectName("appium_settings_group")
         
         app_group = UIComponents._create_app_settings_group(
@@ -507,7 +507,8 @@ class UIComponents:
     def _create_appium_settings_group(
         layout: QFormLayout, 
         config_widgets: Dict[str, Any],
-        tooltips: Dict[str, str]
+        tooltips: Dict[str, str],
+        controls_handler: Any
     ) -> QGroupBox:
         """Create the Appium settings group."""
         appium_group = QGroupBox("Appium Settings")
@@ -518,10 +519,16 @@ class UIComponents:
         label_appium_url.setToolTip(tooltips['APPIUM_SERVER_URL'])
         appium_layout.addRow(label_appium_url, config_widgets['APPIUM_SERVER_URL'])
         
-        config_widgets['TARGET_DEVICE_UDID'] = QLineEdit()
-        label_device_udid = QLabel("Target Device UDID (Optional):")
+        config_widgets['TARGET_DEVICE_UDID'] = QComboBox()
+        label_device_udid = QLabel("Target Device UDID:")
         label_device_udid.setToolTip(tooltips['TARGET_DEVICE_UDID'])
-        appium_layout.addRow(label_device_udid, config_widgets['TARGET_DEVICE_UDID'])
+        
+        device_layout = QHBoxLayout()
+        device_layout.addWidget(config_widgets['TARGET_DEVICE_UDID'])
+        refresh_devices_btn = QPushButton("Refresh")
+        controls_handler.refresh_devices_btn = refresh_devices_btn
+        device_layout.addWidget(refresh_devices_btn)
+        appium_layout.addRow(label_device_udid, device_layout)
         
         config_widgets['NEW_COMMAND_TIMEOUT'] = QSpinBox()
         config_widgets['NEW_COMMAND_TIMEOUT'].setRange(0, 3600)

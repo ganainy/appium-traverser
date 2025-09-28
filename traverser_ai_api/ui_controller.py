@@ -5,6 +5,8 @@ import sys
 import os
 import logging
 import json
+import subprocess
+import re
 from typing import Optional, Dict, Any, List, TYPE_CHECKING
 
 from PySide6.QtWidgets import (
@@ -147,6 +149,13 @@ class CrawlerControllerWindow(QMainWindow):
         
         # Connect signals to slots
         self._connect_signals()
+
+        # Connect the refresh devices button
+        if hasattr(self, 'refresh_devices_btn') and self.refresh_devices_btn:
+            self.refresh_devices_btn.clicked.connect(self._populate_device_dropdown)
+
+        # Populate device dropdown on startup
+        self._populate_device_dropdown()
         
         # Shutdown flag path for crawler process
         self._shutdown_flag_file_path = self.config.SHUTDOWN_FLAG_PATH
@@ -672,6 +681,46 @@ class CrawlerControllerWindow(QMainWindow):
     def run_mobsf_analysis(self):
         """Run MobSF analysis for the selected app."""
         self.mobsf_ui_manager.run_mobsf_analysis()
+
+    def _get_connected_devices(self) -> List[str]:
+        """Get a list of connected ADB devices."""
+        try:
+            result = subprocess.run(['adb', 'devices'], capture_output=True, text=True, check=True)
+            devices = []
+            for line in result.stdout.strip().split('\n')[1:]:
+                if '\tdevice' in line:
+                    devices.append(line.split('\t')[0])
+            return devices
+        except FileNotFoundError:
+            self.log_message("ERROR: 'adb' command not found. Is Android SDK platform-tools in your PATH?", 'red')
+            return []
+        except Exception as e:
+            self.log_message(f"Error getting connected devices: {e}", 'red')
+            return []
+
+    def _populate_device_dropdown(self):
+        """Populate the device dropdown with connected devices."""
+        self.log_message("🔍 Refreshing connected devices...", 'blue')
+        device_dropdown = self.config_widgets.get('TARGET_DEVICE_UDID')
+        if not device_dropdown:
+            return
+
+        devices = self._get_connected_devices()
+        device_dropdown.clear()
+
+        if devices:
+            device_dropdown.addItems(devices)
+            self.log_message(f"✅ Found devices: {', '.join(devices)}", 'green')
+        else:
+            device_dropdown.addItem("No devices found")
+            self.log_message("⚠️ No connected devices found.", 'orange')
+
+        # Try to set to the currently configured device
+        current_udid = getattr(self.config, 'TARGET_DEVICE_UDID', None)
+        if current_udid:
+            index = device_dropdown.findText(current_udid)
+            if index != -1:
+                device_dropdown.setCurrentIndex(index)
 
 
 if __name__ == '__main__':

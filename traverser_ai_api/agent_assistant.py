@@ -554,10 +554,28 @@ class AgentAssistant:
                         top_left = bbox.get("top_left", [])
                         bottom_right = bbox.get("bottom_right", [])
                         if len(top_left) == 2 and len(bottom_right) == 2:
-                            center_y = (top_left[0] + bottom_right[0]) / 2
-                            center_x = (top_left[1] + bottom_right[1]) / 2
-                            result = self.tools.tap_coordinates(center_x, center_y)
-                            success = result.get("success", False)
+                            # FIX: Bounding box format is {"top_left": [y1, x1], "bottom_right": [y2, x2]}
+                            y1, x1 = top_left
+                            y2, x2 = bottom_right
+                            center_x = (x1 + x2) / 2  # CORRECT
+                            center_y = (y1 + y2) / 2  # CORRECT
+                            
+                            # Add coordinate validation
+                            window_size = self.tools.driver.get_window_size()
+                            if window_size:
+                                screen_width = window_size['width']
+                                screen_height = window_size['height']
+                                
+                                # Clamp coordinates to screen bounds
+                                center_x = max(0, min(center_x, screen_width - 1))
+                                center_y = max(0, min(center_y, screen_height - 1))
+                                
+                                logging.debug(f"Calculated tap coordinates: ({center_x}, {center_y}) from bbox {bbox}")
+                                result = self.tools.tap_coordinates(center_x, center_y, normalized=False)
+                                success = result.get("success", False)
+                            else:
+                                logging.error("Cannot get screen size for coordinate validation")
+                                return False
                     else:
                         logging.error("Cannot execute click: No target identifier or valid bounding box provided")
                         return False

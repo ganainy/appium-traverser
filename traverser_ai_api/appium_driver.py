@@ -1,5 +1,7 @@
 import logging
 import shlex # For escaping text in ADB commands
+import subprocess
+import re
 from typing import Optional, List, Dict, Any, Tuple
 
 from appium.webdriver.webdriver import WebDriver as AppiumRemote
@@ -70,29 +72,55 @@ class AppiumDriver:
             logging.warning("Appium session already exists. Disconnecting before attempting a new one.")
             self.disconnect()
 
+        udid = self.cfg.TARGET_DEVICE_UDID
+        if not udid:
+            logging.info("TARGET_DEVICE_UDID not set. Attempting to auto-detect a single connected device.")
+            try:
+                result = subprocess.run(['adb', 'devices'], capture_output=True, text=True, check=True)
+                devices = []
+                for line in result.stdout.strip().split('\n')[1:]:
+                    if '\tdevice' in line:
+                        devices.append(line.split('\t')[0])
+                
+                if len(devices) == 1:
+                    udid = devices[0]
+                    logging.info(f"Auto-detected single device: {udid}. Using it for the session.")
+                elif len(devices) == 0:
+                    logging.error("No ADB devices found. Please connect a device or start an emulator.")
+                    return False
+                else:
+                    logging.error(f"Multiple ADB devices found: {devices}. Please specify one using TARGET_DEVICE_UDID in your config.")
+                    return False
+            except FileNotFoundError:
+                logging.error("'adb' command not found. Please ensure the Android SDK platform-tools are in your system's PATH.")
+                return False
+            except Exception as e:
+                logging.error(f"An error occurred while trying to detect ADB devices: {e}")
+                return False
+
         options = UiAutomator2Options()
         caps = {
             "platformName": "Android",
             "appium:automationName": "UiAutomator2",
-            "appium:appPackage": str(self.cfg.APP_PACKAGE), # Ensure string
-            "appium:appActivity": str(self.cfg.APP_ACTIVITY), # Ensure string
-            "appium:noReset": getattr(self.cfg, 'APPIUM_NO_RESET', True), # Default to True if not in Config
-            "appium:autoGrantPermissions": getattr(self.cfg, 'APPIUM_AUTO_GRANT_PERMISSIONS', True), # Default
-            "appium:newCommandTimeout": int(self.cfg.NEW_COMMAND_TIMEOUT), # Ensure int
+            "appium:appPackage": str(self.cfg.APP_PACKAGE),
+            "appium:appActivity": str(self.cfg.APP_ACTIVITY),
+            "appium:noReset": getattr(self.cfg, 'APPIUM_NO_RESET', True),
+            "appium:autoGrantPermissions": getattr(self.cfg, 'APPIUM_AUTO_GRANT_PERMISSIONS', True),
+            "appium:newCommandTimeout": int(self.cfg.NEW_COMMAND_TIMEOUT),
             "appium:ensureWebviewsHavePages": True,
             "appium:nativeWebScreenshot": True,
-            "appium:connectHardwareKeyboard": True, # Default
+            "appium:connectHardwareKeyboard": True,
         }
-        if self.cfg.TARGET_DEVICE_UDID: # Check if UDID is set in config
-            caps["appium:udid"] = self.cfg.TARGET_DEVICE_UDID
+        if udid:
+            caps["appium:udid"] = udid
 
         options.load_capabilities(caps)
 
         try:
             logging.debug(f"Connecting to Appium server at {self.cfg.APPIUM_SERVER_URL} with capabilities: {caps}")
-            self.driver = AppiumRemote(command_executor=str(self.cfg.APPIUM_SERVER_URL), options=options) # Ensure string
+            self.driver = AppiumRemote(command_executor=str(self.cfg.APPIUM_SERVER_URL), options=options)
 
-            implicit_wait_time = int(self.cfg.APPIUM_IMPLICIT_WAIT) # Ensure int
+            implicit_wait_time = int(self.cfg.APPIUM_IMPLICIT_WAIT)
             self.driver.implicitly_wait(implicit_wait_time)
             logging.debug(f"Set Appium implicit wait to {implicit_wait_time} seconds.")
             logging.debug("Appium session established successfully.")
@@ -309,40 +337,49 @@ class AppiumDriver:
         if not self.driver:
             logging.error("Driver not available, cannot tap at coordinates.")
             return False
+        
+        # ADD COORDINATE VALIDATION
+        window_size = self.get_window_size()
+        if window_size:
+            max_x, max_y = window_size['width'], window_size['height']
+            if x < 0 or y < 0 or x > max_x or y > max_y:
+                logging.error(f"Invalid coordinates ({x}, {y}) for screen size {max_x}x{max_y}")
+                return False
+        
         try:
             from selenium.webdriver.common.actions import interaction
             from selenium.webdriver.common.actions.action_builder import ActionBuilder
             from selenium.webdriver.common.actions.pointer_input import PointerInput
 
-            actual_duration = duration if duration is not None else 100  # Default tap duration in milliseconds
+            actual_duration = duration if duration is not None else 100
             logging.debug(f"Attempting tap at coordinates: ({x}, {y}), duration: {actual_duration}ms")
 
             # Create touch pointer action
             actions = ActionBuilder(self.driver, mouse=PointerInput(interaction.POINTER_TOUCH, "touch"))
-
+            
             # Move to the target coordinates
             actions.pointer_action.move_to_location(x, y)
-
+            
             # Perform tap (press and release)
             actions.pointer_action.pointer_down()
             if actual_duration > 0:
-                actions.pointer_action.pause(actual_duration / 1000)  # Convert ms to seconds
+                actions.pointer_action.pause(actual_duration / 1000)
             actions.pointer_action.release()
-
+            
             # Execute the action sequence
             actions.perform()
             logging.debug(f"Successfully tapped at coordinates: ({x}, {y})")
-
-            # Add a small pause after tap to ensure it's registered
+            
+            # Add a small pause after tap
             time.sleep(0.1)
-
+            
             return True
 
         except WebDriverException as e:
-            logging.error(f"WebDriverException during tap at ({x}, {y}): {e}", exc_info=True)
+            logging.error(f"WebDriverException during tap at ({x}, {y}): {e}")
             return False
         except Exception as e:
-            logging.error(f"Unexpected error during tap at ({x}, {y}): {e}", exc_info=True)
+            logging.error(f"Unexpected error during tap at ({x}, {y}): {e}")
             return False
 
     def tap_element_center(self, element: WebElement) -> bool:

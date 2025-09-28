@@ -231,7 +231,7 @@ class Config:
         app_package = self.APP_PACKAGE or "unknown_package"
         app_package = app_package.replace(".", "_")
         # Generate timestamp in DD-MM-YY format
-        timestamp = datetime.now().strftime("%d-%m-%y")
+        timestamp = datetime.now().strftime("%d-%m-%y_%H-%M")
         return f"{device_id}_{app_package}_{timestamp}"
 
     def _update_attribute(self, key: str, new_value: Any, source: str, perform_type_conversion: bool = True):
