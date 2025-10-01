@@ -430,6 +430,13 @@ class CrawlerManager(QObject):
             return
             
         # Continue with the rest of the start_crawler logic
+        # Ensure output session directories are created just-in-time for this run
+        try:
+            self.config._resolve_all_paths(create_session_dirs=True)
+        except Exception as e:
+            self.main_controller.log_message(f"ERROR: Failed to prepare output directories: {e}", 'red')
+            return
+
         if self._shutdown_flag_file_path and os.path.exists(self._shutdown_flag_file_path):
             try:
                 os.remove(self._shutdown_flag_file_path)

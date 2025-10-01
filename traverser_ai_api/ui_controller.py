@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # ui_controller.py - Main UI controller for the Appium Crawler
 
 import sys

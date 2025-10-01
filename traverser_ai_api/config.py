@@ -297,7 +297,7 @@ class Config:
                 logging.warning(f"Failed to load or apply user config from {file_path}: {e}", exc_info=True)
         else:
             logging.debug(f"User configuration file ({file_path}) not found. Using defaults and environment variables.")
-        self._resolve_all_paths()
+        self._resolve_all_paths(create_session_dirs=False)
         
         # Adjust XML limits based on AI provider
         self._adjust_xml_limits_for_provider()
@@ -446,18 +446,20 @@ class Config:
             return os.path.abspath(os.path.join(self.BASE_DIR, resolved_path))
         return os.path.abspath(resolved_path)
 
-    def _resolve_all_paths(self):
+    def _resolve_all_paths(self, create_session_dirs: bool = True):
         # 1. Resolve the main OUTPUT_DATA_DIR first
         if not os.path.isabs(self._OUTPUT_DATA_DIR_TEMPLATE):
             self.OUTPUT_DATA_DIR = os.path.abspath(os.path.join(self.BASE_DIR, self._OUTPUT_DATA_DIR_TEMPLATE))
         else:
             self.OUTPUT_DATA_DIR = os.path.abspath(self._OUTPUT_DATA_DIR_TEMPLATE)
-        os.makedirs(self.OUTPUT_DATA_DIR, exist_ok=True)
+        if create_session_dirs:
+            os.makedirs(self.OUTPUT_DATA_DIR, exist_ok=True)
 
         # 2. Generate unique session directory name
         session_dir_name = self._generate_session_dir_name()
         self.SESSION_DIR = os.path.join(self.OUTPUT_DATA_DIR, session_dir_name)
-        os.makedirs(self.SESSION_DIR, exist_ok=True)
+        if create_session_dirs:
+            os.makedirs(self.SESSION_DIR, exist_ok=True)
 
         current_app_pkg = getattr(self, 'APP_PACKAGE', None) # Get current app_package
 
@@ -482,9 +484,10 @@ class Config:
         if self.DB_NAME: # DB_NAME is a file path, so create its parent
             dirs_to_create.append(os.path.dirname(self.DB_NAME))
 
-        for dir_path in filter(None, dirs_to_create):
-            if dir_path: # Ensure dir_path is not empty
-                os.makedirs(dir_path, exist_ok=True)
+        if create_session_dirs:
+            for dir_path in filter(None, dirs_to_create):
+                if dir_path: # Ensure dir_path is not empty
+                    os.makedirs(dir_path, exist_ok=True)
 
         if self.PCAPDROID_PACKAGE:
             self.PCAPDROID_ACTIVITY = f"{self.PCAPDROID_PACKAGE}/.activities.CaptureCtrl"
@@ -519,7 +522,7 @@ class Config:
         if attribute_updated or is_output_dir_template_update:
             # Re-resolve paths if APP_PACKAGE changed, or if OUTPUT_DATA_DIR template changed
             if key == "APP_PACKAGE" or is_output_dir_template_update:
-                self._resolve_all_paths()
+                self._resolve_all_paths(create_session_dirs=False)
             
             self.save_user_config()
             

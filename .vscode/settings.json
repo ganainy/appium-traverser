@@ -1,5 +1,6 @@
 {
     "projectManager.git.baseFolders": [
         "https://github.com/ganainy"
-    ]
+    ],
+    "debug.console.fontSize": 16
 }
