@@ -29,6 +29,8 @@ class UIComponents:
     def _update_model_types(provider: str, config_widgets: Dict[str, Any]) -> None:
         """Update the model types based on the selected AI provider."""
         model_dropdown = config_widgets['DEFAULT_MODEL_TYPE']
+        # Capture the current selection to restore it after repopulating
+        previous_text = model_dropdown.currentText()
         
         # Block signals to prevent auto-save from triggering with an empty value
         model_dropdown.blockSignals(True)
@@ -47,6 +49,14 @@ class UIComponents:
             model_dropdown.addItems([
                 'flash-latest', 'flash-latest-fast'
             ])
+            # Try to restore saved selection if present
+            try:
+                if previous_text:
+                    idx = model_dropdown.findText(previous_text)
+                    if idx >= 0:
+                        model_dropdown.setCurrentIndex(idx)
+            except Exception:
+                pass
             # Enable image context for Gemini
             if 'ENABLE_IMAGE_CONTEXT' in config_widgets:
                 config_widgets['ENABLE_IMAGE_CONTEXT'].setEnabled(True)
@@ -113,6 +123,15 @@ class UIComponents:
                 elif model_items and model_items[0] != "No Ollama models available - run 'ollama pull <model>'":
                     model_dropdown.setCurrentText(model_items[0])
                     logging.debug(f"Set default to first available model: {model_items[0]}")
+
+                # Try to restore saved selection if present among items
+                try:
+                    if previous_text:
+                        idx = model_dropdown.findText(previous_text)
+                        if idx >= 0:
+                            model_dropdown.setCurrentIndex(idx)
+                except Exception:
+                    pass
                 
                 logging.debug(f"Loaded {len(model_items)} Ollama models: {model_items}")
                 
@@ -192,7 +211,18 @@ class UIComponents:
                     break
             elif vision_models:
                 preferred_default = vision_models[0]
-            model_dropdown.setCurrentText(preferred_default)
+            # Restore saved selection if available; otherwise use preferred default
+            try:
+                restored = False
+                if previous_text:
+                    idx = model_dropdown.findText(previous_text)
+                    if idx >= 0:
+                        model_dropdown.setCurrentIndex(idx)
+                        restored = True
+                if not restored:
+                    model_dropdown.setCurrentText(preferred_default)
+            except Exception:
+                model_dropdown.setCurrentText(preferred_default)
 
             # Handle image context based on provider capabilities (generally enabled)
             if 'ENABLE_IMAGE_CONTEXT' in config_widgets:

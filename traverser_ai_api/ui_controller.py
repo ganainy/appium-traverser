@@ -820,7 +820,7 @@ class CrawlerControllerWindow(QMainWindow):
 
     def _populate_device_dropdown(self):
         """Populate the device dropdown with connected devices."""
-        self.log_message("🔍 Refreshing connected devices...", "blue")
+        self.log_message("Refreshing connected devices...", "blue")
         device_dropdown = self.config_widgets.get("TARGET_DEVICE_UDID")
         if not device_dropdown:
             return
@@ -833,7 +833,7 @@ class CrawlerControllerWindow(QMainWindow):
             self.log_message(f"Found devices: {', '.join(devices)}", "green")
         else:
             device_dropdown.addItem("No devices found")
-            self.log_message("⚠️ No connected devices found.", "orange")
+            self.log_message("No connected devices found.", "orange")
 
         # Try to set to the currently configured device
         current_udid = getattr(self.config, "TARGET_DEVICE_UDID", None)
