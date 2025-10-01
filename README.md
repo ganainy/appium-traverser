@@ -1,7 +1,7 @@
 # AI-Driven Android App Crawler
 
 [![Python Version](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/)
-[![Status](https://img.shields.io/badge/status-production-green.svg)]()
+[![Status](https://img.shields.io/badge/status-development-blue.svg)]()
 
 ## Table of Contents
 
