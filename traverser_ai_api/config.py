@@ -46,6 +46,9 @@ class Config:
         self.USE_COORDINATE_FALLBACK: bool = True
         self.GEMINI_API_KEY: Optional[str] = None
         self.OPENROUTER_API_KEY: Optional[str] = None
+        self.OPENROUTER_REFRESH_BTN: bool = False
+        self.OPENROUTER_SHOW_FREE_ONLY: bool = False
+        self.OPENROUTER_MODEL_ID_OVERRIDE: Optional[str] = None
         self.OLLAMA_BASE_URL: Optional[str] = None
         self.AI_PROVIDER: str = 'gemini'  # 'gemini', or 'ollama'
         self.DEFAULT_MODEL_TYPE: str = 'flash-latest-fast'
@@ -380,6 +383,7 @@ class Config:
             "NEW_COMMAND_TIMEOUT", "APPIUM_IMPLICIT_WAIT", "APPIUM_SERVER_URL",
             "TARGET_DEVICE_UDID", "USE_COORDINATE_FALLBACK",
             "AI_PROVIDER", "DEFAULT_MODEL_TYPE", "USE_CHAT_MEMORY", "MAX_CHAT_HISTORY",
+            "OPENROUTER_REFRESH_BTN", "OPENROUTER_SHOW_FREE_ONLY", "OPENROUTER_MODEL_ID_OVERRIDE",
             "ENABLE_IMAGE_CONTEXT", "XML_SNIPPET_MAX_LEN", "MAX_APPS_TO_SEND_TO_AI",
             "USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY", "AI_SAFETY_SETTINGS",
             "CRAWL_MODE", "MAX_CRAWL_STEPS", "MAX_CRAWL_DURATION_SECONDS",
@@ -868,3 +872,6 @@ OPENROUTER_MODELS = {
         'online': True
     }
 }
+OPENROUTER_REFRESH_BTN = False
+OPENROUTER_SHOW_FREE_ONLY = False
+OPENROUTER_MODEL_ID_OVERRIDE = None

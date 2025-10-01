@@ -14,6 +14,7 @@ from PIL import Image
 import io
 import re
 import os
+from datetime import datetime
 
 class AIAssistant:
     """
@@ -219,6 +220,27 @@ class AIAssistant:
             else:
                 self.chat = None # type: ignore
                 logging.debug("Chat memory is disabled.")
+
+            # --- Setup for AI interaction logging ---
+            self.ai_interaction_logger = logging.getLogger('AIInteractionLogger')
+            self.ai_interaction_logger.setLevel(logging.INFO)
+            self.ai_interaction_logger.propagate = False
+
+            if self.cfg.SESSION_DIR and os.path.isdir(self.cfg.SESSION_DIR):
+                log_file_path = os.path.join(self.cfg.SESSION_DIR, 'ai_interactions.log')
+                if self.ai_interaction_logger.hasHandlers():
+                    self.ai_interaction_logger.handlers.clear()
+                
+                fh = logging.FileHandler(log_file_path, encoding='utf-8')
+                fh.setLevel(logging.INFO)
+                formatter = logging.Formatter('%(message)s') # Just the message
+                fh.setFormatter(formatter)
+                self.ai_interaction_logger.addHandler(fh)
+                logging.info(f"AI interaction logger initialized at: {log_file_path}")
+            else:
+                logging.error("Session directory not available, AI interaction log will not be saved.")
+            # --- End of AI interaction logging setup ---
+
         except Exception as e:
             logging.error(f"Failed to initialize GenerativeModel or AIAssistant: {e}", exc_info=True)
             raise
@@ -602,7 +624,23 @@ Based on this feedback, you MUST choose a different action to avoid getting stuc
 
                 try:
                     parsed_main_response = json.loads(json_str_to_parse)
-                    logging.debug("Successfully parsed AI main JSON response.")                    
+                    logging.debug("Successfully parsed AI main JSON response.")
+
+                    # --- Log AI interaction ---
+                    try:
+                        log_entry = {
+                            "timestamp_utc": datetime.utcnow().isoformat() + "Z",
+                            "model_alias": self.model_alias,
+                            "prompt": prompt_text,
+                            "response": parsed_main_response,
+                            "usage": {
+                                "total_tokens": total_tokens
+                            }
+                        }
+                        self.ai_interaction_logger.info(json.dumps(log_entry)) # JSONL format
+                    except Exception as log_err:
+                        logging.error(f"Failed to log AI interaction: {log_err}")
+                    # --- End log AI interaction ---
 
                     if not isinstance(parsed_main_response.get("action_to_perform"), dict):
                         logging.error(f"Parsed JSON lacks 'action_to_perform' dictionary. Data: {parsed_main_response}")
