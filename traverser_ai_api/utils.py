@@ -257,7 +257,7 @@ def simplify_xml_for_ai(xml_string: str, max_len: int, provider: str = "gemini")
     Args:
         xml_string: The XML string to simplify
         max_len: Maximum length in characters
-        provider: AI provider ("deepseek", "gemini", etc.) for provider-specific optimizations
+        provider: AI provider ("gemini", etc.) for provider-specific optimizations
     """
     if not xml_string:
         return ""

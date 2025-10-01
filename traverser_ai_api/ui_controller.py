@@ -188,7 +188,7 @@ class CrawlerControllerWindow(QMainWindow):
             'MAX_CONSECUTIVE_AI_FAILURES': "Maximum number of consecutive times the AI can fail to provide a valid action before stopping.",
             'MAX_CONSECUTIVE_MAP_FAILURES': "Maximum number of consecutive times the AI action cannot be mapped to a UI element before stopping.",
             'MAX_CONSECUTIVE_EXEC_FAILURES': "Maximum number of consecutive times an action execution can fail before stopping.",
-            'ENABLE_IMAGE_CONTEXT': "Enable to send screenshots to the AI for visual analysis. Disable for text-only analysis using XML only. Note: Automatically disabled for DeepSeek due to payload size limits.",
+            'ENABLE_IMAGE_CONTEXT': "Enable to send screenshots to the AI for visual analysis. Disable for text-only analysis using XML only.",
             'ENABLE_TRAFFIC_CAPTURE': "Enable to capture network traffic (PCAP) during the crawl using PCAPdroid (requires PCAPdroid to be installed and configured on the device).",
             'CLEANUP_DEVICE_PCAP_FILE': "If traffic capture is enabled, delete the PCAP file from the device after successfully pulling it to the computer.",
             'CONTINUE_EXISTING_RUN': "Enable to resume a previous crawl session, using its existing database and screenshots. Disable to start a fresh run.",

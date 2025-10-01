@@ -17,7 +17,7 @@ except ImportError:
 
 class AgentAssistant:
     """
-    Handles interactions with AI models (Google Gemini, DeepSeek, OpenRouter, Ollama) using adapters.
+    Handles interactions with AI models (Google Gemini, OpenRouter, Ollama) using adapters.
     Implements structured prompting for mobile app UI testing.
     
     The AgentAssistant can also directly perform actions using the AgentTools, allowing it to 
@@ -48,14 +48,6 @@ class AgentAssistant:
             if not self.cfg.GEMINI_API_KEY:
                 raise ValueError("GEMINI_API_KEY is not set in the provided application configuration.")
             self.api_key = self.cfg.GEMINI_API_KEY
-        elif self.ai_provider == 'deepseek':
-            # Route DeepSeek through OpenRouter while keeping provider label 'deepseek'
-            logging.info("Routing 'deepseek' via OpenRouter models without changing provider label.")
-            self._adapter_provider_override = 'openrouter'
-            openrouter_key = getattr(self.cfg, 'OPENROUTER_API_KEY', None)
-            if not openrouter_key:
-                raise ValueError("OPENROUTER_API_KEY is not set in the provided application configuration.")
-            self.api_key = openrouter_key
         elif self.ai_provider == 'openrouter':
             if not getattr(self.cfg, 'OPENROUTER_API_KEY', None):
                 raise ValueError("OPENROUTER_API_KEY is not set in the provided application configuration.")
@@ -75,25 +67,6 @@ class AgentAssistant:
             models_config = self.cfg.GEMINI_MODELS
             if not models_config or not isinstance(models_config, dict):
                 raise ValueError("GEMINI_MODELS must be defined in app_config and be a non-empty dictionary.")
-        elif self.ai_provider == 'deepseek':
-            # Use OpenRouter model catalog for DeepSeek selections
-            models_config = getattr(self.cfg, 'OPENROUTER_MODELS', None)
-            if not models_config or not isinstance(models_config, dict) or len(models_config) == 0:
-                logging.warning("OPENROUTER_MODELS missing or invalid; using resilient defaults.")
-                models_config = {
-                    'openrouter-auto': {
-                        'name': 'openrouter/auto',
-                        'description': 'Balanced auto-router via OpenRouter',
-                        'generation_config': {'temperature': 0.7, 'top_p': 0.95, 'max_output_tokens': 4096},
-                        'online': True
-                    },
-                    'openrouter-auto-fast': {
-                        'name': 'openrouter/auto',
-                        'description': 'Faster auto-router via OpenRouter',
-                        'generation_config': {'temperature': 0.3, 'top_p': 0.8, 'max_output_tokens': 4096},
-                        'online': True
-                    }
-                }
         elif self.ai_provider == 'ollama':
             models_config = self.cfg.OLLAMA_MODELS
             if not models_config or not isinstance(models_config, dict):
@@ -121,7 +94,7 @@ class AgentAssistant:
 
         # Allow manual OpenRouter override from UI/config
         openrouter_raw_alias = False
-        if self.ai_provider in ['openrouter', 'deepseek']:
+        if self.ai_provider in ['openrouter']:
             override_id = getattr(self.cfg, 'OPENROUTER_MODEL_ID_OVERRIDE', None)
             if isinstance(override_id, str) and override_id.strip():
                 model_alias = override_id.strip()
@@ -157,7 +130,7 @@ class AgentAssistant:
                         if hasattr(self.cfg, 'update_setting_and_save'):
                             self.cfg.update_setting_and_save("DEFAULT_MODEL_TYPE", model_alias)
                             logging.debug(f"Updated DEFAULT_MODEL_TYPE setting to '{model_alias}' to match {self.ai_provider} provider")
-            elif self.ai_provider in ['openrouter', 'deepseek'] and not openrouter_raw_alias:
+            elif self.ai_provider in ['openrouter'] and not openrouter_raw_alias:
                 # Treat the provided alias as a raw model name for OpenRouter
                 # This enables dynamic model selection without predefining aliases
                 openrouter_raw_alias = True

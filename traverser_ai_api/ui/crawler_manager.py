@@ -189,10 +189,6 @@ class CrawlerManager(QObject):
             if not getattr(self.config, 'GEMINI_API_KEY', None):
                 issues.append("❌ Gemini API key is not set (check GEMINI_API_KEY in .env file)")
         
-        elif ai_provider == 'deepseek':
-            if not getattr(self.config, 'DEEPSEEK_API_KEY', None):
-                issues.append("❌ DeepSeek API key is not set (check DEEPSEEK_API_KEY in .env file)")
-        
         elif ai_provider == 'openrouter':
             if not getattr(self.config, 'OPENROUTER_API_KEY', None):
                 issues.append("❌ OpenRouter API key is not set (check OPENROUTER_API_KEY in .env file)")

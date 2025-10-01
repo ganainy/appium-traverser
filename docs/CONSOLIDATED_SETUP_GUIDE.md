@@ -214,7 +214,6 @@ Add your cloud AI provider API key(s) and optional service keys:
 ```env
 # Required for AI functionality (set the one for your selected provider)
 GEMINI_API_KEY=your_gemini_api_key_here
-DEEPSEEK_API_KEY=your_deepseek_api_key_here
 OPENROUTER_API_KEY=your_openrouter_api_key_here
 
 # Optional keys
@@ -226,7 +225,7 @@ IMPORTANT: Only use ONE .env file in the project root. The application is config
 
 This file contains sensitive information and should NOT be committed to version control.
 
-If you use the DeepSeek or OpenRouter providers, install the OpenAI SDK in your environment:
+If you use the OpenRouter providers, install the OpenAI SDK in your environment:
 ```powershell
 pip install openai
 ```

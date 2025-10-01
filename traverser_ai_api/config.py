@@ -45,10 +45,9 @@ class Config:
         self.TARGET_DEVICE_UDID: Optional[str] = None
         self.USE_COORDINATE_FALLBACK: bool = True
         self.GEMINI_API_KEY: Optional[str] = None
-        self.DEEPSEEK_API_KEY: Optional[str] = None
         self.OPENROUTER_API_KEY: Optional[str] = None
         self.OLLAMA_BASE_URL: Optional[str] = None
-        self.AI_PROVIDER: str = 'gemini'  # 'gemini', 'deepseek', or 'ollama'
+        self.AI_PROVIDER: str = 'gemini'  # 'gemini', or 'ollama'
         self.DEFAULT_MODEL_TYPE: str = 'flash-latest-fast'
         self.USE_CHAT_MEMORY: bool = False
         self.MAX_CHAT_HISTORY: int = 10
@@ -59,7 +58,6 @@ class Config:
         self.USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY: bool = True
         self.AI_SAFETY_SETTINGS: Dict[str, Any] = {}
         self.GEMINI_MODELS: Dict[str, Any] = {}
-        self.DEEPSEEK_MODELS: Dict[str, Any] = {}
         self.OLLAMA_MODELS: Dict[str, Any] = {}
         self.CRAWL_MODE: str = 'steps'
         self.MAX_CRAWL_STEPS: int = 10
@@ -201,7 +199,6 @@ class Config:
                 logging.error(f"Failed to load environment variables with dotenv: {e2}")
             
         self.GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", self.GEMINI_API_KEY)
-        self.DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", self.DEEPSEEK_API_KEY)
         self.OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", self.OPENROUTER_API_KEY)
         self.OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", self.OLLAMA_BASE_URL)
         self.PCAPDROID_API_KEY = os.getenv("PCAPDROID_API_KEY", self.PCAPDROID_API_KEY)
@@ -602,20 +599,7 @@ GEMINI_MODELS = {
         'online': True
     }
 }
-DEEPSEEK_MODELS = {
-    'deepseek-vision': {
-        'name': 'deepseek-chat',
-        'description': 'DeepSeek Chat model with vision capabilities for multimodal tasks.',
-        'generation_config': {'temperature': 0.7, 'top_p': 0.95, 'max_output_tokens': 4096},
-        'online': True
-    },
-    'deepseek-vision-fast': {
-        'name': 'deepseek-chat',
-        'description': 'DeepSeek Chat model with vision capabilities, optimized for faster responses.',
-        'generation_config': {'temperature': 0.3, 'top_p': 0.8, 'max_output_tokens': 4096},
-        'online': True
-    }
-}
+
 OLLAMA_MODELS = {
     # Text-only models
     'llama3.2': {
@@ -823,17 +807,7 @@ AI_PROVIDER_CAPABILITIES = {
         'description': 'Google Gemini - High capacity, supports large payloads and images',
         'online': True  # Indicates this is an online/cloud provider
     },
-    'deepseek': {
-        'xml_max_len': 30000,   # Conservative limit for DeepSeek
-        'image_supported': True,  # Technically supported but limited
-        'image_max_width': 480,  # Further reduced from 640 for maximum compression
-        'image_quality': 65,     # Lower quality for smaller payloads while keeping UI readable
-        'image_format': 'JPEG',  # Image format for compression
-        'payload_max_size_kb': 150,  # Strict payload limit
-        'auto_disable_image_context': True,  # Auto-disable due to payload limits
-        'description': 'DeepSeek - Strict payload limits, optimized for text analysis',
-        'online': True  # Indicates this is an online/cloud provider
-    },
+
     'ollama': {
         'xml_max_len': 100000,  # Higher limit for local models
         'image_supported': True,  # Ollama supports images with vision-capable models

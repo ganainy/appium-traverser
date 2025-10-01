@@ -229,12 +229,7 @@ class ConfigManager(QObject):
                 if hasattr(self.config, 'UI_MODE'):
                     self.config.UI_MODE = self.user_config['UI_MODE']
 
-            # Remap 'deepseek' to 'openrouter' for UI consistency
-            if self.user_config.get('AI_PROVIDER', '').lower() == 'deepseek':
-                logging.info("AI_PROVIDER 'deepseek' detected in user config; remapping to 'openrouter' for UI.")
-                self.user_config['AI_PROVIDER'] = 'openrouter'
-                if hasattr(self.config, 'AI_PROVIDER'):
-                    self.config.AI_PROVIDER = 'openrouter'
+
             
             for key, value in self.user_config.items():
                 if key in self.main_controller.config_widgets:

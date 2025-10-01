@@ -1,6 +1,5 @@
 appium-python-client  # Mobile app automation framework for interaction with app UI
 google-generativeai  # Google Gemini API for AI model integration
-deepseek  # DeepSeek API for AI model integration (vision-language models)
 ollama  # Ollama API for local LLM integration
 pillow  # Image processing library for screenshot handling
 imagehash  # Perceptual image hashing for screen state comparison

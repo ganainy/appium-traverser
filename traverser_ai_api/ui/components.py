@@ -654,7 +654,6 @@ class UIComponents:
         
         # AI Provider Selection
         config_widgets['AI_PROVIDER'] = QComboBox()
-        # Remove DeepSeek from provider dropdown; use OpenRouter for DeepSeek models
         config_widgets['AI_PROVIDER'].addItems(['gemini', 'ollama', 'openrouter'])
         label_ai_provider = QLabel("AI Provider: ")
         label_ai_provider.setToolTip("The AI model provider to use for analysis and decision making.")
@@ -711,7 +710,7 @@ class UIComponents:
 
         # Advanced manual model id entry for OpenRouter
         config_widgets['OPENROUTER_MODEL_ID_OVERRIDE'] = QLineEdit()
-        config_widgets['OPENROUTER_MODEL_ID_OVERRIDE'].setPlaceholderText("Optional: Enter exact OpenRouter model id (e.g., deepseek/deepseek-chat)")
+        config_widgets['OPENROUTER_MODEL_ID_OVERRIDE'].setPlaceholderText("Optional: Enter exact OpenRouter model id (e.g., openai/gpt-4o-mini)")
         ai_layout.addRow(QLabel("Advanced Model ID (OpenRouter):"), config_widgets['OPENROUTER_MODEL_ID_OVERRIDE'])
         
         config_widgets['USE_CHAT_MEMORY'] = QCheckBox()
@@ -774,7 +773,7 @@ class UIComponents:
             return False
         mid = model_id.lower()
         patterns = [
-            'vision', 'vl', 'gpt-4o', 'gpt-4.1', 'o-mini', 'omni', 'llava', 'qwen-vl', 'minicpm-v', 'moondream', 'gemma3', 'image', 'deepseek/deepseek-chat'
+            'vision', 'vl', 'gpt-4o', 'gpt-4.1', 'o-mini', 'omni', 'llava', 'qwen-vl', 'minicpm-v', 'moondream', 'gemma3', 'image'
         ]
         return any(p in mid for p in patterns)
 
@@ -1015,7 +1014,7 @@ class UIComponents:
         
         config_widgets['ENABLE_IMAGE_CONTEXT'] = QCheckBox()
         label_enable_image_context = QLabel("Enable Image Context: ")
-        label_enable_image_context.setToolTip("Enable sending screenshots to AI for visual analysis. Disable for text-only analysis. Note: Automatically disabled for DeepSeek due to payload size limits.")
+        label_enable_image_context.setToolTip("Enable sending screenshots to AI for visual analysis. Disable for text-only analysis.")
         
         # Create warning label (initially hidden)
         config_widgets['IMAGE_CONTEXT_WARNING'] = QLabel("⚠️ Auto-disabled")

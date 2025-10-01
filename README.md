@@ -35,8 +35,6 @@ cd appium-traverser-master-arbeit
 py -3 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
-# If using the DeepSeek or OpenRouter provider:
-python -m pip install openai
 
 # 3. Start crawling
 appium --relaxed-security  # Terminal 1
@@ -69,21 +67,15 @@ This project supports multiple AI providers for intelligent app exploration:
    - Excellent image understanding
    - Requires API key
 
-2. **DeepSeek**
-   - Cloud-based model with vision capabilities
-   - Cost-effective alternative
-   - Requires API key
-
-3. **Ollama** (Local)
+2. **Ollama** (Local)
    - Run models locally on your machine
    - Supports both text-only and vision-capable models
    - No API costs, privacy-focused
 
-4. **OpenRouter**
+3. **OpenRouter**
    - Cloud-based router to top models via OpenAI-compatible API
    - Simple presets (`openrouter-auto`, `openrouter-auto-fast`)
    - Requires API key
-   - DeepSeek models are accessible via OpenRouter (no separate DeepSeek key)
 
 ### Using Ollama with Vision Support
 
@@ -132,7 +124,7 @@ You can easily switch between providers by updating your `user_config.json`:
 
 ```json
 {
-  "AI_PROVIDER": "ollama",  // or "gemini", "deepseek", or "openrouter"
+  "AI_PROVIDER": "ollama",  // or "gemini", or "openrouter"
   "DEFAULT_MODEL_TYPE": "llama3.2-vision"  // e.g., "openrouter-auto" for OpenRouter
 }
 ```
@@ -241,7 +233,7 @@ python demo_agent.py --api-key "your-api-key" --screenshot "path/to/screenshot.p
 - Without activation: `\.venv\Scripts\python.exe -m traverser_ai_api.ui_controller`
 
 Notes
-- If using the DeepSeek or OpenRouter provider, install the OpenAI SDK inside the venv: `pip install openai`.
+- If using the OpenRouter provider, install the OpenAI SDK inside the venv: `pip install openai`.
 - In VS Code, select interpreter: `Ctrl+Shift+P` → `Python: Select Interpreter` → choose `\.venv\Scripts\python.exe`.
 
 ### Using OpenRouter
@@ -260,10 +252,9 @@ OpenRouter provides curated routing across high-quality models using an OpenAI-c
 - Available models:
   - `openrouter-auto` (balanced)
   - `openrouter-auto-fast` (faster)
-   - Any direct model id from the catalog, e.g. `deepseek/deepseek-chat`, `openai/gpt-4o-mini`, `anthropic/claude-3.5-sonnet`
+   - Any direct model id from the catalog, e.g. `openai/gpt-4o-mini`, `anthropic/claude-3.5-sonnet`
 
 Notes
-- To use DeepSeek via OpenRouter, set `AI_PROVIDER` to `openrouter` and choose a DeepSeek model id from the catalog (e.g., `deepseek/deepseek-chat`). No `DEEPSEEK_API_KEY` is required.
 - If `OPENROUTER_MODELS` is missing in configuration, the app falls back to resilient defaults (`openrouter-auto`, `openrouter-auto-fast`). You can still specify any direct model id in `DEFAULT_MODEL_TYPE` and the app will use it.
 
 ## Architecture

@@ -55,6 +55,42 @@ class ActionMapper:
             f"Max map failures: {self.max_map_failures}"
         )
 
+    def _escape_xpath_literal(self, s: str) -> str:
+        """Safely escape a string for use as an XPath literal.
+        Handles cases where the string contains both single and double quotes
+        by using concat().
+        """
+        if s is None:
+            return "''"
+        if "'" in s and '"' in s:
+            parts = []
+            for i, part in enumerate(s.split("'")):
+                if '"' in part:
+                    parts.append(f"'{part}'")
+                elif part:
+                    parts.append(f'"{part}"')
+                if i < len(s.split("'")) - 1:
+                    parts.append("\"'\"")
+            return f"concat({','.join(filter(None, parts))})"
+        elif "'" in s:
+            return f'"{s}"'
+        else:
+            return f"'{s}'"
+
+    def _is_full_resource_id(self, identifier: str) -> bool:
+        """Return True if identifier looks like a full Android resource-id, e.g., 'com.pkg:id/view_id'."""
+        try:
+            return isinstance(identifier, str) and ":id/" in identifier and len(identifier.split(":id/")) == 2
+        except Exception:
+            return False
+
+    def _build_full_resource_id(self, simple_id: str) -> Optional[str]:
+        """Build full resource-id using configured app package if available."""
+        package = getattr(self.cfg, 'APP_PACKAGE', None)
+        if package and isinstance(simple_id, str) and simple_id:
+            return f"{package}:id/{simple_id}"
+        return None
+
     def _find_element_by_ai_identifier(self, identifier: str) -> Optional[Any]: # Return type Any for WebElement
         """
         Attempts to find a WebElement using the identifier provided by the AI,
@@ -82,7 +118,27 @@ class ActionMapper:
                             actual_appium_by = appium_by_strategy_str
 
                         if strategy_key in ['id', 'acc_id'] and actual_appium_by:
-                            element = self.driver.find_element(by=actual_appium_by, value=identifier)
+                            # Normalize resource-id handling for 'id'
+                            if strategy_key == 'id':
+                                # Try full resource-id directly
+                                if self._is_full_resource_id(identifier):
+                                    element = self.driver.find_element(by=actual_appium_by, value=identifier)
+                                else:
+                                    # Try building full id with package
+                                    full_id = self._build_full_resource_id(identifier)
+                                    if full_id:
+                                        try:
+                                            element = self.driver.find_element(by=actual_appium_by, value=full_id)
+                                        except (NoSuchElementException, InvalidSelectorException):
+                                            element = None
+                                    # If still not found and identifier lacks package prefix, try XPath contains on resource-id
+                                    if not element:
+                                        safe = self._escape_xpath_literal(identifier)
+                                        xpath_generated = f"//*[@resource-id and contains(@resource-id,{safe})]"
+                                        element = self.driver.find_element(by=AppiumBy.XPATH, value=xpath_generated)
+                            else:
+                                # Accessibility ID straightforward
+                                element = self.driver.find_element(by=actual_appium_by, value=identifier)
                         elif strategy_key == 'xpath_exact':
                             if "'" in identifier and '"' in identifier:
                                 parts = []
@@ -96,6 +152,35 @@ class ActionMapper:
                             elif '"' in identifier: xpath_text_expression = f"'{identifier}'"
                             else: xpath_text_expression = f"'{identifier}'"
                             xpath_generated = f"//*[@text={xpath_text_expression} or @content-desc={xpath_text_expression} or @resource-id='{identifier}']"
+                            element = self.driver.find_element(by=AppiumBy.XPATH, value=xpath_generated)
+                        elif strategy_key == 'xpath_contains':
+                            safe = self._escape_xpath_literal(identifier)
+                            xpath_generated = f"//*[contains(@resource-id,{safe}) or contains(@text,{safe}) or contains(@content-desc,{safe})]"
+                            element = self.driver.find_element(by=AppiumBy.XPATH, value=xpath_generated)
+                        elif strategy_key == 'id_partial':
+                            safe = self._escape_xpath_literal(identifier)
+                            xpath_generated = f"//*[@resource-id and contains(@resource-id,{safe})]"
+                            element = self.driver.find_element(by=AppiumBy.XPATH, value=xpath_generated)
+                        elif strategy_key == 'text_case_insensitive':
+                            # Case-insensitive text contains using translate()
+                            safe_lowerable = self._escape_xpath_literal(identifier)
+                            xpath_generated = (
+                                "//*[contains("
+                                "translate(@text,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'), "
+                                f"translate({safe_lowerable},'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'))]"
+                            )
+                            element = self.driver.find_element(by=AppiumBy.XPATH, value=xpath_generated)
+                        elif strategy_key == 'class_contains':
+                            safe = self._escape_xpath_literal(identifier)
+                            xpath_generated = f"//*[contains(@class,{safe})]"
+                            element = self.driver.find_element(by=AppiumBy.XPATH, value=xpath_generated)
+                        elif strategy_key == 'xpath_flexible':
+                            safe = self._escape_xpath_literal(identifier)
+                            xpath_generated = (
+                                f"//*[(starts-with(@resource-id,{safe}) or contains(@resource-id,{safe})) "
+                                f"or (starts-with(@text,{safe}) or contains(@text,{safe})) "
+                                f"or (starts-with(@content-desc,{safe}) or contains(@content-desc,{safe}))]"
+                            )
                             element = self.driver.find_element(by=AppiumBy.XPATH, value=xpath_generated)
                         # ... (other strategies can be added here)
 

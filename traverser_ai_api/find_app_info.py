@@ -44,13 +44,7 @@ except ImportError:
     genai_configure = None # Define to None if import fails
     GenAIModel = None      # Define to None if import fails
 
-# DeepSeek
-try:
-    from deepseek import Client as DeepSeekClient
-    DEEPSEEK_AVAILABLE = True
-except ImportError:
-    DEEPSEEK_AVAILABLE = False
-    DeepSeekClient = None
+
 
 # --- Centralized Configuration Setup ---
 CURRENT_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -131,29 +125,6 @@ if AI_PROVIDER == 'gemini':
             DEFAULT_AI_MODEL_NAME = model_details.get('name')
             if not DEFAULT_AI_MODEL_NAME:
                 print(f"Error: 'name' for model type '{model_type}' not in GEMINI_MODELS (Config). AI Filtering will be globally unavailable.", file=sys.stderr)
-                CAN_ENABLE_AI_FILTERING_GLOBALLY = False
-            else:
-                print(f"Using AI Model from Config: {DEFAULT_AI_MODEL_NAME} (type: {model_type})")
-elif AI_PROVIDER == 'deepseek':
-    if not DEEPSEEK_AVAILABLE:
-        print("Error: 'deepseek' library not installed. AI Filtering will be globally unavailable.", file=sys.stderr)
-        CAN_ENABLE_AI_FILTERING_GLOBALLY = False
-        
-    if CAN_ENABLE_AI_FILTERING_GLOBALLY and not cfg.DEEPSEEK_API_KEY:
-        print("Error: DEEPSEEK_API_KEY not found in configuration (via Config). AI Filtering will be globally unavailable.", file=sys.stderr)
-        CAN_ENABLE_AI_FILTERING_GLOBALLY = False
-        
-    if CAN_ENABLE_AI_FILTERING_GLOBALLY:
-        if not cfg.DEFAULT_MODEL_TYPE or not cfg.DEEPSEEK_MODELS or \
-           not isinstance(cfg.DEEPSEEK_MODELS, dict) or not cfg.DEEPSEEK_MODELS.get(cfg.DEFAULT_MODEL_TYPE):
-            print("Error: DEFAULT_MODEL_TYPE or DEEPSEEK_MODELS (with entry for default) not valid in Config. AI Filtering will be globally unavailable.", file=sys.stderr)
-            CAN_ENABLE_AI_FILTERING_GLOBALLY = False
-        else:
-            model_type = cfg.DEFAULT_MODEL_TYPE
-            model_details = cfg.DEEPSEEK_MODELS[model_type]
-            DEFAULT_AI_MODEL_NAME = model_details.get('name')
-            if not DEFAULT_AI_MODEL_NAME:
-                print(f"Error: 'name' for model type '{model_type}' not in DEEPSEEK_MODELS (Config). AI Filtering will be globally unavailable.", file=sys.stderr)
                 CAN_ENABLE_AI_FILTERING_GLOBALLY = False
             else:
                 print(f"Using AI Model from Config: {DEFAULT_AI_MODEL_NAME} (type: {model_type})")
@@ -350,7 +321,7 @@ def find_main_activity(package_name):
     return None
 
 def filter_apps_with_ai(app_data_list: list):
-    """Uses AI (Google Gemini or DeepSeek) to filter apps for health/fitness categories."""
+    """Uses AI (Google Gemini) to filter apps for health/fitness categories."""
     print("\n--- Filtering apps using AI ---")
     if not CAN_ENABLE_AI_FILTERING_GLOBALLY:
         print("AI Filtering globally disabled - will NOT filter app list.", file=sys.stderr)
@@ -373,18 +344,6 @@ def filter_apps_with_ai(app_data_list: list):
             model = GenAIModel(model_name=DEFAULT_AI_MODEL_NAME, safety_settings=AI_MODEL_SAFETY_SETTINGS)
         except Exception as e:
             print(f"Error configuring Google AI SDK or initializing model: {e}", file=sys.stderr)
-            traceback.print_exc()
-            return app_data_list  # Return original list on SDK error
-    
-    elif AI_PROVIDER == 'deepseek':
-        if not DeepSeekClient or not DEFAULT_AI_MODEL_NAME:
-            print("Error: DeepSeek client or model name missing. Cannot proceed.", file=sys.stderr)
-            return app_data_list  # Return original on configuration error
-            
-        try:
-            client = DeepSeekClient(api_key=cfg.DEEPSEEK_API_KEY)
-        except Exception as e:
-            print(f"Error initializing DeepSeek client: {e}", file=sys.stderr)
             traceback.print_exc()
             return app_data_list  # Return original list on SDK error
     
@@ -439,18 +398,7 @@ Input JSON:
                         print(f"Prompt Feedback: {response.prompt_feedback}", file=sys.stderr)
                     continue  # Skip to the next chunk
             
-            elif AI_PROVIDER == 'deepseek':
-                response = client.chat.completions.create(
-                    model=DEFAULT_AI_MODEL_NAME,
-                    messages=[{"role": "user", "content": prompt}]
-                )
-                if response is None:
-                    print("Error: AI returned None response", file=sys.stderr)
-                    continue  # Skip to the next chunk
-                response_text = response.choices[0].message.content.strip() if hasattr(response.choices[0].message, 'content') else ""
-                if not response_text:
-                    print("Warning: Empty response from AI", file=sys.stderr)
-                    continue  # Skip to the next chunk
+
 
             # Clean up JSON formatting if present
             if response_text.startswith("```json"):
