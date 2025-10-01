@@ -210,10 +210,12 @@ pip install -r requirements.txt
 
 **Environment Configuration (`.env` file):**
 Create a file named `.env` in the project root directory (NOT in the traverser_ai_api subdirectory).
-Add your Google Gemini API key and optionally PCAPdroid API key to it:
+Add your cloud AI provider API key(s) and optional service keys:
 ```env
-# Required for AI functionality
-GEMINI_API_KEY=your_api_key_here
+# Required for AI functionality (set the one for your selected provider)
+GEMINI_API_KEY=your_gemini_api_key_here
+DEEPSEEK_API_KEY=your_deepseek_api_key_here
+OPENROUTER_API_KEY=your_openrouter_api_key_here
 
 # Optional keys
 # PCAPDROID_API_KEY=your_pcapdroid_key_here
@@ -223,6 +225,11 @@ GEMINI_API_KEY=your_api_key_here
 IMPORTANT: Only use ONE .env file in the project root. The application is configured to look for it there.
 
 This file contains sensitive information and should NOT be committed to version control.
+
+If you use the DeepSeek or OpenRouter providers, install the OpenAI SDK in your environment:
+```powershell
+pip install openai
+```
 
 ## Usage Guide
 

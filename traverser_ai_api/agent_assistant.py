@@ -17,7 +17,7 @@ except ImportError:
 
 class AgentAssistant:
     """
-    Handles interactions with AI models (Google Gemini, DeepSeek) using adapters.
+    Handles interactions with AI models (Google Gemini, DeepSeek, OpenRouter, Ollama) using adapters.
     Implements structured prompting for mobile app UI testing.
     
     The AgentAssistant can also directly perform actions using the AgentTools, allowing it to 
@@ -40,15 +40,26 @@ class AgentAssistant:
         self.ai_provider = getattr(self.cfg, 'AI_PROVIDER', 'gemini').lower()
         logging.debug(f"Using AI provider: {self.ai_provider}")
 
+        # Adapter provider override (for routing purposes without changing UI label)
+        self._adapter_provider_override: Optional[str] = None
+
         # Get the appropriate API key based on the provider
         if self.ai_provider == 'gemini':
             if not self.cfg.GEMINI_API_KEY:
                 raise ValueError("GEMINI_API_KEY is not set in the provided application configuration.")
             self.api_key = self.cfg.GEMINI_API_KEY
         elif self.ai_provider == 'deepseek':
-            if not self.cfg.DEEPSEEK_API_KEY:
-                raise ValueError("DEEPSEEK_API_KEY is not set in the provided application configuration.")
-            self.api_key = self.cfg.DEEPSEEK_API_KEY
+            # Route DeepSeek through OpenRouter while keeping provider label 'deepseek'
+            logging.info("Routing 'deepseek' via OpenRouter models without changing provider label.")
+            self._adapter_provider_override = 'openrouter'
+            openrouter_key = getattr(self.cfg, 'OPENROUTER_API_KEY', None)
+            if not openrouter_key:
+                raise ValueError("OPENROUTER_API_KEY is not set in the provided application configuration.")
+            self.api_key = openrouter_key
+        elif self.ai_provider == 'openrouter':
+            if not getattr(self.cfg, 'OPENROUTER_API_KEY', None):
+                raise ValueError("OPENROUTER_API_KEY is not set in the provided application configuration.")
+            self.api_key = self.cfg.OPENROUTER_API_KEY
         elif self.ai_provider == 'ollama':
             # For Ollama, we use the base URL instead of API key
             self.api_key = getattr(self.cfg, 'OLLAMA_BASE_URL', 'http://localhost:11434')
@@ -65,15 +76,57 @@ class AgentAssistant:
             if not models_config or not isinstance(models_config, dict):
                 raise ValueError("GEMINI_MODELS must be defined in app_config and be a non-empty dictionary.")
         elif self.ai_provider == 'deepseek':
-            models_config = self.cfg.DEEPSEEK_MODELS
-            if not models_config or not isinstance(models_config, dict):
-                raise ValueError("DEEPSEEK_MODELS must be defined in app_config and be a non-empty dictionary.")
+            # Use OpenRouter model catalog for DeepSeek selections
+            models_config = getattr(self.cfg, 'OPENROUTER_MODELS', None)
+            if not models_config or not isinstance(models_config, dict) or len(models_config) == 0:
+                logging.warning("OPENROUTER_MODELS missing or invalid; using resilient defaults.")
+                models_config = {
+                    'openrouter-auto': {
+                        'name': 'openrouter/auto',
+                        'description': 'Balanced auto-router via OpenRouter',
+                        'generation_config': {'temperature': 0.7, 'top_p': 0.95, 'max_output_tokens': 4096},
+                        'online': True
+                    },
+                    'openrouter-auto-fast': {
+                        'name': 'openrouter/auto',
+                        'description': 'Faster auto-router via OpenRouter',
+                        'generation_config': {'temperature': 0.3, 'top_p': 0.8, 'max_output_tokens': 4096},
+                        'online': True
+                    }
+                }
         elif self.ai_provider == 'ollama':
             models_config = self.cfg.OLLAMA_MODELS
             if not models_config or not isinstance(models_config, dict):
                 raise ValueError("OLLAMA_MODELS must be defined in app_config and be a non-empty dictionary.")
+        elif self.ai_provider == 'openrouter':
+            models_config = getattr(self.cfg, 'OPENROUTER_MODELS', None)
+            if not models_config or not isinstance(models_config, dict) or len(models_config) == 0:
+                logging.warning("OPENROUTER_MODELS missing or invalid; using resilient defaults.")
+                models_config = {
+                    'openrouter-auto': {
+                        'name': 'openrouter/auto',
+                        'description': 'Balanced auto-router via OpenRouter',
+                        'generation_config': {'temperature': 0.7, 'top_p': 0.95, 'max_output_tokens': 4096},
+                        'online': True
+                    },
+                    'openrouter-auto-fast': {
+                        'name': 'openrouter/auto',
+                        'description': 'Faster auto-router via OpenRouter',
+                        'generation_config': {'temperature': 0.3, 'top_p': 0.8, 'max_output_tokens': 4096},
+                        'online': True
+                    }
+                }
         else:
             raise ValueError(f"Unsupported AI provider: {self.ai_provider}")
+
+        # Allow manual OpenRouter override from UI/config
+        openrouter_raw_alias = False
+        if self.ai_provider in ['openrouter', 'deepseek']:
+            override_id = getattr(self.cfg, 'OPENROUTER_MODEL_ID_OVERRIDE', None)
+            if isinstance(override_id, str) and override_id.strip():
+                model_alias = override_id.strip()
+                openrouter_raw_alias = True
+                logging.info(f"OpenRouter: overriding model with manual id '{model_alias}'.")
 
         available_model_aliases = list(models_config.keys())
         if not available_model_aliases:
@@ -104,6 +157,11 @@ class AgentAssistant:
                         if hasattr(self.cfg, 'update_setting_and_save'):
                             self.cfg.update_setting_and_save("DEFAULT_MODEL_TYPE", model_alias)
                             logging.debug(f"Updated DEFAULT_MODEL_TYPE setting to '{model_alias}' to match {self.ai_provider} provider")
+            elif self.ai_provider in ['openrouter', 'deepseek'] and not openrouter_raw_alias:
+                # Treat the provided alias as a raw model name for OpenRouter
+                # This enables dynamic model selection without predefining aliases
+                openrouter_raw_alias = True
+                logging.info(f"OpenRouter: using raw model alias '{model_alias}' as direct model name.")
             else:
                 logging.warning(f"Model alias '{model_alias}' not found in {self.ai_provider.upper()}_MODELS. " +
                                f"Using default model for {self.ai_provider} provider.")
@@ -115,8 +173,18 @@ class AgentAssistant:
                     logging.debug(f"Updated DEFAULT_MODEL_TYPE setting to '{model_alias}' to match {self.ai_provider} provider")
 
         model_config_from_file = models_config.get(model_alias)
-        if not model_config_from_file or not isinstance(model_config_from_file, dict):
-            raise ValueError(f"Model configuration for alias '{model_alias}' not found or invalid.")
+        if (not model_config_from_file or not isinstance(model_config_from_file, dict)):
+            if self.ai_provider == 'openrouter' and openrouter_raw_alias:
+                # Build a fallback config using the raw alias as the actual model name
+                model_config_from_file = {
+                    'name': model_alias,
+                    'description': f"Direct OpenRouter model '{model_alias}'",
+                    'generation_config': {'temperature': 0.7, 'top_p': 0.95, 'max_output_tokens': 4096},
+                    'online': True
+                }
+                logging.info(f"OpenRouter: using direct model '{model_alias}' with default generation settings.")
+            else:
+                raise ValueError(f"Model configuration for alias '{model_alias}' not found or invalid.")
 
         actual_model_name = model_config_from_file.get('name')
         if not actual_model_name:
@@ -150,10 +218,11 @@ class AgentAssistant:
         try:
             # Check if the required dependencies are installed for the chosen provider
             from model_adapters import check_dependencies
-            deps_installed, error_msg = check_dependencies(self.ai_provider)
+            adapter_provider = self._adapter_provider_override or self.ai_provider
+            deps_installed, error_msg = check_dependencies(adapter_provider)
             
             if not deps_installed:
-                logging.error(f"Missing dependencies for {self.ai_provider}: {error_msg}")
+                logging.error(f"Missing dependencies for {adapter_provider}: {error_msg}")
                 raise ImportError(error_msg)
             
             # Ensure we have a valid model name
@@ -162,7 +231,7 @@ class AgentAssistant:
                     
             # Create model adapter
             self.model_adapter = create_model_adapter(
-                provider=self.ai_provider,
+                provider=adapter_provider,
                 api_key=self.api_key,
                 model_name=self.actual_model_name
             )
@@ -175,7 +244,7 @@ class AgentAssistant:
             
             logging.debug(f"AI Assistant initialized with model alias: {self.model_alias} (actual: {self.actual_model_name})")
             logging.debug(f"Model description: {model_config.get('description', 'N/A')}")
-            logging.debug(f"Model provider: {self.ai_provider}")
+            logging.debug(f"Model provider label: {self.ai_provider} | adapter: {adapter_provider}")
 
         except Exception as e:
             logging.error(f"Failed to initialize AI model: {e}", exc_info=True)

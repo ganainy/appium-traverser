@@ -18,14 +18,14 @@ from PySide6.QtCore import Qt, QProcess, QTimer, QThread
 from PySide6.QtCore import Signal, Slot as slot
 from PySide6.QtGui import QPixmap, QColor, QTextCursor, QIcon, QImage
 
-from config import Config
-from ui.components import UIComponents
-from ui.config_manager import ConfigManager
-from ui.crawler_manager import CrawlerManager
-from ui.health_app_scanner import HealthAppScanner
-from ui.mobsf_ui_manager import MobSFUIManager
-from ui.logo import LogoWidget
-from ui.utils import update_screenshot
+from .config import Config
+from .ui.components import UIComponents
+from .ui.config_manager import ConfigManager
+from .ui.crawler_manager import CrawlerManager
+from .ui.health_app_scanner import HealthAppScanner
+from .ui.mobsf_ui_manager import MobSFUIManager
+from .ui.logo import LogoWidget
+from .ui.utils import update_screenshot
 
 
 class CrawlerControllerWindow(QMainWindow):

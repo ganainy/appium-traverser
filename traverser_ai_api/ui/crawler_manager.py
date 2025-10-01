@@ -193,6 +193,10 @@ class CrawlerManager(QObject):
             if not getattr(self.config, 'DEEPSEEK_API_KEY', None):
                 issues.append("❌ DeepSeek API key is not set (check DEEPSEEK_API_KEY in .env file)")
         
+        elif ai_provider == 'openrouter':
+            if not getattr(self.config, 'OPENROUTER_API_KEY', None):
+                issues.append("❌ OpenRouter API key is not set (check OPENROUTER_API_KEY in .env file)")
+        
         elif ai_provider == 'ollama':
             if not getattr(self.config, 'OLLAMA_BASE_URL', None):
                 warnings.append("⚠️ Ollama base URL not set (using default localhost:11434)")

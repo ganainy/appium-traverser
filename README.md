@@ -29,21 +29,25 @@ This project implements an automated crawler for Android applications driven by 
 npm install -g appium
 appium driver install uiautomator2
 
-# 2. Setup project
+# 2. Setup project (Windows, using virtual environment)
 git clone <repository-url>
-cd appium-traverser-vertiefung
-python -m venv .venv
+cd appium-traverser-master-arbeit
+py -3 -m venv .venv
 .\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
+# If using the DeepSeek or OpenRouter provider:
+python -m pip install openai
 
 # 3. Start crawling
 appium --relaxed-security  # Terminal 1
 
-# CLI Controller (Terminal 2)
-python traverser_ai_api/cli_controller.py --scan-apps --list-apps --select-app 1 --start
+# CLI Controller (Terminal 2, venv active)
+python -m traverser_ai_api.cli_controller --scan-apps --list-apps --select-app 1 --start
 
-# OR UI Controller (Terminal 2)
-python traverser_ai_api/ui_controller.py  # Opens graphical interface
+# UI Controller (Terminal 2, venv active)
+# Preferred (venv activated):
+python -m traverser_ai_api.ui_controller  # Opens graphical interface
+
 ```
 
 ## Features
@@ -74,6 +78,12 @@ This project supports multiple AI providers for intelligent app exploration:
    - Run models locally on your machine
    - Supports both text-only and vision-capable models
    - No API costs, privacy-focused
+
+4. **OpenRouter**
+   - Cloud-based router to top models via OpenAI-compatible API
+   - Simple presets (`openrouter-auto`, `openrouter-auto-fast`)
+   - Requires API key
+   - DeepSeek models are accessible via OpenRouter (no separate DeepSeek key)
 
 ### Using Ollama with Vision Support
 
@@ -122,8 +132,8 @@ You can easily switch between providers by updating your `user_config.json`:
 
 ```json
 {
-  "AI_PROVIDER": "ollama",  // or "gemini" or "deepseek"
-  "DEFAULT_MODEL_TYPE": "llama3.2-vision"
+  "AI_PROVIDER": "ollama",  // or "gemini", "deepseek", or "openrouter"
+  "DEFAULT_MODEL_TYPE": "llama3.2-vision"  // e.g., "openrouter-auto" for OpenRouter
 }
 ```
 
@@ -221,6 +231,40 @@ python demo_agent.py --api-key "your-api-key" --screenshot "path/to/screenshot.p
 ## Complete Setup & Usage
 
 📖 **[See CONSOLIDATED_SETUP_GUIDE.md](./CONSOLIDATED_SETUP_GUIDE.md)** for comprehensive setup instructions, usage examples, configuration options, and troubleshooting.
+
+### Running the UI in a Virtual Environment (Windows)
+
+- Create the environment: `py -3 -m venv .venv`
+- Activate in PowerShell: `\.venv\Scripts\Activate.ps1`
+- Install deps: `pip install -r requirements.txt`
+- Run the UI: `python -m traverser_ai_api.ui_controller`
+- Without activation: `\.venv\Scripts\python.exe -m traverser_ai_api.ui_controller`
+
+Notes
+- If using the DeepSeek or OpenRouter provider, install the OpenAI SDK inside the venv: `pip install openai`.
+- In VS Code, select interpreter: `Ctrl+Shift+P` → `Python: Select Interpreter` → choose `\.venv\Scripts\python.exe`.
+
+### Using OpenRouter
+
+OpenRouter provides curated routing across high-quality models using an OpenAI-compatible API.
+
+- Get your API key at `https://openrouter.ai` and set `OPENROUTER_API_KEY` in your `.env`.
+- Install the OpenAI SDK: `pip install openai`.
+- Configure:
+  ```json
+  {
+    "AI_PROVIDER": "openrouter",
+    "DEFAULT_MODEL_TYPE": "openrouter-auto"
+  }
+  ```
+- Available models:
+  - `openrouter-auto` (balanced)
+  - `openrouter-auto-fast` (faster)
+   - Any direct model id from the catalog, e.g. `deepseek/deepseek-chat`, `openai/gpt-4o-mini`, `anthropic/claude-3.5-sonnet`
+
+Notes
+- To use DeepSeek via OpenRouter, set `AI_PROVIDER` to `openrouter` and choose a DeepSeek model id from the catalog (e.g., `deepseek/deepseek-chat`). No `DEEPSEEK_API_KEY` is required.
+- If `OPENROUTER_MODELS` is missing in configuration, the app falls back to resilient defaults (`openrouter-auto`, `openrouter-auto-fast`). You can still specify any direct model id in `DEFAULT_MODEL_TYPE` and the app will use it.
 
 ## Architecture
 

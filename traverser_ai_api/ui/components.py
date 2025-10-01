@@ -3,6 +3,8 @@
 import os
 import logging
 from typing import Dict, Any, Callable, Optional
+import json
+import time
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QLineEdit, QCheckBox, QSpinBox,
@@ -56,50 +58,6 @@ class UIComponents:
                 # Hide warning label
                 if 'IMAGE_CONTEXT_WARNING' in config_widgets:
                     config_widgets['IMAGE_CONTEXT_WARNING'].setVisible(False)
-        elif provider.lower() == 'deepseek':
-            model_dropdown.addItems([
-                'deepseek-vision', 'deepseek-vision-fast'
-            ])
-            # Handle image context based on provider capabilities
-            if 'ENABLE_IMAGE_CONTEXT' in config_widgets:
-                auto_disable = capabilities.get('auto_disable_image_context', False)
-                if auto_disable:
-                    config_widgets['ENABLE_IMAGE_CONTEXT'].setChecked(False)
-                    config_widgets['ENABLE_IMAGE_CONTEXT'].setEnabled(False)
-                    config_widgets['ENABLE_IMAGE_CONTEXT'].setToolTip(f"⚠️ DISABLED: {provider} has strict payload limits ({capabilities.get('payload_max_size_kb', 150)}KB max). Image context automatically disabled to prevent API errors.")
-                    
-                    # Add visual styling to make the disabled state more obvious
-                    config_widgets['ENABLE_IMAGE_CONTEXT'].setStyleSheet("""
-                        QCheckBox {
-                            color: #ff6b35;
-                            font-weight: bold;
-                        }
-                        QCheckBox::indicator {
-                            background-color: #ff6b35;
-                            border: 2px solid #ff6b35;
-                            border-radius: 3px;
-                        }
-                        QCheckBox::indicator:unchecked {
-                            background-color: #ffeaa7;
-                        }
-                    """)
-                    
-                    # Show warning label
-                    if 'IMAGE_CONTEXT_WARNING' in config_widgets:
-                        config_widgets['IMAGE_CONTEXT_WARNING'].setVisible(True)
-                    
-                    # Add visual warning indicator
-                    UIComponents._add_image_context_warning(provider, capabilities)
-                else:
-                    config_widgets['ENABLE_IMAGE_CONTEXT'].setEnabled(True)
-                    config_widgets['ENABLE_IMAGE_CONTEXT'].setToolTip("Enable sending screenshots to AI for visual analysis. Disable for text-only analysis.")
-                    
-                    # Reset styling when enabling
-                    config_widgets['ENABLE_IMAGE_CONTEXT'].setStyleSheet("")
-                    
-                    # Hide warning label
-                    if 'IMAGE_CONTEXT_WARNING' in config_widgets:
-                        config_widgets['IMAGE_CONTEXT_WARNING'].setVisible(False)
         elif provider.lower() == 'ollama':
             # Get available Ollama models dynamically
             try:
@@ -184,6 +142,95 @@ class UIComponents:
                 # Hide warning label
                 if 'IMAGE_CONTEXT_WARNING' in config_widgets:
                     config_widgets['IMAGE_CONTEXT_WARNING'].setVisible(False)
+        elif provider.lower() == 'openrouter':
+            # Try to populate from cached OpenRouter models; fallback to presets
+            cached_models = UIComponents._load_openrouter_models_from_cache()
+            vision_models = []
+            free_only = False
+            try:
+                if 'OPENROUTER_SHOW_FREE_ONLY' in config_widgets:
+                    free_only = bool(config_widgets['OPENROUTER_SHOW_FREE_ONLY'].isChecked())
+            except Exception:
+                free_only = False
+            if cached_models:
+                try:
+                    # Add dynamic models (id values), honoring free-only filter by model metadata
+                    model_ids = []
+                    for m in cached_models:
+                        mid = m.get('id') or m.get('name')
+                        if not mid:
+                            continue
+                        if free_only:
+                            if UIComponents._is_openrouter_model_free(m):
+                                model_ids.append(mid)
+                        else:
+                            model_ids.append(mid)
+                    # Heuristic for vision-capable models
+                    for mid in model_ids:
+                        if UIComponents._is_openrouter_model_vision(mid):
+                            vision_models.append(mid)
+                    model_dropdown.addItems(model_ids)
+                except Exception as e:
+                    logging.warning(f"Error loading cached OpenRouter models: {e}")
+                    model_dropdown.addItems(['openrouter-auto', 'openrouter-auto-fast'])
+            else:
+                model_dropdown.addItems(['openrouter-auto', 'openrouter-auto-fast'])
+
+            # Always include presets as safe options at the top if not already
+            for preset in ['openrouter-auto', 'openrouter-auto-fast']:
+                if model_dropdown.findText(preset) == -1:
+                    model_dropdown.insertItem(0, preset)
+
+            # Prefer a vision-capable default if available, else openrouter-auto
+            preferred_default = 'openrouter-auto'
+            if free_only:
+                # Prefer first free model if available
+                for i in range(model_dropdown.count()):
+                    txt = model_dropdown.itemText(i)
+                    # Without name available in dropdown, we assume free-only list already applied
+                    preferred_default = txt
+                    break
+            elif vision_models:
+                preferred_default = vision_models[0]
+            model_dropdown.setCurrentText(preferred_default)
+
+            # Handle image context based on provider capabilities (generally enabled)
+            if 'ENABLE_IMAGE_CONTEXT' in config_widgets:
+                auto_disable = capabilities.get('auto_disable_image_context', False)
+                if auto_disable:
+                    config_widgets['ENABLE_IMAGE_CONTEXT'].setChecked(False)
+                    config_widgets['ENABLE_IMAGE_CONTEXT'].setEnabled(False)
+                    config_widgets['ENABLE_IMAGE_CONTEXT'].setToolTip(
+                        f"⚠️ DISABLED: {provider} has strict payload limits ({capabilities.get('payload_max_size_kb', 500)}KB max)."
+                    )
+                    if 'IMAGE_CONTEXT_WARNING' in config_widgets:
+                        config_widgets['IMAGE_CONTEXT_WARNING'].setVisible(True)
+                    UIComponents._add_image_context_warning(provider, capabilities)
+                else:
+                    # Auto-enable for vision-capable selections, otherwise keep as-is
+                    selected = model_dropdown.currentText()
+                    is_vision = UIComponents._is_openrouter_model_vision(selected)
+                    config_widgets['ENABLE_IMAGE_CONTEXT'].setEnabled(True)
+                    config_widgets['ENABLE_IMAGE_CONTEXT'].setChecked(is_vision)
+                    config_widgets['ENABLE_IMAGE_CONTEXT'].setToolTip(
+                        "Enable sending screenshots to AI for visual analysis. Automatically enabled for vision-capable models."
+                    )
+                    # Reset styling when enabling
+                    config_widgets['ENABLE_IMAGE_CONTEXT'].setStyleSheet("")
+                    if 'IMAGE_CONTEXT_WARNING' in config_widgets:
+                        config_widgets['IMAGE_CONTEXT_WARNING'].setVisible(False)
+
+            # React to model changes to auto-toggle image context
+            def _on_openrouter_model_changed(name: str):
+                try:
+                    if 'ENABLE_IMAGE_CONTEXT' in config_widgets:
+                        auto_disable_local = capabilities.get('auto_disable_image_context', False)
+                        if not auto_disable_local:
+                            config_widgets['ENABLE_IMAGE_CONTEXT'].setChecked(UIComponents._is_openrouter_model_vision(name))
+                except Exception as e:
+                    logging.debug(f"Error toggling image context on model change: {e}")
+            model_dropdown.currentTextChanged.connect(_on_openrouter_model_changed)
+        
         
         # Unblock signals after updating
         model_dropdown.blockSignals(False)
@@ -239,6 +286,8 @@ class UIComponents:
         "CONTINUE_EXISTING_RUN": False,
         "MOBSF_API_URL": True,
         "MOBSF_API_KEY": True,
+        "OPENROUTER_MODEL_ID_OVERRIDE": True,
+        "OPENROUTER_SHOW_FREE_ONLY": False,
     }
     
     @staticmethod
@@ -605,15 +654,16 @@ class UIComponents:
         
         # AI Provider Selection
         config_widgets['AI_PROVIDER'] = QComboBox()
-        config_widgets['AI_PROVIDER'].addItems(['gemini', 'deepseek', 'ollama'])
+        # Remove DeepSeek from provider dropdown; use OpenRouter for DeepSeek models
+        config_widgets['AI_PROVIDER'].addItems(['gemini', 'ollama', 'openrouter'])
         label_ai_provider = QLabel("AI Provider: ")
         label_ai_provider.setToolTip("The AI model provider to use for analysis and decision making.")
         ai_layout.addRow(label_ai_provider, config_widgets['AI_PROVIDER'])
         
-        # Connect the AI provider selection to update model types
-        config_widgets['AI_PROVIDER'].currentTextChanged.connect(
-            lambda provider: UIComponents._update_model_types(provider, config_widgets)
-        )
+        # Create refresh button for OpenRouter models (hidden by default)
+        config_widgets['OPENROUTER_REFRESH_BTN'] = QPushButton("Refresh models")
+        config_widgets['OPENROUTER_REFRESH_BTN'].setToolTip("Fetch latest models from OpenRouter API")
+        config_widgets['OPENROUTER_REFRESH_BTN'].setVisible(False)
         
         config_widgets['DEFAULT_MODEL_TYPE'] = QComboBox()
         config_widgets['DEFAULT_MODEL_TYPE'].addItems([
@@ -621,7 +671,48 @@ class UIComponents:
         ])
         label_model_type = QLabel("Default Model Type: ")
         label_model_type.setToolTip(tooltips['DEFAULT_MODEL_TYPE'])
-        ai_layout.addRow(label_model_type, config_widgets['DEFAULT_MODEL_TYPE'])
+        # Place dropdown and refresh button side-by-side
+        _model_row_layout = QHBoxLayout()
+        _model_row_layout.addWidget(config_widgets['DEFAULT_MODEL_TYPE'])
+        _model_row_layout.addWidget(config_widgets['OPENROUTER_REFRESH_BTN'])
+        # Free-only filter (hidden by default; shown for OpenRouter)
+        config_widgets['OPENROUTER_SHOW_FREE_ONLY'] = QCheckBox("Free only")
+        config_widgets['OPENROUTER_SHOW_FREE_ONLY'].setToolTip("Show only models whose name ends with '(free)'")
+        config_widgets['OPENROUTER_SHOW_FREE_ONLY'].setVisible(False)
+        _model_row_layout.addWidget(config_widgets['OPENROUTER_SHOW_FREE_ONLY'])
+        ai_layout.addRow(label_model_type, _model_row_layout)
+
+        # Connect the AI provider selection to update model types and toggle refresh visibility
+        def _on_provider_changed(provider: str):
+            UIComponents._update_model_types(provider, config_widgets)
+            is_or = provider.lower() == 'openrouter'
+            # Show OpenRouter controls only when OpenRouter is selected
+            config_widgets['OPENROUTER_REFRESH_BTN'].setVisible(is_or)
+            config_widgets['OPENROUTER_SHOW_FREE_ONLY'].setVisible(is_or)
+        config_widgets['AI_PROVIDER'].currentTextChanged.connect(_on_provider_changed)
+
+        # Wire up refresh button
+        def _on_refresh_clicked():
+            try:
+                UIComponents._refresh_openrouter_models(config_handler, config_widgets)
+            except Exception as e:
+                logging.warning(f"Failed to refresh OpenRouter models: {e}")
+        config_widgets['OPENROUTER_REFRESH_BTN'].clicked.connect(_on_refresh_clicked)
+
+        # Wire up free-only filter to re-populate models
+        def _on_free_only_changed(_state: int):
+            try:
+                current_provider = config_widgets['AI_PROVIDER'].currentText().lower()
+                if current_provider == 'openrouter':
+                    UIComponents._update_model_types('openrouter', config_widgets)
+            except Exception as e:
+                logging.debug(f"Failed to apply free-only filter: {e}")
+        config_widgets['OPENROUTER_SHOW_FREE_ONLY'].stateChanged.connect(_on_free_only_changed)
+
+        # Advanced manual model id entry for OpenRouter
+        config_widgets['OPENROUTER_MODEL_ID_OVERRIDE'] = QLineEdit()
+        config_widgets['OPENROUTER_MODEL_ID_OVERRIDE'].setPlaceholderText("Optional: Enter exact OpenRouter model id (e.g., deepseek/deepseek-chat)")
+        ai_layout.addRow(QLabel("Advanced Model ID (OpenRouter):"), config_widgets['OPENROUTER_MODEL_ID_OVERRIDE'])
         
         config_widgets['USE_CHAT_MEMORY'] = QCheckBox()
         label_use_chat_memory = QLabel("Use Chat Memory: ")
@@ -642,6 +733,123 @@ class UIComponents:
         
         layout.addRow(ai_group)
         return ai_group
+
+    @staticmethod
+    def _get_openrouter_cache_path() -> str:
+        base_dir = os.path.dirname(os.path.dirname(__file__))
+        cache_dir = os.path.join(base_dir, 'output_data', 'cache')
+        os.makedirs(cache_dir, exist_ok=True)
+        return os.path.join(cache_dir, 'openrouter_models.json')
+
+    @staticmethod
+    def _load_openrouter_models_from_cache() -> Optional[list]:
+        try:
+            cache_path = UIComponents._get_openrouter_cache_path()
+            if not os.path.exists(cache_path):
+                return None
+            with open(cache_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            # Expect keys: models, timestamp
+            models = data.get('models') or data
+            if isinstance(models, list) and len(models) > 0:
+                return models
+            return None
+        except Exception as e:
+            logging.debug(f"Failed to read OpenRouter cache: {e}")
+            return None
+
+    @staticmethod
+    def _save_openrouter_models_to_cache(models: list) -> None:
+        try:
+            cache_path = UIComponents._get_openrouter_cache_path()
+            payload = { 'models': models, 'timestamp': int(time.time()) }
+            with open(cache_path, 'w', encoding='utf-8') as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logging.debug(f"Failed to save OpenRouter cache: {e}")
+
+    @staticmethod
+    def _is_openrouter_model_vision(model_id: str) -> bool:
+        if not model_id:
+            return False
+        mid = model_id.lower()
+        patterns = [
+            'vision', 'vl', 'gpt-4o', 'gpt-4.1', 'o-mini', 'omni', 'llava', 'qwen-vl', 'minicpm-v', 'moondream', 'gemma3', 'image', 'deepseek/deepseek-chat'
+        ]
+        return any(p in mid for p in patterns)
+
+    @staticmethod
+    def _refresh_openrouter_models(config_handler: Any, config_widgets: Dict[str, Any]) -> None:
+        try:
+            api_key = getattr(config_handler.config, 'OPENROUTER_API_KEY', None)
+            if not api_key:
+                config_handler.main_controller.log_message("OpenRouter API key missing. Set OPENROUTER_API_KEY in .env.", 'orange')
+                return
+            import requests
+            headers = {
+                'Authorization': f'Bearer {api_key}',
+                'Content-Type': 'application/json'
+            }
+            resp = requests.get('https://openrouter.ai/api/v1/models', headers=headers, timeout=20)
+            if resp.status_code != 200:
+                raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:200]}")
+            data = resp.json()
+            # OpenRouter returns {'data': [ ...models... ]}
+            models = data.get('data') or data.get('models') or []
+            # Normalize to include only id and name
+            normalized = []
+            for m in models:
+                mid = m.get('id') or m.get('name')
+                if not mid:
+                    continue
+                entry = {
+                    'id': mid,
+                    'name': m.get('name', mid)
+                }
+                # Preserve pricing info for free detection if available
+                if isinstance(m.get('pricing'), dict):
+                    entry['pricing'] = m.get('pricing')
+                normalized.append(entry)
+            if not normalized:
+                raise RuntimeError('No models returned from OpenRouter')
+            UIComponents._save_openrouter_models_to_cache(normalized)
+            config_handler.main_controller.log_message(f"Fetched {len(normalized)} OpenRouter models.", 'green')
+            # Re-populate dropdown from cache
+            UIComponents._update_model_types('openrouter', config_widgets)
+        except Exception as e:
+            logging.warning(f"OpenRouter model fetch failed: {e}")
+            try:
+                config_handler.main_controller.log_message(f"OpenRouter model fetch failed: {e}", 'orange')
+            except Exception:
+                pass
+
+    @staticmethod
+    def _is_openrouter_model_free(model_meta: Any) -> bool:
+        try:
+            # Accept either dict meta or name string
+            if isinstance(model_meta, dict):
+                name = (model_meta.get('name') or '').lower()
+                if '(free' in name:
+                    return True
+                pricing = model_meta.get('pricing')
+                if isinstance(pricing, dict):
+                    # Flatten pricing values to a single string
+                    parts = []
+                    for v in pricing.values():
+                        if isinstance(v, str):
+                            parts.append(v)
+                        elif isinstance(v, dict):
+                            parts.extend([str(x) for x in v.values() if x is not None])
+                    joined = ' '.join(parts).lower()
+                    # Common indicators
+                    if 'free' in joined or '$0' in joined or '0/m' in joined:
+                        return True
+                return False
+            # If just a name string
+            name_str = str(model_meta).lower()
+            return '(free' in name_str
+        except Exception:
+            return False
     
     @staticmethod
     def _create_focus_areas_group(

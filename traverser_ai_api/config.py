@@ -46,6 +46,7 @@ class Config:
         self.USE_COORDINATE_FALLBACK: bool = True
         self.GEMINI_API_KEY: Optional[str] = None
         self.DEEPSEEK_API_KEY: Optional[str] = None
+        self.OPENROUTER_API_KEY: Optional[str] = None
         self.OLLAMA_BASE_URL: Optional[str] = None
         self.AI_PROVIDER: str = 'gemini'  # 'gemini', 'deepseek', or 'ollama'
         self.DEFAULT_MODEL_TYPE: str = 'flash-latest-fast'
@@ -201,6 +202,7 @@ class Config:
             
         self.GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", self.GEMINI_API_KEY)
         self.DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", self.DEEPSEEK_API_KEY)
+        self.OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", self.OPENROUTER_API_KEY)
         self.OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", self.OLLAMA_BASE_URL)
         self.PCAPDROID_API_KEY = os.getenv("PCAPDROID_API_KEY", self.PCAPDROID_API_KEY)
         self.MOBSF_API_KEY = os.getenv("MOBSF_API_KEY", self.MOBSF_API_KEY)
@@ -842,6 +844,17 @@ AI_PROVIDER_CAPABILITIES = {
         'auto_disable_image_context': False,  # Don't auto-disable since vision models exist
         'description': 'Ollama - Local LLM provider with vision support for compatible models',
         'online': False  # Local provider
+    },
+    'openrouter': {
+        'xml_max_len': 200000,  # Balanced default; depends on routed model
+        'image_supported': True,  # Many OpenRouter models support images
+        'image_max_width': 640,
+        'image_quality': 75,
+        'image_format': 'JPEG',
+        'payload_max_size_kb': 500,  # Conservative; varies by downstream model
+        'auto_disable_image_context': False,
+        'description': 'OpenRouter - Unified gateway to multiple model providers',
+        'online': True
     }
     # Future providers can be easily added here, e.g.:
     # 'claude': {
@@ -866,4 +879,18 @@ AI_PROVIDER_CAPABILITIES = {
     #     'description': 'Ollama - Local LLM provider',
     #     'online': False  # Local provider
     # }
+}
+OPENROUTER_MODELS = {
+    'openrouter-auto': {
+        'name': 'openrouter/auto',
+        'description': 'OpenRouter auto-router model. Routes to suitable provider automatically.',
+        'generation_config': {'temperature': 0.7, 'top_p': 0.95, 'max_output_tokens': 4096},
+        'online': True
+    },
+    'openrouter-auto-fast': {
+        'name': 'openrouter/auto',
+        'description': 'OpenRouter auto-router model with faster, lower-variance settings.',
+        'generation_config': {'temperature': 0.3, 'top_p': 0.8, 'max_output_tokens': 4096},
+        'online': True
+    }
 }
