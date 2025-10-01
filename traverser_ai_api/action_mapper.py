@@ -335,6 +335,9 @@ class ActionMapper:
         if target_element:
             action_details["element"] = target_element
             action_details["element_info"] = element_info
+            # Carry through any provided bbox for potential execution-time fallback
+            if isinstance(target_bounding_box, dict):
+                action_details["original_bbox"] = target_bounding_box
             if action_type == "input":
                 if input_text is None:
                     logging.warning(f"AI suggested 'input' for '{target_identifier}' but 'input_text' is null. Will attempt to clear or input empty.")

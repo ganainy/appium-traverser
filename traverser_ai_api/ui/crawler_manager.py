@@ -610,9 +610,36 @@ class CrawlerManager(QObject):
         try:
             output = bytes(raw_data).decode('utf-8', errors='replace')
             
-            # Display the raw output in the log
-            self.main_controller.log_message(output.strip())
-            
+            for line in output.strip().split('\n'):
+                line = line.strip()
+                if not line:
+                    continue
+
+                color = 'white'
+                message = line
+                
+                prefixes = {
+                    '[INFO]': 'blue',
+                    'INFO:': 'blue',
+                    '[WARNING]': 'orange',
+                    'WARNING:': 'orange',
+                    '[ERROR]': 'red',
+                    'ERROR:': 'red',
+                    '[CRITICAL]': 'red',
+                    'CRITICAL:': 'red',
+                    '[DEBUG]': 'gray',
+                    'DEBUG:': 'gray',
+                }
+
+                for prefix, p_color in prefixes.items():
+                    if line.startswith(prefix):
+                        message = line[len(prefix):].lstrip()
+                        color = p_color
+                        break
+                
+                if not any(line.startswith(p) for p in ['UI_STEP:', 'UI_ACTION:', 'UI_SCREENSHOT:', 'UI_STATUS:', 'UI_FOCUS:', 'UI_END:']):
+                    self.main_controller.log_message(message, color)
+
             # Check for UI_STEP_PREFIX:step
             step_match = re.search(r'UI_STEP:(\d+)', output)
             if step_match:

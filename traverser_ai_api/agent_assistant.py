@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import re
 from PIL import Image
 import io
+from datetime import datetime
 
 # Try both relative and absolute imports to support different execution contexts
 try:
@@ -186,6 +187,8 @@ class AgentAssistant:
         else:
             logging.debug("Chat memory is disabled.")
 
+        self.ai_interaction_logger = None
+
     def _initialize_model(self, model_config, safety_settings_override):
         """Initialize the AI model with appropriate settings using the adapter."""
         try:
@@ -222,6 +225,40 @@ class AgentAssistant:
         except Exception as e:
             logging.error(f"Failed to initialize AI model: {e}", exc_info=True)
             raise
+
+    def _setup_ai_interaction_logger(self):
+        """Initializes the logger for AI interactions if it hasn't been already."""
+        if self.ai_interaction_logger and self.ai_interaction_logger.handlers and not isinstance(self.ai_interaction_logger.handlers[0], logging.NullHandler):
+            return  # Already configured
+
+        self.ai_interaction_logger = logging.getLogger('AIInteractionLogger')
+        self.ai_interaction_logger.setLevel(logging.INFO)
+        self.ai_interaction_logger.propagate = False
+        
+        # Clear existing handlers
+        if self.ai_interaction_logger.hasHandlers():
+            self.ai_interaction_logger.handlers.clear()
+
+        # Prefer writing AI interactions to the dedicated logs directory of the session
+        target_log_dir = getattr(self.cfg, 'LOG_DIR', None)
+        if target_log_dir:
+            try:
+                os.makedirs(target_log_dir, exist_ok=True)
+                log_file_path = os.path.join(target_log_dir, 'ai_interactions.log')
+                
+                fh = logging.FileHandler(log_file_path, encoding='utf-8')
+                fh.setLevel(logging.INFO)
+                formatter = logging.Formatter('%(message)s')
+                fh.setFormatter(formatter)
+                self.ai_interaction_logger.addHandler(fh)
+                logging.info(f"AI interaction logger initialized at: {log_file_path}")
+            except OSError as e:
+                logging.error(f"Could not create logs directory or log file for AI interactions: {e}")
+                self.ai_interaction_logger.addHandler(logging.NullHandler())
+        else:
+            logging.error("Log directory not available, AI interaction log will not be saved.")
+            self.ai_interaction_logger.addHandler(logging.NullHandler())
+
 
     def _prepare_image_part(self, screenshot_bytes: Optional[bytes]) -> Optional[Image.Image]:
         """Prepare an image for the agent with optimized compression for LLM understanding."""
@@ -558,7 +595,25 @@ class AgentAssistant:
             if not action_data:
                 logging.error("Failed to parse action data from AI response")
                 return None
-                
+
+            # --- Log AI interaction ---
+            try:
+                self._setup_ai_interaction_logger()
+                if self.ai_interaction_logger:
+                    log_entry = {
+                        "timestamp_utc": datetime.utcnow().isoformat() + "Z",
+                        "model_alias": self.model_alias,
+                        "prompt": prompt,
+                        "response": action_data,
+                        "usage": {
+                            "total_tokens": token_count
+                        }
+                    }
+                    self.ai_interaction_logger.info(json.dumps(log_entry)) # JSONL format
+            except Exception as log_err:
+                logging.error(f"Failed to log AI interaction: {log_err}")
+            # --- End log AI interaction ---
+
             return {"action_to_perform": action_data}, elapsed_time, token_count
             
         except Exception as e:

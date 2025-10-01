@@ -1,5 +1,6 @@
 import logging
 import time
+import re
 from typing import Tuple, Optional, Any, Union, TYPE_CHECKING, Dict
 
 from selenium.webdriver.remote.webelement import WebElement
@@ -126,7 +127,31 @@ class ActionExecutor:
                         logging.warning(f"Standard click failed for element ID {getattr(element, 'id', 'N/A')}. Attempting tap fallback.")
                         success = self.driver.tap_element_center(element)
                         if not success:
-                            current_error_msg = f"Click and tap fallbacks failed for element (ID: {getattr(element, 'id', 'N/A')})."
+                            # Bounds-based coordinate fallback when element became stale
+                            element_info: Dict[str, Any] = action_details.get("element_info", {}) if isinstance(action_details.get("element_info"), dict) else {}
+                            bounds_str: Optional[str] = element_info.get("bounds")
+                            center_from_bounds: Optional[Tuple[int, int]] = None
+                            if isinstance(bounds_str, str):
+                                try:
+                                    m = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", bounds_str)
+                                    if m:
+                                        x1, y1, x2, y2 = map(int, m.groups())
+                                        center_from_bounds = (int((x1 + x2) / 2), int((y1 + y2) / 2))
+                                except Exception:
+                                    center_from_bounds = None
+                            if center_from_bounds:
+                                logging.info(f"Using bounds-based fallback tap at {center_from_bounds} for element ID {getattr(element, 'id', 'N/A')}")
+                                success = self.driver.tap_at_coordinates(center_from_bounds[0], center_from_bounds[1])
+                            # If bounds not available or failed, try original_bbox from mapping
+                            if not success:
+                                original_bbox = action_details.get("original_bbox")
+                                if isinstance(original_bbox, dict):
+                                    center_from_bbox = self._compute_center_from_bbox(original_bbox)
+                                    if center_from_bbox:
+                                        logging.info(f"Using bbox-based fallback tap at {center_from_bbox} for element ID {getattr(element, 'id', 'N/A')}")
+                                        success = self.driver.tap_at_coordinates(center_from_bbox[0], center_from_bbox[1])
+                            if not success:
+                                current_error_msg = f"Click and all fallbacks failed for element (ID: {getattr(element, 'id', 'N/A')})."
                 else:
                     current_error_msg = f"Invalid element for click action: {element}"
                     logging.error(current_error_msg)
@@ -209,6 +234,35 @@ class ActionExecutor:
             self._track_failure(current_error_msg or f"Unknown failure: {action_log_info}")
 
         return success
+
+    def _compute_center_from_bbox(self, bbox: Dict[str, Any]) -> Optional[Tuple[int, int]]:
+        """Compute center coordinates from a bbox dict that may contain normalized or absolute coordinates."""
+        try:
+            top_left = bbox.get('top_left')
+            bottom_right = bbox.get('bottom_right')
+            if not (isinstance(top_left, list) and isinstance(bottom_right, list) and len(top_left) == 2 and len(bottom_right) == 2):
+                return None
+            y1_norm, x1_norm = top_left
+            y2_norm, x2_norm = bottom_right
+            if not all(isinstance(v, (int, float)) for v in [y1_norm, x1_norm, y2_norm, x2_norm]):
+                return None
+            window_size = self.driver.get_window_size()
+            if not window_size:
+                return None
+            screen_width, screen_height = window_size['width'], window_size['height']
+            # Determine if normalized
+            if all(float(v) <= 1.0 for v in [y1_norm, x1_norm, y2_norm, x2_norm]):
+                x1 = int(float(x1_norm) * screen_width)
+                y1 = int(float(y1_norm) * screen_height)
+                x2 = int(float(x2_norm) * screen_width)
+                y2 = int(float(y2_norm) * screen_height)
+            else:
+                x1, y1, x2, y2 = int(x1_norm), int(y1_norm), int(x2_norm), int(y2_norm)
+            if x1 > x2: x1, x2 = x2, x1
+            if y1 > y2: y1, y2 = y2, y1
+            return int((x1 + x2) / 2), int((y1 + y2) / 2)
+        except Exception:
+            return None
 
     def _track_failure(self, reason: str):
         self.consecutive_exec_failures += 1
