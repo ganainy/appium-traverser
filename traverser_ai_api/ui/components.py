@@ -538,17 +538,29 @@ class UIComponents:
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
         
-        # Log output
+        # Log output section
+        log_group = QGroupBox("Logs")
+        log_layout = QVBoxLayout(log_group)
+
+        # Add a clear button
+        controller.clear_logs_btn = QPushButton("Clear Logs")
+        
+        log_header_layout = QHBoxLayout()
+        log_header_layout.addStretch()
+        log_header_layout.addWidget(controller.clear_logs_btn)
+
         controller.log_output = QTextEdit()
         controller.log_output.setReadOnly(True)
-        # Set dark background for log output to make white text visible
         controller.log_output.setStyleSheet("background-color: #333333;")
+
+        log_layout.addLayout(log_header_layout)
+        log_layout.addWidget(controller.log_output)
         
         # Add all sections to the layout
         layout.addLayout(status_layout)
         layout.addLayout(step_action_layout)
         layout.addWidget(controller.screenshot_label)
-        layout.addWidget(controller.log_output, 1)
+        layout.addWidget(log_group, 1)
         
         return panel
     

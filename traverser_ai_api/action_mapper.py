@@ -50,7 +50,7 @@ class ActionMapper:
             
         self.consecutive_map_failures = 0
         
-        logging.debug(
+        logging.info(
             f"ActionMapper initialized. Coordinate fallback: {'ENABLED' if self.use_coordinate_fallback else 'DISABLED'}. "
             f"Max map failures: {self.max_map_failures}"
         )
@@ -189,11 +189,11 @@ class ActionMapper:
                             is_enabled = element.is_enabled()
                             if is_displayed and is_enabled:
                                 duration = time.perf_counter() - start_time
-                                logging.debug(f"Found suitable element by {log_name}: '{identifier}' (took {duration:.4f}s)")
+                                logging.info(f"Found suitable element by {log_name}: '{identifier}' (took {duration:.4f}s)")
                                 if index > 0:
                                     promoted_strategy = self.element_finding_strategies.pop(index)
                                     self.element_finding_strategies.insert(0, promoted_strategy)
-                                    logging.debug(f"Promoted strategy '{log_name}'.")
+                                    logging.info(f"Promoted strategy '{log_name}'.")
                                 return element
                             else:
                                 element = None
@@ -291,7 +291,7 @@ class ActionMapper:
         input_text = ai_response.get("input_text")
         target_bounding_box = ai_response.get("target_bounding_box")
 
-        logging.debug(
+        logging.info(
             f"Mapping AI suggestion: Action='{action_type}', Identifier='{target_identifier}', "
             f"Input='{input_text}', BBox='{target_bounding_box is not None}'"
         )
@@ -342,10 +342,10 @@ class ActionMapper:
                 else:
                     action_details["text"] = str(input_text)
             self.consecutive_map_failures = 0
-            logging.debug(f"Successfully mapped action '{action_type}' to element (ID: {element_info.get('id', 'N/A')}) found by identifier.")
+            logging.info(f"Successfully mapped action '{action_type}' to element (ID: {element_info.get('id', 'N/A')}) found by identifier.")
             return action_details
         
-        logging.debug(f"Element not found by identifier '{target_identifier}'. Checking coordinate fallback (Enabled: {self.use_coordinate_fallback}).")
+        logging.info(f"Element not found by identifier '{target_identifier}'. Checking coordinate fallback (Enabled: {self.use_coordinate_fallback}).")
         if self.use_coordinate_fallback and target_bounding_box and isinstance(target_bounding_box, dict):
             coordinates = self._extract_coordinates_from_bbox(target_bounding_box)
             if coordinates:
@@ -355,9 +355,9 @@ class ActionMapper:
                 action_details["original_bbox"] = target_bounding_box
                 if action_type == "input" and input_text is not None:
                     action_details["intended_input_text"] = str(input_text)
-                    logging.debug(f"Coordinate fallback for INPUT action: will tap at ({center_x},{center_y}), then try to input '{input_text}' (likely via ADB).")
+                    logging.info(f"Coordinate fallback for INPUT action: will tap at ({center_x},{center_y}), then try to input text.")
                 else:
-                     logging.debug(f"Coordinate fallback for {action_type}: will tap at ({center_x},{center_y}).")
+                     logging.info(f"Coordinate fallback for {action_type}: will tap at ({center_x},{center_y}).")
                 
                 self.consecutive_map_failures = 0
                 return action_details

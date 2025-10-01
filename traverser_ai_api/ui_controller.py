@@ -42,6 +42,7 @@ class CrawlerControllerWindow(QMainWindow):
         self.stop_btn = None
         self.test_mobsf_conn_btn = None
         self.run_mobsf_analysis_btn = None
+        self.clear_logs_btn = None
         self.log_output = None
         self.screenshot_label = None
         self.status_label = None
@@ -239,6 +240,9 @@ class CrawlerControllerWindow(QMainWindow):
                 self.run_mobsf_analysis_btn.clicked.connect(
                     self.mobsf_ui_manager.run_mobsf_analysis
                 )
+
+            if self.clear_logs_btn and hasattr(self.clear_logs_btn, 'clicked'):
+                self.clear_logs_btn.clicked.connect(self.clear_logs)
             
             # Connect crawl mode change
             if 'CRAWL_MODE' in self.config_widgets and hasattr(self.config_widgets['CRAWL_MODE'], 'currentTextChanged'):
@@ -250,6 +254,13 @@ class CrawlerControllerWindow(QMainWindow):
                 
         except Exception as e:
             logging.error(f"Error connecting signals: {e}")
+
+    @slot()
+    def clear_logs(self):
+        """Clears the log output."""
+        if self.log_output:
+            self.log_output.clear()
+            self.log_message("Logs cleared.", 'green')
 
     def _attempt_load_cached_health_apps(self):
         """Tries to load health apps from the cached file path if it exists."""
