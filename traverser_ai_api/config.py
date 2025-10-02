@@ -102,6 +102,8 @@ class Config:
         
         # Focus areas for AI agent behavior
         self.FOCUS_AREAS: List[Dict[str, Any]] = []
+        # Limit how many enabled focus areas are considered ACTIVE in prompts/validation
+        self.FOCUS_MAX_ACTIVE: int = 5
         
         # Store templates from defaults for dynamic resolution
         self._OUTPUT_DATA_DIR_TEMPLATE = "output_data"

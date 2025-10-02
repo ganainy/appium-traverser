@@ -103,51 +103,53 @@ class FocusAreaItem(QWidget):
         layout.setContentsMargins(5, 5, 5, 5)
         layout.setSpacing(8)
 
-        # Drag handle with priority number
-        priority_layout = QVBoxLayout()
+        # Drag handle with priority number (horizontal for aligned column)
+        priority_layout = QHBoxLayout()
         priority_layout.setContentsMargins(0, 0, 0, 0)
-        priority_layout.setSpacing(0)
+        priority_layout.setSpacing(6)
 
         # Priority number
         priority_label = QLabel(str(self.area.priority + 1))
         priority_label.setStyleSheet("""
             QLabel {
-                color: #1e40af;
-                font-size: 8px;
-                font-weight: bold;
+                color: #e5e7eb;
+                font-size: 10px;
+                font-weight: 600;
                 text-align: center;
-                background-color: #dbeafe;
+                background-color: #374151;
                 border-radius: 8px;
-                padding: 1px 4px;
-                min-width: 16px;
-                max-width: 16px;
-                min-height: 16px;
-                max-height: 16px;
+                padding: 1px 6px;
+                min-width: 18px;
+                max-width: 18px;
+                min-height: 18px;
+                max-height: 18px;
             }
         """)
         priority_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        priority_layout.addWidget(priority_label, alignment=Qt.AlignmentFlag.AlignCenter)
+        priority_layout.addWidget(priority_label, alignment=Qt.AlignmentFlag.AlignVCenter)
 
         # Drag handle
         self.drag_handle = QLabel("⋮⋮")
         self.drag_handle.setStyleSheet("""
             QLabel {
-                color: #3b82f6;
+                color: #9ca3af;
                 font-size: 12px;
                 padding: 2px 5px;
-                background-color: #eff6ff;
+                background-color: transparent;
                 border-radius: 3px;
             }
             QLabel:hover {
-                background-color: #dbeafe;
+                color: #d1d5db;
+                background-color: #1f2937;
             }
         """)
-        self.drag_handle.setFixedWidth(25)
-        self.drag_handle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.drag_handle.setFixedWidth(20)
+        self.drag_handle.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         priority_layout.addWidget(self.drag_handle)
 
         priority_widget = QWidget()
         priority_widget.setLayout(priority_layout)
+        priority_widget.setFixedWidth(60)
         layout.addWidget(priority_widget)
 
         # Checkbox for enable/disable
@@ -164,13 +166,13 @@ class FocusAreaItem(QWidget):
 
         # Name
         name_label = QLabel(self.area.name)
-        name_label.setStyleSheet("font-weight: bold; font-size: 11px;")
+        name_label.setStyleSheet("font-weight: 600; font-size: 11px; color: #e5e7eb;")
         name_label.setWordWrap(True)
         content_layout.addWidget(name_label)
 
         # Description
         desc_label = QLabel(self.area.description)
-        desc_label.setStyleSheet("color: #666; font-size: 10px;")
+        desc_label.setStyleSheet("color: #9ca3af; font-size: 10px;")
         desc_label.setWordWrap(True)
         content_layout.addWidget(desc_label)
 
@@ -179,14 +181,14 @@ class FocusAreaItem(QWidget):
         # Styling
         self.setStyleSheet("""
             FocusAreaItem {
-                background-color: #ffffff;
-                border: 1px solid #93c5fd;
-                border-radius: 6px;
+                background-color: #111827;
+                border: 1px solid #374151;
+                border-radius: 8px;
                 margin: 2px;
             }
             FocusAreaItem:hover {
-                background-color: #eff6ff;
-                border-color: #3b82f6;
+                background-color: #1f2937;
+                border-color: #4b5563;
             }
         """)
 
@@ -306,8 +308,14 @@ class FocusAreasWidget(QWidget):
         header_layout = QHBoxLayout()
 
         title_label = QLabel("AI Privacy Focus Areas")
-        title_label.setStyleSheet("font-weight: bold; font-size: 14px; color: #1e40af;")
+        title_label.setStyleSheet("font-weight: 600; font-size: 14px; color: #e5e7eb;")
         header_layout.addWidget(title_label)
+
+        # Orderable list hint
+        orderable_hint = QLabel("↕ Drag to reorder")
+        orderable_hint.setToolTip("You can drag items to change their priority order.")
+        orderable_hint.setStyleSheet("color: #9ca3af; font-size: 10px; padding-left: 8px;")
+        header_layout.addWidget(orderable_hint)
 
         header_layout.addStretch()
 
@@ -330,7 +338,7 @@ class FocusAreasWidget(QWidget):
             "Drag items to reorder priority, toggle checkboxes to enable/disable."
         )
         desc_label.setWordWrap(True)
-        desc_label.setStyleSheet("color: #1e40af; font-size: 11px; margin-bottom: 10px;")
+        desc_label.setStyleSheet("color: #9ca3af; font-size: 11px; margin-bottom: 10px;")
         layout.addWidget(desc_label)
 
         # Scrollable area for focus items
@@ -339,9 +347,9 @@ class FocusAreasWidget(QWidget):
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll_area.setStyleSheet("""
             QScrollArea {
-                border: 1px solid #3b82f6;
-                border-radius: 5px;
-                background-color: #fafafa;
+                border: 1px solid #374151;
+                border-radius: 6px;
+                background-color: #1f2937;
             }
         """)
 
@@ -362,7 +370,7 @@ class FocusAreasWidget(QWidget):
 
         # Statistics footer
         self.stats_label = QLabel()
-        self.stats_label.setStyleSheet("color: #666; font-size: 10px; margin-top: 5px;")
+        self.stats_label.setStyleSheet("color: #9ca3af; font-size: 10px; margin-top: 5px;")
         layout.addWidget(self.stats_label)
 
         self.update_stats()

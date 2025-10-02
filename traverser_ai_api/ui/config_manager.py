@@ -393,17 +393,70 @@ class ConfigManager(QObject):
                     'name': area.name,
                     'description': area.description,
                     'prompt_modifier': area.prompt_modifier,
-                    'enabled': area.enabled,
-                    'priority': area.priority
+                    'enabled': bool(area.enabled),
+                    'priority': int(area.priority)
                 })
             else:
                 # It's already a dict
                 focus_areas_dict.append(area)
-        
+
+        # Basic schema validation and unique ID enforcement
+        errors = []
+        seen_ids = set()
+        validated_dicts = []
+        for idx, area in enumerate(focus_areas_dict):
+            try:
+                aid = str(area.get('id', '')).strip()
+                name = str(area.get('name', '')).strip()
+                desc = str(area.get('description', ''))
+                prompt = str(area.get('prompt_modifier', ''))
+                enabled = bool(area.get('enabled', True))
+                # priority may be string; coerce to int
+                try:
+                    priority = int(area.get('priority', 0))
+                except (TypeError, ValueError):
+                    priority = 0
+
+                if not aid:
+                    errors.append(f"Focus area at index {idx} missing non-empty 'id'")
+                    continue
+                if aid in seen_ids:
+                    errors.append(f"Duplicate focus area id detected: '{aid}'")
+                    continue
+                if not name:
+                    errors.append(f"Focus area '{aid}' has empty 'name'")
+                    continue
+                # Limit overly long prompt modifiers to avoid excessive prompt size
+                if len(prompt) > 1000:
+                    errors.append(f"Focus area '{aid}' prompt_modifier too long ({len(prompt)} > 1000)")
+                    continue
+
+                seen_ids.add(aid)
+                validated_dicts.append({
+                    'id': aid,
+                    'name': name,
+                    'description': desc,
+                    'prompt_modifier': prompt,
+                    'enabled': enabled,
+                    'priority': priority
+                })
+            except Exception as e:
+                errors.append(f"Error validating focus area at index {idx}: {e}")
+
+        if errors:
+            # Do not save invalid configuration; inform the user
+            err_text = "; ".join(errors)
+            logging.warning(f"Focus areas validation failed: {err_text}")
+            try:
+                self.main_controller.log_message(f"Focus areas not saved due to validation errors: {err_text}", 'red')
+            except Exception:
+                pass
+            return
+
         # Update the config object
-        self.config.FOCUS_AREAS = focus_areas_dict
-        
+        self.config.FOCUS_AREAS = validated_dicts
+
         # Save to user config
-        self.config.update_setting_and_save('FOCUS_AREAS', focus_areas_dict, self.main_controller._sync_user_config_files)
-        
-        logging.debug(f"Updated focus areas configuration with {len(focus_areas_dict)} areas")
+        self.config.update_setting_and_save('FOCUS_AREAS', validated_dicts, self.main_controller._sync_user_config_files)
+
+        logging.debug(f"Updated focus areas configuration with {len(validated_dicts)} areas")

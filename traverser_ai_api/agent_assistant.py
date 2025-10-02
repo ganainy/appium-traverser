@@ -489,6 +489,11 @@ class AgentAssistant:
         enabled_areas = [area for area in focus_areas if area.get('enabled', True)]
         enabled_areas.sort(key=lambda x: x.get('priority', 0))
         
+        # Limit to top-K active areas to control prompt size
+        max_active = getattr(self.cfg, 'FOCUS_MAX_ACTIVE', 5)
+        if isinstance(max_active, int) and max_active > 0:
+            enabled_areas = enabled_areas[:max_active]
+        
         if not enabled_areas:
             return ""
         
@@ -739,8 +744,12 @@ class AgentAssistant:
                         'reasoning': action_data.get('reasoning', '')
                     }
                     
-                    # Output to stdout with UI_FOCUS prefix for UI to capture
-                    print(f"UI_FOCUS:{focus_info}")
+                    # Output to stdout with UI_FOCUS prefix for UI to capture (JSON for robust parsing)
+                    try:
+                        print(f"UI_FOCUS:{json.dumps(focus_info, ensure_ascii=False)}")
+                    except Exception:
+                        # Fallback to string representation if JSON serialization fails
+                        print(f"UI_FOCUS:{focus_info}")
                     
             return success
             
@@ -1078,9 +1087,14 @@ class AgentAssistant:
         return action_data
 
     def _get_valid_focus_area_ids(self) -> List[str]:
-        """Get list of valid focus area IDs from configuration."""
+        """Get list of valid focus area IDs from configuration, limited to top-K by priority."""
         focus_areas = getattr(self.cfg, 'FOCUS_AREAS', [])
-        return [area.get('id', '') for area in focus_areas if area.get('enabled', True)]
+        enabled_areas = [area for area in focus_areas if area.get('enabled', True)]
+        enabled_areas.sort(key=lambda x: x.get('priority', 0))
+        max_active = getattr(self.cfg, 'FOCUS_MAX_ACTIVE', 5)
+        if isinstance(max_active, int) and max_active > 0:
+            enabled_areas = enabled_areas[:max_active]
+        return [area.get('id', '') for area in enabled_areas]
 
     def _extract_base_model_name(self, model_name: str) -> str:
         """Extract the base model name without tag version and match it to available models.

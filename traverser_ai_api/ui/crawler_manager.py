@@ -672,9 +672,9 @@ class CrawlerManager(QObject):
             if focus_match:
                 try:
                     focus_data_str = focus_match.group(1).strip()
-                    # Parse the focus data (it's a dict converted to string)
-                    import ast
-                    focus_data = ast.literal_eval(focus_data_str)
+                    # Parse the focus data as JSON for robustness
+                    import json
+                    focus_data = json.loads(focus_data_str)
                     
                     # Log the focus attribution
                     self.main_controller.log_action_with_focus(focus_data)
