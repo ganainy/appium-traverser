@@ -7,10 +7,11 @@ import json
 import time
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QPushButton, QLineEdit, QCheckBox, QSpinBox,
-    QTextEdit, QFormLayout, QGroupBox, QComboBox,
+    QLabel, QPushButton, QLineEdit, QCheckBox,
+    QTextEdit, QFormLayout, QGroupBox,
     QScrollArea, QSizePolicy, QProgressBar
 )
+from .custom_widgets import NoScrollSpinBox as QSpinBox, NoScrollComboBox as QComboBox
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPixmap
 

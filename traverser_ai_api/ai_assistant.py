@@ -221,7 +221,7 @@ class AIAssistant:
                 self.chat = None # type: ignore
                 logging.debug("Chat memory is disabled.")
 
-            self.ai_interaction_logger = None # Will be initialized on first use
+            self.ai_interaction_readable_logger = None # Human-readable companion logger
 
         except Exception as e:
             logging.error(f"Failed to initialize GenerativeModel or AIAssistant: {e}", exc_info=True)
@@ -258,32 +258,36 @@ class AIAssistant:
             logging.error(f"Error analyzing response details: {e}", exc_info=True)
 
     def _setup_ai_interaction_logger(self):
-        """Initializes the logger for AI interactions if it hasn't been already."""
-        if self.ai_interaction_logger and self.ai_interaction_logger.handlers and not isinstance(self.ai_interaction_logger.handlers[0], logging.NullHandler):
-            return  # Already configured
+        """Initializes the human-readable logger only (JSONL removed)."""
+        # If already configured, skip
+        if self.ai_interaction_readable_logger and self.ai_interaction_readable_logger.handlers:
+            return
 
-        self.ai_interaction_logger = logging.getLogger('AIInteractionLogger')
-        self.ai_interaction_logger.setLevel(logging.INFO)
-        self.ai_interaction_logger.propagate = False
-        
-        # Clear existing handlers
-        if self.ai_interaction_logger.hasHandlers():
-            self.ai_interaction_logger.handlers.clear()
-
-        # Prefer writing AI interactions to the dedicated logs directory of the session
         target_log_dir = getattr(self.cfg, 'LOG_DIR', None)
+        try:
+            if target_log_dir:
+                os.makedirs(target_log_dir, exist_ok=True)
+        except Exception as e:
+            logging.error(f"Could not ensure log directory exists: {e}")
+
+        # Human-readable logger
+        self.ai_interaction_readable_logger = logging.getLogger('AIInteractionReadableLogger')
+        self.ai_interaction_readable_logger.setLevel(logging.INFO)
+        self.ai_interaction_readable_logger.propagate = False
+        if self.ai_interaction_readable_logger.hasHandlers():
+            self.ai_interaction_readable_logger.handlers.clear()
+
         if target_log_dir and os.path.isdir(target_log_dir):
-            log_file_path = os.path.join(target_log_dir, 'ai_interactions.log')
-            
-            fh = logging.FileHandler(log_file_path, encoding='utf-8')
-            fh.setLevel(logging.INFO)
-            formatter = logging.Formatter('%(message)s')
-            fh.setFormatter(formatter)
-            self.ai_interaction_logger.addHandler(fh)
-            logging.info(f"AI interaction logger initialized at: {log_file_path}")
+            readable_path = os.path.join(target_log_dir, 'ai_interactions_readable.log')
+            fh_readable = logging.FileHandler(readable_path, encoding='utf-8')
+            fh_readable.setLevel(logging.INFO)
+            # Preserve message as-is; we will format the readable entry ourselves
+            fh_readable.setFormatter(logging.Formatter('%(message)s'))
+            self.ai_interaction_readable_logger.addHandler(fh_readable)
+            logging.info(f"AI interaction readable logger initialized at: {readable_path}")
         else:
-            logging.error("Log directory not available, AI interaction log will not be saved.")
-            self.ai_interaction_logger.addHandler(logging.NullHandler())
+            logging.error("Log directory not available, AI interaction readable log will not be saved.")
+            self.ai_interaction_readable_logger.addHandler(logging.NullHandler())
 
     def _prepare_image_part(self, screenshot_bytes: bytes) -> Optional[Content]:
         try:
@@ -638,17 +642,17 @@ Based on this feedback, you MUST choose a different action to avoid getting stuc
                     # --- Log AI interaction ---
                     try:
                         self._setup_ai_interaction_logger()
-                        if self.ai_interaction_logger:
-                            log_entry = {
-                                "timestamp_utc": datetime.utcnow().isoformat() + "Z",
-                                "model_alias": self.model_alias,
-                                "prompt": prompt_text,
-                                "response": parsed_main_response,
-                                "usage": {
-                                    "total_tokens": total_tokens
-                                }
-                            }
-                            self.ai_interaction_logger.info(json.dumps(log_entry)) # JSONL format
+                        if self.ai_interaction_readable_logger:
+                            # Human-readable multi-line entry
+                            readable_entry = (
+                                f"=== AI Interaction @ {datetime.utcnow().isoformat()}Z ===\n"
+                                f"Model: {self.model_alias}\n"
+                                f"Tokens: {total_tokens}\n\n"
+                                f"Prompt:\n{prompt_text}\n\n"
+                                f"Response:\n{json.dumps(parsed_main_response, ensure_ascii=False, indent=2)}\n"
+                                f"----------------------------------------\n"
+                            )
+                            self.ai_interaction_readable_logger.info(readable_entry)
                     except Exception as log_err:
                         logging.error(f"Failed to log AI interaction: {log_err}")
                     # --- End log AI interaction ---

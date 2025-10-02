@@ -97,10 +97,18 @@ class AgentAssistant:
         openrouter_raw_alias = False
         if self.ai_provider in ['openrouter']:
             override_id = getattr(self.cfg, 'OPENROUTER_MODEL_ID_OVERRIDE', None)
-            if isinstance(override_id, str) and override_id.strip():
-                model_alias = override_id.strip()
-                openrouter_raw_alias = True
-                logging.info(f"OpenRouter: overriding model with manual id '{model_alias}'.")
+            if isinstance(override_id, str):
+                cleaned = override_id.strip()
+                # Treat 'None'/'null'/empty as no override
+                if cleaned.lower() in ('none', 'null', ''):
+                    cleaned = ''
+                # Only accept plausible OpenRouter IDs that contain a '/'
+                if cleaned and '/' in cleaned:
+                    model_alias = cleaned
+                    openrouter_raw_alias = True
+                    logging.info(f"OpenRouter: overriding model with manual id '{model_alias}'.")
+                elif cleaned:
+                    logging.warning(f"OpenRouter: ignoring invalid manual id '{cleaned}'. Expected 'vendor/model'.")
 
         available_model_aliases = list(models_config.keys())
         if not available_model_aliases:
@@ -108,8 +116,11 @@ class AgentAssistant:
         
         # Handle model alias that doesn't match the provider
         if model_alias not in available_model_aliases:
+            # If manual OpenRouter override is present, keep direct id
+            if self.ai_provider == 'openrouter' and openrouter_raw_alias:
+                logging.info(f"OpenRouter: using direct model id '{model_alias}'.")
             # For Ollama, try to extract the base model name by removing tags
-            if self.ai_provider == 'ollama':
+            elif self.ai_provider == 'ollama':
                 base_model_alias = self._extract_base_model_name(model_alias)
                 
                 # First try exact match with base name
@@ -187,7 +198,7 @@ class AgentAssistant:
         else:
             logging.debug("Chat memory is disabled.")
 
-        self.ai_interaction_logger = None
+        self.ai_interaction_readable_logger = None
 
     def _initialize_model(self, model_config, safety_settings_override):
         """Initialize the AI model with appropriate settings using the adapter."""
@@ -227,37 +238,38 @@ class AgentAssistant:
             raise
 
     def _setup_ai_interaction_logger(self):
-        """Initializes the logger for AI interactions if it hasn't been already."""
-        if self.ai_interaction_logger and self.ai_interaction_logger.handlers and not isinstance(self.ai_interaction_logger.handlers[0], logging.NullHandler):
+        """Initializes only the human-readable logger (JSONL removed)."""
+        if self.ai_interaction_readable_logger and self.ai_interaction_readable_logger.handlers:
             return  # Already configured
 
-        self.ai_interaction_logger = logging.getLogger('AIInteractionLogger')
-        self.ai_interaction_logger.setLevel(logging.INFO)
-        self.ai_interaction_logger.propagate = False
-        
-        # Clear existing handlers
-        if self.ai_interaction_logger.hasHandlers():
-            self.ai_interaction_logger.handlers.clear()
-
-        # Prefer writing AI interactions to the dedicated logs directory of the session
         target_log_dir = getattr(self.cfg, 'LOG_DIR', None)
+        try:
+            if target_log_dir:
+                os.makedirs(target_log_dir, exist_ok=True)
+        except OSError as e:
+            logging.error(f"Could not create logs directory for AI interactions: {e}")
+
+        # Human-readable logger
+        self.ai_interaction_readable_logger = logging.getLogger('AIInteractionReadableLogger')
+        self.ai_interaction_readable_logger.setLevel(logging.INFO)
+        self.ai_interaction_readable_logger.propagate = False
+        if self.ai_interaction_readable_logger.hasHandlers():
+            self.ai_interaction_readable_logger.handlers.clear()
+
         if target_log_dir:
             try:
-                os.makedirs(target_log_dir, exist_ok=True)
-                log_file_path = os.path.join(target_log_dir, 'ai_interactions.log')
-                
-                fh = logging.FileHandler(log_file_path, encoding='utf-8')
-                fh.setLevel(logging.INFO)
-                formatter = logging.Formatter('%(message)s')
-                fh.setFormatter(formatter)
-                self.ai_interaction_logger.addHandler(fh)
-                logging.info(f"AI interaction logger initialized at: {log_file_path}")
+                readable_path = os.path.join(target_log_dir, 'ai_interactions_readable.log')
+                fh_readable = logging.FileHandler(readable_path, encoding='utf-8')
+                fh_readable.setLevel(logging.INFO)
+                fh_readable.setFormatter(logging.Formatter('%(message)s'))
+                self.ai_interaction_readable_logger.addHandler(fh_readable)
+                logging.info(f"AI interaction readable logger initialized at: {readable_path}")
             except OSError as e:
-                logging.error(f"Could not create logs directory or log file for AI interactions: {e}")
-                self.ai_interaction_logger.addHandler(logging.NullHandler())
+                logging.error(f"Could not create AI interactions readable log file: {e}")
+                self.ai_interaction_readable_logger.addHandler(logging.NullHandler())
         else:
-            logging.error("Log directory not available, AI interaction log will not be saved.")
-            self.ai_interaction_logger.addHandler(logging.NullHandler())
+            logging.error("Log directory not available, AI interaction readable log will not be saved.")
+            self.ai_interaction_readable_logger.addHandler(logging.NullHandler())
 
 
     def _prepare_image_part(self, screenshot_bytes: Optional[bytes]) -> Optional[Image.Image]:
@@ -599,17 +611,16 @@ class AgentAssistant:
             # --- Log AI interaction ---
             try:
                 self._setup_ai_interaction_logger()
-                if self.ai_interaction_logger:
-                    log_entry = {
-                        "timestamp_utc": datetime.utcnow().isoformat() + "Z",
-                        "model_alias": self.model_alias,
-                        "prompt": prompt,
-                        "response": action_data,
-                        "usage": {
-                            "total_tokens": token_count
-                        }
-                    }
-                    self.ai_interaction_logger.info(json.dumps(log_entry)) # JSONL format
+                if self.ai_interaction_readable_logger:
+                    readable_entry = (
+                        f"=== AI Interaction @ {datetime.utcnow().isoformat()}Z ===\n"
+                        f"Model: {self.model_alias}\n"
+                        f"Tokens: {token_count}\n\n"
+                        f"Prompt:\n{prompt}\n\n"
+                        f"Response:\n{json.dumps(action_data, ensure_ascii=False, indent=2)}\n"
+                        f"----------------------------------------\n"
+                    )
+                    self.ai_interaction_readable_logger.info(readable_entry)
             except Exception as log_err:
                 logging.error(f"Failed to log AI interaction: {log_err}")
             # --- End log AI interaction ---

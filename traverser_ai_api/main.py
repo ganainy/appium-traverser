@@ -206,17 +206,7 @@ if __name__ == "__main__":
     root_logger.info(f"Main application logging re-initialized by LoggerManager. Level: {cfg.LOG_LEVEL.upper()}. File: '{target_log_file_path}'")
     # Re-log critical info with the new logger
     root_logger.info(f"Using configuration from: Defaults='{cfg.DEFAULTS_MODULE_PATH}', User='{cfg.USER_CONFIG_FILE_PATH}'")
-    # Prepare AI interactions log file alongside main log in the run's logs directory
-    try:
-        if cfg.LOG_DIR:
-            os.makedirs(cfg.LOG_DIR, exist_ok=True)
-            ai_log_path = os.path.join(cfg.LOG_DIR, 'ai_interactions.log')
-            # Touch the file to ensure it exists from the start of the run
-            with open(ai_log_path, 'a', encoding='utf-8'):
-                pass
-            root_logger.info(f"AI interactions log prepared at: '{ai_log_path}'")
-    except Exception as e:
-        root_logger.error(f"Failed to prepare AI interactions log file: {e}")
+    # Removed preparation of legacy JSONL AI interactions log (ai_interactions.log)
     root_logger.info(f"Effective APP_PACKAGE: {cfg.APP_PACKAGE}")
     root_logger.info(f"Effective APP_ACTIVITY: {cfg.APP_ACTIVITY}")
     root_logger.info(f"Shutdown flag file path set to: {cfg.SHUTDOWN_FLAG_PATH}")
