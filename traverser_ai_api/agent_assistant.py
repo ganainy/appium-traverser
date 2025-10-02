@@ -93,22 +93,8 @@ class AgentAssistant:
         else:
             raise ValueError(f"Unsupported AI provider: {self.ai_provider}")
 
-        # Allow manual OpenRouter override from UI/config
+        # For OpenRouter, allow raw alias when dropdown-selected model isn't in predefined aliases
         openrouter_raw_alias = False
-        if self.ai_provider in ['openrouter']:
-            override_id = getattr(self.cfg, 'OPENROUTER_MODEL_ID_OVERRIDE', None)
-            if isinstance(override_id, str):
-                cleaned = override_id.strip()
-                # Treat 'None'/'null'/empty as no override
-                if cleaned.lower() in ('none', 'null', ''):
-                    cleaned = ''
-                # Only accept plausible OpenRouter IDs that contain a '/'
-                if cleaned and '/' in cleaned:
-                    model_alias = cleaned
-                    openrouter_raw_alias = True
-                    logging.info(f"OpenRouter: overriding model with manual id '{model_alias}'.")
-                elif cleaned:
-                    logging.warning(f"OpenRouter: ignoring invalid manual id '{cleaned}'. Expected 'vendor/model'.")
 
         available_model_aliases = list(models_config.keys())
         if not available_model_aliases:
@@ -116,8 +102,9 @@ class AgentAssistant:
         
         # Handle model alias that doesn't match the provider
         if model_alias not in available_model_aliases:
-            # If manual OpenRouter override is present, keep direct id
-            if self.ai_provider == 'openrouter' and openrouter_raw_alias:
+            # If OpenRouter and alias is a direct id, treat as raw alias
+            if self.ai_provider == 'openrouter' and '/' in str(model_alias):
+                openrouter_raw_alias = True
                 logging.info(f"OpenRouter: using direct model id '{model_alias}'.")
             # For Ollama, try to extract the base model name by removing tags
             elif self.ai_provider == 'ollama':
@@ -143,10 +130,9 @@ class AgentAssistant:
                             self.cfg.update_setting_and_save("DEFAULT_MODEL_TYPE", model_alias)
                             logging.debug(f"Updated DEFAULT_MODEL_TYPE setting to '{model_alias}' to match {self.ai_provider} provider")
             elif self.ai_provider in ['openrouter'] and not openrouter_raw_alias:
-                # Treat the provided alias as a raw model name for OpenRouter
-                # This enables dynamic model selection without predefining aliases
-                openrouter_raw_alias = True
-                logging.info(f"OpenRouter: using raw model alias '{model_alias}' as direct model name.")
+                # Fallback to first available predefined alias
+                model_alias = available_model_aliases[0]
+                logging.warning(f"OpenRouter: alias '{model_alias}' not found; using default '{model_alias}'.")
             else:
                 logging.warning(f"Model alias '{model_alias}' not found in {self.ai_provider.upper()}_MODELS. " +
                                f"Using default model for {self.ai_provider} provider.")

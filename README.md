@@ -77,6 +77,17 @@ This project supports multiple AI providers for intelligent app exploration:
    - Simple presets (`openrouter-auto`, `openrouter-auto-fast`)
    - Requires API key
 
+#### OpenRouter Models Metadata & Refresh
+
+- The UI fetches capabilities from the OpenRouter Models API and caches them locally.
+- Use the `Refresh models` button in the UI to update metadata on demand.
+- Image support is detected using standardized `architecture.input_modalities` fields.
+- The `ENABLE_IMAGE_CONTEXT` control is tri-state:
+  - Vision-capable: enabled and checked with tooltip `This model supports image inputs.`
+  - Non-vision: enabled and unchecked with tooltip `This model does not support image inputs.`
+  - Auto-disabled: disabled with tooltip `Image context disabled due to provider payload limits (max X KB).`
+  - Unknown: enabled (unchecked by default) with tooltip `Capability unknown; metadata not available.`
+
 ### Using Ollama with Vision Support
 
 To use Ollama with vision-capable models:
@@ -252,10 +263,10 @@ OpenRouter provides curated routing across high-quality models using an OpenAI-c
 - Available models:
   - `openrouter-auto` (balanced)
   - `openrouter-auto-fast` (faster)
-   - Any direct model id from the catalog, e.g. `openai/gpt-4o-mini`, `anthropic/claude-3.5-sonnet`
+   - Select any model from the dropdown, including dynamic catalog entries.
 
 Notes
-- If `OPENROUTER_MODELS` is missing in configuration, the app falls back to resilient defaults (`openrouter-auto`, `openrouter-auto-fast`). You can still specify any direct model id in `DEFAULT_MODEL_TYPE` and the app will use it.
+- If `OPENROUTER_MODELS` is missing in configuration, the app falls back to resilient defaults (`openrouter-auto`, `openrouter-auto-fast`). Model selection is dropdown-only.
 
 ## Architecture
 

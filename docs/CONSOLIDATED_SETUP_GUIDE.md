@@ -221,6 +221,18 @@ OPENROUTER_API_KEY=your_openrouter_api_key_here
 # MOBSF_API_KEY=your_mobsf_key_here
 ```
 
+### OpenRouter Models Metadata & Refresh
+
+- The UI integrates the OpenRouter Models API to fetch model capabilities and caches results.
+- Click `Refresh models` in the AI settings to update metadata on demand.
+- A 24-hour TTL is applied to the local cache; when expired, a background refresh is queued when the UI becomes active.
+- Image support detection uses the standardized `architecture.input_modalities` entries.
+- The `ENABLE_IMAGE_CONTEXT` setting reflects availability:
+  - Vision-capable: `This model supports image inputs.`
+  - Non-vision: `This model does not support image inputs.`
+  - Auto-disabled: `Image context disabled due to provider payload limits (max X KB).`
+  - Unknown capability: `Capability unknown; metadata not available.`
+
 IMPORTANT: Only use ONE .env file in the project root. The application is configured to look for it there.
 
 This file contains sensitive information and should NOT be committed to version control.
