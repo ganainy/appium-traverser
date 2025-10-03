@@ -121,6 +121,16 @@ class Config:
         self.ELEMENT_STRATEGY_MAX_ATTEMPTS: int = 3
         # Auto-hide software keyboard before non-input actions to avoid overlay-induced no-ops
         self.AUTO_HIDE_KEYBOARD_BEFORE_NON_INPUT: bool = True
+
+        # Image preprocessing controls (persisted and overridable via UI)
+        # These correspond to global defaults defined at the bottom of this file
+        # and will be loaded by _load_from_defaults_module, then saved to user_config.json
+        self.IMAGE_MAX_WIDTH: int = 896           # Max width for downsampling; no upscaling
+        self.IMAGE_FORMAT: str = "JPEG"          # Preferred encoding format (JPEG/WebP/PNG)
+        self.IMAGE_QUALITY: int = 70             # Compression quality (0-100)
+        self.IMAGE_CROP_BARS: bool = True        # Crop status/navigation bars to reduce payload
+        self.IMAGE_CROP_TOP_PERCENT: float = 0.06    # Fraction of height to crop from top
+        self.IMAGE_CROP_BOTTOM_PERCENT: float = 0.06 # Fraction of height to crop from bottom
         
         # Store templates from defaults for dynamic resolution
         self._OUTPUT_DATA_DIR_TEMPLATE = "output_data"
@@ -233,6 +243,9 @@ class Config:
         import re
         import subprocess
         device_id = self.TARGET_DEVICE_UDID
+        # Sanitize placeholder values that may have been persisted accidentally
+        if isinstance(device_id, str) and device_id.strip().lower() in ("no devices found", ""):
+            device_id = None
         if not device_id:
             try:
                 result = subprocess.run(['adb', 'get-serialno'], capture_output=True, text=True, timeout=5)
@@ -419,6 +432,9 @@ class Config:
             "SAFE_TAP_MARGIN_RATIO", "SAFE_TAP_EDGE_HANDLING", "TOAST_DISMISS_WAIT_MS",
             # Pre-action behavior
             "AUTO_HIDE_KEYBOARD_BEFORE_NON_INPUT",
+            # Image preprocessing knobs
+            "IMAGE_MAX_WIDTH", "IMAGE_FORMAT", "IMAGE_QUALITY",
+            "IMAGE_CROP_BARS", "IMAGE_CROP_TOP_PERCENT", "IMAGE_CROP_BOTTOM_PERCENT",
             # Save the template for OUTPUT_DATA_DIR so user can change base output loc
             # The actual key in user_config.json will be "OUTPUT_DATA_DIR"
         ]
@@ -543,6 +559,11 @@ class Config:
             if self._OUTPUT_DATA_DIR_TEMPLATE != value:
                 self._OUTPUT_DATA_DIR_TEMPLATE = value
                 is_output_dir_template_update = True
+
+        # Sanitize placeholder for device UDID so it is not persisted as a real value
+        if key == "TARGET_DEVICE_UDID" and isinstance(value, str):
+            if value.strip().lower() in ("no devices found", ""):
+                value = None
         
         attribute_updated = self._update_attribute(key, value, source="gui/dynamic_update")
 
@@ -828,6 +849,16 @@ ENABLE_MOBSF_ANALYSIS = True
 # Video Recording Settings
 ENABLE_VIDEO_RECORDING = False
 VIDEO_RECORDING_DIR = "{session_dir}/video"
+
+# --- Image Preprocessing (Global overrides) ---
+# These knobs control how screenshots are preprocessed before being sent to the AI.
+# They override provider defaults where applicable.
+IMAGE_MAX_WIDTH = 896           # Max width for downsampling; no upscaling
+IMAGE_FORMAT = "JPEG"          # Preferred encoding format (JPEG/WebP/PNG)
+IMAGE_QUALITY = 70             # Compression quality (0-100, typical 60-80)
+IMAGE_CROP_BARS = True         # If true, crop status bar and nav bar regions
+IMAGE_CROP_TOP_PERCENT = 0.06  # Fraction of image height to crop from top
+IMAGE_CROP_BOTTOM_PERCENT = 0.06  # Fraction of image height to crop from bottom
 
 # --- AI Provider Capabilities Configuration ---
 # This configuration makes it easy to add new AI providers with different capabilities

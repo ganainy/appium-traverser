@@ -35,6 +35,7 @@ class UIComponents:
         "appium_settings_group",
         "error_handling_group",
         "focus_areas_group",  # Focus areas can be advanced for basic users
+        "image_preprocessing_group",  # Image preprocessing controls are advanced
     ]
 
     @staticmethod
@@ -446,6 +447,13 @@ class UIComponents:
         "MOBSF_API_URL": True,
         "MOBSF_API_KEY": True,
         "OPENROUTER_SHOW_FREE_ONLY": False,
+        # Image preprocessing controls
+        "IMAGE_MAX_WIDTH": True,
+        "IMAGE_FORMAT": True,
+        "IMAGE_QUALITY": True,
+        "IMAGE_CROP_BARS": True,
+        "IMAGE_CROP_TOP_PERCENT": True,
+        "IMAGE_CROP_BOTTOM_PERCENT": True,
     }
 
     @staticmethod
@@ -567,6 +575,12 @@ class UIComponents:
         )
         mobsf_group.setObjectName("mobsf_settings_group")
 
+        # Image Preprocessing group
+        image_prep_group = UIComponents._create_image_preprocessing_group(
+            scroll_layout, config_widgets, tooltips
+        )
+        image_prep_group.setObjectName("image_preprocessing_group")
+
         # Apply default values
         config_handler._apply_defaults_from_config_to_widgets()
         config_handler._update_crawl_mode_inputs_state()
@@ -581,6 +595,7 @@ class UIComponents:
             "error_handling_group": error_handling_group,
             "feature_toggles_group": feature_toggle_group,
             "mobsf_settings_group": mobsf_group,
+            "image_preprocessing_group": image_prep_group,
         }
 
         scroll.setWidget(scroll_content)
@@ -966,6 +981,60 @@ class UIComponents:
 
         layout.addRow(ai_group)
         return ai_group
+
+    @staticmethod
+    def _create_image_preprocessing_group(
+        layout: QFormLayout,
+        config_widgets: Dict[str, Any],
+        tooltips: Dict[str, str],
+    ) -> QGroupBox:
+        """Create the Image Preprocessing settings group."""
+        group = QGroupBox("Image Preprocessing")
+        form = QFormLayout(group)
+
+        # Max width
+        config_widgets["IMAGE_MAX_WIDTH"] = QSpinBox()
+        config_widgets["IMAGE_MAX_WIDTH"].setRange(240, 4000)
+        label_max_width = QLabel("Max Screenshot Width (px): ")
+        label_max_width.setToolTip(tooltips.get("IMAGE_MAX_WIDTH", "Max width to resize screenshots before sending to AI. Smaller reduces payload; larger preserves detail."))
+        form.addRow(label_max_width, config_widgets["IMAGE_MAX_WIDTH"])
+
+        # Format
+        config_widgets["IMAGE_FORMAT"] = QComboBox()
+        config_widgets["IMAGE_FORMAT"].addItems(["JPEG", "WEBP", "PNG"])
+        label_format = QLabel("Image Format: ")
+        label_format.setToolTip(tooltips.get("IMAGE_FORMAT", "Choose output format for screenshots sent to AI."))
+        form.addRow(label_format, config_widgets["IMAGE_FORMAT"])
+
+        # Quality
+        config_widgets["IMAGE_QUALITY"] = QSpinBox()
+        config_widgets["IMAGE_QUALITY"].setRange(10, 100)
+        label_quality = QLabel("Image Quality (%): ")
+        label_quality.setToolTip(tooltips.get("IMAGE_QUALITY", "Compression quality for lossy formats (JPEG/WEBP). Lower = smaller payload, higher = more detail."))
+        form.addRow(label_quality, config_widgets["IMAGE_QUALITY"])
+
+        # Crop bars toggle
+        config_widgets["IMAGE_CROP_BARS"] = QCheckBox()
+        label_crop_bars = QLabel("Crop Status/Navigation Bars: ")
+        label_crop_bars.setToolTip(tooltips.get("IMAGE_CROP_BARS", "Remove top/bottom bars to reduce payload while keeping UI content."))
+        form.addRow(label_crop_bars, config_widgets["IMAGE_CROP_BARS"])
+
+        # Top crop percent
+        config_widgets["IMAGE_CROP_TOP_PERCENT"] = QSpinBox()
+        config_widgets["IMAGE_CROP_TOP_PERCENT"].setRange(0, 50)
+        label_crop_top = QLabel("Top Crop (% of height): ")
+        label_crop_top.setToolTip(tooltips.get("IMAGE_CROP_TOP_PERCENT", "Percentage of image height to crop from the top when cropping bars is enabled."))
+        form.addRow(label_crop_top, config_widgets["IMAGE_CROP_TOP_PERCENT"])
+
+        # Bottom crop percent
+        config_widgets["IMAGE_CROP_BOTTOM_PERCENT"] = QSpinBox()
+        config_widgets["IMAGE_CROP_BOTTOM_PERCENT"].setRange(0, 50)
+        label_crop_bottom = QLabel("Bottom Crop (% of height): ")
+        label_crop_bottom.setToolTip(tooltips.get("IMAGE_CROP_BOTTOM_PERCENT", "Percentage of image height to crop from the bottom when cropping bars is enabled."))
+        form.addRow(label_crop_bottom, config_widgets["IMAGE_CROP_BOTTOM_PERCENT"])
+
+        layout.addRow(group)
+        return group
 
     @staticmethod
     def _get_openrouter_cache_path() -> str:

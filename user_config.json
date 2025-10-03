@@ -102,7 +102,7 @@
             "name": "Account & Profile Privacy",
             "description": "Focus on account creation, profile data, and privacy controls",
             "prompt_modifier": "PRIVACY: Check account/profile data and privacy controls; test deletion.",
-            "enabled": true,
+            "enabled": false,
             "priority": 5
         },
         {
@@ -142,5 +142,15 @@
     "MAX_SAME_ACTION_REPEAT": 2,
     "DISABLE_EXPENSIVE_XPATH": true,
     "ELEMENT_STRATEGY_MAX_ATTEMPTS": 4,
+    "SAFE_TAP_MARGIN_RATIO": 0.03,
+    "SAFE_TAP_EDGE_HANDLING": "snap",
+    "TOAST_DISMISS_WAIT_MS": 1200,
+    "AUTO_HIDE_KEYBOARD_BEFORE_NON_INPUT": true,
+    "IMAGE_MAX_WIDTH": 896,
+    "IMAGE_FORMAT": "JPEG",
+    "IMAGE_QUALITY": 70,
+    "IMAGE_CROP_BARS": true,
+    "IMAGE_CROP_TOP_PERCENT": 0,
+    "IMAGE_CROP_BOTTOM_PERCENT": 0,
     "OUTPUT_DATA_DIR": "output_data"
 }

@@ -247,7 +247,7 @@ class OpenRouterAdapter(ModelAdapter):
             # Create user message
             user_message = {"role": "user", "content": []}
             
-            # Add image if provided (use provider capability settings)
+            # Add image if provided (use provider capability settings, with UI overrides)
             if image:
                 # Get provider capabilities for image settings
                 try:
@@ -256,11 +256,18 @@ class OpenRouterAdapter(ModelAdapter):
                     from config import AI_PROVIDER_CAPABILITIES
                 
                 capabilities = AI_PROVIDER_CAPABILITIES.get('openrouter', {})
-                image_format = capabilities.get('image_format', 'JPEG')
-                image_quality = capabilities.get('image_quality', 65)
+                # UI/kwargs overrides take precedence over provider defaults
+                image_format = kwargs.get('image_format', None) or capabilities.get('image_format', 'JPEG')
+                image_quality = kwargs.get('image_quality', None) or capabilities.get('image_quality', 65)
                 
                 # Convert PIL Image to bytes with optimized settings
                 image_byte_arr = io.BytesIO()
+                # Ensure compatible color mode for certain formats
+                try:
+                    if image_format.upper() in ('JPEG', 'WEBP') and image.mode not in ('RGB'):
+                        image = image.convert('RGB')
+                except Exception:
+                    pass
                 if image_format.upper() == 'JPEG':
                     image.save(image_byte_arr, format='JPEG', quality=image_quality, optimize=True, progressive=True, subsampling='4:2:0')
                 else:
@@ -535,21 +542,49 @@ class OllamaAdapter(ModelAdapter):
             # Handle image if provided and model supports vision
             if image and supports_vision:
                 try:
+                    # Get provider capabilities for image settings
+                    try:
+                        from .config import AI_PROVIDER_CAPABILITIES
+                    except ImportError:
+                        from config import AI_PROVIDER_CAPABILITIES
+                    capabilities = AI_PROVIDER_CAPABILITIES.get('ollama', {})
+                    # UI/kwargs overrides take precedence over provider defaults
+                    image_format = kwargs.get('image_format', None) or capabilities.get('image_format', 'JPEG')
+                    image_quality = kwargs.get('image_quality', None) or capabilities.get('image_quality', 75)
+
                     # Save temporary file with a unique identifier
                     import uuid
-                    temp_image_path = f"temp_ollama_image_{uuid.uuid4()}.jpg"
+                    ext = 'jpg' if image_format.upper() == 'JPEG' else image_format.lower()
+                    temp_image_path = f"temp_ollama_image_{uuid.uuid4()}.{ext}"
                     
                     # Convert image to RGB mode if it's not in a compatible format
-                    if image.mode not in ('RGB'):
+                    if image_format.upper() in ('JPEG', 'WEBP') and image.mode not in ('RGB'):
                         image = image.convert('RGB')
                         
                     # Save the image to a temporary file
-                    image.save(temp_image_path, format="JPEG", quality=95)
+                    save_kwargs = {}
+                    if image_format.upper() == 'JPEG':
+                        save_kwargs = {
+                            'quality': image_quality,
+                            'optimize': True,
+                            'progressive': True,
+                            'subsampling': '4:2:0'
+                        }
+                        image.save(temp_image_path, format='JPEG', **save_kwargs)
+                    elif image_format.upper() == 'WEBP':
+                        save_kwargs = {
+                            'quality': image_quality,
+                            'method': 6
+                        }
+                        image.save(temp_image_path, format='WEBP', **save_kwargs)
+                    else:
+                        # Default fallback for PNG or others
+                        image.save(temp_image_path, format=image_format, optimize=True)
                     
                     # For Ollama, we'll pass the file path directly in the images parameter
                     # This follows the documented approach: https://ollama.com/blog/vision-models
                     images.append(temp_image_path)
-                    logging.debug(f"Added image to Ollama request (file: {temp_image_path})")
+                    logging.debug(f"Added image to Ollama request (file: {temp_image_path}, format: {image_format}, quality: {image_quality})")
                 except Exception as img_error:
                     logging.error(f"Error processing image for Ollama: {img_error}", exc_info=True)
                     raise ValueError(f"Failed to process image for Ollama: {img_error}")

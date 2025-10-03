@@ -74,6 +74,9 @@ class AppiumDriver:
             self.disconnect()
 
         udid = self.cfg.TARGET_DEVICE_UDID
+        # Normalize placeholder or empty values which might be mistakenly saved in config
+        if isinstance(udid, str) and udid.strip().lower() in ("no devices found", ""):
+            udid = None
         if not udid:
             logging.info("TARGET_DEVICE_UDID not set. Attempting to auto-detect a single connected device.")
             try:
@@ -86,6 +89,12 @@ class AppiumDriver:
                 if len(devices) == 1:
                     udid = devices[0]
                     logging.info(f"Auto-detected single device: {udid}. Using it for the session.")
+                    # Persist the auto-detected UDID back to the config for future runs
+                    try:
+                        self.cfg.update_setting_and_save("TARGET_DEVICE_UDID", udid)
+                        logging.debug(f"Persisted auto-detected UDID '{udid}' to user_config.json")
+                    except Exception as persist_ex:
+                        logging.debug(f"Failed to persist auto-detected UDID to config: {persist_ex}")
                 elif len(devices) == 0:
                     logging.error("No ADB devices found. Please connect a device or start an emulator.")
                     return False

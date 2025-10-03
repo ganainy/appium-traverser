@@ -259,7 +259,16 @@ class AgentAssistant:
 
 
     def _prepare_image_part(self, screenshot_bytes: Optional[bytes]) -> Optional[Image.Image]:
-        """Prepare an image for the agent with optimized compression for LLM understanding."""
+        """Prepare an image for the agent with config-driven preprocessing before model encoding.
+
+        Steps:
+        - Decode screenshot bytes to PIL Image
+        - Optional: Crop status/nav bars using configured percentages
+        - Resize down to configured max width (no upscaling), preserve aspect ratio
+        - Convert to RGB for consistent compression downstream
+        - Apply mild sharpening to preserve text clarity
+        - Return processed PIL Image (model adapters will handle provider-specific encoding)
+        """
         if screenshot_bytes is None:
             return None
             
@@ -278,12 +287,34 @@ class AgentAssistant:
             
             capabilities = AI_PROVIDER_CAPABILITIES.get(ai_provider, AI_PROVIDER_CAPABILITIES.get('gemini', {}))
             
-            # Use provider-specific image settings
-            max_width = capabilities.get('image_max_width', 640)
-            quality = capabilities.get('image_quality', 75)
-            image_format = capabilities.get('image_format', 'JPEG')
+            # Resolve preprocessing settings (global overrides take precedence)
+            max_width = getattr(self.cfg, 'IMAGE_MAX_WIDTH', None) or capabilities.get('image_max_width', 640)
+            quality = getattr(self.cfg, 'IMAGE_QUALITY', None) or capabilities.get('image_quality', 75)
+            image_format = getattr(self.cfg, 'IMAGE_FORMAT', None) or capabilities.get('image_format', 'JPEG')
+            crop_bars = getattr(self.cfg, 'IMAGE_CROP_BARS', True)
+            crop_top_pct = float(getattr(self.cfg, 'IMAGE_CROP_TOP_PERCENT', 0.06) or 0.0)
+            crop_bottom_pct = float(getattr(self.cfg, 'IMAGE_CROP_BOTTOM_PERCENT', 0.06) or 0.0)
             
-            logging.debug(f"Applying {ai_provider}-specific image optimization: {max_width}px width, {quality}% quality, {image_format} format")
+            logging.debug(
+                f"Image preprocessing settings -> provider: {ai_provider}, max_width: {max_width}, "
+                f"quality: {quality}, format: {image_format}, crop_bars: {crop_bars}, "
+                f"top_pct: {crop_top_pct}, bottom_pct: {crop_bottom_pct}"
+            )
+
+            # Optional: crop status bar and bottom nav/keyboard areas before resizing
+            if crop_bars and (crop_top_pct > 0 or crop_bottom_pct > 0):
+                try:
+                    h = img.height
+                    crop_top_px = int(max(0, min(1.0, crop_top_pct)) * h)
+                    crop_bottom_px = int(max(0, min(1.0, crop_bottom_pct)) * h)
+                    # Ensure we don't invert or over-crop
+                    upper = crop_top_px
+                    lower = max(upper + 1, h - crop_bottom_px)
+                    if lower > upper:
+                        img = img.crop((0, upper, img.width, lower))
+                        logging.debug(f"Cropped bars: top {crop_top_px}px, bottom {crop_bottom_px}px -> new size {img.size}")
+                except Exception as crop_err:
+                    logging.warning(f"Failed to crop bars: {crop_err}")
             
             # Resize if necessary (maintain aspect ratio)
             if img.width > max_width:
@@ -308,33 +339,29 @@ class AgentAssistant:
             # Mild sharpening to preserve text readability
             img = img.filter(ImageFilter.UnsharpMask(radius=0.5, percent=150, threshold=3))
             
-            # Compress with optimized settings
-            compressed_buffer = io.BytesIO()
-            
-            if image_format.upper() == 'JPEG':
-                # Use progressive JPEG with chroma subsampling for maximum compression
-                img.save(
-                    compressed_buffer, 
-                    format='JPEG', 
-                    quality=quality, 
-                    optimize=True,
-                    progressive=True,  # Progressive JPEG for better compression
-                    subsampling='4:2:0'  # Chroma subsampling reduces file size significantly
+            # Note: We return the processed PIL Image. Encoding (format/quality) is handled by model adapters.
+            # Still, estimate potential savings for logging by encoding briefly to measure size.
+            try:
+                compressed_buffer = io.BytesIO()
+                if image_format.upper() == 'JPEG':
+                    img.save(
+                        compressed_buffer,
+                        format='JPEG',
+                        quality=quality,
+                        optimize=True,
+                        progressive=True,
+                        subsampling='4:2:0'
+                    )
+                else:
+                    img.save(compressed_buffer, format=image_format, optimize=True)
+                compressed_size = compressed_buffer.tell()
+                compression_ratio = original_size / compressed_size if compressed_size > 0 else 1
+                logging.debug(
+                    f"Preprocessed image size estimate: {original_size} -> {compressed_size} bytes "
+                    f"({compression_ratio:.1f}x). Final encoding will be done by adapter."
                 )
-            else:
-                # Fallback to PNG if specified (though JPEG is better for photos/screenshots)
-                img.save(compressed_buffer, format=image_format, optimize=True)
-            
-            compressed_buffer.seek(0)
-            compressed_size = compressed_buffer.tell()
-            
-            # Reload the compressed image
-            img = Image.open(compressed_buffer)
-            
-            # Calculate compression ratio
-            compression_ratio = original_size / compressed_size if compressed_size > 0 else 1
-            logging.debug(f"Compressed image: {original_size} -> {compressed_size} bytes ({compression_ratio:.1f}x compression)")
-            logging.debug(f"Optimized image for {ai_provider}: {img.size}, {quality}% quality, {image_format} format")
+            except Exception as est_err:
+                logging.debug(f"Could not estimate compressed size: {est_err}")
             
             return img
             
@@ -552,9 +579,14 @@ class AgentAssistant:
             
             # Generate response from the model
             try:
+                # Pass config-driven image encoding preferences to the adapter so UI controls take effect
+                img_fmt_override = getattr(self.cfg, 'IMAGE_FORMAT', None)
+                img_quality_override = getattr(self.cfg, 'IMAGE_QUALITY', None)
                 response_text, metadata = self.model_adapter.generate_response(
                     prompt=prompt,
-                    image=processed_image
+                    image=processed_image,
+                    image_format=img_fmt_override,
+                    image_quality=img_quality_override
                 )
                 elapsed_time = metadata.get("processing_time", time.time() - start_time)
                 token_count = metadata.get("token_count", {}).get("total", len(prompt) // 4)

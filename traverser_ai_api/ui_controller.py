@@ -212,6 +212,13 @@ class CrawlerControllerWindow(QMainWindow):
             "MOBSF_API_URL": "URL of the MobSF API (e.g., http://localhost:8000/api/v1)",
             "MOBSF_API_KEY": "API Key for authenticating with MobSF. This can be found in the MobSF web interface or in the config file.",
             "ENABLE_VIDEO_RECORDING": "Enable to record the entire crawl session as an MP4 video.",
+            # Image preprocessing tooltips
+            "IMAGE_MAX_WIDTH": "Max screenshot width before sending to AI. Smaller widths (e.g., 720–1080px) reduce payload and are sufficient for most UI understanding; use larger widths for dense UIs or OCR.",
+            "IMAGE_FORMAT": "Screenshot format sent to AI. JPEG offers broad compatibility; WEBP typically yields smaller files with similar quality (great for OpenRouter); PNG is lossless and best for crisp text/OCR but larger.",
+            "IMAGE_QUALITY": "Compression quality for JPEG/WEBP. 70–85 is a good balance; increase to 90–95 if the model struggles to read fine text; decrease to ~60 to minimize payload.",
+            "IMAGE_CROP_BARS": "Remove top/bottom system bars to reduce payload while keeping the core app UI. Enable when bars are not needed for analysis.",
+            "IMAGE_CROP_TOP_PERCENT": "Percent of image height to crop from the top. 5–8% is typical for Android status bars; adjust if needed.",
+            "IMAGE_CROP_BOTTOM_PERCENT": "Percent of image height to crop from the bottom. 8–12% is typical for Android navigation bars; adjust if needed.",
         }
 
     def _connect_signals(self):
@@ -835,12 +842,34 @@ class CrawlerControllerWindow(QMainWindow):
             device_dropdown.addItem("No devices found")
             self.log_message("No connected devices found.", "orange")
 
-        # Try to set to the currently configured device
+        # Try to set to the currently configured device; otherwise auto-select first available
         current_udid = getattr(self.config, "TARGET_DEVICE_UDID", None)
-        if current_udid:
-            index = device_dropdown.findText(current_udid)
-            if index != -1:
-                device_dropdown.setCurrentIndex(index)
+        # Normalize placeholder values
+        normalized_current = (current_udid or "").strip().lower()
+        is_placeholder = normalized_current in ("no devices found", "")
+        if devices:
+            if current_udid and not is_placeholder:
+                index = device_dropdown.findText(current_udid)
+                if index != -1:
+                    device_dropdown.setCurrentIndex(index)
+                    return
+            # Auto-select the first available device and persist to config
+            device_dropdown.setCurrentIndex(0)
+            try:
+                self.config.update_setting_and_save(
+                    "TARGET_DEVICE_UDID", devices[0], self._sync_user_config_files
+                )
+                self.log_message(f"Auto-selected device UDID: {devices[0]}", "blue")
+            except Exception as e:
+                self.log_message(f"Failed to auto-save selected device UDID: {e}", "red")
+        else:
+            # No devices present; ensure config does not keep placeholder as a real UDID
+            try:
+                self.config.update_setting_and_save(
+                    "TARGET_DEVICE_UDID", None, self._sync_user_config_files
+                )
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":
