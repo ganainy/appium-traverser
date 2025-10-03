@@ -370,6 +370,15 @@ class ConfigManager(QObject):
                 widget.editingFinished.connect(save_lambda)
             elif isinstance(widget, QCheckBox):
                 widget.stateChanged.connect(save_lambda)
+                # If the health-only AI filter checkbox changes, trigger a rescan automatically
+                if key == 'USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY':
+                    try:
+                        if hasattr(self.main_controller, 'health_app_scanner') and self.main_controller.health_app_scanner:
+                            # Cache-first behavior: on toggle, try to use cached file first, otherwise rescan
+                            widget.stateChanged.connect(lambda *args: self.main_controller.health_app_scanner.on_filter_toggle_state_changed())
+                            logging.debug("Connected USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY checkbox to cache-first load-or-scan.")
+                    except Exception as e:
+                        logging.warning(f"Could not connect AI filter checkbox to rescan: {e}")
             elif isinstance(widget, QComboBox):
                 widget.currentIndexChanged.connect(save_lambda)
             elif isinstance(widget, QTextEdit):

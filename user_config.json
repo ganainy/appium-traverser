@@ -23,7 +23,7 @@
     "TARGET_DEVICE_UDID": "279cb9b1",
     "USE_COORDINATE_FALLBACK": true,
     "AI_PROVIDER": "openrouter",
-    "DEFAULT_MODEL_TYPE": "x-ai/grok-4-fast:free",
+    "DEFAULT_MODEL_TYPE": "grok-4-fast (free)",
     "USE_CHAT_MEMORY": false,
     "MAX_CHAT_HISTORY": 10,
     "OPENROUTER_REFRESH_BTN": null,
@@ -47,11 +47,11 @@
     "DEVICE_PCAP_DIR": "/sdcard/Download/PCAPdroid",
     "CLEANUP_DEVICE_PCAP_FILE": true,
     "ENABLE_VIDEO_RECORDING": true,
-    "CURRENT_HEALTH_APP_LIST_FILE": "output_data\\app_info\\279cb9b1\\health_apps.json",
+    "CURRENT_HEALTH_APP_LIST_FILE": "output_data\\app_info\\279cb9b1\\health_apps_ai.json",
     "LAST_SELECTED_APP": {
         "package_name": "de.gesund.app",
         "activity_name": "de.gesund.app.MainActivity",
-        "app_name": null
+        "app_name": "Gesund"
     },
     "UI_MODE": "Expert",
     "MOBSF_API_URL": "http://localhost:8000/api/v1",

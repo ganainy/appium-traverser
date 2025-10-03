@@ -933,6 +933,17 @@ OPENROUTER_MODELS = {
         'description': 'OpenRouter auto-router model with faster, lower-variance settings.',
         'generation_config': {'temperature': 0.3, 'top_p': 0.8, 'max_output_tokens': 4096},
         'online': True
+    },
+    # Recommended display alias mapping for Grok (free tier)
+    'grok-4-fast (free)': {
+        'name': 'x-ai/grok-4-fast:free',
+        'description': 'X.ai Grok 4 Fast - Free tier via OpenRouter',
+        'generation_config': {
+            'temperature': 0.3,
+            'top_p': 0.8,
+            'max_output_tokens': 4096
+        },
+        'online': True
     }
 }
 OPENROUTER_REFRESH_BTN = False

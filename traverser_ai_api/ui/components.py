@@ -257,6 +257,20 @@ class UIComponents:
                 if model_dropdown.findText(preset) == -1:
                     model_dropdown.insertItem(0, preset)
 
+            # Include configured display aliases from OPENROUTER_MODELS at the very top
+            try:
+                try:
+                    from ..config import OPENROUTER_MODELS
+                except ImportError:
+                    from config import OPENROUTER_MODELS
+                if isinstance(OPENROUTER_MODELS, dict):
+                    # Insert user-defined aliases so saved DEFAULT_MODEL_TYPE can be restored
+                    for alias in reversed(list(OPENROUTER_MODELS.keys())):
+                        if model_dropdown.findText(alias) == -1:
+                            model_dropdown.insertItem(0, alias)
+            except Exception as e:
+                logging.debug(f"Could not insert OPENROUTER_MODELS aliases into dropdown: {e}")
+
             # Preferred default: first free if free-only, else first vision-capable, else auto
             preferred_default = "openrouter-auto"
             if free_only:
@@ -550,6 +564,12 @@ class UIComponents:
         )
         ai_group.setObjectName("ai_settings_group")
 
+        # Image Preprocessing placed directly after AI for clearer perception grouping
+        image_prep_group = UIComponents._create_image_preprocessing_group(
+            scroll_layout, config_widgets, tooltips
+        )
+        image_prep_group.setObjectName("image_preprocessing_group")
+
         focus_areas_group = UIComponents._create_focus_areas_group(
             scroll_layout, config_widgets, tooltips, config_handler
         )
@@ -565,21 +585,27 @@ class UIComponents:
         )
         error_handling_group.setObjectName("error_handling_group")
 
-        feature_toggle_group = UIComponents._create_feature_toggles_group(
+        # Privacy & Network settings (traffic capture)
+        privacy_network_group = UIComponents._create_privacy_network_group(
             scroll_layout, config_widgets, tooltips
         )
-        feature_toggle_group.setObjectName("feature_toggles_group")
+        privacy_network_group.setObjectName("privacy_network_group")
 
         mobsf_group = UIComponents._create_mobsf_settings_group(
             scroll_layout, config_widgets, tooltips, config_handler
         )
         mobsf_group.setObjectName("mobsf_settings_group")
 
-        # Image Preprocessing group
-        image_prep_group = UIComponents._create_image_preprocessing_group(
+        # Run Control and Recording groups (split from previous combined group)
+        run_control_group = UIComponents._create_run_control_group(
             scroll_layout, config_widgets, tooltips
         )
-        image_prep_group.setObjectName("image_preprocessing_group")
+        run_control_group.setObjectName("run_control_group")
+
+        recording_group = UIComponents._create_recording_group(
+            scroll_layout, config_widgets, tooltips
+        )
+        recording_group.setObjectName("recording_group")
 
         # Apply default values
         config_handler._apply_defaults_from_config_to_widgets()
@@ -590,12 +616,14 @@ class UIComponents:
             "appium_settings_group": appium_group,
             "app_settings_group": app_group,
             "ai_settings_group": ai_group,
+            "image_preprocessing_group": image_prep_group,
             "focus_areas_group": focus_areas_group,
             "crawler_settings_group": crawler_group,
             "error_handling_group": error_handling_group,
-            "feature_toggles_group": feature_toggle_group,
+            "privacy_network_group": privacy_network_group,
             "mobsf_settings_group": mobsf_group,
-            "image_preprocessing_group": image_prep_group,
+            "run_control_group": run_control_group,
+            "recording_group": recording_group,
         }
 
         scroll.setWidget(scroll_content)
@@ -841,6 +869,14 @@ class UIComponents:
 
         config_handler.app_scan_status_label = QLabel("App Scan: Idle")
         app_layout.addRow(QLabel("Scan Status:"), config_handler.app_scan_status_label)
+
+        # Health-only filter toggle (AI)
+        # This controls whether the discovery script applies AI filtering to only show health-related apps
+        config_widgets["USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY"] = QCheckBox("Health-only filter (AI)")
+        config_widgets["USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY"].setToolTip(
+            "If enabled, the scanner uses AI to keep only health-related apps (fitness, wellness, medical, medication, mental health)."
+        )
+        app_layout.addRow(QLabel("Discovery Filter:"), config_widgets["USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY"])        
 
         # App package and activity (auto-filled)
         config_widgets["APP_PACKAGE"] = QLineEdit()
@@ -1584,42 +1620,65 @@ class UIComponents:
         return error_handling_group
 
     @staticmethod
-    def _create_feature_toggles_group(
+    def _create_run_control_group(
         layout: QFormLayout, config_widgets: Dict[str, Any], tooltips: Dict[str, str]
     ) -> QGroupBox:
-        """Create the Feature Toggles group."""
-        feature_toggle_group = QGroupBox("Feature Toggles")
-        feature_toggle_layout = QFormLayout(feature_toggle_group)
+        """Create the Run Control group for session-related controls."""
+        run_control_group = QGroupBox("Run Control")
+        run_control_layout = QFormLayout(run_control_group)
 
+        config_widgets["CONTINUE_EXISTING_RUN"] = QCheckBox()
+        label_continue_run = QLabel("Continue Existing Run: ")
+        label_continue_run.setToolTip(tooltips["CONTINUE_EXISTING_RUN"])
+        run_control_layout.addRow(
+            label_continue_run, config_widgets["CONTINUE_EXISTING_RUN"]
+        )
+
+        layout.addRow(run_control_group)
+        return run_control_group
+
+    @staticmethod
+    def _create_recording_group(
+        layout: QFormLayout, config_widgets: Dict[str, Any], tooltips: Dict[str, str]
+    ) -> QGroupBox:
+        """Create the Recording group for media capture settings."""
+        recording_group = QGroupBox("Recording")
+        recording_layout = QFormLayout(recording_group)
+
+        config_widgets["ENABLE_VIDEO_RECORDING"] = QCheckBox()
+        label_enable_video = QLabel("Enable Video Recording: ")
+        recording_layout.addRow(
+            label_enable_video, config_widgets["ENABLE_VIDEO_RECORDING"]
+        )
+
+        layout.addRow(recording_group)
+        return recording_group
+
+    @staticmethod
+    def _create_privacy_network_group(
+        layout: QFormLayout, config_widgets: Dict[str, Any], tooltips: Dict[str, str]
+    ) -> QGroupBox:
+        """Create the Privacy & Network group for traffic capture-related settings."""
+        privacy_group = QGroupBox("Privacy & Network")
+        privacy_layout = QFormLayout(privacy_group)
+
+        # Traffic capture toggles moved from Feature Toggles
         config_widgets["ENABLE_TRAFFIC_CAPTURE"] = QCheckBox()
         label_enable_traffic_capture = QLabel("Enable Traffic Capture: ")
         label_enable_traffic_capture.setToolTip(tooltips["ENABLE_TRAFFIC_CAPTURE"])
-        feature_toggle_layout.addRow(
+        privacy_layout.addRow(
             label_enable_traffic_capture, config_widgets["ENABLE_TRAFFIC_CAPTURE"]
         )
 
         config_widgets["CLEANUP_DEVICE_PCAP_FILE"] = QCheckBox()
         label_cleanup_pcap = QLabel("Cleanup Device PCAP after Pull: ")
         label_cleanup_pcap.setToolTip(tooltips["CLEANUP_DEVICE_PCAP_FILE"])
-        feature_toggle_layout.addRow(
+        privacy_layout.addRow(
             label_cleanup_pcap, config_widgets["CLEANUP_DEVICE_PCAP_FILE"]
         )
 
-        config_widgets["CONTINUE_EXISTING_RUN"] = QCheckBox()
-        label_continue_run = QLabel("Continue Existing Run: ")
-        label_continue_run.setToolTip(tooltips["CONTINUE_EXISTING_RUN"])
-        feature_toggle_layout.addRow(
-            label_continue_run, config_widgets["CONTINUE_EXISTING_RUN"]
-        )
-
-        config_widgets["ENABLE_VIDEO_RECORDING"] = QCheckBox()
-        label_enable_video = QLabel("Enable Video Recording: ")
-        feature_toggle_layout.addRow(
-            label_enable_video, config_widgets["ENABLE_VIDEO_RECORDING"]
-        )
-
-        layout.addRow(feature_toggle_group)
-        return feature_toggle_group
+        layout.addRow(privacy_group)
+        return privacy_group
 
     @staticmethod
     def _create_mobsf_settings_group(
