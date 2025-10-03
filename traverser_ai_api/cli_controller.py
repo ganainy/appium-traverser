@@ -538,6 +538,86 @@ class CLIController:
             return False
 
 
+    def print_analysis_summary_for_target(self, target_identifier: str, is_index: bool) -> bool:
+        """Select target and print summary metrics for its latest/only run."""
+        if not self._ensure_analysis_targets_discovered(quiet=True):
+            print("Error: Could not ensure analysis targets were discovered. Aborting summary printing.")
+            return False
+
+        if RunAnalyzer is None:
+            logging.error("RunAnalyzer module not available.")
+            print("Error: Analysis module not available.")
+            return False
+        if self.cfg.OUTPUT_DATA_DIR is None:
+            logging.error("OUTPUT_DATA_DIR is not configured.")
+            print("Error: OUTPUT_DATA_DIR is not configured.")
+            return False
+
+        selected_target: Optional[Dict[str, Any]] = None
+        if is_index:
+            try:
+                target_index_val = int(target_identifier)
+                selected_target = next((t for t in self.discovered_analysis_targets if t["index"] == target_index_val), None)
+            except ValueError:
+                logging.error(f"Invalid target index: '{target_identifier}'. Must be a number.")
+                print(f"Error: Invalid target index '{target_identifier}'.")
+                return False
+            if not selected_target:
+                logging.error(f"Target index {target_identifier} not found.")
+                print(f"Error: Target index {target_identifier} not found. Run '--list-analysis-targets' to see available targets.")
+                return False
+        else:
+            selected_target = next((t for t in self.discovered_analysis_targets if t["app_package"] == target_identifier), None)
+            if not selected_target:
+                logging.error(f"Target app package '{target_identifier}' not found.")
+                print(f"Error: Target app package '{target_identifier}' not found. Run '--list-analysis-targets' to see available targets.")
+                return False
+
+        # Determine latest/only run_id
+        actual_run_id: Optional[int] = None
+        try:
+            conn_temp = sqlite3.connect(selected_target["db_path"])
+            cursor_temp = conn_temp.cursor()
+            cursor_temp.execute("SELECT run_id FROM runs ORDER BY run_id DESC LIMIT 1")
+            latest_run_row = cursor_temp.fetchone()
+            if latest_run_row and latest_run_row[0] is not None:
+                actual_run_id = latest_run_row[0]
+            else:
+                cursor_temp.execute("SELECT run_id FROM runs LIMIT 1")
+                any_run_row = cursor_temp.fetchone()
+                if any_run_row and any_run_row[0] is not None:
+                    actual_run_id = any_run_row[0]
+                else:
+                    logging.error(f"No runs found in the database for target {selected_target['app_package']}. Cannot determine a run ID.")
+                    print(f"Error: No runs found for {selected_target['app_package']}.")
+                    conn_temp.close()
+                    return False
+            conn_temp.close()
+        except sqlite3.Error as e:
+            logging.error(f"Database error determining run ID for {selected_target['app_package']}: {e}")
+            print(f"Error: Database error determining run ID for {selected_target['app_package']}.")
+            return False
+
+        if actual_run_id is None:
+            logging.error(f"Failed to determine a run_id for summary printing for target {selected_target['app_package']}.")
+            return False
+
+        try:
+            analyzer = RunAnalyzer(
+                db_path=selected_target["db_path"],
+                output_data_dir=self.cfg.OUTPUT_DATA_DIR,
+                app_package_for_run=selected_target["app_package"]
+            )
+            analyzer.print_run_summary(actual_run_id)
+            return True
+        except FileNotFoundError:
+            logging.error(f"Database file not found for summary printing: {selected_target['db_path']}")
+            print(f"Error: Database file not found: {selected_target['db_path']}")
+            return False
+        except Exception as e:
+            logging.error(f"Error printing summary for target {selected_target['app_package']}, run {actual_run_id}: {e}", exc_info=True)
+            print(f"Error printing summary: {e}")
+            return False
 def create_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="CLI Controller for Appium Crawler.",
@@ -563,6 +643,8 @@ Examples:
   %(prog)s --generate-analysis-pdf --target-index 1 
   %(prog)s --generate-analysis-pdf --target-app-package com.example.app
   %(prog)s --generate-analysis-pdf --target-app-package com.example.app --pdf-output-name "custom_report.pdf"
+  %(prog)s --print-analysis-summary --target-index 1
+  %(prog)s --print-analysis-summary --target-app-package com.example.app
         """)
     )
     app_group = parser.add_argument_group('App Management')
@@ -590,6 +672,8 @@ Examples:
                                 help='List runs for a specific analysis target. Requires --target-index OR --target-app-package.')
     analysis_group.add_argument('--generate-analysis-pdf', action='store_true',
                                 help='Generate PDF report for the (latest/only) run of an analysis target. Requires --target-index OR --target-app-package. Optionally takes --pdf-output-name.')
+    analysis_group.add_argument('--print-analysis-summary', action='store_true',
+                                help='Compute and print summary metrics for the (latest/only) run of an analysis target. Requires --target-index OR --target-app-package.')
 
     analysis_target_group = analysis_group.add_mutually_exclusive_group(required=False)
     analysis_target_group.add_argument('--target-index', metavar='NUMBER', type=str,
@@ -707,6 +791,27 @@ def main_cli():
                     pdf_output_name=args.pdf_output_name
                 ): exit_code = 1
             # else: error already handled and exit_code set
+
+        elif args.print_analysis_summary:
+            action_taken = True
+            target_identifier_val = None
+            is_index_val = False
+            if args.target_index:
+                target_identifier_val = args.target_index
+                is_index_val = True
+            elif args.target_app_package:
+                target_identifier_val = args.target_app_package
+                is_index_val = False
+            else:
+                logging.error("--target-index OR --target-app-package is required with --print-analysis-summary.")
+                parser.print_help()
+                exit_code = 1
+
+            if target_identifier_val:
+                if not controller.print_analysis_summary_for_target(
+                    target_identifier_val,
+                    is_index_val
+                ): exit_code = 1
 
         elif not action_taken:
             parser.print_help()

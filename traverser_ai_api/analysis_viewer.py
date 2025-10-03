@@ -454,3 +454,49 @@ class RunAnalyzer:
                 logger.error(f"Failed to save debug HTML file: {e_debug}")
         finally:
             self._close_db_connection()
+
+    def print_run_summary(self, run_id: int):
+        """Compute summary metrics for a run and print them to the console.
+
+        This provides a quick CLI-friendly overview without generating a PDF.
+        """
+        run_data, steps = self._fetch_run_and_steps_data(run_id)
+
+        if not run_data:
+            print(f"Run ID {run_id} not found. No summary available.")
+            logger.info(f"Run ID {run_id} not found. Summary printing aborted.")
+            self._close_db_connection()
+            return
+
+        steps = steps or []
+
+        metrics_data = self._calculate_summary_metrics(run_id, run_data, steps)
+
+        # Pretty-print summary
+        print("\n=== Run Summary ===")
+        print(f"Run ID: {run_id}")
+        print(f"App Package: {run_data['app_package']}")
+        print(f"Start Activity: {run_data['start_activity']}")
+        print(f"Start Time: {run_data['start_time'] or 'N/A'}")
+        print(f"End Time: {run_data['end_time'] or 'N/A'}")
+        print("-------------------")
+        print("General:")
+        print(f"  Total Duration: {metrics_data.get('Total Duration', 'N/A')}")
+        print(f"  Final Status: {metrics_data.get('Final Status', 'N/A')}")
+        print(f"  Total Steps: {metrics_data.get('Total Steps', 'N/A')}")
+        print("Coverage:")
+        print(f"  Unique Screens Discovered: {metrics_data.get('Unique Screens Discovered', 'N/A')}")
+        print(f"  Unique Transitions: {metrics_data.get('Unique Transitions', 'N/A')}")
+        print(f"  Activity Coverage: {metrics_data.get('Activity Coverage', 'N/A')}")
+        print(f"  Action Distribution: {metrics_data.get('Action Distribution', 'N/A')}")
+        print("Efficiency:")
+        print(f"  Steps per New Screen: {metrics_data.get('Steps per New Screen', 'N/A')}")
+        print(f"  Avg AI Response Time: {metrics_data.get('Avg AI Response Time', 'N/A')}")
+        print(f"  Total Token Usage: {metrics_data.get('Total Token Usage', 'N/A')}")
+        print("Robustness:")
+        print(f"  Action Success Rate: {metrics_data.get('Action Success Rate', 'N/A')}")
+        print(f"  Execution Failures: {metrics_data.get('Execution Failures', 'N/A')}")
+        print(f"  Stuck Steps (No-Op): {metrics_data.get('Stuck Steps (No-Op)', 'N/A')}")
+        print("====================\n")
+
+        self._close_db_connection()

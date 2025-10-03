@@ -43,6 +43,26 @@ class ActionExecutor:
         self.last_error_message = None
 
     def execute_action(self, action_details: Dict[str, Any]) -> bool:
+        # Avoid interacting under transient overlays (e.g., Toast). Wait briefly if detected.
+        try:
+            if self.driver:
+                self.driver.wait_for_toast_to_dismiss(getattr(self.cfg, 'TOAST_DISMISS_WAIT_MS', 1200))
+        except Exception:
+            # Non-fatal; proceed even if toast detection fails
+            pass
+
+        # Hide software keyboard before non-input actions to reduce overlay-related no-ops
+        try:
+            if bool(getattr(self.cfg, 'AUTO_HIDE_KEYBOARD_BEFORE_NON_INPUT', True)):
+                action_type_preview = action_details.get('type') if isinstance(action_details, dict) else None
+                # Only hide keyboard if we're not about to input text
+                if action_type_preview not in ["input"] and self.driver and self.driver.is_keyboard_shown():
+                    logging.debug("Software keyboard is shown before non-input action. Hiding keyboard.")
+                    self.driver.hide_keyboard()
+                    time.sleep(0.2)
+        except Exception:
+            # Non-fatal; proceed even if keyboard detection/hide fails
+            pass
         # Add validation at the start
         if action_details.get('type') == 'tap_coords':
             coordinates = action_details.get('coordinates')
@@ -93,7 +113,14 @@ class ActionExecutor:
                 if isinstance(coordinates, tuple) and len(coordinates) == 2:
                     action_log_info += f", Coords: {coordinates}"
                     logging.debug(f"Executing coordinate-based tap at {coordinates}")
-                    success = self.driver.tap_at_coordinates(coordinates[0], coordinates[1])
+                    # Support optional duration for long-press semantics
+                    duration_ms = None
+                    try:
+                        if isinstance(action_details.get("duration_ms"), (int, float)):
+                            duration_ms = int(action_details.get("duration_ms"))
+                    except Exception:
+                        duration_ms = None
+                    success = self.driver.tap_at_coordinates(coordinates[0], coordinates[1], duration=duration_ms)
                     if success and intended_input_text_for_coord_tap is not None:
                         logging.debug(f"Coordinate tap successful. Now attempting to input text: '{intended_input_text_for_coord_tap}'")
                         time.sleep(0.5)

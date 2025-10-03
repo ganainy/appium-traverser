@@ -380,35 +380,19 @@ class AgentAssistant:
         if current_screen_visit_count > loop_threshold or action_analysis["is_looping"]:
             repeated_text = ', '.join(action_analysis['repeated_actions']) if action_analysis['repeated_actions'] else 'None'
             tried_text = ', '.join(action_analysis['last_unique_actions']) if action_analysis['last_unique_actions'] else 'None'
-            visit_instruction = f"""
-            **CRITICAL - LOOP DETECTED / HIGH VISIT COUNT:**
-            - Screen visited {current_screen_visit_count} times.
-            - Recent action patterns detected as potentially looping: {repeated_text}.
-            - Recent unique action types attempted on this screen: {tried_text}.
-            REQUIRED ACTION CHANGES TO BREAK THE LOOP:
-            1. DO NOT repeat recently failed or looped action sequences.
-            2. Prioritize actions or elements that have NOT been tried recently on this screen.
-            3. If all else fails and the app seems stuck, consider using 'back'.
-            """
+            visit_instruction = (
+                f"LOOP ALERT: visits={current_screen_visit_count}. "
+                f"Looping actions: {repeated_text}. Tried: {tried_text}. "
+                "Choose a different action/element; use 'back' if stuck."
+            )
             
         test_email_val = os.environ.get("TEST_EMAIL", "test.user@example.com")
         test_password_val = os.environ.get("TEST_PASSWORD", "Str0ngP@ssw0rd!")
         test_name_val = os.environ.get("TEST_NAME", "Test User")
         
-        input_value_guidance = f"""
-        **Input Value Guidance (for input text):**
-        - Email/Username: Use "{test_email_val}"
-        - Password: Use "{test_password_val}"
-        - Name: Use "{test_name_val}"
-        - Other fields: Use realistic, context-appropriate test data.
-        - AVOID generic placeholders like "test", "input", "asdf".
-        """
+        input_value_guidance = f"Input hints: email {test_email_val}, password {test_password_val}, name {test_name_val}. Use realistic values; avoid placeholders."
 
-        defer_authentication_guidance = """
-        **STRATEGY: Defer Authentication Flows (Login/Registration):**
-        - Primary goal: explore features accessible *without* immediate login/registration.
-        - If other navigation options exist (e.g., "Explore as Guest", "Skip"), prioritize those.
-        """
+        defer_authentication_guidance = "Strategy: Prefer non-auth flows (Guest/Skip) to explore features first."
 
         # Check if image context is enabled
         enable_image_context = getattr(self.cfg, 'ENABLE_IMAGE_CONTEXT', True)
@@ -422,25 +406,10 @@ class AgentAssistant:
         focus_areas_section = self._build_focus_areas_section()
         
         # NEW: Enhanced JSON output guidance section
-        json_output_guidance = """
-        **CRITICAL: STRUCTURED JSON OUTPUT REQUIRED**
-        Your response MUST be provided as a valid JSON object enclosed in a code block.
-        
-        Always wrap your JSON in a code block using triple backticks and specify the json format:
-        ```json
-        {
-          "action": "click|input|scroll_down|scroll_up|swipe_left|swipe_right|back",
-          "target_identifier": "element_id_or_text", 
-          "target_bounding_box": {"top_left": [y1, x1], "bottom_right": [y2, x2]},
-          "input_text": "text to input if action is input",
-          "reasoning": "brief explanation for choosing this action",
-          "focus_influence": ["focus_area_id1", "focus_area_id2"]
-        }
-        ```
-        
-        DO NOT include any narrative analysis, explanation, or other text outside the JSON code block.
-        If you need to explain your reasoning, include it in the "reasoning" field of the JSON.
-        """
+        json_output_guidance = (
+        "Return a JSON object in a ```json code block with keys: action, target_identifier, "
+        "target_bounding_box, input_text, reasoning, focus_influence. No text outside the JSON."
+        )
         
         prompt = f"""
         You are an expert Android app tester. Your goal is to:
@@ -712,7 +681,45 @@ class AgentAssistant:
             elif action_type == "back":
                 result = self.tools.press_back()
                 success = result.get("success", False)
-                
+            
+            elif action_type == "long_press":
+                target_id = action_data.get("target_identifier")
+                bbox = action_data.get("target_bounding_box")
+                # Default duration from config
+                try:
+                    default_duration_ms = int(getattr(self.cfg, 'LONG_PRESS_MIN_DURATION_MS', 600))
+                except Exception:
+                    default_duration_ms = 600
+                duration_ms = action_data.get("duration_ms", default_duration_ms)
+                if not target_id and bbox and isinstance(bbox, dict):
+                    top_left = bbox.get("top_left", [])
+                    bottom_right = bbox.get("bottom_right", [])
+                    if len(top_left) == 2 and len(bottom_right) == 2:
+                        # Compute center to long press
+                        y1, x1 = top_left
+                        y2, x2 = bottom_right
+                        center_x = (x1 + x2) / 2
+                        center_y = (y1 + y2) / 2
+                        window_size = self.tools.driver.get_window_size()
+                        if window_size:
+                            screen_width = window_size['width']
+                            screen_height = window_size['height']
+                            center_x = max(0, min(center_x, screen_width - 1))
+                            center_y = max(0, min(center_y, screen_height - 1))
+                            # Use coordinate tap with duration for long press
+                            result = self.tools.tap_coordinates(center_x, center_y, normalized=False, duration_ms=duration_ms)
+                            success = result.get("success", False)
+                        else:
+                            logging.error("Cannot get screen size for coordinate validation")
+                            return False
+                    else:
+                        logging.error("Invalid bounding box format for long_press")
+                        return False
+                else:
+                    # Prefer element-based long press via tools
+                    result = self.tools.long_press(target_id, bbox, duration_ms)
+                    success = result.get("success", False)
+
             else:
                 logging.error(f"Unknown action type: {action_type}")
                 return False
@@ -917,13 +924,13 @@ class AgentAssistant:
                 is_narrative = True
             
             # 2. Short responses without JSON format but with action keywords
-            action_keywords = ['click', 'input', 'type', 'enter', 'scroll', 'swipe', 'back']
+            action_keywords = ['click', 'input', 'type', 'enter', 'scroll', 'swipe', 'back', 'long_press', 'long press']
             if not is_narrative and len(response_text) < 500 and not '{' in response_text and any(keyword in response_text.lower() for keyword in action_keywords):
                 is_narrative = True
             
             # 3. Responses with clear action sentences but no JSON
             action_patterns = [
-                r'(?:should|would|recommend|can)\s+(?:click|input|type|enter|scroll|swipe|back)',
+                r'(?:should|would|recommend|can)\s+(?:click|input|type|enter|scroll|swipe|back|long\s?press)',
                 r'(?:most appropriate|next|best)\s+action',
                 r'(?:the user should|user needs to|we should)'
             ]
@@ -1003,7 +1010,7 @@ class AgentAssistant:
             I'll provide you with an analysis text that describes an action to take in a mobile app.
             Extract the following information in JSON format:
             
-            1. action: The type of action (click, input, scroll_down, scroll_up, swipe_left, swipe_right, back)
+            1. action: The type of action (click, input, scroll_down, scroll_up, swipe_left, swipe_right, back, long_press)
             2. target_identifier: The target element (if applicable, otherwise null)
             3. target_bounding_box: The bounding box coordinates (if applicable, otherwise null)
             4. input_text: The text to input (if applicable, otherwise null)

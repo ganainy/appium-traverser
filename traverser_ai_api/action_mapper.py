@@ -101,12 +101,27 @@ class ActionMapper:
             return None
 
         max_retries = 2
+        # Strategy attempts cap (0 or less disables capping)
+        attempts_cap = 0
+        try:
+            attempts_cap = int(getattr(self.cfg, 'ELEMENT_STRATEGY_MAX_ATTEMPTS', 0))
+        except Exception:
+            attempts_cap = 0
+        exempt_full_id = self._is_full_resource_id(identifier)
         for retry in range(max_retries + 1):
             try:
                 logging.debug(f"Attempting to find element '{identifier}' (Attempt {retry + 1}/{max_retries + 1})")
                 total_start_time = time.perf_counter()
 
+                attempts_count = 0
                 for index, (strategy_key, appium_by_strategy_str, log_name) in enumerate(self.element_finding_strategies):
+                    # Enforce attempts cap unless identifier is a full resource-id
+                    attempts_count += 1
+                    if attempts_cap > 0 and not exempt_full_id and attempts_count > attempts_cap:
+                        logging.debug(
+                            f"Capping element-finding strategy attempts at {attempts_cap} for identifier '{identifier}'."
+                        )
+                        break
                     element: Optional[Any] = None
                     start_time = time.perf_counter()
                     duration = 0.0
@@ -344,6 +359,29 @@ class ActionMapper:
                     action_details["text"] = "" 
                 else:
                     action_details["text"] = str(input_text)
+            elif action_type == "long_press":
+                # For long_press on element, compute center from element rect and map to coordinate tap with duration
+                try:
+                    rect = getattr(target_element, 'rect', None)
+                    if rect and all(k in rect for k in ('x', 'y', 'width', 'height')):
+                        center_x = int(rect['x'] + rect['width'] / 2)
+                        center_y = int(rect['y'] + rect['height'] / 2)
+                        action_details = {
+                            "type": "tap_coords",
+                            "coordinates": (center_x, center_y),
+                            "element_info": element_info
+                        }
+                        # Duration from config for long press
+                        try:
+                            lp_ms = int(getattr(self.cfg, 'LONG_PRESS_MIN_DURATION_MS', 600))
+                        except Exception:
+                            lp_ms = 600
+                        action_details["duration_ms"] = lp_ms
+                        self.consecutive_map_failures = 0
+                        logging.info(f"Mapped long_press to coordinate tap at ({center_x},{center_y}) with duration {lp_ms}ms.")
+                        return action_details
+                except Exception as e:
+                    logging.warning(f"Failed to compute center for long_press element mapping: {e}")
             self.consecutive_map_failures = 0
             logging.info(f"Successfully mapped action '{action_type}' to element (ID: {element_info.get('id', 'N/A')}) found by identifier.")
             return action_details
@@ -359,6 +397,13 @@ class ActionMapper:
                 if action_type == "input" and input_text is not None:
                     action_details["intended_input_text"] = str(input_text)
                     logging.info(f"Coordinate fallback for INPUT action: will tap at ({center_x},{center_y}), then try to input text.")
+                elif action_type == "long_press":
+                    try:
+                        lp_ms = int(getattr(self.cfg, 'LONG_PRESS_MIN_DURATION_MS', 600))
+                    except Exception:
+                        lp_ms = 600
+                    action_details["duration_ms"] = lp_ms
+                    logging.info(f"Coordinate fallback for LONG_PRESS: will tap+hold at ({center_x},{center_y}) for {lp_ms}ms.")
                 else:
                      logging.info(f"Coordinate fallback for {action_type}: will tap at ({center_x},{center_y}).")
                 

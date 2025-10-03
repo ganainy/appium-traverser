@@ -211,6 +211,12 @@ KEEP_ATTRS = {
     'selected', 'editable', 'long-clickable', 'password',
     'bounds'
 }
+CONTAINER_CLASSES = {
+    # Common Android container/layout classes (suffixes; we strip package prefixes)
+    'FrameLayout', 'LinearLayout', 'RelativeLayout', 'ConstraintLayout',
+    'RecyclerView', 'ListView', 'ScrollView', 'NestedScrollView',
+    'ViewPager', 'CoordinatorLayout', 'AppBarLayout'
+}
 BOOLEAN_ATTRS_TRUE_ONLY = {
     'clickable', 'focusable', 'enabled', 'checkable',
     'selected', 'editable', 'long-clickable', 'password'
@@ -249,7 +255,7 @@ def visual_hash_distance(hash1: str, hash2: str) -> int:
         logging.error(f"🔴 Error calculating hash distance between {hash1} and {hash2}: {e}")
         return 1000
 
-def simplify_xml_for_ai(xml_string: str, max_len: int, provider: str = "gemini") -> str:
+def simplify_xml_for_ai(xml_string: str, max_len: int, provider: str = "gemini", prune_noninteractive: bool = True) -> str:
     """
     Simplifies XML by removing non-essential attributes and potentially empty nodes,
     aiming to stay under max_len without arbitrary truncation.
@@ -277,6 +283,8 @@ def simplify_xml_for_ai(xml_string: str, max_len: int, provider: str = "gemini")
     
     # Use the more restrictive limit between configured max_len and provider capability
     effective_max_len = min(max_len, provider_xml_limit)
+    # Tight mode for small provider limits or explicitly small max_len
+    tight_mode = effective_max_len <= 50000 or provider.lower() in {"openrouter", "ollama"}
     
     if effective_max_len != max_len:
         logging.debug(f"Applied {provider}-specific XML limit: {effective_max_len} (from configured {max_len})")
@@ -295,6 +303,7 @@ def simplify_xml_for_ai(xml_string: str, max_len: int, provider: str = "gemini")
         if root is None:
             raise ValueError("Failed to parse XML root.")
 
+        # First pass: keep only whitelisted attrs and drop false booleans
         for element in root.iter('*'):
             current_attrs = list(element.attrib.keys())
             for attr_name in current_attrs:
@@ -306,6 +315,95 @@ def simplify_xml_for_ai(xml_string: str, max_len: int, provider: str = "gemini")
                     if isinstance(attr_value, str) and attr_value.lower() == 'false':
                         del element.attrib[attr_name]
                         continue
+            # Provider-aware attribute prioritization and compression
+            # - In tight_mode, drop non-critical boolean attrs except 'clickable'
+            if tight_mode:
+                for maybe_drop in ('focusable', 'enabled', 'checkable', 'checked', 'selected', 'editable', 'long-clickable', 'password', 'hint'):
+                    element.attrib.pop(maybe_drop, None)
+            # Compress 'class' to suffix without package prefix (e.g., android.widget.FrameLayout -> FrameLayout)
+            if 'class' in element.attrib and isinstance(element.attrib['class'], str):
+                cls = element.attrib['class']
+                if '.' in cls:
+                    element.attrib['class'] = cls.split('.')[-1]
+            # In tight_mode, for non-interactive nodes later, we may drop 'class'
+
+        # Second pass: interactive-node-centric text handling
+        # Interactive criteria: any of clickable, focusable, checkable, long-clickable == 'true'
+        interactive_flags: Dict[Any, bool] = {}
+        MAX_TEXT_FIELD_LEN = 80 if tight_mode else 120
+        for element in root.iter('*'):
+            try:
+                is_interactive = any(
+                    element.attrib.get(attr, '').lower() == 'true'
+                    for attr in ['clickable', 'focusable', 'checkable', 'long-clickable']
+                )
+            except Exception:
+                is_interactive = False
+            interactive_flags[element] = is_interactive
+
+            if is_interactive:
+                # Truncate long text fields to reduce token usage
+                for field in ('text', 'content-desc'):
+                    if field in element.attrib and isinstance(element.attrib[field], str):
+                        val = element.attrib[field]
+                        if len(val) > MAX_TEXT_FIELD_LEN:
+                            element.attrib[field] = val[:MAX_TEXT_FIELD_LEN]
+            else:
+                # Remove non-essential text for non-interactive nodes
+                element.attrib.pop('text', None)
+                element.attrib.pop('content-desc', None)
+                if tight_mode:
+                    # Bounds of non-interactive containers rarely help; drop to save tokens
+                    element.attrib.pop('bounds', None)
+                if tight_mode:
+                    # Drop class for purely structural, non-interactive nodes to save tokens
+                    element.attrib.pop('class', None)
+
+        # Third pass (optional, when lxml is available): prune non-interactive containers
+        # that have no resource-id and no interactive descendants (controlled by prune_noninteractive)
+        if prune_noninteractive and USING_LXML and lxml_etree:
+            try:
+                nodes_to_remove: List[Any] = []
+                for element in root.iter('*'):
+                    # Skip the root element
+                    if element.getparent() is None:
+                        continue
+                    has_resource_id = bool(element.attrib.get('resource-id', ''))
+                    is_interactive = bool(interactive_flags.get(element, False))
+                    if is_interactive or has_resource_id:
+                        continue
+                    # Check if any descendant is interactive or has a resource-id
+                    descendant_has_interactive = False
+                    descendant_has_id = False
+                    for desc in element.iterdescendants():
+                        if interactive_flags.get(desc, False):
+                            descendant_has_interactive = True
+                            break
+                        if bool(desc.attrib.get('resource-id', '')):
+                            descendant_has_id = True
+                            # do not break; prefer detecting interactive first
+                    # Additional pruning for large structural containers in tight_mode
+                    if tight_mode:
+                        cls = element.attrib.get('class', '')
+                        cls_suffix = cls.split('.')[-1] if '.' in cls else cls
+                        many_children = len(element) >= 4
+                        is_structural = cls_suffix in CONTAINER_CLASSES or (not cls_suffix and many_children)
+                        if is_structural and not descendant_has_interactive and not descendant_has_id:
+                            nodes_to_remove.append(element)
+                    else:
+                        if not descendant_has_interactive:
+                            nodes_to_remove.append(element)
+
+                # Remove after collection to avoid mutating while iterating
+                for node in nodes_to_remove:
+                    parent = node.getparent()
+                    try:
+                        parent.remove(node)
+                    except Exception:
+                        # If removal fails, skip silently
+                        pass
+            except Exception as e:
+                logging.debug(f"XML pruning skipped due to error: {e}")
 
         if USING_LXML and lxml_etree:
             xml_bytes = lxml_etree.tostring(root)

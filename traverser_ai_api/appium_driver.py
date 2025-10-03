@@ -339,13 +339,34 @@ class AppiumDriver:
             logging.error("Driver not available, cannot tap at coordinates.")
             return False
         
-        # ADD COORDINATE VALIDATION
+        # ADD COORDINATE VALIDATION AND SAFE-AREA HANDLING
         window_size = self.get_window_size()
         if window_size:
             max_x, max_y = window_size['width'], window_size['height']
             if x < 0 or y < 0 or x > max_x or y > max_y:
                 logging.error(f"Invalid coordinates ({x}, {y}) for screen size {max_x}x{max_y}")
                 return False
+
+            # Safe-area margin handling to avoid taps too close to screen edges (status/nav bars)
+            try:
+                margin_ratio = float(getattr(self.cfg, 'SAFE_TAP_MARGIN_RATIO', 0.03))
+                edge_strategy = str(getattr(self.cfg, 'SAFE_TAP_EDGE_HANDLING', 'snap')).lower()
+                margin_x = int(max_x * margin_ratio)
+                margin_y = int(max_y * margin_ratio)
+
+                unsafe_edge = (x < margin_x or x > (max_x - margin_x) or y < margin_y or y > (max_y - margin_y))
+                if unsafe_edge:
+                    if edge_strategy == 'reject':
+                        logging.warning(f"Tap coordinates ({x},{y}) in unsafe edge zone with margin ratio {margin_ratio}. Rejecting.")
+                        return False
+                    else:  # default 'snap' strategy: move into safe zone
+                        snapped_x = min(max(x, margin_x + 2), max_x - margin_x - 2)
+                        snapped_y = min(max(y, margin_y + 2), max_y - margin_y - 2)
+                        if (snapped_x, snapped_y) != (x, y):
+                            logging.debug(f"Tap coordinates adjusted from ({x},{y}) to ({snapped_x},{snapped_y}) due to safe-area margin.")
+                            x, y = snapped_x, snapped_y
+            except Exception as m_err:
+                logging.debug(f"Safe-area margin handling skipped due to error: {m_err}")
         
         try:
             from selenium.webdriver.common.actions import interaction
@@ -382,6 +403,35 @@ class AppiumDriver:
         except Exception as e:
             logging.error(f"Unexpected error during tap at ({x}, {y}): {e}")
             return False
+
+    def has_toast_message(self) -> bool:
+        """Detects presence of Android Toast messages by scanning page source for android.widget.Toast."""
+        try:
+            page_src = self.get_page_source()
+            if not page_src:
+                return False
+            # Common toast class; some OEMs may vary but this is broadly correct
+            return 'android.widget.Toast' in page_src
+        except Exception as e:
+            logging.debug(f"Toast detection skipped due to error: {e}")
+            return False
+
+    def wait_for_toast_to_dismiss(self, max_wait_ms: Optional[int] = None) -> None:
+        """Waits briefly while a toast is present to avoid interacting under transient overlays."""
+        try:
+            wait_ms = int(max_wait_ms) if isinstance(max_wait_ms, (int, float)) else int(getattr(self.cfg, 'TOAST_DISMISS_WAIT_MS', 1200))
+        except Exception:
+            wait_ms = 1200
+        # Poll in short intervals up to wait_ms
+        end_time = time.time() + (wait_ms / 1000.0)
+        # Only wait if we actually see a toast initially
+        if not self.has_toast_message():
+            return
+        logging.debug(f"Toast detected. Waiting up to {wait_ms}ms for dismissal before proceeding.")
+        while time.time() < end_time:
+            time.sleep(0.15)
+            if not self.has_toast_message():
+                break
 
     def tap_element_center(self, element: WebElement) -> bool:
         """Calculates the center of an element and performs a tap."""

@@ -258,7 +258,7 @@ class AgentTools:
             self.last_action_result = error_result
             return error_result
     
-    def tap_coordinates(self, x: float, y: float, normalized: bool = True) -> Dict[str, Any]:
+    def tap_coordinates(self, x: float, y: float, normalized: bool = True, duration_ms: Optional[int] = None) -> Dict[str, Any]:
         """
         Tap on the screen at the given coordinates.
         
@@ -271,7 +271,7 @@ class AgentTools:
             A dictionary containing the result of the action.
         """
         try:
-            logging.debug(f"Agent tool: tap_coordinates({x}, {y}, normalized={normalized})")
+            logging.debug(f"Agent tool: tap_coordinates({x}, {y}, normalized={normalized}, duration_ms={duration_ms})")
             
             # Convert normalized coordinates to absolute if needed
             if normalized:
@@ -293,6 +293,11 @@ class AgentTools:
                 "type": "tap_coords",
                 "coordinates": (x_abs, y_abs)
             }
+            if isinstance(duration_ms, (int, float)):
+                try:
+                    action_details["duration_ms"] = int(duration_ms)
+                except Exception:
+                    pass
             
             # Execute the action
             success = self.action_executor.execute_action(action_details)
@@ -316,6 +321,64 @@ class AgentTools:
             error_result = {
                 "success": False,
                 "message": f"Exception during coordinate tap: {str(e)}"
+            }
+            self.last_action_result = error_result
+            return error_result
+
+    def long_press(self, element_identifier: Optional[str] = None, target_bounding_box: Optional[Dict[str, Any]] = None, duration_ms: Optional[int] = None) -> Dict[str, Any]:
+        """
+        Perform a long press on an element or at specified coordinates.
+
+        Args:
+            element_identifier: Optional identifier of the element to long press.
+            target_bounding_box: Optional bbox to compute coordinates if element is not found.
+            duration_ms: Optional override duration in milliseconds.
+
+        Returns:
+            A dictionary containing the result of the action.
+        """
+        try:
+            logging.debug(f"Agent tool: long_press(identifier={element_identifier}, has_bbox={bool(target_bounding_box)}, duration_ms={duration_ms})")
+
+            action_request: Dict[str, Any] = {"action": "long_press"}
+            if element_identifier:
+                action_request["target_identifier"] = element_identifier
+            if isinstance(target_bounding_box, dict):
+                action_request["target_bounding_box"] = target_bounding_box
+
+            mapped_action = self.action_mapper.map_ai_action_to_appium(action_request)
+            if not mapped_action:
+                result = {
+                    "success": False,
+                    "message": "Failed to map long_press action"
+                }
+            else:
+                # If duration provided, pass through for coordinate taps
+                if isinstance(duration_ms, (int, float)) and mapped_action.get("type") == "tap_coords":
+                    try:
+                        mapped_action["duration_ms"] = int(duration_ms)
+                    except Exception:
+                        pass
+                success = self.action_executor.execute_action(mapped_action)
+                result = {
+                    "success": success,
+                    "message": "Long press executed successfully" if success else f"Long press failed: {self.action_executor.last_error_message}"
+                }
+
+                # Save to action history
+                self.action_history.append({
+                    "action": "long_press",
+                    "target": element_identifier or "coords",
+                    "success": success,
+                    "timestamp": time.time()
+                })
+
+            self.last_action_result = result
+            return result
+        except Exception as e:
+            error_result = {
+                "success": False,
+                "message": f"Exception during long_press: {str(e)}"
             }
             self.last_action_result = error_result
             return error_result

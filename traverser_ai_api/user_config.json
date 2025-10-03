@@ -18,7 +18,7 @@
     "STABILITY_WAIT": 1.0,
     "APP_LAUNCH_WAIT_TIME": 3,
     "NEW_COMMAND_TIMEOUT": 300,
-    "APPIUM_IMPLICIT_WAIT": 2,
+    "APPIUM_IMPLICIT_WAIT": 1,
     "APPIUM_SERVER_URL": "http://127.0.0.1:4723",
     "TARGET_DEVICE_UDID": "279cb9b1",
     "USE_COORDINATE_FALLBACK": true,
@@ -30,18 +30,18 @@
     "OPENROUTER_SHOW_FREE_ONLY": true,
     "OPENROUTER_MODEL_ID_OVERRIDE": "",
     "ENABLE_IMAGE_CONTEXT": true,
-    "XML_SNIPPET_MAX_LEN": 30000,
+    "XML_SNIPPET_MAX_LEN": 20000,
     "MAX_APPS_TO_SEND_TO_AI": 200,
     "USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY": true,
     "AI_SAFETY_SETTINGS": {},
     "CRAWL_MODE": "steps",
-    "MAX_CRAWL_STEPS": 1,
+    "MAX_CRAWL_STEPS": 10,
     "MAX_CRAWL_DURATION_SECONDS": 600,
     "CONTINUE_EXISTING_RUN": false,
     "VISUAL_SIMILARITY_THRESHOLD": 5,
     "THIRD_PARTY_APPS_ONLY": true,
     "MAX_CONSECUTIVE_AI_FAILURES": 3,
-    "MAX_CONSECUTIVE_MAP_FAILURES": 5,
+    "MAX_CONSECUTIVE_MAP_FAILURES": 3,
     "MAX_CONSECUTIVE_EXEC_FAILURES": 5,
     "ENABLE_TRAFFIC_CAPTURE": true,
     "PCAPDROID_PACKAGE": "com.emanuelef.remote_capture",
@@ -58,7 +58,7 @@
             "id": "privacy_policy",
             "name": "Privacy Policies & Terms",
             "description": "Prioritize exploring privacy policies, terms of service, and data usage disclosures",
-            "prompt_modifier": "**PRIVACY FOCUS: Policy Documents** - Actively seek out and thoroughly explore privacy policies, terms of service, data processing agreements, and any legal documents. Read and analyze all privacy-related content for data collection practices, third-party sharing, and user rights.",
+            "prompt_modifier": "PRIVACY: Find and open Privacy Policy, Terms, and data usage disclosures.",
             "enabled": true,
             "priority": 0
         },
@@ -66,7 +66,7 @@
             "id": "permissions",
             "name": "App Permissions",
             "description": "Focus on permission requests and privacy settings",
-            "prompt_modifier": "**PRIVACY FOCUS: Permissions** - Pay special attention to permission requests (location, camera, microphone, contacts, storage, phone). Test how the app handles permission denials and privacy settings. Look for granular permission controls.",
+            "prompt_modifier": "PRIVACY: Review permission prompts; try deny/allow and check settings.",
             "enabled": true,
             "priority": 1
         },
@@ -74,7 +74,7 @@
             "id": "data_collection",
             "name": "Data Collection Forms",
             "description": "Prioritize forms that collect personal information",
-            "prompt_modifier": "**PRIVACY FOCUS: Data Collection** - Focus on forms and input fields that collect personal data (name, email, phone, address, payment info, health data). Test data validation, storage indications, and sharing disclosures. Look for data minimization practices.",
+            "prompt_modifier": "PRIVACY: Inspect forms collecting personal/health data; note disclosures.",
             "enabled": true,
             "priority": 2
         },
@@ -82,7 +82,7 @@
             "id": "third_party",
             "name": "Third-Party Integrations",
             "description": "Identify and analyze third-party services and trackers",
-            "prompt_modifier": "**PRIVACY FOCUS: Third-Party Services** - Look for integrations with analytics services, advertising networks, social media platforms, and other third-party services. Note any data sharing with external companies and tracking mechanisms.",
+            "prompt_modifier": "PRIVACY: Identify analytics/ads/social integrations; note data sharing.",
             "enabled": true,
             "priority": 3
         },
@@ -90,7 +90,7 @@
             "id": "network_requests",
             "name": "Network Communications",
             "description": "Monitor and analyze app's network requests and data transmission",
-            "prompt_modifier": "**PRIVACY FOCUS: Network Activity** - Be alert to network requests and data transmissions. Look for API calls, data uploads, and server communications. Identify what data is being sent to which servers and for what purposes.",
+            "prompt_modifier": "PRIVACY: Observe network/API calls; record data sent and destinations.",
             "enabled": true,
             "priority": 4
         },
@@ -98,7 +98,7 @@
             "id": "account_privacy",
             "name": "Account & Profile Privacy",
             "description": "Focus on account creation, profile data, and privacy controls",
-            "prompt_modifier": "**PRIVACY FOCUS: Account Privacy** - Examine account creation processes, profile data collection, and privacy control options. Test data sharing settings, account deletion processes, and privacy dashboard features.",
+            "prompt_modifier": "PRIVACY: Check account/profile data and privacy controls; test deletion.",
             "enabled": true,
             "priority": 5
         },
@@ -106,16 +106,16 @@
             "id": "advertising_tracking",
             "name": "Advertising & Tracking",
             "description": "Identify advertising networks and tracking mechanisms",
-            "prompt_modifier": "**PRIVACY FOCUS: Advertising & Tracking** - Look for advertising networks, tracking pixels, and behavioral data collection. Find opt-out mechanisms, ad personalization controls, and tracking consent options.",
-            "enabled": true,
+            "prompt_modifier": "PRIVACY: Find ads/tracking; verify opt-out and consent controls.",
+            "enabled": false,
             "priority": 6
         },
         {
             "id": "data_rights",
             "name": "Data Subject Rights",
             "description": "Focus on GDPR/CCPA compliance and user data rights",
-            "prompt_modifier": "**PRIVACY FOCUS: Data Rights** - Search for data export options, account deletion features, data portability tools, and consent management. Test compliance with data protection regulations and user rights.",
-            "enabled": true,
+            "prompt_modifier": "PRIVACY: Locate data export/deletion and consent management features.",
+            "enabled": false,
             "priority": 7
         },
         {
@@ -135,5 +135,9 @@
             "priority": 9
         }
     ],
-    "OUTPUT_DATA_DIR": "output_data"
+    "OUTPUT_DATA_DIR": "output_data",
+    "FOCUS_MAX_ACTIVE": 2,
+    "MAX_SAME_ACTION_REPEAT": 2,
+    "DISABLE_EXPENSIVE_XPATH": true,
+    "ELEMENT_STRATEGY_MAX_ATTEMPTS": 4
 }

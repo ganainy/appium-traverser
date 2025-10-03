@@ -67,8 +67,8 @@ class AIAssistant:
             properties={
                 'action': Schema(
                     type=GLMType.STRING,
-                    # MODIFIED: Add swipe actions here
-                    enum=["click", "input", "scroll_up", "scroll_down", "swipe_left", "swipe_right", "back"],
+                    # MODIFIED: Add swipe and long press actions here
+                    enum=["click", "input", "scroll_up", "scroll_down", "swipe_left", "swipe_right", "back", "long_press"],
                     description="The type of action to perform."
                 ),
                 'target_identifier': Schema(
@@ -327,7 +327,8 @@ class AIAssistant:
             "scroll_up": getattr(self.cfg, 'ACTION_DESC_SCROLL_UP', "Scroll the view upwards."),
             "swipe_left": getattr(self.cfg, 'ACTION_DESC_SWIPE_LEFT', "Swipe content from right to left (for carousels)."),
             "swipe_right": getattr(self.cfg, 'ACTION_DESC_SWIPE_RIGHT', "Swipe content from left to right."),
-            "back": getattr(self.cfg, 'ACTION_DESC_BACK', "Navigate back using the system back button.")
+            "back": getattr(self.cfg, 'ACTION_DESC_BACK', "Navigate back using the system back button."),
+            "long_press": getattr(self.cfg, 'ACTION_DESC_LONG_PRESS', "Press and hold on a target element (contextual menu or options).")
         }
 
         feedback_section = ""
@@ -339,64 +340,22 @@ Based on this feedback, you MUST choose a different action to avoid getting stuc
 
         actual_available_actions = getattr(self.cfg, 'AVAILABLE_ACTIONS', available_actions)
         if not actual_available_actions:
-            actual_available_actions = ["click", "input", "scroll_down", "scroll_up", "swipe_left", "swipe_right", "back"]
+            actual_available_actions = ["click", "input", "scroll_down", "scroll_up", "swipe_left", "swipe_right", "back", "long_press"]
 
-        ui_element_types_guidance = """
-        **Identifiable UI Element Types for `all_ui_elements` list:**
-        When listing all UI elements, try to classify them into one of the following types:
-        "button", "editText" (or "textInput", "searchBox"), "textView" (or "label", "text"), "imageView" (or "image", "icon"), "imageButton",
-        "radioButton", "checkBox", "switch", "seekBar", "slider", "progressBar",
-        "webView", "mapView", "videoPlayer", "datePicker", "timePicker", "numberPicker",
-        "listViewItem", "recyclerViewItem", "gridItem", "carouselItem",
-        "tab", "menuItem", "dialog", "advertisement", "banner", "card", "chip", "tooltip",
-        "navigationBarIcon", "toolbarIcon", "FAB" (Floating Action Button),
-        "header", "footer", "link", "other" (for elements not fitting other categories).
-        Provide the most specific type possible.
-        """
+        # Compact guidance to reduce tokens
+        ui_element_types_guidance = "**UI types (examples):** button, editText, textView, imageView, checkBox, radioButton, switch, seekBar, listItem, tab, dialog, card, chip, link, other."
 
-        bounding_box_guidance_general = """
-        **Bounding Box Format for ALL Elements (`target_bounding_box` for action AND `bounding_box` in `all_ui_elements`):**
-        -   Coordinates MUST be NORMALIZED (values between 0.0 and 1.0, where (0,0) is top-left, (1,1) is bottom-right).
-        -   Provide `top_left` as `[y1, x1]` and `bottom_right` as `[y2, x2]`.
-        -   If extracting from XML 'bounds' (e.g., `[x1,y1][x2,y2]`), carefully convert to normalized `[y,x]` format relative to screen dimensions.
-            If screen dimensions are unknown, make your best visual estimate for normalization from the screenshot.
-        -   If a precise bounding box cannot be determined for an element in `all_ui_elements`, you MAY set its `bounding_box` to `null`.
-            However, for the `action_to_perform.target_bounding_box`, strive to provide it if the action is 'click' or 'input'.
-        """
+        bounding_box_guidance_general = "**Bounding boxes (normalized):** top_left [y1,x1], bottom_right [y2,x2]. Prefer XML 'bounds'; otherwise estimate from screenshot."
         
         # Simplified guidance for action_to_perform.target_bounding_box
-        action_target_bbox_guidance = """
-        **For `action_to_perform.target_bounding_box` (if action is 'click' or 'input'):**
-        1.  **Extract from XML (Primary):** Use the 'bounds' attribute from the XML for the `target_identifier`. Convert to normalized `{"top_left": [y1, x1], "bottom_right": [y2, x2]}`.
-        2.  **Visually Estimate (Fallback):** If XML bounds are unavailable/unreliable for the target, visually estimate normalized coordinates from the screenshot.
-        3.  **Use `null` (Last Resort):** Only if coordinates cannot be determined for the action target. For 'scroll' or 'back', this should be `null`.
-        """
+        action_target_bbox_guidance = "**target_bounding_box:** Use XML bounds when available; otherwise estimate. Use null for scroll/back if not applicable."
 
 
-        json_format_instruction_new = f"""\
-        **RESPONSE FORMAT (Strict JSON Schema Enforced by API):**
-        Your response MUST be a JSON object with one top-level key: `action_to_perform`.
-
-        1.  `action_to_perform`: (object) MANDATORY. Describes the single best action to take. This object itself must always be present.
-            -   `action`: (string, enum) The action (e.g., "click", "input"). REQUIRED.
-            -   `target_identifier`: (string | null) Identifier for "click"/"input". Crucial if applicable, otherwise null.
-            -   `target_bounding_box`: (object | null) Normalized bounding box for the action's target. `{{"top_left": [y1,x1], "bottom_right": [y2,x2]}}`. Strongly preferred for 'click'/'input'.
-            -   `input_text`: (string | null) Text for "input" action. Required if action is "input", otherwise null.
-            -   `reasoning`: (string) Your brief explanation. REQUIRED.
-
-        Example of a valid JSON response:
-        ```json
-        {{
-          "action_to_perform": {{
-            "action": "click",
-            "target_identifier": "com.example.app:id/submit_button",
-            "target_bounding_box": {{ "top_left": [0.8, 0.1], "bottom_right": [0.85, 0.9] }},
-            "input_text": null,
-            "reasoning": "Clicked the submit button to proceed. Bounds estimated from screenshot as XML was minimal."
-          }}
-        }}
-        ```
-        """
+        json_format_instruction_new = (
+            "RESPONSE FORMAT (JSON): Return {\"action_to_perform\"} with keys: "
+            "action (enum), target_identifier (string|null), target_bounding_box (object|null), "
+            "input_text (string|null), reasoning (string)."
+        )
         # ... (rest of loop_threshold, visit_context, visit_instruction, input_value_guidance, etc. remain similar to your provided code) ...
 
         loop_threshold = getattr(self.cfg, 'LOOP_DETECTION_VISIT_THRESHOLD', 3)
@@ -410,16 +369,11 @@ Based on this feedback, you MUST choose a different action to avoid getting stuc
         if current_screen_visit_count > loop_threshold or action_analysis["is_looping"]:
             repeated_text = ', '.join(action_analysis['repeated_actions']) if action_analysis['repeated_actions'] else 'None'
             tried_text = ', '.join(action_analysis['last_unique_actions']) if action_analysis['last_unique_actions'] else 'None'
-            visit_instruction = f"""
-            **CRITICAL - LOOP DETECTED / HIGH VISIT COUNT:**
-            - Screen visited {current_screen_visit_count} times.
-            - Recent action patterns detected as potentially looping: {repeated_text}.
-            - Recent unique action types attempted on this screen: {tried_text}.
-            REQUIRED ACTION CHANGES TO BREAK THE LOOP (for `action_to_perform`):
-            1. DO NOT repeat recently failed or looped action sequences.
-            2. Prioritize actions or elements that have NOT been tried recently on this screen.
-            3. If all else fails and the app seems stuck, consider using 'back'.
-            """
+            visit_instruction = (
+                f"LOOP ALERT: visits={current_screen_visit_count}. "
+                f"Looping actions: {repeated_text}. Tried recently: {tried_text}. "
+                "Pick a different action/element; use 'back' if stuck."
+            )
         test_email_val = os.environ.get("TEST_EMAIL", "test.user@example.com")
         test_password_val = os.environ.get("TEST_PASSWORD", "Str0ngP@ssw0rd!")
         test_name_val = os.environ.get("TEST_NAME", "Test User")

@@ -102,16 +102,24 @@ class AppCrawler:
         self.driver = AppiumDriver(app_config=self.cfg)
         self.db_manager = DatabaseManager(app_config=self.cfg)
         self.screen_state_manager = ScreenStateManager(db_manager=self.db_manager, driver=self.driver, app_config=self.cfg)
+        # Strategy ordering tuned for speed and reliability:
+        # 1) Full resource-id (ID)
+        # 2) Accessibility ID
+        # 3) Text (case-insensitive contains)
+        # 4) Class contains (allowed even when DISABLE_EXPENSIVE_XPATH is True)
+        # Heavier XPath heuristics (xpath contains, flexible) remain gated by DISABLE_EXPENSIVE_XPATH.
         self.element_finding_strategies: List[Tuple[str, Optional[str], str]] = [
             ('id', AppiumBy.ID, "ID"),
             ('acc_id', AppiumBy.ACCESSIBILITY_ID, "Accessibility ID"),
-            ('xpath_exact', AppiumBy.XPATH, "XPath Exact Match"),
-            ('xpath_contains', AppiumBy.XPATH, "XPath Contains Match"),
-            ('id_partial', AppiumBy.XPATH, "ID Partial Match"),
             ('text_case_insensitive', AppiumBy.XPATH, "Text Case Insensitive"),
             ('class_contains', AppiumBy.XPATH, "Class Contains Match"),
-            ('xpath_flexible', AppiumBy.XPATH, "XPath Flexible Match")
         ]
+        # Add heavier XPath heuristics only if not disabled
+        if not getattr(self.cfg, 'DISABLE_EXPENSIVE_XPATH', False):
+            self.element_finding_strategies.extend([
+                ('xpath_contains', AppiumBy.XPATH, "XPath Contains Match"),
+                ('xpath_flexible', AppiumBy.XPATH, "XPath Flexible Match")
+            ])
         self.action_mapper = ActionMapper(driver=self.driver, element_finding_strategies=self.element_finding_strategies, app_config=self.cfg)
         self.traffic_capture_manager = TrafficCaptureManager(driver=self.driver, app_config=self.cfg)
         self.action_executor = ActionExecutor(driver=self.driver, app_config=self.cfg)
@@ -145,6 +153,15 @@ class AppCrawler:
         self.last_action_feedback_for_ai: Optional[str] = None
         self.consecutive_no_op_failures: int = 0
         self.fallback_action_index: int = 0
+        self.force_image_context_next_step: bool = False
+
+        # Cache for simplified XML to avoid repeated heavy processing when the screen hash is unchanged
+        self.simplified_xml_cache: Dict[str, str] = {}
+        self.max_xml_cache_entries: int = 200
+
+        # Track how many times the same action has been attempted per screen to prevent loops
+        self.action_repeat_counts: Dict[str, Dict[str, int]] = {}
+        self.max_repeat_tracking_screens: int = 200
 
         self.is_shutting_down: bool = False
         self.monitor_task: Optional[asyncio.Task] = None
@@ -396,10 +413,21 @@ class AppCrawler:
         if ai_action_suggestion is None:
             xml_content = definitive_screen_repr.xml_content or ""
             filtered_xml = utils.filter_xml_by_allowed_packages(xml_content, str(self.cfg.APP_PACKAGE), self.cfg.ALLOWED_EXTERNAL_PACKAGES)
-            simplified_xml = utils.simplify_xml_for_ai(filtered_xml, int(self.cfg.XML_SNIPPET_MAX_LEN), self.cfg.AI_PROVIDER)
+            # Use cache for simplified XML based on screen hash, provider, and max snippet length
+            cache_key = f"{definitive_screen_repr.composite_hash}:{self.cfg.AI_PROVIDER}:{int(self.cfg.XML_SNIPPET_MAX_LEN)}"
+            simplified_xml = self.simplified_xml_cache.get(cache_key)
+            if simplified_xml is None:
+                simplified_xml = utils.simplify_xml_for_ai(filtered_xml, int(self.cfg.XML_SNIPPET_MAX_LEN), self.cfg.AI_PROVIDER)
+                # Maintain a simple cap on cache size
+                if len(self.simplified_xml_cache) >= getattr(self, 'max_xml_cache_entries', 200):
+                    try:
+                        self.simplified_xml_cache.pop(next(iter(self.simplified_xml_cache)))
+                    except StopIteration:
+                        pass
+                self.simplified_xml_cache[cache_key] = simplified_xml
             
-            # Check if image context is enabled
-            enable_image_context = getattr(self.cfg, 'ENABLE_IMAGE_CONTEXT', True)
+            # Check if image context is enabled, or forced for a single step
+            enable_image_context = (getattr(self.cfg, 'ENABLE_IMAGE_CONTEXT', True) or self.force_image_context_next_step)
             
             if enable_image_context and definitive_screen_repr.screenshot_bytes and self.loop:
                 try:
@@ -445,6 +473,10 @@ class AppCrawler:
                             
                 except Exception as e:
                     logging.error(f"Error in agent-based execution: {e}", exc_info=True)
+                finally:
+                    # Reset forced image context after a single attempt
+                    if self.force_image_context_next_step:
+                        self.force_image_context_next_step = False
             elif not enable_image_context:
                 # Use text-only analysis without image
                 if self.loop:
@@ -515,18 +547,26 @@ class AppCrawler:
                     self.last_action_feedback_for_ai = f"NO CHANGE: Your action '{ai_suggestion.get('action')}' was executed, but the screen did not change. You MUST suggest a different action."
                     logging.warning(self.last_action_feedback_for_ai)
                     self.consecutive_no_op_failures += 1
+                    # Force image context on next step to help break no-change loops
+                    self.force_image_context_next_step = True
                 else:
                     self.last_action_feedback_for_ai = "SUCCESS: Your last action was successful."
                     self.consecutive_no_op_failures = 0
                     self.fallback_action_index = 0
+                    # Clear forced image context after progression
+                    if self.force_image_context_next_step:
+                        self.force_image_context_next_step = False
             else:
                  self.last_action_feedback_for_ai = "UNKNOWN: Action succeeded but the next state could not be determined."
                  self.consecutive_no_op_failures += 1
+                 self.force_image_context_next_step = True
         else:
             error_msg = self.action_executor.last_error_message or "Unknown execution error"
             self.last_action_feedback_for_ai = f"EXECUTION FAILED: Your action '{ai_suggestion.get('action')}' failed with error: {error_msg}. You MUST suggest a different action."
             logging.error(self.last_action_feedback_for_ai)
             self.consecutive_no_op_failures += 1
+            # Optionally force image context to assist recovery
+            self.force_image_context_next_step = True
         
         action_str_log = utils.generate_action_description(ai_suggestion.get('action', 'unknown'), None, ai_suggestion.get('input_text'), ai_suggestion.get('target_identifier'))
         
@@ -564,6 +604,8 @@ class AppCrawler:
         screen = self.screen_state_manager.get_current_screen_representation(self.run_id, current_step_for_log)
         if not screen or not screen.screenshot_bytes:
             self._handle_mapping_failure() # Treat as a mapping failure
+            # Force image context on next step to assist mapping on tough screens
+            self.force_image_context_next_step = True
             if self.db_manager:
                 self.db_manager.insert_step_log(self.run_id, current_step_for_log, None, None, "GET_SCREEN_STATE", None, None, False, "Failed to get valid screen state", None, None)
             if self._should_terminate(): return "BREAK", "TERMINATED_STATE_FAIL"
@@ -586,13 +628,47 @@ class AppCrawler:
             return "CONTINUE", None
         self.consecutive_ai_failures = 0
         
+        # Enforce repeated action cap per screen to reduce loops
+        repeat_cap = getattr(self.cfg, 'MAX_SAME_ACTION_REPEAT', 3)
+        if ai_suggestion:
+            current_hash = screen.composite_hash
+            suggested_action = ai_suggestion.get('action', 'unknown')
+            prev_counts = self.action_repeat_counts.get(current_hash, {})
+            if prev_counts.get(suggested_action, 0) >= repeat_cap:
+                logging.warning(f"Repeat cap reached for action '{suggested_action}' on screen {current_hash}. Selecting fallback action.")
+                fallback_actions = getattr(self.cfg, 'FALLBACK_ACTIONS_SEQUENCE', [])
+                if fallback_actions:
+                    action_to_try = fallback_actions[self.fallback_action_index % len(fallback_actions)]
+                    ai_suggestion = action_to_try.copy()
+                    ai_suggestion['reasoning'] = f"FALLBACK ACTION: Repeat limit reached for '{suggested_action}'."
+                    self.fallback_action_index += 1
+                    # Force image context on the next step to help break loops when repeat cap triggers
+                    self.force_image_context_next_step = True
+
         action_str = utils.generate_action_description(ai_suggestion.get('action', 'unknown'), None, ai_suggestion.get('input_text'), ai_suggestion.get('target_identifier'))
         logging.debug(f"Step {current_step_for_log}: AI suggested: {action_str}. Reasoning: {ai_suggestion.get('reasoning')}")
         print(f"{UI_ACTION_PREFIX}{action_str}\n{UI_STATUS_PREFIX}Step {current_step_for_log}: Mapping and executing...")
 
+        # Increment repeat counter for the attempted action on this screen
+        try:
+            if screen.composite_hash:
+                # Prune tracking size if needed
+                if len(self.action_repeat_counts) >= getattr(self, 'max_repeat_tracking_screens', 200):
+                    try:
+                        self.action_repeat_counts.pop(next(iter(self.action_repeat_counts)))
+                    except StopIteration:
+                        pass
+                counts = self.action_repeat_counts.setdefault(screen.composite_hash, {})
+                action_name_for_count = ai_suggestion.get('action', 'unknown')
+                counts[action_name_for_count] = counts.get(action_name_for_count, 0) + 1
+        except Exception:
+            pass
+
         action_details = self.action_mapper.map_ai_action_to_appium(ai_suggestion, screen.xml_content)
         if not action_details:
             self._handle_mapping_failure()
+            # Force image context on next step to assist mapping
+            self.force_image_context_next_step = True
             if self.db_manager:
                  self.db_manager.insert_step_log(self.run_id, current_step_for_log, screen.id, None, action_str, json.dumps(ai_suggestion), None, False, "Failed to map AI action to element", ai_time, tokens)
             if self._should_terminate(): return "BREAK", "TERMINATED_MAP_FAIL"

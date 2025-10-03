@@ -53,8 +53,8 @@ class Config:
         self.DEFAULT_MODEL_TYPE: str = 'flash-latest-fast'
         self.USE_CHAT_MEMORY: bool = False
         self.MAX_CHAT_HISTORY: int = 10
-        self.ENABLE_IMAGE_CONTEXT: bool = True
-        self.XML_SNIPPET_MAX_LEN: int = 500000
+        self.ENABLE_IMAGE_CONTEXT: bool = False
+        self.XML_SNIPPET_MAX_LEN: int = 15000
         self.MAX_APPS_TO_SEND_TO_AI: int = 200
         self.LOOP_DETECTION_VISIT_THRESHOLD: int = 1
         self.USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY: bool = True
@@ -76,15 +76,25 @@ class Config:
         # ---- Start of Corrected Area ----
         self.ACTION_DESC_SWIPE_LEFT: Optional[str] = None
         self.ACTION_DESC_SWIPE_RIGHT: Optional[str] = None
+        self.ACTION_DESC_LONG_PRESS: Optional[str] = None
         # ---- End of Corrected Area ----
+        # Long press minimum duration (ms) for tap-and-hold semantics
+        self.LONG_PRESS_MIN_DURATION_MS: int = 600
         self.MAX_CONSECUTIVE_AI_FAILURES: int = 3
         self.MAX_CONSECUTIVE_MAP_FAILURES: int = 3
         self.MAX_CONSECUTIVE_EXEC_FAILURES: int = 3
         self.MAX_CONSECUTIVE_CONTEXT_FAILURES: int = 3
         # ---- Start of Corrected Area ----
         self.MAX_CONSECUTIVE_NO_OP_FAILURES: int = 3
+        # Cap how many times the same action can be attempted on the same screen before forcing a fallback
+        self.MAX_SAME_ACTION_REPEAT: int = 3
         self.FALLBACK_ACTIONS_SEQUENCE: List[Dict[str, Any]] = []
         self.USE_ADB_INPUT_FALLBACK: bool = True
+        # Safety tap configuration (used by AppiumDriver.tap_at_coordinates)
+        self.SAFE_TAP_MARGIN_RATIO: float = 0.03  # 3% safe margin from each edge
+        self.SAFE_TAP_EDGE_HANDLING: str = 'snap'  # 'reject' or 'snap'
+        # Overlay/Toast handling (used by ActionExecutor pre-action wait)
+        self.TOAST_DISMISS_WAIT_MS: int = 1200
         # ---- End of Corrected Area ----
         self.ENABLE_TRAFFIC_CAPTURE: bool = True
         self.PCAPDROID_PACKAGE: str = "com.emanuelef.remote_capture"
@@ -104,6 +114,13 @@ class Config:
         self.FOCUS_AREAS: List[Dict[str, Any]] = []
         # Limit how many enabled focus areas are considered ACTIVE in prompts/validation
         self.FOCUS_MAX_ACTIVE: int = 5
+        # Optionally disable expensive XPath strategies for element search
+        self.DISABLE_EXPENSIVE_XPATH: bool = True
+        # Cap how many element-finding strategies are attempted per mapping
+        # Set to 0 or negative to disable capping
+        self.ELEMENT_STRATEGY_MAX_ATTEMPTS: int = 3
+        # Auto-hide software keyboard before non-input actions to avoid overlay-induced no-ops
+        self.AUTO_HIDE_KEYBOARD_BEFORE_NON_INPUT: bool = True
         
         # Store templates from defaults for dynamic resolution
         self._OUTPUT_DATA_DIR_TEMPLATE = "output_data"
@@ -396,6 +413,12 @@ class Config:
             "CURRENT_HEALTH_APP_LIST_FILE", "LAST_SELECTED_APP", "UI_MODE",
             "MOBSF_API_URL", "ENABLE_MOBSF_ANALYSIS",
             "FOCUS_AREAS",  # Add focus areas to savable config
+            # Additional optimization flags
+            "FOCUS_MAX_ACTIVE", "MAX_SAME_ACTION_REPEAT", "DISABLE_EXPENSIVE_XPATH", "ELEMENT_STRATEGY_MAX_ATTEMPTS",
+            # Safety tap and overlay handling
+            "SAFE_TAP_MARGIN_RATIO", "SAFE_TAP_EDGE_HANDLING", "TOAST_DISMISS_WAIT_MS",
+            # Pre-action behavior
+            "AUTO_HIDE_KEYBOARD_BEFORE_NON_INPUT",
             # Save the template for OUTPUT_DATA_DIR so user can change base output loc
             # The actual key in user_config.json will be "OUTPUT_DATA_DIR"
         ]
@@ -585,8 +608,8 @@ AI_PROVIDER = 'gemini'  # 'gemini' or 'deepseek' - Gemini has generous free tier
 DEFAULT_MODEL_TYPE = 'flash-latest-fast'
 USE_CHAT_MEMORY = False
 MAX_CHAT_HISTORY = 10
-ENABLE_IMAGE_CONTEXT = True
-XML_SNIPPET_MAX_LEN = 50000
+ENABLE_IMAGE_CONTEXT = False
+XML_SNIPPET_MAX_LEN = 15000
 MAX_APPS_TO_SEND_TO_AI = 200
 USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY = True
 AI_SAFETY_SETTINGS = {}
@@ -758,7 +781,7 @@ CONTINUE_EXISTING_RUN = False
 VISUAL_SIMILARITY_THRESHOLD = 5
 THIRD_PARTY_APPS_ONLY = True
 
-AVAILABLE_ACTIONS = ["click", "input", "scroll_down", "scroll_up", "swipe_left", "swipe_right", "back"]
+AVAILABLE_ACTIONS = ["click", "input", "scroll_down", "scroll_up", "swipe_left", "swipe_right", "back", "long_press"]
 ACTION_DESC_CLICK = "Click the specified element."
 ACTION_DESC_INPUT = "Input the provided text into the specified element."
 ACTION_DESC_SCROLL_DOWN = "Scroll the screen down to reveal more content."
@@ -766,6 +789,9 @@ ACTION_DESC_SCROLL_UP = "Scroll the screen up to reveal previous content."
 ACTION_DESC_BACK = "Press the device's back button."
 ACTION_DESC_SWIPE_LEFT = "Swipe content from right to left (e.g., for carousels)."
 ACTION_DESC_SWIPE_RIGHT = "Swipe content from left to right (e.g., for carousels)."
+ACTION_DESC_LONG_PRESS = "Press and hold on the specified element to open contextual options or menus."
+
+LONG_PRESS_MIN_DURATION_MS = 600
 
 
 MAX_CONSECUTIVE_AI_FAILURES = 3
@@ -787,6 +813,11 @@ FALLBACK_ACTIONS_SEQUENCE = [
     {"action": "swipe_left", "target_identifier": None, "input_text": None},
 ]
 USE_ADB_INPUT_FALLBACK = True
+
+# Safety tap configuration and toast handling defaults
+SAFE_TAP_MARGIN_RATIO = 0.03  # 3% from each screen edge considered unsafe
+SAFE_TAP_EDGE_HANDLING = 'snap'  # Options: 'reject' or 'snap' to safe area
+TOAST_DISMISS_WAIT_MS = 1200  # Wait time for transient toast overlays to dismiss
 
 # MobSF Integration settings - URL and default for ENABLE flag only
 # API key should be set via environment variable MOBSF_API_KEY
