@@ -16,10 +16,10 @@
 ## Project Overview
 
 ### Purpose
-The AI-Driven Android App Crawler is an automated testing and exploration tool that uses Google Gemini multimodal AI to intelligently navigate Android applications. It analyzes visual layouts and structural information to make intelligent decisions about the next best action for discovering new states and interactions.
+The AI-Driven Android App Crawler is an automated testing and exploration tool that uses pluggable AI model adapters (Gemini, OpenRouter, Ollama) to intelligently navigate Android applications. It analyzes visual layouts and structural information to make decisions about the next best action for discovering new states and interactions.
 
 ### Key Features
-- **AI-Powered Exploration**: Uses Google Gemini for intelligent action selection
+- **AI-Powered Exploration**: Uses provider adapters (Gemini, OpenRouter, Ollama) for intelligent action selection
 - **Intelligent State Management**: Visual and structural hashing to identify unique screens
 - **Loop Detection**: Prevents getting stuck in repetitive patterns
 - **Traffic Capture**: Optional network monitoring via PCAPdroid
@@ -30,7 +30,7 @@ The AI-Driven Android App Crawler is an automated testing and exploration tool t
 ### Technology Stack
 - **Language**: Python 3.8+
 - **Mobile Automation**: Appium with UIAutomator2
-- **AI Model**: Google Gemini 2.5 Flash
+- **AI Models**: Pluggable provider adapters (Gemini, Ollama, OpenRouter)
 - **Database**: SQLite
 - **Image Processing**: Pillow, ImageHash
 - **GUI Framework**: PySide6 (Qt)
@@ -60,8 +60,8 @@ The AI-Driven Android App Crawler is an automated testing and exploration tool t
 ┌─────────────────────────────────────────────────────────────────┐
 │                      Component Layer                            │
 ├─────────────────┬───────────────┬───────────────┬───────────────┤
-│   AI Assistant  │  State Mgmt   │  Action Exec  │  App Context  │
-│   (Gemini)      │  (Hashing)    │  (Appium)     │  (Lifecycle)  │
+│  Agent Assistant │  State Mgmt   │  Action Exec  │  App Context  │
+│  (Adapters: Gemini/OpenRouter/Ollama) │  (Hashing)    │  (Appium)     │  (Lifecycle)  │
 ├─────────────────┼───────────────┼───────────────┼───────────────┤
 │   Screenshot    │  Traffic      │  Action       │  Database     │
 │   Annotator     │  Capture      │  Mapper       │  Manager      │
@@ -144,33 +144,47 @@ def _step_crawl_action(self) -> Tuple[bool, Optional[str]]:
     """Execute one crawling step with AI guidance"""
 ```
 
-### 3. AI Assistant (`ai_assistant.py`)
-**Purpose**: Interface with Google Gemini for intelligent action selection.
+### 3. Agent Assistant (`agent_assistant.py`)
+**Purpose**: Primary decision-making agent that integrates with provider-specific model adapters (Gemini, OpenRouter, Ollama) and enforces structured prompting tailored for mobile UI testing.
 
 **Key Responsibilities**:
-- Analyze screenshots and XML structure
-- Generate contextual action recommendations
-- Maintain conversation history (optional)
-- Handle AI API rate limiting and errors
+- Initialize and manage provider adapters and selected models
+- Analyze screenshots and UI XML to craft context-rich prompts
+- Enforce structured JSON output schema for actions and reasoning
+- Maintain and optionally persist chat memory across steps
+- Apply safety settings and provider-specific constraints
+- Handle provider failures and implement fallbacks/backoffs
 
-**Decision Process**:
+**Decision Process** (conceptual):
 ```python
-def get_next_action(
-    self,
-    screenshot_bytes: bytes,
+def choose_next_action(
+    screenshot_input: Union[bytes, str],  # bytes or image path (normalized by adapter)
     xml_content: str,
     previous_actions: List[str],
     available_actions: List[str],
     current_visits: int,
     screen_hash: str
 ) -> Tuple[Optional[Dict], Optional[str]]:
+    """
+    Returns a structured action recommendation and optional error.
+    Delegates model invocation through the selected provider adapter.
+    """
 ```
 
 **AI Input Format**:
-- **Visual**: Screenshot image (PNG bytes)
+- **Visual**: Screenshot image (PNG bytes or file path, depending on provider)
 - **Structural**: XML UI hierarchy
 - **Context**: Previous actions, visit counts, available actions
 - **Constraints**: Allowed action types, target app packages
+
+### 3a. Model Adapters (`model_adapters.py`)
+**Purpose**: Provide a unified integration layer across AI providers.
+
+**Key Responsibilities**:
+- Normalize request/response formats across providers
+- Detect and enforce vision capability (image input support)
+- Map display names to raw model aliases and handle provider-specific quirks
+- Manage provider-specific configuration and payload limits
 
 ### 4. Screen State Manager (`screen_state_manager.py`)
 **Purpose**: Track unique screen states and manage state transitions.
@@ -294,7 +308,7 @@ capabilities = {
    └─ Check if screen is new/visited
 
 3. AI Decision Making
-   ├─ Send screenshot + XML to Gemini
+   ├─ Send screenshot + XML to selected AI provider (via adapter)
    ├─ Include context (previous actions, visits)
    ├─ Get structured JSON response
    └─ Parse action recommendation
@@ -314,11 +328,11 @@ capabilities = {
 
 ### Data Storage Flow
 ```
-Raw Data Collection:
-├─ Screenshots → output_data/screenshots/
-├─ Annotated Screenshots → output_data/screenshots/annotated_*
-├─ Traffic Captures → output_data/traffic_captures/
-└─ Logs → output_data/logs/
+Raw Data Collection (session-scoped):
+├─ Screenshots → output_data/sessions/<session_id>/screenshots/
+├─ Annotated Screenshots → output_data/sessions/<session_id>/screenshots/annotated/
+├─ Traffic Captures → output_data/sessions/<session_id>/traffic_captures/
+└─ Logs → output_data/sessions/<session_id>/logs/
 
 Database Storage:
 ├─ Screen States → screens table
@@ -326,9 +340,9 @@ Database Storage:
 ├─ AI Decisions → ai_interactions table
 └─ Run Metadata → runs table
 
-Analysis Output:
-├─ PDF Reports → output_data/analysis_reports/
-└─ JSON Annotations → annotations.json
+Analysis Output (session/target-scoped):
+├─ PDF Reports → output_data/analysis_reports/<package_name>/<session_id>/
+└─ JSON Annotations → output_data/sessions/<session_id>/annotations.json
 ```
 
 ## Configuration Management
@@ -341,9 +355,12 @@ class Config:
     APP_ACTIVITY: str = "com.example.MainActivity"
     APPIUM_SERVER_URL: str = "http://127.0.0.1:4723"
     
-    # AI Configuration
+    # AI Configuration (provider-agnostic)
     GEMINI_API_KEY: str = ""  # From environment or .env
-    DEFAULT_MODEL_TYPE: str = "flash-latest-fast"
+    OPENROUTER_API_KEY: str = ""
+    OLLAMA_BASE_URL: str = "http://127.0.0.1:11434"
+    AI_PROVIDER: str = "Gemini"  # "Gemini" | "OpenRouter" | "Ollama"
+    AI_MODEL: str = "gemini-1.5-flash-latest"
     MAX_CHAT_HISTORY: int = 10
     
     # Crawling Behavior

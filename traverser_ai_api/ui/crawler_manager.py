@@ -548,7 +548,14 @@ class CrawlerManager(QObject):
         if hasattr(self.main_controller, 'progress_bar'):
             self.main_controller.progress_bar.setRange(0, 100)
             self.main_controller.progress_bar.setValue(100 if exit_status == QProcess.ExitStatus.NormalExit else 0)
-        
+
+        # Play audio alert on normal finish (single beep)
+        try:
+            if exit_status == QProcess.ExitStatus.NormalExit and hasattr(self.main_controller, '_audio_alert'):
+                self.main_controller._audio_alert('finish')
+        except Exception:
+            pass
+
         self.crawler_process = None
     
     @Slot(QProcess.ProcessError)
@@ -596,6 +603,13 @@ class CrawlerManager(QObject):
         self.main_controller.status_label.setText(f"Status: Error ({error_name})")
         self.main_controller.progress_bar.setRange(0, 100)
         self.main_controller.progress_bar.setValue(0)
+
+        # Play audio alert on error (double beep)
+        try:
+            if hasattr(self.main_controller, '_audio_alert'):
+                self.main_controller._audio_alert('error')
+        except Exception:
+            pass
     
     @Slot()
     def read_stdout(self) -> None:
@@ -666,6 +680,22 @@ class CrawlerManager(QObject):
             if status_match:
                 status_text = status_match.group(1).strip()
                 self.main_controller.status_label.setText(f"Status: {status_text}")
+
+            # Check for UI_END_PREFIX:final_status
+            end_match = re.search(r'UI_END:(.*?)($|\n)', output)
+            if end_match:
+                final_status = end_match.group(1).strip()
+                # Log final status line for visibility
+                self.main_controller.log_message(f"Final status: {final_status}", 'blue')
+                # Play audio based on final status content
+                try:
+                    if hasattr(self.main_controller, '_audio_alert'):
+                        if final_status.startswith('COMPLETED'):
+                            self.main_controller._audio_alert('finish')
+                        else:
+                            self.main_controller._audio_alert('error')
+                except Exception:
+                    pass
                 
             # Check for UI_FOCUS_PREFIX:focus_info
             focus_match = re.search(r'UI_FOCUS:(.*?)($|\n)', output)

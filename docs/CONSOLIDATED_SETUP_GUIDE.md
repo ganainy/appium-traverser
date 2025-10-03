@@ -58,7 +58,7 @@ appium driver install uiautomator2
 **2. Clone and setup project**
 ```bash
 git clone <repository-url>
-cd appium-traverser-vertiefung
+cd appium-traverser-master-arbeit
 ```
 
 **3. Create virtual environment**
@@ -181,7 +181,7 @@ appium driver list --installed
 **Clone Repository:**
 ```bash
 git clone <repository-url> # Replace <repository-url> with the actual URL
-cd appium-traverser-vertiefung
+cd appium-traverser-master-arbeit
 ```
 
 **Virtual Environment (Recommended):**
@@ -219,6 +219,7 @@ OPENROUTER_API_KEY=your_openrouter_api_key_here
 # Optional keys
 # PCAPDROID_API_KEY=your_pcapdroid_key_here
 # MOBSF_API_KEY=your_mobsf_key_here
+# OLLAMA_BASE_URL=http://localhost:11434
 ```
 
 ### OpenRouter Models Metadata & Refresh
@@ -241,6 +242,23 @@ If you use the OpenRouter providers, install the OpenAI SDK in your environment:
 ```powershell
 pip install openai
 ```
+
+### AI Provider Selection
+
+Choose your provider and default model in `user_config.json`:
+
+```json
+{
+  "AI_PROVIDER": "gemini",            // or "ollama" or "openrouter"
+  "DEFAULT_MODEL_TYPE": "gemini-1.5-flash", // e.g., "llama3.2-vision" or "openrouter-auto"
+  "OLLAMA_BASE_URL": "http://localhost:11434" // required only for Ollama
+}
+```
+
+Notes:
+- OpenRouter uses an OpenAI-compatible SDK; ensure `OPENROUTER_API_KEY` is set and `openai` package installed.
+- Ollama supports local models; pull models (e.g., `ollama pull llama3.2-vision`) and set `OLLAMA_BASE_URL`.
+- The UI can refresh OpenRouter model metadata and detects vision support automatically.
 
 ## Usage Guide
 
@@ -299,6 +317,15 @@ Start the crawling process for the selected app:
 ```powershell
 python traverser_ai_api/cli_controller.py --start
 ```
+
+### Health App List Caching
+
+When scanning installed apps from the UI, the application maintains separate per-device caches to prevent overwriting when toggling AI filtering:
+
+- AI filtering OFF: `output_data/app_info/<device_id>/health_apps_all.json`
+- AI filtering ON:  `output_data/app_info/<device_id>/health_apps_ai.json`
+
+The UI automatically selects the appropriate cache based on the filter state and persists a device-specific relative path in the configuration.
 Check crawler status (can be run while crawler is active or stopped):
 ```powershell
 python traverser_ai_api/cli_controller.py --status

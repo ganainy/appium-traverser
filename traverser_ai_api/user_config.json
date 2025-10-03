@@ -23,7 +23,7 @@
     "TARGET_DEVICE_UDID": "279cb9b1",
     "USE_COORDINATE_FALLBACK": true,
     "AI_PROVIDER": "openrouter",
-    "DEFAULT_MODEL_TYPE": "x-ai/grok-4-fast:free",
+    "DEFAULT_MODEL_TYPE": "grok-4-fast (free)",
     "USE_CHAT_MEMORY": false,
     "MAX_CHAT_HISTORY": 10,
     "OPENROUTER_REFRESH_BTN": null,

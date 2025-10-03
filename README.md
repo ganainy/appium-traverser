@@ -15,7 +15,7 @@
 
 ## Overview
 
-This project implements an automated crawler for Android applications driven by a multimodal AI model (Google Gemini). It intelligently explores app screens by analyzing visual layout and structural information, deciding the next best action to discover new states and interactions.
+This project implements an automated crawler for Android applications driven by pluggable AI model adapters (Gemini, Ollama, OpenRouter). It intelligently explores app screens by analyzing visual layout and structural information, deciding the next best action to discover new states and interactions.
 
 **Available Interfaces:**
 
@@ -50,7 +50,7 @@ python -m traverser_ai_api.ui_controller  # Opens graphical interface
 
 ## Features
 
-- **AI-Powered Exploration** - Uses Google Gemini to analyze screens and decide actions
+- **AI-Powered Exploration** - Uses your selected provider/model (Gemini, Ollama, OpenRouter) to analyze screens and decide actions
 - **Intelligent State Management** - Visual and structural hashing to identify unique screens
 - **Loop Detection** - Prevents getting stuck in repetitive patterns
 - **Traffic Capture** - Optional network monitoring
@@ -144,15 +144,16 @@ For cloud providers, make sure to set the appropriate API keys in your environme
 
 ### How It Works
 
-The agent-based architecture uses Google Generative AI (Gemini) for multimodal analysis of mobile app screens, making intelligent decisions about what UI actions to take next. The implementation focuses on direct API integration with the Google Generative AI SDK, providing a cleaner and more maintainable codebase.
+The agent-based architecture uses a unified model adapter layer to integrate with multiple AI providers for multimodal analysis of mobile app screens. Supported providers include Google Gemini, local Ollama models (including vision-capable variants), and OpenRouter-accessed cloud models. This adapter approach keeps the core logic clean and maintainable while allowing you to switch models without changing crawler code.
 
 ### Key Features
 
-- **Direct Google Generative AI Integration** - Uses the official Google Generative AI Python SDK
-- **Simplified API** - Clean interface for getting next actions from the AI model
-- **Image Optimization** - Automatically resizes and optimizes screenshots for the model
-- **Robust Error Handling** - Comprehensive error handling and logging
-- **Response Caching** - Caches responses to avoid duplicate API calls
+- **Pluggable Model Adapters** - Unified integration for Gemini, Ollama (local), and OpenRouter
+- **Simplified AI API** - Clean interface for retrieving next actions regardless of provider
+- **Image Optimization** - Automatically resizes and optimizes screenshots for vision-capable models
+- **Provider Capability Detection** - Detects image input support and payload limits to auto-toggle image context
+- **Robust Error Handling** - Comprehensive error handling and logging across providers
+- **Response Caching** - Caches AI responses to avoid duplicate calls
 
 ### Agent Components
 
@@ -197,13 +198,22 @@ The agent-based approach follows these steps:
 
 ### Implementation Details
 
-The agent-based architecture is centered around the `AgentAssistant` class in `traverser_ai_api/agent_assistant.py`. This class handles:
+The agent-based architecture is centered around the `AgentAssistant` class in `traverser_ai_api/agent_assistant.py`, which works with provider-specific adapters defined in `traverser_ai_api/model_adapters.py`.
 
-1. **Model Initialization** - Setting up the Google Generative AI model with appropriate configuration
-2. **Image Processing** - Preparing screenshots for the model
-3. **Prompt Engineering** - Building effective prompts for the model
-4. **Response Parsing** - Extracting structured action data from model responses
-5. **Caching** - Avoiding duplicate API calls for the same state
+1. **Provider Initialization** - Initialize the selected provider via model adapters (Gemini, Ollama, OpenRouter)
+2. **Image Processing** - Prepare screenshots for vision-capable models
+3. **Prompt Engineering** - Build effective prompts for consistent, structured outputs
+4. **Response Parsing** - Extract structured action data from model responses
+5. **Caching** - Avoid duplicate API calls for the same state
+
+### Health App List Caching
+
+When scanning installed apps and toggling AI filtering, the UI now maintains separate per-device caches to prevent overwriting:
+
+- AI filtering OFF: `output_data/app_info/<device_id>/health_apps_all.json`
+- AI filtering ON:  `output_data/app_info/<device_id>/health_apps_ai.json`
+
+The application automatically reads and writes the appropriate cache based on your current AI filter setting and persists device-specific relative paths in the configuration.
 
 ### Testing
 
@@ -272,14 +282,51 @@ Notes
 
 - **`main.py`** - Entry point and orchestration
 - **`crawler.py`** - Main crawling logic and state transitions
-- **`agent_assistant.py`** - Google Generative AI integration using direct API
+- **`agent_assistant.py`** - Core agent orchestrating AI-driven actions
+- **`ai_assistant.py` & `model_adapters.py`** - Unified AI integration via provider adapters (Gemini, Ollama, OpenRouter)
 - **`agent_tools.py`** - Tools for the agent to interact with the app
 - **`cli_controller.py`** - Command-line interface
 - **`ui_controller.py`** - Graphical user interface
 - **`screen_state_manager.py`** - Screen state and transition management
 
+## Configuration
+
+Environment variables (create a .env file in the project root):
+
+```
+GEMINI_API_KEY=your_gemini_api_key        # Required if using provider "gemini"
+OPENROUTER_API_KEY=your_openrouter_key    # Required if using provider "openrouter"
+OLLAMA_BASE_URL=http://localhost:11434    # Required if using provider "ollama"
+# Optional service keys
+# PCAPDROID_API_KEY=...
+# MOBSF_API_KEY=...
+```
+
+Provider and model selection (user_config.json):
+
+```json
+{
+  "AI_PROVIDER": "gemini",            
+  "DEFAULT_MODEL_TYPE": "gemini-2.5-flash",  
+  "ENABLE_IMAGE_CONTEXT": true,
+  "OPENROUTER_SHOW_FREE_ONLY": false,
+  "OUTPUT_DATA_DIR": "output_data"
+}
+```
+
+Notes
+- Set only the API key(s) needed for your selected provider.
+- The UI can refresh OpenRouter model metadata and detects vision support automatically.
+
 ## Output
 
-- **Screenshots:** `traverser_ai_api/output_data/screenshots/`
-- **Database:** `traverser_ai_api/output_data/database_output/`
-- **Traffic Captures:** `traverser_ai_api/output_data/traffic_captures/`
+Session-based output structure (per device/app run):
+
+- Base session directory: `traverser_ai_api/output_data/<device_id>_<app_package>_<timestamp>/`
+- Screenshots: `<session_dir>/screenshots/`
+- Annotated screenshots: `<session_dir>/annotated_screenshots/`
+- Database: `<session_dir>/database/<app_package>_crawl_data.db`
+- Traffic captures: `<session_dir>/traffic_captures/`
+- Logs: `<session_dir>/logs/`
+- Reports: `<session_dir>/reports/`
+- Extracted APK: `<session_dir>/extracted_apk/`

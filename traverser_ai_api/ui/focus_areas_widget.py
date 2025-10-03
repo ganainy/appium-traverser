@@ -128,8 +128,8 @@ class FocusAreaItem(QWidget):
         priority_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         priority_layout.addWidget(priority_label, alignment=Qt.AlignmentFlag.AlignVCenter)
 
-        # Drag handle
-        self.drag_handle = QLabel("⋮⋮")
+        # Drag handle (replace vertical dots with up/down arrow)
+        self.drag_handle = QLabel("↕")
         self.drag_handle.setStyleSheet("""
             QLabel {
                 color: #9ca3af;
@@ -144,6 +144,7 @@ class FocusAreaItem(QWidget):
             }
         """)
         self.drag_handle.setFixedWidth(20)
+        self.drag_handle.setToolTip("Drag to reorder")
         self.drag_handle.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         priority_layout.addWidget(self.drag_handle)
 

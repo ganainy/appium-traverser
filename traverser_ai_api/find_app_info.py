@@ -2,24 +2,20 @@
 """
 Standalone Android App Package and Activity Finder
 
-This script identifies the package name, application label (name), and maiif CAN_ENABLE_AI_FILTERING_GLOBALLY: # Check again before accessing AI_SAFETY_SETTINGS
-    if not hasattr(cfg, 'AI_SAFETY_SETTINGS') or not isinstance(cfg.AI_SAFETY_SETTINGS, dict):
-        print("Error: AI_SAFETY_SETTINGS not a valid dictionary in Config. AI Filtering will be globally unavailable.", file=sys.stderr)
-        CAN_ENABLE_AI_FILTERING_GLOBALLY = False
-    else:
-        AI_MODEL_SAFETY_SETTINGS = cfg.AI_SAFETY_SETTINGSunch
+This script identifies the package name, application label (name), and main
 activity of Android applications installed on a connected device using ADB.
 
 AI Filtering Option:
 If AI filtering is enabled via the Config object and prerequisites are met,
-the script will use the Google Gemini AI model to filter the discovered applications,
-keeping only those primarily related to health, fitness, wellness, medical,
-medication management, or mental health categories.
+the script will use a provider-agnostic AI model (Gemini, OpenRouter, or Ollama)
+to filter the discovered applications, keeping only those primarily related to
+health, fitness, wellness, medical, medication management, or mental health
+categories.
 
 Output:
-- A JSON file named `<device_id>_app_info_<all|health_filtered>.json` will be created
-in the app_info_output_dir defined by the Config object, containing a list of
-app information dictionaries.
+- A JSON file named `<device_id>_app_info_<all|health_filtered>.json` will be
+  created in the app_info_output_dir defined by the Config object, containing a
+  list of app information dictionaries.
 """
 
 import subprocess
@@ -31,18 +27,17 @@ import traceback
 import argparse
 import time
 
-# --- Try importing AI Libraries (required only for filtering) ---
-# Gemini
+# Provider-agnostic model adapters
 try:
-    import google.generativeai as genai
-    from google.generativeai.client import configure as genai_configure
-    from google.generativeai.generative_models import GenerativeModel as GenAIModel
-    GENAI_AVAILABLE = True
+    from model_adapters import create_model_adapter, check_dependencies
 except ImportError:
-    GENAI_AVAILABLE = False
-    genai = None
-    genai_configure = None # Define to None if import fails
-    GenAIModel = None      # Define to None if import fails
+    try:
+        from .model_adapters import create_model_adapter, check_dependencies
+    except ImportError as e:
+        sys.stderr.write(f"FATAL: Could not import 'model_adapters'. Ensure the module is accessible. Error: {e}\n")
+        sys.exit(1)
+
+# --- Try importing AI Libraries (handled via adapters) ---
 
 
 
@@ -88,11 +83,12 @@ if not hasattr(cfg, 'USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY'): # Used later
     raise ValueError("USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY must be defined in Config object")
 
 
-CAN_ENABLE_AI_FILTERING_GLOBALLY = True # Assume possible until checks fail
+CAN_ENABLE_AI_FILTERING_GLOBALLY = True  # Assume possible until checks fail
 
-GEMINI_API_KEY = cfg.GEMINI_API_KEY # From Config (loads .env, defaults)
+# Provider/API keys and model selection
 DEFAULT_AI_MODEL_NAME = None
 AI_MODEL_SAFETY_SETTINGS = None
+PROVIDER_API_KEY_OR_URL = None
 
 APP_INFO_DIR = cfg.APP_INFO_OUTPUT_DIR or os.path.join(os.getcwd(), 'app_info') # Default if None
 if not isinstance(APP_INFO_DIR, str):
@@ -105,40 +101,87 @@ print("Validating AI prerequisites for filtering (using Config instance)...")
 AI_PROVIDER = getattr(cfg, 'AI_PROVIDER', 'gemini').lower()
 print(f"Using AI provider: {AI_PROVIDER}")
 
-if AI_PROVIDER == 'gemini':
-    if not GENAI_AVAILABLE:
-        print("Error: 'google-generativeai' library not installed. AI Filtering will be globally unavailable.", file=sys.stderr)
-        CAN_ENABLE_AI_FILTERING_GLOBALLY = False
-
-    if CAN_ENABLE_AI_FILTERING_GLOBALLY and not cfg.GEMINI_API_KEY:
-        print("Error: GEMINI_API_KEY not found in configuration (via Config). AI Filtering will be globally unavailable.", file=sys.stderr)
-        CAN_ENABLE_AI_FILTERING_GLOBALLY = False
-
-    if CAN_ENABLE_AI_FILTERING_GLOBALLY:
-        if not cfg.DEFAULT_MODEL_TYPE or not cfg.GEMINI_MODELS or \
-           not isinstance(cfg.GEMINI_MODELS, dict) or not cfg.GEMINI_MODELS.get(cfg.DEFAULT_MODEL_TYPE):
-            print("Error: DEFAULT_MODEL_TYPE or GEMINI_MODELS (with entry for default) not valid in Config. AI Filtering will be globally unavailable.", file=sys.stderr)
-            CAN_ENABLE_AI_FILTERING_GLOBALLY = False
-        else:
-            model_type = cfg.DEFAULT_MODEL_TYPE
-            model_details = cfg.GEMINI_MODELS[model_type]
-            DEFAULT_AI_MODEL_NAME = model_details.get('name')
-            if not DEFAULT_AI_MODEL_NAME:
-                print(f"Error: 'name' for model type '{model_type}' not in GEMINI_MODELS (Config). AI Filtering will be globally unavailable.", file=sys.stderr)
-                CAN_ENABLE_AI_FILTERING_GLOBALLY = False
-            else:
-                print(f"Using AI Model from Config: {DEFAULT_AI_MODEL_NAME} (type: {model_type})")
-else:
-    print(f"Error: Unsupported AI provider: {AI_PROVIDER}. AI Filtering will be globally unavailable.", file=sys.stderr)
+# Check dependencies for selected provider
+deps_ok, deps_msg = check_dependencies(AI_PROVIDER)
+if not deps_ok:
+    print(f"Error: {deps_msg} AI Filtering will be globally unavailable.", file=sys.stderr)
     CAN_ENABLE_AI_FILTERING_GLOBALLY = False
 
-    if CAN_ENABLE_AI_FILTERING_GLOBALLY: # Check again before accessing AI_SAFETY_SETTINGS
-        if not hasattr(cfg, 'AI_SAFETY_SETTINGS') or not isinstance(cfg.AI_SAFETY_SETTINGS, dict):
-            print("Error: AI_SAFETY_SETTINGS not a valid dictionary in Config. AI Filtering will be globally unavailable.", file=sys.stderr)
+if CAN_ENABLE_AI_FILTERING_GLOBALLY:
+    # Select models dict and required credentials per provider
+    model_type = getattr(cfg, 'DEFAULT_MODEL_TYPE', None)
+    selected_models = None
+    if AI_PROVIDER == 'gemini':
+        PROVIDER_API_KEY_OR_URL = getattr(cfg, 'GEMINI_API_KEY', None)
+        selected_models = getattr(cfg, 'GEMINI_MODELS', None)
+    elif AI_PROVIDER == 'openrouter':
+        PROVIDER_API_KEY_OR_URL = getattr(cfg, 'OPENROUTER_API_KEY', None)
+        selected_models = getattr(cfg, 'OPENROUTER_MODELS', None)
+    elif AI_PROVIDER == 'ollama':
+        # For Ollama, "api_key" arg is actually the base URL
+        PROVIDER_API_KEY_OR_URL = getattr(cfg, 'OLLAMA_BASE_URL', None)
+        selected_models = getattr(cfg, 'OLLAMA_MODELS', None)
+    else:
+        print(f"Error: Unsupported AI provider: {AI_PROVIDER}.", file=sys.stderr)
+        CAN_ENABLE_AI_FILTERING_GLOBALLY = False
+
+    # Validate credential / URL presence
+    if CAN_ENABLE_AI_FILTERING_GLOBALLY and not PROVIDER_API_KEY_OR_URL:
+        missing_key_name = {
+            'gemini': 'GEMINI_API_KEY',
+            'openrouter': 'OPENROUTER_API_KEY',
+            'ollama': 'OLLAMA_BASE_URL'
+        }.get(AI_PROVIDER, 'API_KEY')
+        print(f"Error: {missing_key_name} not found in configuration (via Config). AI Filtering will be globally unavailable.", file=sys.stderr)
+        CAN_ENABLE_AI_FILTERING_GLOBALLY = False
+
+    # Validate model selection (with provider-specific fallbacks)
+    if CAN_ENABLE_AI_FILTERING_GLOBALLY:
+        if not model_type:
+            print("Error: DEFAULT_MODEL_TYPE missing in Config. AI Filtering will be globally unavailable.", file=sys.stderr)
             CAN_ENABLE_AI_FILTERING_GLOBALLY = False
         else:
-            AI_MODEL_SAFETY_SETTINGS = cfg.AI_SAFETY_SETTINGS
-            print(f"Using AI Safety Settings from Config: {AI_MODEL_SAFETY_SETTINGS}")
+            # Gemini requires a valid mapping entry to resolve the concrete model name
+            if AI_PROVIDER == 'gemini':
+                if not selected_models or not isinstance(selected_models, dict) or not selected_models.get(model_type):
+                    print("Error: DEFAULT_MODEL_TYPE or GEMINI_MODELS mapping not valid in Config. AI Filtering will be globally unavailable.", file=sys.stderr)
+                    CAN_ENABLE_AI_FILTERING_GLOBALLY = False
+                else:
+                    model_details = selected_models[model_type]
+                    DEFAULT_AI_MODEL_NAME = model_details.get('name')
+                    if not DEFAULT_AI_MODEL_NAME:
+                        print(f"Error: 'name' for model type '{model_type}' not in GEMINI_MODELS (Config). AI Filtering will be globally unavailable.", file=sys.stderr)
+                        CAN_ENABLE_AI_FILTERING_GLOBALLY = False
+                    else:
+                        print(f"Using AI Model from Config: {DEFAULT_AI_MODEL_NAME} (type: {model_type})")
+            # OpenRouter and Ollama can accept a raw model alias directly, even if not present in *_MODELS mapping
+            elif AI_PROVIDER in ['openrouter', 'ollama']:
+                if isinstance(selected_models, dict) and selected_models.get(model_type):
+                    model_details = selected_models[model_type]
+                    DEFAULT_AI_MODEL_NAME = model_details.get('name') or model_type
+                    print(f"Using AI Model from Config: {DEFAULT_AI_MODEL_NAME} (type: {model_type})")
+                else:
+                    # Fallback: use the DEFAULT_MODEL_TYPE value as the raw model alias/name
+                    DEFAULT_AI_MODEL_NAME = model_type
+                    print(
+                        f"Warning: {AI_PROVIDER.upper()}_MODELS missing or alias '{model_type}' not found. "
+                        f"Proceeding with raw model alias from DEFAULT_MODEL_TYPE: '{DEFAULT_AI_MODEL_NAME}'.",
+                        file=sys.stderr
+                    )
+            else:
+                # Unknown provider already handled above, keep safety
+                print(f"Error: Unsupported AI provider: {AI_PROVIDER}.", file=sys.stderr)
+                CAN_ENABLE_AI_FILTERING_GLOBALLY = False
+
+# Load safety settings if available (primarily for Gemini)
+if CAN_ENABLE_AI_FILTERING_GLOBALLY:
+    if hasattr(cfg, 'AI_SAFETY_SETTINGS') and isinstance(cfg.AI_SAFETY_SETTINGS, dict):
+        AI_MODEL_SAFETY_SETTINGS = cfg.AI_SAFETY_SETTINGS
+        print(f"Using AI Safety Settings from Config: {AI_MODEL_SAFETY_SETTINGS}")
+    else:
+        # Not fatal for non-Gemini providers
+        if AI_PROVIDER == 'gemini':
+            print("Warning: AI_SAFETY_SETTINGS missing or invalid. Proceeding without explicit safety settings.", file=sys.stderr)
 
 if not CAN_ENABLE_AI_FILTERING_GLOBALLY:
     print("Warning: AI filtering is GLOBALLY UNAVAILABLE for this script run due to missing prerequisites or configuration.", file=sys.stderr)
@@ -321,7 +364,7 @@ def find_main_activity(package_name):
     return None
 
 def filter_apps_with_ai(app_data_list: list):
-    """Uses AI (Google Gemini) to filter apps for health/fitness categories."""
+    """Uses AI (provider-agnostic adapters) to filter apps for health/fitness categories."""
     print("\n--- Filtering apps using AI ---")
     if not CAN_ENABLE_AI_FILTERING_GLOBALLY:
         print("AI Filtering globally disabled - will NOT filter app list.", file=sys.stderr)
@@ -333,23 +376,30 @@ def filter_apps_with_ai(app_data_list: list):
         print("No app data to filter.")
         return []
 
-    # Initialize the appropriate AI model based on provider
-    if AI_PROVIDER == 'gemini':
-        if not genai_configure or not GenAIModel or not DEFAULT_AI_MODEL_NAME or AI_MODEL_SAFETY_SETTINGS is None:
-            print("Error: Google AI SDK components, model name, or safety settings missing. Cannot proceed.", file=sys.stderr)
-            return app_data_list  # Return original on configuration error
+    # Initialize the appropriate AI adapter based on provider
+    try:
+        adapter = create_model_adapter(
+            AI_PROVIDER,
+            api_key=PROVIDER_API_KEY_OR_URL,
+            model_name=DEFAULT_AI_MODEL_NAME
+        )
+        # Pick provider-specific model config
+        model_type = getattr(cfg, 'DEFAULT_MODEL_TYPE', None)
+        if AI_PROVIDER == 'gemini':
+            model_config = getattr(cfg, 'GEMINI_MODELS', {}).get(model_type, {})
+        elif AI_PROVIDER == 'openrouter':
+            model_config = getattr(cfg, 'OPENROUTER_MODELS', {}).get(model_type, {})
+        elif AI_PROVIDER == 'ollama':
+            model_config = getattr(cfg, 'OLLAMA_MODELS', {}).get(model_type, {})
+        else:
+            model_config = {}
 
-        try:
-            genai_configure(api_key=cfg.GEMINI_API_KEY)
-            model = GenAIModel(model_name=DEFAULT_AI_MODEL_NAME, safety_settings=AI_MODEL_SAFETY_SETTINGS)
-        except Exception as e:
-            print(f"Error configuring Google AI SDK or initializing model: {e}", file=sys.stderr)
-            traceback.print_exc()
-            return app_data_list  # Return original list on SDK error
-    
-    else:
-        print(f"Error: Unsupported AI provider: {AI_PROVIDER}", file=sys.stderr)
-        return app_data_list  # Return original on provider error
+        adapter.initialize(model_config=model_config, safety_settings=AI_MODEL_SAFETY_SETTINGS)
+        print(f"Initialized AI adapter for provider '{AI_PROVIDER}' with model '{DEFAULT_AI_MODEL_NAME}'.")
+    except Exception as init_error:
+        print(f"Error initializing AI adapter: {init_error}", file=sys.stderr)
+        traceback.print_exc()
+        return app_data_list
 
     filtered_results = []
     for i in range(0, len(app_data_list), cfg.MAX_APPS_TO_SEND_TO_AI):
@@ -384,21 +434,11 @@ Input JSON:
         )
 
         try:
-            # Generate response based on the AI provider
-            response_text = ""
-            if AI_PROVIDER == 'gemini':
-                response = model.generate_content(prompt)
-                if response is None:
-                    print("Error: AI returned None response", file=sys.stderr)
-                    continue  # Skip to the next chunk
-                response_text = response.text.strip() if hasattr(response, 'text') else ""
-                if not response_text:
-                    print("Warning: Empty response from AI", file=sys.stderr)
-                    if hasattr(response, 'prompt_feedback'):
-                        print(f"Prompt Feedback: {response.prompt_feedback}", file=sys.stderr)
-                    continue  # Skip to the next chunk
-            
-
+            # Generate response via adapter
+            response_text, metadata = adapter.generate_response(prompt)
+            if not response_text:
+                print("Warning: Empty response from AI", file=sys.stderr)
+                continue
 
             # Clean up JSON formatting if present
             if response_text.startswith("```json"):

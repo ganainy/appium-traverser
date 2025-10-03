@@ -32,3 +32,9 @@ All tests were successful, confirming that the OllamaAdapter can now correctly w
 1. Consider extending the vision capabilities to handle more complex use cases
 2. Add error handling for specific Ollama API errors
 3. Consider implementing a more sophisticated image processing pipeline to optimize images for different Ollama models
+
+## Adapter Behavior (Current)
+
+- The Ollama adapter extracts the raw model alias from display names (e.g., removes suffixes like "(local)" or vision badges) and verifies vision support before sending image inputs.
+- Vision capability is enforced to prevent accidental image payloads to text-only models.
+- When the UI toggles image context, the adapter respects provider limits and disables image input if payload size would exceed configured thresholds.

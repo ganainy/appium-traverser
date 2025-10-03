@@ -1,4 +1,4 @@
-# ui_controller.py - Main UI controller for the Appium Crawler
+﻿# ui_controller.py - Main UI controller for the Appium Crawler
 
 import sys
 import os
@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QProcess, QTimer, QThread
 from PySide6.QtCore import Signal, Slot as slot
-from PySide6.QtGui import QPixmap, QColor, QTextCursor, QIcon, QImage
+from PySide6.QtGui import QPixmap, QColor, QTextCursor, QIcon, QImage, QGuiApplication
 
 from .config import Config
 from .ui.components import UIComponents
@@ -180,6 +180,21 @@ class CrawlerControllerWindow(QMainWindow):
         else:
             logging.debug(log_message)
 
+    def _audio_alert(self, kind: str = "finish") -> None:
+        """Play a simple audio alert using the system beep.
+
+        kind: 'finish' -> single beep; 'error' -> double beep.
+        """
+        try:
+            if kind == "error":
+                QGuiApplication.beep()
+                # Schedule a second beep shortly after
+                QTimer.singleShot(200, QGuiApplication.beep)
+            else:
+                QGuiApplication.beep()
+        except Exception as e:
+            logging.debug(f"Audio alert failed: {e}")
+
     def _create_tooltips(self) -> Dict[str, str]:
         """Create tooltips for UI elements."""
         return {
@@ -213,12 +228,12 @@ class CrawlerControllerWindow(QMainWindow):
             "MOBSF_API_KEY": "API Key for authenticating with MobSF. This can be found in the MobSF web interface or in the config file.",
             "ENABLE_VIDEO_RECORDING": "Enable to record the entire crawl session as an MP4 video.",
             # Image preprocessing tooltips
-            "IMAGE_MAX_WIDTH": "Max screenshot width before sending to AI. Smaller widths (e.g., 720–1080px) reduce payload and are sufficient for most UI understanding; use larger widths for dense UIs or OCR.",
+            "IMAGE_MAX_WIDTH": "Max screenshot width before sending to AI. Smaller widths (e.g., 720â€“1080px) reduce payload and are sufficient for most UI understanding; use larger widths for dense UIs or OCR.",
             "IMAGE_FORMAT": "Screenshot format sent to AI. JPEG offers broad compatibility; WEBP typically yields smaller files with similar quality (great for OpenRouter); PNG is lossless and best for crisp text/OCR but larger.",
-            "IMAGE_QUALITY": "Compression quality for JPEG/WEBP. 70–85 is a good balance; increase to 90–95 if the model struggles to read fine text; decrease to ~60 to minimize payload.",
+            "IMAGE_QUALITY": "Compression quality for JPEG/WEBP. 70â€“85 is a good balance; increase to 90â€“95 if the model struggles to read fine text; decrease to ~60 to minimize payload.",
             "IMAGE_CROP_BARS": "Remove top/bottom system bars to reduce payload while keeping the core app UI. Enable when bars are not needed for analysis.",
-            "IMAGE_CROP_TOP_PERCENT": "Percent of image height to crop from the top. 5–8% is typical for Android status bars; adjust if needed.",
-            "IMAGE_CROP_BOTTOM_PERCENT": "Percent of image height to crop from the bottom. 8–12% is typical for Android navigation bars; adjust if needed.",
+            "IMAGE_CROP_TOP_PERCENT": "Percent of image height to crop from the top. 5â€“8% is typical for Android status bars; adjust if needed.",
+            "IMAGE_CROP_BOTTOM_PERCENT": "Percent of image height to crop from the bottom. 8â€“12% is typical for Android navigation bars; adjust if needed.",
         }
 
     def _connect_signals(self):
@@ -633,47 +648,47 @@ class CrawlerControllerWindow(QMainWindow):
                 fid in ["privacy_policy", "data_rights", "data_collection"]
                 for fid in focus_ids
             ):
-                prefix = "🔒 "  # Privacy-related actions
+                prefix = "ðŸ”’ "  # Privacy-related actions
                 color = "magenta"
             # Security-focused actions
             elif any(
                 fid in ["security_features", "account_privacy"] for fid in focus_ids
             ):
-                prefix = "🔐 "  # Security-related actions
+                prefix = "ðŸ” "  # Security-related actions
                 color = "cyan"
             # Tracking-related actions
             elif any(
                 fid in ["third_party", "advertising_tracking", "network_requests"]
                 for fid in focus_ids
             ):
-                prefix = "👁️ "  # Tracking-related actions
+                prefix = "ðŸ‘ï¸ "  # Tracking-related actions
                 color = "orange"
             # Location and permissions-related actions
             elif any(fid in ["location_tracking", "permissions"] for fid in focus_ids):
-                prefix = "📍 "  # Location-related actions
+                prefix = "ðŸ“ "  # Location-related actions
                 color = "yellow"
             else:
-                prefix = "🔎 "  # Default for other focus areas
+                prefix = "ðŸ”Ž "  # Default for other focus areas
                 color = "green"
         else:
             # Prefix by action type if no focus areas
             if action_type == "click":
-                prefix = "👆 "  # Click action
+                prefix = "ðŸ‘† "  # Click action
                 color = "blue"
             elif action_type == "input":
-                prefix = "⌨️ "  # Input action
+                prefix = "âŒ¨ï¸ "  # Input action
                 color = "cyan"
             elif action_type == "scroll_down" or action_type == "scroll_up":
-                prefix = "📜 "  # Scroll action
+                prefix = "ðŸ“œ "  # Scroll action
                 color = "gray"
             elif action_type == "swipe_left" or action_type == "swipe_right":
-                prefix = "👈 "  # Swipe action
+                prefix = "ðŸ‘ˆ "  # Swipe action
                 color = "gray"
             elif action_type == "back":
-                prefix = "⬅️ "  # Back action
+                prefix = "â¬…ï¸ "  # Back action
                 color = "orange"
             else:
-                prefix = "⚡ "  # Default for unknown actions
+                prefix = "âš¡ "  # Default for unknown actions
                 color = "white"
 
         # Log to UI with prefix
@@ -780,7 +795,7 @@ class CrawlerControllerWindow(QMainWindow):
     @slot()
     def check_pre_crawl_status(self):
         """Check and display pre-crawl validation status."""
-        self.log_message("🔍 Checking pre-crawl validation status...", "blue")
+        self.log_message("ðŸ” Checking pre-crawl validation status...", "blue")
         self.show_pre_crawl_validation_details()
 
     def show_pre_crawl_validation_details(self):
@@ -893,3 +908,4 @@ if __name__ == "__main__":
     # Start in full screen mode but allow resizing
     window.showMaximized()
     sys.exit(app.exec())
+
