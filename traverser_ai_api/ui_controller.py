@@ -733,9 +733,34 @@ class CrawlerControllerWindow(QMainWindow):
                 f"Log output not available, logging to console: {log_message}"
             )
 
-
-
+        # Also send to colored logger
         self.log_message(log_message, color)
+
+        # Append structured entry to Action History for easier review
+        if hasattr(self, "action_history") and self.action_history:
+            try:
+                step_num = getattr(getattr(self, "crawler_manager", None), "step_count", None)
+                step_label = f"Step {step_num}" if isinstance(step_num, int) else "Step"
+                target_identifier = action_data.get("target_identifier")
+                result_text = action_data.get("result") or action_data.get("status")
+
+                structured_lines = [f"{step_label}: {action_type}"]
+                if target_identifier:
+                    structured_lines.append(f"Target: {target_identifier}")
+                structured_lines.append(f"Reasoning: {reasoning}")
+                if result_text:
+                    structured_lines.append(f"Result: {result_text}")
+
+                structured_entry = "\n".join(structured_lines)
+                self.action_history.append(structured_entry)
+                self.action_history.verticalScrollBar().setValue(self.action_history.verticalScrollBar().maximum())
+            except Exception:
+                # Fallback to simple append
+                try:
+                    self.action_history.append(log_message)
+                    self.action_history.verticalScrollBar().setValue(self.action_history.verticalScrollBar().maximum())
+                except Exception:
+                    pass
 
     def get_focus_area_name(self, focus_id: str) -> Optional[str]:
         """Get human-readable name for focus area ID."""

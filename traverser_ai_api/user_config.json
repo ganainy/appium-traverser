@@ -28,7 +28,7 @@
     "MAX_CHAT_HISTORY": 10,
     "OPENROUTER_REFRESH_BTN": null,
     "OPENROUTER_SHOW_FREE_ONLY": true,
-    "OPENROUTER_MODEL_ID_OVERRIDE": "",
+    "OPENROUTER_NON_FREE_WARNING": null,
     "ENABLE_IMAGE_CONTEXT": false,
     "XML_SNIPPET_MAX_LEN": 20000,
     "MAX_APPS_TO_SEND_TO_AI": 200,
@@ -135,7 +135,6 @@
             "priority": 9
         }
     ],
-    "OUTPUT_DATA_DIR": "output_data",
     "FOCUS_MAX_ACTIVE": 2,
     "MAX_SAME_ACTION_REPEAT": 2,
     "DISABLE_EXPENSIVE_XPATH": false,
@@ -150,5 +149,5 @@
     "IMAGE_CROP_BARS": true,
     "IMAGE_CROP_TOP_PERCENT": 0,
     "IMAGE_CROP_BOTTOM_PERCENT": 0,
-    "OPENROUTER_NON_FREE_WARNING": null
+    "OUTPUT_DATA_DIR": "output_data"
 }

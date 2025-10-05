@@ -43,6 +43,20 @@ class ActionMapper:
         else:
             self.use_coordinate_fallback = bool(self.cfg.USE_COORDINATE_FALLBACK)
 
+    def _wait_for_element_ready(self, element: Any, timeout_s: float = 1.5, poll_s: float = 0.1) -> bool:
+        """
+        Wait briefly until the element reports displayed and enabled to reduce transient failures.
+        """
+        end_time = time.monotonic() + float(timeout_s)
+        while time.monotonic() < end_time:
+            try:
+                if element.is_displayed() and element.is_enabled():
+                    return True
+            except Exception:
+                pass
+            time.sleep(float(poll_s))
+        return False
+
         if not hasattr(self.cfg, 'MAX_CONSECUTIVE_MAP_FAILURES') or self.cfg.MAX_CONSECUTIVE_MAP_FAILURES is None:
             logging.warning("MAX_CONSECUTIVE_MAP_FAILURES not explicitly in config, defaulting to 3 for ActionMapper.")
             self.max_map_failures = 3
@@ -218,13 +232,21 @@ class ActionMapper:
                             is_displayed = element.is_displayed()
                             is_enabled = element.is_enabled()
                             if is_displayed and is_enabled:
-                                duration = time.perf_counter() - start_time
-                                logging.info(f"Found suitable element by {log_name}: '{identifier}' (took {duration:.4f}s)")
-                                if index > 0:
-                                    promoted_strategy = self.element_finding_strategies.pop(index)
-                                    self.element_finding_strategies.insert(0, promoted_strategy)
-                                    logging.info(f"Promoted strategy '{log_name}'.")
-                                return element
+                                # Brief stabilization then re-verify readiness
+                                try:
+                                    time.sleep(0.1)
+                                    if not (element.is_displayed() and element.is_enabled()):
+                                        element = None
+                                    else:
+                                        duration = time.perf_counter() - start_time
+                                        logging.info(f"Found suitable element by {log_name}: '{identifier}' (took {duration:.4f}s)")
+                                        if index > 0:
+                                            promoted_strategy = self.element_finding_strategies.pop(index)
+                                            self.element_finding_strategies.insert(0, promoted_strategy)
+                                            logging.info(f"Promoted strategy '{log_name}'.")
+                                        return element
+                                except Exception:
+                                    element = None
                             else:
                                 element = None
 
@@ -463,6 +485,13 @@ class ActionMapper:
 
         if target_identifier:
             target_element = self._find_element_by_ai_identifier(str(target_identifier))
+            # Brief retry if first attempt fails
+            if not target_element:
+                try:
+                    time.sleep(0.3)
+                    target_element = self._find_element_by_ai_identifier(str(target_identifier))
+                except Exception:
+                    target_element = None
             if target_element:
                 element_info["method"] = "identifier"
                 element_info["identifier_used"] = str(target_identifier)
@@ -477,6 +506,10 @@ class ActionMapper:
                      target_element = None
                 except Exception as e_attr:
                     logging.warning(f"Error fetching attributes for element found by '{target_identifier}': {e_attr}")
+
+            # Ensure element is ready before mapping
+            if target_element and not self._wait_for_element_ready(target_element, timeout_s=getattr(self.cfg, 'WAIT_ELEMENT_READY_TIMEOUT_S', 1.5)):
+                target_element = None
 
 
         if target_element:

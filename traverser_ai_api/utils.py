@@ -114,6 +114,7 @@ class LoggerManager:
     def __init__(self):
         self.handlers: List[logging.Handler] = []
         self.stdout_wrapper: Optional[io.TextIOWrapper] = None
+        self.stderr_wrapper: Optional[io.TextIOWrapper] = None
         self.ui_controller = None  # Reference to UI controller for colored logging
 
     def set_ui_controller(self, ui_controller):
@@ -169,6 +170,9 @@ class LoggerManager:
         try:
             if not self.stdout_wrapper:
                 self.stdout_wrapper = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+            # Prepare stderr wrapper as well for any direct error prints
+            if not self.stderr_wrapper:
+                self.stderr_wrapper = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
             console_handler = logging.StreamHandler(self.stdout_wrapper)
         except Exception:
             console_handler = logging.StreamHandler(sys.stdout)
@@ -196,7 +200,14 @@ class LoggerManager:
                 logger.addHandler(file_handler)
                 self.handlers.append(file_handler)
             except Exception as e:
-                print(f"Error setting up file logger for {log_file}: {e}", file=sys.stderr)
+                try:
+                    if self.stderr_wrapper:
+                        print(f"Error setting up file logger for {log_file}: {e}", file=self.stderr_wrapper)
+                    else:
+                        print(f"Error setting up file logger for {log_file}: {e}", file=sys.stderr)
+                except Exception:
+                    # Last resort if printing fails
+                    pass
 
         if numeric_level > logging.DEBUG:
             for lib_name in ["appium.webdriver.webdriver", "urllib3.connectionpool", "selenium.webdriver.remote.remote_connection"]:

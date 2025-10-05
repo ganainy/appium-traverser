@@ -318,6 +318,30 @@ Notes
 - Set only the API key(s) needed for your selected provider.
 - The UI can refresh OpenRouter model metadata and detects vision support automatically.
 
+### MobSF (Docker) port mapping
+
+If you run MobSF in Docker, you must publish the MobSF container port to your device (host) port so the app can reach the API at `http://localhost:8000`.
+
+Example command:
+
+```powershell
+docker run -d --name mobsf -p 8000:8000 opensecurity/mobile-security-framework-mobsf:latest
+```
+
+After starting:
+- Open MobSF UI at `http://localhost:8000`
+- Copy your API key from the MobSF UI
+- Configure the app with:
+  - `MOBSF_API_URL`: `http://localhost:8000`
+  - `MOBSF_API_KEY`: your key
+
+With Docker Compose, add to the service:
+
+```yaml
+ports:
+  - "8000:8000"
+```
+
 ## Output
 
 Session-based output structure (per device/app run):
