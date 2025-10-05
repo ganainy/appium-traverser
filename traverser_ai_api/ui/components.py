@@ -1234,6 +1234,17 @@ class UIComponents:
     def _refresh_openrouter_models(
         config_handler: Any, config_widgets: Dict[str, Any]
     ) -> None:
+        # Disable refresh button and show busy overlay to indicate long-running operation
+        btn = config_widgets.get("OPENROUTER_REFRESH_BTN")
+        try:
+            if btn:
+                btn.setEnabled(False)
+        except Exception:
+            pass
+        try:
+            config_handler.main_controller.show_busy("Refreshing AI models...")
+        except Exception:
+            pass
         try:
             api_key = getattr(config_handler.config, "OPENROUTER_API_KEY", None)
             if not api_key:
@@ -1360,6 +1371,17 @@ class UIComponents:
                 config_handler.main_controller.log_message(
                     f"OpenRouter model fetch failed: {e}", "orange"
                 )
+            except Exception:
+                pass
+        finally:
+            # Ensure the overlay is hidden and button re-enabled regardless of success or failure
+            try:
+                config_handler.main_controller.hide_busy()
+            except Exception:
+                pass
+            try:
+                if btn:
+                    btn.setEnabled(True)
             except Exception:
                 pass
 

@@ -102,6 +102,11 @@ class MobSFUIManager(QObject):
         if not hasattr(self, 'mobsf_analysis_process') or self.mobsf_analysis_process is None:
             self.main_controller.log_message(f"Starting MobSF analysis for package: {app_package}...", 'blue')
             self.main_controller.run_mobsf_analysis_btn.setEnabled(False)
+            # Show busy overlay
+            try:
+                self.main_controller.show_busy("Running MobSF analysis...")
+            except Exception:
+                pass
             
             # Create a temporary script to run the analysis
             temp_script_path = os.path.join(self.api_dir, "temp_mobsf_analysis.py")
@@ -204,6 +209,11 @@ except Exception as e:
             self.main_controller.log_message(f"MobSF analysis process failed with exit code: {exit_code}", 'red')
             
         self.main_controller.run_mobsf_analysis_btn.setEnabled(True)
+        # Hide busy overlay
+        try:
+            self.main_controller.hide_busy()
+        except Exception:
+            pass
         self.mobsf_analysis_process = None
 
 

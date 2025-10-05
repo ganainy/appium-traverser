@@ -40,6 +40,7 @@ from .ui.health_app_scanner import HealthAppScanner
 from .ui.mobsf_ui_manager import MobSFUIManager
 from .ui.logo import LogoWidget
 from .ui.utils import update_screenshot
+from .ui.custom_widgets import BusyDialog
 
 
 class CrawlerControllerWindow(QMainWindow):
@@ -179,6 +180,33 @@ class CrawlerControllerWindow(QMainWindow):
             self.log_output.append(log_message)
         else:
             logging.debug(log_message)
+
+        # Busy overlay dialog (initialized lazily)
+        self._busy_dialog: Optional[BusyDialog] = None
+
+    def show_busy(self, message: str = "Working...") -> None:
+        """Show a modal busy overlay with the given message."""
+        try:
+            if self._busy_dialog is None:
+                self._busy_dialog = BusyDialog(self)
+            self._busy_dialog.set_message(message)
+            # Cover the entire main window
+            try:
+                self._busy_dialog.setGeometry(self.geometry())
+            except Exception:
+                pass
+            self._busy_dialog.show()
+            QApplication.processEvents()
+        except Exception as e:
+            logging.debug(f"Failed to show busy overlay: {e}")
+
+    def hide_busy(self) -> None:
+        """Hide the busy overlay if visible."""
+        try:
+            if self._busy_dialog:
+                self._busy_dialog.hide()
+        except Exception as e:
+            logging.debug(f"Failed to hide busy overlay: {e}")
 
     def _audio_alert(self, kind: str = "finish") -> None:
         """Play an audible alert.

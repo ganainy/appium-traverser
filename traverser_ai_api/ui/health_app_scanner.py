@@ -401,6 +401,12 @@ class HealthAppScanner(QObject):
         self.main_controller.health_app_dropdown.setEnabled(False)
         self.find_apps_stdout_buffer = ""  # Reset buffer
 
+        # Show busy overlay
+        try:
+            self.main_controller.show_busy("Scanning device apps...")
+        except Exception:
+            pass
+
         self.find_apps_process = QProcess()
         self.find_apps_process.setProcessChannelMode(
             QProcess.ProcessChannelMode.MergedChannels
@@ -444,6 +450,11 @@ class HealthAppScanner(QObject):
         except Exception as e:
             self.main_controller.log_message(f"ERROR starting process: {e}", "red")
             logging.error(f"Exception starting QProcess: {e}", exc_info=True)
+            # Hide busy overlay on failure to start
+            try:
+                self.main_controller.hide_busy()
+            except Exception:
+                pass
 
     @Slot()
     def _on_find_apps_stdout_ready(self) -> None:
@@ -489,6 +500,11 @@ class HealthAppScanner(QObject):
     @Slot(int, QProcess.ExitStatus)
     def _on_find_apps_finished(self, exit_code: int, exit_status: QProcess.ExitStatus):
         """Handle completion of the app scanning process."""
+        # Hide busy overlay
+        try:
+            self.main_controller.hide_busy()
+        except Exception:
+            pass
         # Re-enable UI controls
         self.main_controller.refresh_apps_btn.setEnabled(True)
         self.main_controller.health_app_dropdown.setEnabled(True)
