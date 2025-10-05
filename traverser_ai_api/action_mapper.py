@@ -1,6 +1,7 @@
 # action_mapper.py
 import logging
 import time
+import re
 from typing import Optional, Tuple, Any, List, Dict, TYPE_CHECKING
 
 from appium.webdriver.common.appiumby import AppiumBy
@@ -154,6 +155,15 @@ class ActionMapper:
                             else:
                                 # Accessibility ID straightforward
                                 element = self.driver.find_element(by=actual_appium_by, value=identifier)
+                        elif strategy_key == 'content_desc_case_insensitive':
+                            # Case-insensitive content-desc contains using translate()
+                            safe_lowerable = self._escape_xpath_literal(identifier)
+                            xpath_generated = (
+                                "//*[contains("
+                                "translate(@content-desc,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'), "
+                                f"translate({safe_lowerable},'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'))]"
+                            )
+                            element = self.driver.find_element(by=AppiumBy.XPATH, value=xpath_generated)
                         elif strategy_key == 'xpath_exact':
                             if "'" in identifier and '"' in identifier:
                                 parts = []
@@ -170,7 +180,12 @@ class ActionMapper:
                             element = self.driver.find_element(by=AppiumBy.XPATH, value=xpath_generated)
                         elif strategy_key == 'xpath_contains':
                             safe = self._escape_xpath_literal(identifier)
-                            xpath_generated = f"//*[contains(@resource-id,{safe}) or contains(@text,{safe}) or contains(@content-desc,{safe})]"
+                            # Use normalize-space for text/content-desc to be more tolerant of newlines/spaces
+                            xpath_generated = (
+                                f"//*[contains(@resource-id,{safe}) "
+                                f"or contains(normalize-space(@text), normalize-space({safe})) "
+                                f"or contains(normalize-space(@content-desc), normalize-space({safe}))]"
+                            )
                             element = self.driver.find_element(by=AppiumBy.XPATH, value=xpath_generated)
                         elif strategy_key == 'id_partial':
                             safe = self._escape_xpath_literal(identifier)
@@ -193,8 +208,8 @@ class ActionMapper:
                             safe = self._escape_xpath_literal(identifier)
                             xpath_generated = (
                                 f"//*[(starts-with(@resource-id,{safe}) or contains(@resource-id,{safe})) "
-                                f"or (starts-with(@text,{safe}) or contains(@text,{safe})) "
-                                f"or (starts-with(@content-desc,{safe}) or contains(@content-desc,{safe}))]"
+                                f"or (starts-with(normalize-space(@text), normalize-space({safe})) or contains(normalize-space(@text), normalize-space({safe}))) "
+                                f"or (starts-with(normalize-space(@content-desc), normalize-space({safe})) or contains(normalize-space(@content-desc), normalize-space({safe})))]"
                             )
                             element = self.driver.find_element(by=AppiumBy.XPATH, value=xpath_generated)
                         # ... (other strategies can be added here)
@@ -246,8 +261,31 @@ class ActionMapper:
         )
         # Termination due to max failures is handled by AppCrawler's _should_terminate()
 
-    def _extract_coordinates_from_bbox(self, target_bounding_box: Dict[str, Any]) -> Optional[Tuple[int, int]]:
+    def _extract_coordinates_from_bbox(self, target_bounding_box: Any) -> Optional[Tuple[int, int]]:
         try:
+            # Accept either a dict with top_left/bottom_right in normalized or absolute coordinates
+            # OR a string in Android bounds format: "[x1,y1][x2,y2]"
+            if isinstance(target_bounding_box, str):
+                m = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", target_bounding_box.strip())
+                if not m:
+                    logging.warning(f"Invalid bounds string format: {target_bounding_box}")
+                    return None
+                x1 = int(m.group(1)); y1 = int(m.group(2)); x2 = int(m.group(3)); y2 = int(m.group(4))
+                window_size = self.driver.get_window_size()
+                if not window_size:
+                    logging.error("Failed to get window size for coordinate calculation.")
+                    return None
+                screen_width, screen_height = window_size['width'], window_size['height']
+                # Clamp to screen bounds
+                x1 = max(0, min(x1, screen_width - 1)); x2 = max(0, min(x2, screen_width - 1))
+                y1 = max(0, min(y1, screen_height - 1)); y2 = max(0, min(y2, screen_height - 1))
+                if x1 > x2: x1, x2 = x2, x1
+                if y1 > y2: y1, y2 = y2, y1
+                center_x = int((x1 + x2) / 2)
+                center_y = int((y1 + y2) / 2)
+                logging.debug(f"Calculated tap coordinates ({center_x}, {center_y}) from bounds string {target_bounding_box}")
+                return center_x, center_y
+
             top_left = target_bounding_box.get('top_left')
             bottom_right = target_bounding_box.get('bottom_right')
 
@@ -300,11 +338,55 @@ class ActionMapper:
             return None
 
 
+    def _normalize_ai_identifier(self, identifier: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
+        """Return (normalized_identifier, bounds_str_if_any). Extract resource-id/content-desc/text values, strip wrappers.
+        If multiple fields are present, prefer resource-id, then content-desc, then text.
+        Also extract bounds if included as bounds="[x1,y1][x2,y2]".
+        """
+        if not identifier:
+            return None, None
+        s = str(identifier).strip()
+        # Remove leading strange prefixes like '*/**'
+        s = re.sub(r"^\*/\*\*", "", s)
+
+        # Extract bounds if present
+        bounds_match = re.search(r"bounds\s*=\s*\"(\[\d+,\d+\]\[\d+,\d+\])\"", s)
+        bounds_str = bounds_match.group(1) if bounds_match else None
+
+        # Try resource-id
+        rid_match = re.search(r"resource-id\s*=\s*([\w.:-]+)\b", s)
+        if rid_match:
+            rid_val = rid_match.group(1)
+            return rid_val.strip(), bounds_str
+        # Try content-desc
+        cd_match = re.search(r"content-desc\s*=\s*\"(.+?)\"", s)
+        if cd_match:
+            cd_val = cd_match.group(1)
+            return cd_val.strip(), bounds_str
+        # Try text="..."
+        text_match = re.search(r"text\s*=\s*\"(.+?)\"", s)
+        if text_match:
+            txt_val = text_match.group(1)
+            return txt_val.strip(), bounds_str
+        # Handle pipe-separated combined forms: try split and recurse
+        if '|' in s:
+            parts = [p.strip() for p in s.split('|') if p.strip()]
+            for p in parts:
+                norm, b = self._normalize_ai_identifier(p)
+                if norm:
+                    return norm, bounds_str or b
+        # As a last resort, strip surrounding quotes
+        s = s.strip('"').strip("'")
+        return s if s else None, bounds_str
+
     def map_ai_action_to_appium(self, ai_response: Dict[str, Any], current_xml_string: Optional[str] = None) -> Optional[Dict[str, Any]]:
         action_type = ai_response.get("action")
-        target_identifier = ai_response.get("target_identifier")
+        raw_target_identifier = ai_response.get("target_identifier")
+        # Normalize identifier and extract bounds if present within the identifier string
+        normalized_identifier, bounds_in_identifier = self._normalize_ai_identifier(raw_target_identifier)
+        target_identifier = normalized_identifier
         input_text = ai_response.get("input_text")
-        target_bounding_box = ai_response.get("target_bounding_box")
+        target_bounding_box = ai_response.get("target_bounding_box") or bounds_in_identifier
 
         logging.info(
             f"Mapping AI suggestion: Action='{action_type}', Identifier='{target_identifier}', "
@@ -318,8 +400,58 @@ class ActionMapper:
         action_details: Dict[str, Any] = {"type": action_type}
 
         if action_type in ["scroll_down", "scroll_up", "swipe_left", "swipe_right"]:
+            # Support targeted element swipes/scrolls when identifier or bbox is provided
             self.consecutive_map_failures = 0
             action_details["direction"] = action_type.split('_')[1]
+
+            target_element: Optional[Any] = None
+            element_info: Dict[str, Any] = {}
+
+            if target_identifier:
+                target_element = self._find_element_by_ai_identifier(str(target_identifier))
+                if target_element:
+                    element_info["method"] = "identifier"
+                    element_info["identifier_used"] = str(target_identifier)
+                    try:
+                        element_info["id"] = target_element.id
+                        element_info["class"] = target_element.get_attribute('class')
+                        element_info["text"] = target_element.text
+                        element_info["content-desc"] = target_element.get_attribute('content-desc')
+                        element_info["bounds"] = target_element.get_attribute('bounds')
+                    except StaleElementReferenceException:
+                        logging.warning(
+                            f"Element found by '{target_identifier}' became stale when fetching attributes for targeted swipe/scroll."
+                        )
+                        target_element = None
+                    except Exception as e_attr:
+                        logging.warning(
+                            f"Error fetching attributes for element found by '{target_identifier}' (targeted swipe/scroll): {e_attr}"
+                        )
+
+            # Carry through any provided bbox so executor can perform coordinate-based swipe within region
+            if target_bounding_box and isinstance(target_bounding_box, (dict, str)):
+                action_details["original_bbox"] = target_bounding_box
+
+            if target_element:
+                action_details["element"] = target_element
+                action_details["element_info"] = element_info
+                logging.info(
+                    f"Mapped targeted {action_type} to element (ID: {element_info.get('id', 'N/A')}) using identifier."
+                )
+            else:
+                if target_identifier:
+                    logging.info(
+                        f"Targeted {action_type} requested but element not found by identifier '{target_identifier}'. Will use bbox fallback if available or full-screen gesture."
+                    )
+                elif target_bounding_box:
+                    logging.info(
+                        f"Targeted {action_type} requested with bbox only. Executor will attempt region-based gesture."
+                    )
+                else:
+                    logging.info(
+                        f"Non-targeted {action_type} will be performed as a full-screen gesture."
+                    )
+
             return action_details
         
         if action_type == "back":

@@ -112,6 +112,7 @@ class AppCrawler:
             ('id', AppiumBy.ID, "ID"),
             ('acc_id', AppiumBy.ACCESSIBILITY_ID, "Accessibility ID"),
             ('text_case_insensitive', AppiumBy.XPATH, "Text Case Insensitive"),
+            ('content_desc_case_insensitive', AppiumBy.XPATH, "Content-Desc Case Insensitive"),
             ('class_contains', AppiumBy.XPATH, "Class Contains Match"),
         ]
         # Add heavier XPath heuristics only if not disabled
@@ -447,8 +448,9 @@ class AppCrawler:
                         )
                     
                     if agent_result:
-                        action_data, time_taken, success = agent_result
+                        action_data, time_taken, token_count, success = agent_result
                         ai_time_taken = time_taken
+                        total_tokens = token_count
                         
                         # If the action was already executed by the agent, record the result
                         if success:
@@ -494,8 +496,9 @@ class AppCrawler:
                         )
                         
                         if agent_result:
-                            action_data, time_taken, success = agent_result
+                            action_data, time_taken, token_count, success = agent_result
                             ai_time_taken = time_taken
+                            total_tokens = token_count
                             
                             # If the action was already executed by the agent, record the result
                             if success:

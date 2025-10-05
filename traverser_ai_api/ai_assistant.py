@@ -9,6 +9,7 @@ from google.ai.generativelanguage import Schema, Type as GLMType, Content, Part
 import logging
 import time
 from typing import Any, Dict, List, Optional, Tuple
+from collections import OrderedDict
 import json
 from PIL import Image
 import io
@@ -119,6 +120,18 @@ class AIAssistant:
         self.cfg = app_config
         self.response_cache: Dict[str, Tuple[Dict[str, Any], float, int]] = {}
         logging.debug("AI response cache initialized.")
+        # XML summary cache and compact prompt mode settings
+        self.xml_summary_cache: "OrderedDict[str, str]" = OrderedDict()
+        try:
+            self.xml_cache_max = int(getattr(self.cfg, 'CACHE_MAX_SCREENS', 100) or 100)
+        except Exception:
+            self.xml_cache_max = 100
+        self.prompt_compact_mode = bool(getattr(self.cfg, 'PROMPT_COMPACT_MODE', True))
+        try:
+            self.xml_summary_max_lines = int(getattr(self.cfg, 'XML_SUMMARY_MAX_LINES', 120) or 120)
+        except Exception:
+            self.xml_summary_max_lines = 120
+        self.xml_interactive_only = bool(getattr(self.cfg, 'XML_INTERACTIVE_ONLY', True))
 
         if not self.cfg.GEMINI_API_KEY:
             raise ValueError("GEMINI_API_KEY is not set in the provided application configuration.")
@@ -350,6 +363,13 @@ Based on this feedback, you MUST choose a different action to avoid getting stuc
         # Simplified guidance for action_to_perform.target_bounding_box
         action_target_bbox_guidance = "**target_bounding_box:** Use XML bounds when available; otherwise estimate. Use null for scroll/back if not applicable."
 
+        targeted_gesture_guidance = (
+            "**Strategic Guidance: Prefer TARGETED gestures**\n"
+            "- For swipe_left/swipe_right and scroll_up/scroll_down: When possible, include target_identifier of the scrollable region (e.g., carousel/container) or provide a target_bounding_box of the region to gesture within. Avoid full-screen gestures when a specific region is intended.\n"
+            "- For long_press: Include target_identifier of the element or provide target_bounding_box to press-and-hold within a region (to open context menus/options).\n"
+            "- If previous action feedback indicates 'NO CHANGE', diversify by choosing a different direction or a different target region (identifier or bbox) instead of repeating the same gesture."
+        )
+
 
         json_format_instruction_new = (
             "RESPONSE FORMAT (JSON): Return {\"action_to_perform\"} with keys: "
@@ -407,49 +427,116 @@ Based on this feedback, you MUST choose a different action to avoid getting stuc
         6.  System Back (Judiciously).
         """
 
+        # Build a compact XML summary if enabled
+        xml_summary = None
+        if self.prompt_compact_mode:
+            try:
+                xml_summary = self._get_xml_summary(current_composite_hash, xml_context or "")
+            except Exception as e:
+                logging.debug(f"Failed to build XML summary: {e}")
+                xml_summary = None
+
+        compact_guidance = (
+            "- Prefer progression within current app; avoid leaving the package.\n"
+            "- If stuck or loops detected, choose a different action; use back only when needed.\n"
+            "- For inputs: use provided test credentials; otherwise use realistic values.\n"
+            "- Provide target_identifier as visible text or resource-id from XML (not attribute syntax).\n"
+        )
+
         prompt = f"""
-        You are an expert Android app tester. Your goal is to:
-        1.  Determine the BEST SINGLE `action_to_perform` based on the visual screenshot and XML context, prioritizing PROGRESSION and IN-APP feature discovery.
+        You are an expert Android app tester. Goal: choose the SINGLE best `action_to_perform` based on screenshot and XML.
 
         {feedback_section}
 
-        **IMPORTANT: For `action_to_perform.target_identifier`:**
-        Provide its actual value from the XML (e.g., "com.app:id/button", "Login") or visible text if no ID.
-        CORRECT: "Login", INCORRECT: 'text="Login"'.
-
-
         {visit_context}
 
-        CONTEXT:
-        1. Screenshot: Provided as an image. This is your primary view.
-        2. XML Layout: Provided below (may be a snippet/absent). Use for attributes.
-        3. Previous Actions Taken *From This Exact Screen State* (if any) for `action_to_perform`:
+        Previous actions on this screen:
         {history_str}
 
-        TASK:
-        Analyze the screenshot and XML.
-        1.  For `action_to_perform`: Identify the BEST SINGLE action. Follow all CRUCIAL instructions and strategic guidance.
+        Key guidance:
+        {compact_guidance}
 
-        {defer_authentication_guidance}
-        {visit_instruction}
-        {external_package_avoidance_guidance}
-        {bounding_box_guidance_general}
-        {action_target_bbox_guidance}
-        {input_value_guidance}
-        {general_action_priorities_guidance}
-
-        Choose ONE action for `action_to_perform` from the available list below.
-        Available actions for `action_to_perform.action`:
+        Available actions:
         {action_list_str}
 
         {json_format_instruction_new}
 
-        XML CONTEXT:
+        XML SUMMARY:
         ```xml
-        {xml_context if xml_context else "No XML context provided for this screen, or it was empty. Rely primarily on the screenshot."}
+        {xml_summary if xml_summary else (xml_context if xml_context else "No XML context provided for this screen.")}
         ```
         """
         return prompt.strip()
+
+    def _get_xml_summary(self, composite_hash: str, xml_context: str) -> str:
+        """Return a cached or newly generated compact summary of the XML layout.
+        The summary focuses on interactive elements and key attributes to reduce prompt size.
+        """
+        cache_key = f"{composite_hash}"
+        if cache_key in self.xml_summary_cache:
+            cached = self.xml_summary_cache.pop(cache_key)
+            self.xml_summary_cache[cache_key] = cached
+            return cached
+
+        summary = self._summarize_xml(xml_context)
+        self.xml_summary_cache[cache_key] = summary
+        if len(self.xml_summary_cache) > self.xml_cache_max:
+            self.xml_summary_cache.popitem(last=False)
+        return summary
+
+    def _summarize_xml(self, xml_context: str) -> str:
+        """Create a compact, line-based summary from UI XML.
+        Includes only key attributes and primarily interactive elements.
+        """
+        if not xml_context:
+            return ""
+
+        node_pattern = re.compile(r"<node[^>]*>", re.IGNORECASE)
+        attr_patterns = {
+            'text': re.compile(r'text="([^\"]*)"'),
+            'id': re.compile(r'resource-id="([^\"]*)"'),
+            'desc': re.compile(r'content-desc="([^\"]*)"'),
+            'class': re.compile(r'class="([^\"]*)"'),
+            'bounds': re.compile(r'bounds="([^\"]*)"'),
+            'clickable': re.compile(r'clickable="([^\"]*)"'),
+            'enabled': re.compile(r'enabled="([^\"]*)"'),
+        }
+
+        lines: List[str] = []
+        for m in node_pattern.finditer(xml_context):
+            node_str = m.group(0)
+            attrs = {k: (p.search(node_str).group(1) if p.search(node_str) else '') for k, p in attr_patterns.items()}
+            is_editable = 'EditText' in attrs['class']
+            is_clickable = attrs['clickable'].lower() == 'true'
+            if self.xml_interactive_only and not (is_clickable or is_editable):
+                continue
+
+            text = attrs['text'] or ''
+            rid = attrs['id'] or ''
+            desc = attrs['desc'] or ''
+            cls = attrs['class'] or ''
+            bnd = attrs['bounds'] or ''
+            clk = 'T' if is_clickable else 'F'
+            enb = 'T' if attrs['enabled'].lower() == 'true' else 'F'
+
+            parts = []
+            if text: parts.append(f"text='{text}'")
+            if rid: parts.append(f"id='{rid}'")
+            if desc: parts.append(f"desc='{desc}'")
+            if cls: parts.append(f"class='{cls.split('.')[-1]}'")
+            if bnd: parts.append(f"bounds='{bnd}'")
+            parts.append(f"clickable={clk}")
+            parts.append(f"enabled={enb}")
+            line = "<element " + " ".join(parts) + "/>"
+            lines.append(line)
+
+            if len(lines) >= self.xml_summary_max_lines:
+                lines.append(f"... ({len(lines)} elements summarized; truncated)")
+                break
+
+        if not lines:
+            return "(No interactive elements detected in XML)"
+        return "\n".join(lines)
 
 
     def _analyze_action_history(self, actions: List[str]) -> dict:
@@ -506,6 +593,26 @@ Based on this feedback, you MUST choose a different action to avoid getting stuc
            not all(isinstance(a, str) for a in current_available_actions):
             logging.warning("cfg.AVAILABLE_ACTIONS invalid. Using default actions.")
             current_available_actions = ["click", "input", "scroll_up", "scroll_down", "swipe_left", "swipe_right", "back"]
+
+        # Enforce diversity when loops or repeat patterns are detected
+        try:
+            action_analysis = self._analyze_action_history(previous_actions)
+            looping_detected = action_analysis.get("is_looping", False)
+            must_diversify = bool(last_action_feedback and "MUST suggest a different action" in last_action_feedback)
+            if looping_detected or must_diversify:
+                # Identify the last action type to temporarily remove from available actions
+                last_action_type = None
+                if previous_actions:
+                    last_str = str(previous_actions[-1]).lower()
+                    for a in ["click", "input", "scroll_down", "scroll_up", "swipe_left", "swipe_right", "back", "long_press"]:
+                        if a in last_str:
+                            last_action_type = a
+                            break
+                if last_action_type and last_action_type in current_available_actions:
+                    current_available_actions = [a for a in current_available_actions if a != last_action_type]
+                    logging.debug(f"Loop detection engaged: removing last action '{last_action_type}' from available actions for this step.")
+        except Exception as e:
+            logging.debug(f"Error applying loop-based action diversity filter: {e}")
 
         logging.debug(f"get_next_action: xml_len={len(xml_context)}, prev_actions={len(previous_actions)}, avail_actions={current_available_actions}, visits={current_screen_visit_count}, hash={current_composite_hash}")
 

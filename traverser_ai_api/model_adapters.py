@@ -49,6 +49,7 @@ import time
 import json
 import re
 import io
+from typing import Optional as _Optional
 from abc import ABC, abstractmethod
 from typing import Dict, Any, List, Optional, Tuple, Union
 from PIL import Image
@@ -327,13 +328,28 @@ class OpenRouterAdapter(ModelAdapter):
                 logging.debug(f"Could not calculate payload size: {size_calc_error}")
             
             # Generate response via OpenAI-compatible API
-            response = self.client.chat.completions.create(
-                model=self.model_name,
-                messages=messages,
-                temperature=self.generation_params.get("temperature", 0.7),
-                top_p=self.generation_params.get("top_p", 0.95),
-                max_tokens=self.generation_params.get("max_output_tokens", 1024)
-            )
+            def _create_completion(model_name: str):
+                return self.client.chat.completions.create(
+                    model=model_name,
+                    messages=messages,
+                    temperature=self.generation_params.get("temperature", 0.7),
+                    top_p=self.generation_params.get("top_p", 0.95),
+                    max_tokens=self.generation_params.get("max_output_tokens", 1024)
+                )
+
+            response = None
+            try:
+                response = _create_completion(self.model_name)
+            except Exception as e_req:
+                # Handle common OpenRouter 404 when a model alias/id is unavailable
+                err_str = str(e_req)
+                if ("No endpoints found" in err_str) or ("404" in err_str and "/chat/completions" in err_str):
+                    logging.error(
+                        f"OpenRouter model '{self.model_name}' unavailable (404). No fallback will be attempted. Please select a different model.")
+                    raise
+                else:
+                    # Unknown error, re-raise
+                    raise
             
             # Extract response text
             response_text = response.choices[0].message.content
@@ -370,6 +386,11 @@ class OpenRouterAdapter(ModelAdapter):
     def model_info(self) -> Dict[str, Any]:
         """Return information about the model."""
         return self._model_info
+
+    # Fallback helpers removed per user preference to avoid automatic model selection
+
+        # 5) Fallback to first available
+        return models[0] if models else None
 
 
 # ------ Ollama Adapter ------

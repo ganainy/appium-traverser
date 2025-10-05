@@ -466,7 +466,7 @@ class CrawlerManager(QObject):
             
             # Update UI
             self.main_controller.step_label.setText("Step: 0")
-            self.main_controller.last_action_label.setText("Last Action: None")
+            self.main_controller.action_history.clear()
             self.main_controller.status_label.setText("Status: Starting...")
             self.main_controller.progress_bar.setValue(0)
             self.main_controller.start_btn.setEnabled(False)
@@ -478,7 +478,8 @@ class CrawlerManager(QObject):
             
             # Start the process
             self.main_controller.log_message(f"Starting crawler with: {python_exe} {script_path}", 'blue')
-            self.crawler_process.start(python_exe, [script_path])
+            # Start Python in unbuffered mode to stream stdout in real-time
+            self.crawler_process.start(python_exe, ["-u", script_path])
             self.update_progress()
         else:
             self.main_controller.log_message("Crawler is already running.", 'orange')
@@ -544,10 +545,6 @@ class CrawlerManager(QObject):
         
         if hasattr(self.main_controller, 'stop_btn'):
             self.main_controller.stop_btn.setEnabled(False)
-        
-        if hasattr(self.main_controller, 'progress_bar'):
-            self.main_controller.progress_bar.setRange(0, 100)
-            self.main_controller.progress_bar.setValue(100 if exit_status == QProcess.ExitStatus.NormalExit else 0)
 
         # Play audio alert on normal finish (single beep)
         try:
@@ -665,7 +662,13 @@ class CrawlerManager(QObject):
             action_match = re.search(r'UI_ACTION:(.*?)($|\n)', output)
             if action_match:
                 self.last_action = action_match.group(1).strip()
-                self.main_controller.last_action_label.setText(f"Last Action: {self.last_action}")
+                self.main_controller.action_history.append(f"{self.last_action}")
+                try:
+                    sb = self.main_controller.action_history.verticalScrollBar()
+                    if sb:
+                        sb.setValue(sb.maximum())
+                except Exception:
+                    pass
             
             # Check for UI_SCREENSHOT_PREFIX:path
             screenshot_match = re.search(r'UI_SCREENSHOT:(.*?)($|\n)', output)

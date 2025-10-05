@@ -657,6 +657,36 @@ class AppiumDriver:
             logging.error(f"Unexpected error during scroll: {e}", exc_info=True)
             return False
 
+    def swipe_points(self, start_x: int, start_y: int, end_x: int, end_y: int, duration_ms: int = 400) -> bool:
+        """Perform a swipe between explicit screen coordinates.
+
+        Coordinates are clamped to window bounds to avoid out-of-range errors.
+        """
+        if not self.driver:
+            logging.error("Driver not available, cannot perform swipe.")
+            return False
+        try:
+            window_size = self.get_window_size()
+            if not window_size:
+                return False
+            width, height = window_size['width'], window_size['height']
+            sx = max(0, min(int(start_x), width - 1))
+            sy = max(0, min(int(start_y), height - 1))
+            ex = max(0, min(int(end_x), width - 1))
+            ey = max(0, min(int(end_y), height - 1))
+            if sx == ex and sy == ey:
+                logging.warning("Swipe_points received identical start and end; skipping.")
+                return False
+            logging.debug(f"Swiping from ({sx},{sy}) to ({ex},{ey}) for {duration_ms}ms")
+            self.driver.swipe(sx, sy, ex, ey, duration=max(100, int(duration_ms)))
+            return True
+        except WebDriverException as e:
+            logging.error(f"Error performing swipe_points: {e}")
+            return False
+        except Exception as e:
+            logging.error(f"Unexpected error in swipe_points: {e}", exc_info=True)
+            return False
+
     from typing import Sequence
     def get_all_elements(self) -> Sequence[WebElement]:
         """Gets all elements on the current screen using XPath '//*'."""

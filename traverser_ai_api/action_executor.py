@@ -1,4 +1,6 @@
 import logging
+import re
+from typing import Any, Optional, Tuple
 import time
 import re
 from typing import Tuple, Optional, Any, Union, TYPE_CHECKING, Dict
@@ -229,8 +231,26 @@ class ActionExecutor:
             elif internal_action == "scroll_or_swipe":
                 if isinstance(direction_from_type, str):
                     action_log_info += f", Direction: {direction_from_type}"
-                    success = self.driver.scroll(direction=direction_from_type)
-                    if not success: current_error_msg = f"Scroll/Swipe action in direction '{direction_from_type}' failed."
+                    # Prefer targeted element if provided
+                    target_el = action_details.get("element")
+                    if target_el:
+                        action_log_info += f", Targeted Element ID: {getattr(target_el, 'id', 'N/A')}"
+                        success = self.driver.scroll(direction=direction_from_type, element=target_el)
+                    else:
+                        # If bbox provided, compute region-based swipe within bbox
+                        bbox = action_details.get("original_bbox")
+                        if isinstance(bbox, (dict, str)):
+                            coords = self._compute_bbox_swipe_coords(bbox, direction_from_type)
+                            if coords:
+                                sx, sy, ex, ey = coords
+                                success = self.driver.swipe_points(sx, sy, ex, ey, duration_ms=400)
+                            else:
+                                # Fallback to full-screen gesture if bbox invalid
+                                success = self.driver.scroll(direction=direction_from_type)
+                        else:
+                            success = self.driver.scroll(direction=direction_from_type)
+                    if not success:
+                        current_error_msg = f"Scroll/Swipe action in direction '{direction_from_type}' failed."
                 else:
                     current_error_msg = f"Invalid direction for scroll/swipe action: {direction_from_type}"
                     logging.error(current_error_msg)
@@ -261,6 +281,73 @@ class ActionExecutor:
             self._track_failure(current_error_msg or f"Unknown failure: {action_log_info}")
 
         return success
+
+    def _compute_bbox_swipe_coords(self, bbox: Any, direction: str) -> Optional[Tuple[int, int, int, int]]:
+        """Compute start/end coordinates for a directional swipe within a given bbox.
+
+        bbox may be a dict with top_left/bottom_right (normalized or absolute) or an Android bounds string.
+        """
+        try:
+            window_size = self.driver.get_window_size()
+            if not window_size:
+                return None
+            screen_width, screen_height = window_size['width'], window_size['height']
+
+            # Parse bbox into absolute x1,y1,x2,y2
+            x1 = y1 = x2 = y2 = None
+            if isinstance(bbox, str):
+                m = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", bbox.strip())
+                if not m:
+                    return None
+                x1, y1, x2, y2 = map(int, m.groups())
+            elif isinstance(bbox, dict):
+                tl = bbox.get('top_left')
+                br = bbox.get('bottom_right')
+                if not (isinstance(tl, list) and isinstance(br, list) and len(tl) == 2 and len(br) == 2):
+                    return None
+                y1_norm, x1_norm = tl
+                y2_norm, x2_norm = br
+                if all(isinstance(v, (int, float)) for v in [y1_norm, x1_norm, y2_norm, x2_norm]):
+                    if all(float(v) <= 1.0 for v in [y1_norm, x1_norm, y2_norm, x2_norm]):
+                        x1 = int(float(x1_norm) * screen_width)
+                        y1 = int(float(y1_norm) * screen_height)
+                        x2 = int(float(x2_norm) * screen_width)
+                        y2 = int(float(y2_norm) * screen_height)
+                    else:
+                        x1, y1, x2, y2 = int(x1_norm), int(y1_norm), int(x2_norm), int(y2_norm)
+            else:
+                return None
+
+            # Sanity and clamp
+            if x1 is None or y1 is None or x2 is None or y2 is None:
+                return None
+            x1 = max(0, min(x1, screen_width - 1)); x2 = max(0, min(x2, screen_width - 1))
+            y1 = max(0, min(y1, screen_height - 1)); y2 = max(0, min(y2, screen_height - 1))
+            if x1 > x2: x1, x2 = x2, x1
+            if y1 > y2: y1, y2 = y2, y1
+
+            center_y = int((y1 + y2) / 2)
+            center_x = int((x1 + x2) / 2)
+            # Use 20% inset from edges to reduce accidental edge gestures
+            inset_x = int((x2 - x1) * 0.2)
+            inset_y = int((y2 - y1) * 0.2)
+            left_x = x1 + inset_x
+            right_x = x2 - inset_x
+            top_y = y1 + inset_y
+            bottom_y = y2 - inset_y
+
+            if direction == "left":
+                return right_x, center_y, left_x, center_y
+            elif direction == "right":
+                return left_x, center_y, right_x, center_y
+            elif direction == "up":
+                return center_x, top_y, center_x, bottom_y
+            elif direction == "down":
+                return center_x, bottom_y, center_x, top_y
+            else:
+                return None
+        except Exception:
+            return None
 
     def _compute_center_from_bbox(self, bbox: Dict[str, Any]) -> Optional[Tuple[int, int]]:
         """Compute center coordinates from a bbox dict that may contain normalized or absolute coordinates."""

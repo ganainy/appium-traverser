@@ -26,11 +26,11 @@ class AgentAssistant:
     """
     
     def __init__(self,
-                 app_config, # Type hint with your actual Config class
-                 model_alias_override: Optional[str] = None,
-                 safety_settings_override: Optional[Dict] = None,
-                 agent_tools=None,
-                 ui_callback=None):
+                app_config, # Type hint with your actual Config class
+                model_alias_override: Optional[str] = None,
+                safety_settings_override: Optional[Dict] = None,
+                agent_tools=None,
+                ui_callback=None):
         self.cfg = app_config
         self.response_cache: Dict[str, Tuple[Dict[str, Any], float, int]] = {}
         self.tools = agent_tools  # May be None initially and set later
@@ -60,8 +60,11 @@ class AgentAssistant:
             raise ValueError(f"Unsupported AI provider: {self.ai_provider}")
 
         model_alias = model_alias_override or self.cfg.DEFAULT_MODEL_TYPE
-        if not model_alias:
-            raise ValueError("Model alias must be provided.")
+        # For OpenRouter, allow raw alias when dropdown-selected model isn't in predefined aliases
+        openrouter_raw_alias = False
+        # Respect explicit no-selection from UI
+        if not model_alias or str(model_alias).strip() in ["", "No model selected"]:
+            raise ValueError("No model selected. Please choose a model in AI Settings (Default Model Type).")
 
         # Get the models configuration based on the provider
         if self.ai_provider == 'gemini':
@@ -75,32 +78,22 @@ class AgentAssistant:
         elif self.ai_provider == 'openrouter':
             models_config = getattr(self.cfg, 'OPENROUTER_MODELS', None)
             if not models_config or not isinstance(models_config, dict) or len(models_config) == 0:
-                logging.warning("OPENROUTER_MODELS missing or invalid; using resilient defaults.")
-                models_config = {
-                    'openrouter-auto': {
-                        'name': 'openrouter/auto',
-                        'description': 'Balanced auto-router via OpenRouter',
-                        'generation_config': {'temperature': 0.7, 'top_p': 0.95, 'max_output_tokens': 4096},
-                        'online': True
-                    },
-                    'openrouter-auto-fast': {
-                        'name': 'openrouter/auto',
-                        'description': 'Faster auto-router via OpenRouter',
-                        'generation_config': {'temperature': 0.3, 'top_p': 0.8, 'max_output_tokens': 4096},
-                        'online': True
-                    }
-                }
+                # Allow direct ID if user selected a raw OpenRouter model string
+                if isinstance(model_alias, str) and '/' in model_alias:
+                    openrouter_raw_alias = True
+                    models_config = {}
+                    logging.info("OpenRouter: using direct model id without configured aliases.")
+                else:
+                    raise ValueError("OPENROUTER_MODELS is not configured and no direct model id provided. Please select a model in AI Settings.")
         else:
             raise ValueError(f"Unsupported AI provider: {self.ai_provider}")
 
-        # For OpenRouter, allow raw alias when dropdown-selected model isn't in predefined aliases
-        openrouter_raw_alias = False
-
         available_model_aliases = list(models_config.keys())
-        if not available_model_aliases:
-            raise ValueError(f"{self.ai_provider.upper()}_MODELS in app_config is empty.")
+        if not available_model_aliases and not (self.ai_provider == 'openrouter' and 'openrouter_raw_alias' in locals() and openrouter_raw_alias):
+            raise ValueError(f"{self.ai_provider.upper()}_MODELS in app_config is empty. Please configure models or select a direct model id.")
         
         # Handle model alias that doesn't match the provider
+        requested_alias = model_alias
         if model_alias not in available_model_aliases:
             # If OpenRouter and alias is a direct id, treat as raw alias
             if self.ai_provider == 'openrouter' and '/' in str(model_alias):
@@ -130,18 +123,13 @@ class AgentAssistant:
                             self.cfg.update_setting_and_save("DEFAULT_MODEL_TYPE", model_alias)
                             logging.debug(f"Updated DEFAULT_MODEL_TYPE setting to '{model_alias}' to match {self.ai_provider} provider")
             elif self.ai_provider in ['openrouter'] and not openrouter_raw_alias:
-                # Fallback to first available predefined alias
-                model_alias = available_model_aliases[0]
-                logging.warning(f"OpenRouter: alias '{model_alias}' not found; using default '{model_alias}'.")
+                # Do not auto-fallback; require explicit selection
+                raise ValueError(f"OpenRouter: alias '{requested_alias}' not found in configured OPENROUTER_MODELS and no direct model id was provided.")
             else:
                 logging.warning(f"Model alias '{model_alias}' not found in {self.ai_provider.upper()}_MODELS. " +
                                f"Using default model for {self.ai_provider} provider.")
-                # Use the first available model for this provider
-                model_alias = available_model_aliases[0]
-                # Also update the config to match
-                if hasattr(self.cfg, 'update_setting_and_save'):
-                    self.cfg.update_setting_and_save("DEFAULT_MODEL_TYPE", model_alias)
-                    logging.debug(f"Updated DEFAULT_MODEL_TYPE setting to '{model_alias}' to match {self.ai_provider} provider")
+                # Do not auto-select; require explicit selection
+                raise ValueError(f"Model alias '{model_alias}' not found in {self.ai_provider.upper()}_MODELS. Please select a model explicitly.")
 
         model_config_from_file = models_config.get(model_alias)
         if (not model_config_from_file or not isinstance(model_config_from_file, dict)):
@@ -432,10 +420,15 @@ class AgentAssistant:
         # Build focus areas section
         focus_areas_section = self._build_focus_areas_section()
         
-        # NEW: Enhanced JSON output guidance section
+        # NEW: Enhanced JSON output guidance section with stricter contract
         json_output_guidance = (
         "Return a JSON object in a ```json code block with keys: action, target_identifier, "
-        "target_bounding_box, input_text, reasoning, focus_influence. No text outside the JSON."
+        "target_bounding_box, input_text, reasoning, focus_influence. Rules: "
+        "target_identifier MUST be a single raw value for ONE attribute only (choose one of: resource-id like com.pkg:id/name, content-desc, or visible text). "
+        "Do NOT include prefixes like 'id=' or 'content-desc=' and do NOT combine multiple attributes with '|'. "
+        "target_bounding_box MUST be an object {top_left:[y,x], bottom_right:[y,x]} (absolute pixels or normalized 0..1). "
+        "Do NOT use string formats like '[x,y][x2,y2]'. Use null for scroll/back if bbox/identifier are not applicable. "
+        "No text outside the JSON."
         )
         
         prompt = f"""
@@ -802,7 +795,7 @@ class AgentAssistant:
                         previous_actions: List[str],
                         current_screen_visit_count: int,
                         current_composite_hash: str,
-                        last_action_feedback: Optional[str] = None) -> Optional[Tuple[Dict[str, Any], float, bool]]:
+                        last_action_feedback: Optional[str] = None) -> Optional[Tuple[Dict[str, Any], float, int, bool]]:
         """
         Plans and executes the next action using a ReAct-style approach where the agent:
         1. Reasons about the current state
@@ -812,7 +805,7 @@ class AgentAssistant:
         5. Repeats as needed
         
         Returns:
-            Tuple of (action_data, processing_time, success)
+            Tuple of (action_data, processing_time, total_tokens, success)
         """
         if not self.tools:
             logging.error("Cannot plan and execute: AgentTools not available")
@@ -839,7 +832,7 @@ class AgentAssistant:
         if not result:
             return None
             
-        response, elapsed_time, _ = result
+        response, elapsed_time, total_tokens = result
         
         action_data = response.get("action_to_perform")
         if not action_data:
@@ -848,8 +841,8 @@ class AgentAssistant:
         # Execute the action using agent tools
         success = self.execute_action(action_data)
         
-        # Return the action data, time taken, and success status
-        return action_data, elapsed_time, success
+        # Return the action data, time taken, token count, and success status
+        return action_data, elapsed_time, total_tokens, success
             
     def _clean_and_parse_json(self, json_str: str) -> Optional[Dict[str, Any]]:
         """Clean and parse potentially malformed JSON from AI responses."""
@@ -1049,6 +1042,11 @@ class AgentAssistant:
             5. reasoning: A brief explanation of why this action was chosen
             6. focus_influence: An array of focus area IDs that influenced the decision (can be empty)
             
+            RULES:
+            - target_identifier MUST be a single raw value for ONE attribute only (choose one of: resource-id like com.pkg:id/name, content-desc, or visible text). Do NOT include prefixes like 'id=' or 'content-desc=' and do NOT combine multiple attributes with '|'.
+            - target_bounding_box MUST be an object {top_left:[y,x], bottom_right:[y,x]} using absolute pixels or normalized 0..1. Do NOT use string formats like '[x,y][x2,y2]'.
+            - Use null for scroll/back if bbox/identifier are not applicable.
+            
             Respond ONLY with a valid JSON object containing these fields, nothing else.
             Here's the analysis text:
             
@@ -1103,7 +1101,128 @@ class AgentAssistant:
         """Validate and clean action data, including focus_influence."""
         if not action_data:
             return action_data
-        
+
+        # --- Normalize target_identifier to a single raw value (no prefixes/pipes) ---
+        try:
+            def _strip_quotes(val: str) -> str:
+                v = val.strip()
+                if (v.startswith("\"") and v.endswith("\"")) or (v.startswith("'") and v.endswith("'")):
+                    return v[1:-1]
+                return v
+
+            def _normalize_target_identifier(raw: Any) -> Tuple[Optional[str], Optional[str]]:
+                # Returns (normalized_value, type_hint)
+                if raw is None:
+                    return None, None
+                # If dict-like identifier, pick the strongest key
+                if isinstance(raw, dict):
+                    for key in ["id", "resource_id", "resource-id", "content_desc", "content-desc", "text", "xpath"]:
+                        if key in raw and isinstance(raw[key], str) and raw[key].strip():
+                            return _strip_quotes(raw[key]), key
+                    return None, None
+                if not isinstance(raw, str):
+                    try:
+                        raw = str(raw)
+                    except Exception:
+                        return None, None
+                s = raw.strip()
+                # Split composite strings on pipes
+                parts = re.split(r"\s*\|\s*", s) if "|" in s else [s]
+                kv: Dict[str, str] = {}
+                for p in parts:
+                    m = re.match(r"\s*([a-zA-Z_\-]+)\s*=\s*(.+)\s*", p)
+                    if m:
+                        k = m.group(1).lower()
+                        v = _strip_quotes(m.group(2))
+                        kv[k] = v
+                # Prefer resource-id, then content-desc, then text, then xpath
+                for k in ["id", "resource_id", "resource-id"]:
+                    if k in kv and kv[k]:
+                        return kv[k], "resource-id"
+                for k in ["content_desc", "content-desc"]:
+                    if k in kv and kv[k]:
+                        return kv[k], "content-desc"
+                if "text" in kv and kv.get("text"):
+                    return kv["text"], "text"
+                if "xpath" in kv and kv.get("xpath"):
+                    return kv["xpath"], "xpath"
+                # If no kv pairs, try to infer from the raw string
+                # If it's an XPath
+                if s.startswith("//") or s.startswith(".//"):
+                    return s, "xpath"
+                # If it looks like an Android resource-id
+                if ":id/" in s or re.match(r"^[A-Za-z0-9_.]+:id/[A-Za-z0-9_.]+$", s):
+                    return s, "resource-id"
+                # Otherwise treat as plain text or simple id
+                return _strip_quotes(s), "plain"
+
+            norm_id, id_type = _normalize_target_identifier(action_data.get("target_identifier"))
+            if norm_id:
+                if norm_id != action_data.get("target_identifier"):
+                    logging.debug(f"Normalized target_identifier from '{action_data.get('target_identifier')}' to '{norm_id}' (type={id_type})")
+                action_data["target_identifier"] = norm_id
+            else:
+                # Ensure explicit null when not applicable
+                action_data["target_identifier"] = None
+        except Exception as e:
+            logging.debug(f"Failed to normalize target_identifier: {e}")
+
+        # --- Normalize target_bounding_box to dict {top_left:[y,x], bottom_right:[y,x]} ---
+        try:
+            def _parse_bounds_string(bounds: str) -> Optional[Tuple[int, int, int, int]]:
+                try:
+                    m = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", bounds.strip())
+                    if not m:
+                        return None
+                    x1 = int(m.group(1)); y1 = int(m.group(2)); x2 = int(m.group(3)); y2 = int(m.group(4))
+                    return x1, y1, x2, y2
+                except Exception:
+                    return None
+
+            def _normalize_bbox(raw: Any) -> Optional[Dict[str, List[float]]]:
+                if raw is None:
+                    return None
+                # Accept legacy Android bounds string "[x1,y1][x2,y2]"
+                if isinstance(raw, str):
+                    parsed = _parse_bounds_string(raw)
+                    if not parsed:
+                        logging.warning(f"Invalid bounds string format: {raw}")
+                        return None
+                    x1, y1, x2, y2 = parsed
+                    return {"top_left": [float(y1), float(x1)], "bottom_right": [float(y2), float(x2)]}
+                # Dict formats
+                if isinstance(raw, dict):
+                    tl = raw.get("top_left")
+                    br = raw.get("bottom_right")
+                    # Support object forms {top_left: {y:.., x:..}}
+                    if isinstance(tl, dict):
+                        tl = [tl.get("y"), tl.get("x")]
+                    if isinstance(br, dict):
+                        br = [br.get("y"), br.get("x")]
+                    if isinstance(tl, (list, tuple)) and isinstance(br, (list, tuple)) and len(tl) == 2 and len(br) == 2:
+                        try:
+                            y1, x1 = float(tl[0]), float(tl[1])
+                            y2, x2 = float(br[0]), float(br[1])
+                            return {"top_left": [y1, x1], "bottom_right": [y2, x2]}
+                        except Exception:
+                            logging.warning(f"Non-numeric bbox coordinates: {raw}")
+                            return None
+                    logging.warning(f"Invalid bbox dict format: {raw}")
+                    return None
+                # Unsupported type
+                logging.warning(f"Unsupported bbox type: {type(raw)}")
+                return None
+
+            norm_bbox = _normalize_bbox(action_data.get("target_bounding_box"))
+            if norm_bbox:
+                if norm_bbox != action_data.get("target_bounding_box"):
+                    logging.debug(f"Normalized target_bounding_box from '{action_data.get('target_bounding_box')}' to '{norm_bbox}'")
+                action_data["target_bounding_box"] = norm_bbox
+            else:
+                action_data["target_bounding_box"] = None
+        except Exception as e:
+            logging.debug(f"Failed to normalize target_bounding_box: {e}")
+
         # Validate focus_influence field
         if 'focus_influence' not in action_data:
             logging.debug("AI response missing focus_influence field, setting to empty list")

@@ -50,6 +50,14 @@ class UIComponents:
 
         model_dropdown.clear()
 
+        # Always start with an explicit no-selection placeholder
+        NO_SELECTION_LABEL = "No model selected"
+        try:
+            model_dropdown.addItem(NO_SELECTION_LABEL)
+        except Exception:
+            # Fallback: ensure dropdown has at least one item
+            model_dropdown.addItem("No model selected")
+
         # Get provider capabilities from config
         try:
             from ..config import AI_PROVIDER_CAPABILITIES
@@ -61,6 +69,7 @@ class UIComponents:
         )
 
         if provider.lower() == "gemini":
+            # Populate Gemini models after the placeholder; do not auto-select
             model_dropdown.addItems(["flash-latest", "flash-latest-fast"])
             # Try to restore saved selection if present
             try:
@@ -147,20 +156,6 @@ class UIComponents:
                     logging.warning("No Ollama models found")
 
                 model_dropdown.addItems(model_items)
-
-                # Set default to first vision-capable model if available, otherwise first model
-                if vision_models:
-                    model_dropdown.setCurrentText(vision_models[0])
-                    logging.debug(f"Set default to vision model: {vision_models[0]}")
-                elif (
-                    model_items
-                    and model_items[0]
-                    != "No Ollama models available - run 'ollama pull <model>'"
-                ):
-                    model_dropdown.setCurrentText(model_items[0])
-                    logging.debug(
-                        f"Set default to first available model: {model_items[0]}"
-                    )
 
                 # Try to restore saved selection if present among items
                 try:
@@ -252,10 +247,21 @@ class UIComponents:
             else:
                 model_dropdown.addItems(["openrouter-auto", "openrouter-auto-fast"])
 
-            # Always include presets as safe options at the top if not already
+            # Always include presets as safe options just after the placeholder if not already
             for preset in ["openrouter-auto", "openrouter-auto-fast"]:
                 if model_dropdown.findText(preset) == -1:
-                    model_dropdown.insertItem(0, preset)
+                    # Ensure placeholder remains at index 0
+                    insert_index = 1
+                    try:
+                        # If there are already user aliases at the top, insert after them
+                        # Find first index after placeholder that doesn't equal NO_SELECTION_LABEL
+                        for i in range(model_dropdown.count()):
+                            if model_dropdown.itemText(i) != NO_SELECTION_LABEL:
+                                insert_index = max(1, i)
+                                break
+                    except Exception:
+                        insert_index = 1
+                    model_dropdown.insertItem(insert_index, preset)
 
             # Include configured display aliases from OPENROUTER_MODELS at the very top
             try:
@@ -267,32 +273,19 @@ class UIComponents:
                     # Insert user-defined aliases so saved DEFAULT_MODEL_TYPE can be restored
                     for alias in reversed(list(OPENROUTER_MODELS.keys())):
                         if model_dropdown.findText(alias) == -1:
-                            model_dropdown.insertItem(0, alias)
+                            # Keep placeholder first; insert aliases after it
+                            model_dropdown.insertItem(1, alias)
             except Exception as e:
                 logging.debug(f"Could not insert OPENROUTER_MODELS aliases into dropdown: {e}")
 
-            # Preferred default: first free if free-only, else first vision-capable, else auto
-            preferred_default = "openrouter-auto"
-            if free_only:
-                # Prefer first free model if available
-                for i in range(model_dropdown.count()):
-                    txt = model_dropdown.itemText(i)
-                    preferred_default = txt
-                    break
-            elif vision_models:
-                preferred_default = vision_models[0]
-            # Restore saved selection if available; otherwise use preferred default
+            # Restore saved selection if available; otherwise keep placeholder (no auto-selection)
             try:
-                restored = False
                 if previous_text:
                     idx = model_dropdown.findText(previous_text)
                     if idx >= 0:
                         model_dropdown.setCurrentIndex(idx)
-                        restored = True
-                if not restored:
-                    model_dropdown.setCurrentText(preferred_default)
             except Exception:
-                model_dropdown.setCurrentText(preferred_default)
+                pass
 
             # Handle image context tri-state based on provider capabilities and model metadata
             if "ENABLE_IMAGE_CONTEXT" in config_widgets:
@@ -313,7 +306,16 @@ class UIComponents:
                     if isinstance(meta, dict):
                         supports_image = meta.get("supports_image")
                     # Determine tri-state: enabled, disabled, or unavailable
-                    if supports_image is True:
+                    if selected == NO_SELECTION_LABEL:
+                        # No model selected: disable image context and hide warnings
+                        config_widgets["ENABLE_IMAGE_CONTEXT"].setEnabled(False)
+                        config_widgets["ENABLE_IMAGE_CONTEXT"].setChecked(False)
+                        config_widgets["ENABLE_IMAGE_CONTEXT"].setToolTip(
+                            "Select a model to configure image inputs."
+                        )
+                        if "IMAGE_CONTEXT_WARNING" in config_widgets:
+                            config_widgets["IMAGE_CONTEXT_WARNING"].setVisible(False)
+                    elif supports_image is True:
                         config_widgets["ENABLE_IMAGE_CONTEXT"].setEnabled(True)
                         config_widgets["ENABLE_IMAGE_CONTEXT"].setChecked(True)
                         config_widgets["ENABLE_IMAGE_CONTEXT"].setToolTip(
@@ -366,6 +368,17 @@ class UIComponents:
                             "auto_disable_image_context", False
                         )
                         if not auto_disable_local:
+                            if name == NO_SELECTION_LABEL:
+                                # No model selected: disable image context and hide warnings
+                                config_widgets["ENABLE_IMAGE_CONTEXT"].setEnabled(False)
+                                config_widgets["ENABLE_IMAGE_CONTEXT"].setChecked(False)
+                                config_widgets["ENABLE_IMAGE_CONTEXT"].setToolTip("Select a model to configure image inputs.")
+                                if "IMAGE_CONTEXT_WARNING" in config_widgets:
+                                    config_widgets["IMAGE_CONTEXT_WARNING"].setVisible(False)
+                                # Also hide non-free warning explicitly when no selection
+                                if "OPENROUTER_NON_FREE_WARNING" in config_widgets:
+                                    config_widgets["OPENROUTER_NON_FREE_WARNING"].setVisible(False)
+                                return
                             meta = UIComponents._get_openrouter_model_meta(name)
                             supports_image = None
                             if isinstance(meta, dict):
@@ -399,8 +412,22 @@ class UIComponents:
                                     config_widgets["ENABLE_IMAGE_CONTEXT"].setToolTip("Capability unknown; metadata not available.")
                                 if "IMAGE_CONTEXT_WARNING" in config_widgets:
                                     config_widgets["IMAGE_CONTEXT_WARNING"].setVisible(False)
+
                 except Exception as e:
                     logging.debug(f"Error toggling image context on model change: {e}")
+
+
+
+                # Show or hide the non-free model warning
+                try:
+                    if "OPENROUTER_NON_FREE_WARNING" in config_widgets:
+                        if name == NO_SELECTION_LABEL:
+                            config_widgets["OPENROUTER_NON_FREE_WARNING"].setVisible(False)
+                        else:
+                            is_free = UIComponents._is_openrouter_model_free(name)
+                            config_widgets["OPENROUTER_NON_FREE_WARNING"].setVisible(not is_free)
+                except Exception as e:
+                    logging.debug(f"Error toggling non-free warning: {e}")
 
             model_dropdown.currentTextChanged.connect(_on_openrouter_model_changed)
 
@@ -742,6 +769,11 @@ class UIComponents:
         panel = QWidget()
         layout = QVBoxLayout(panel)
 
+        # Step counter placed above the status text
+        step_layout = QHBoxLayout()
+        controller.step_label = QLabel("Step: 0")
+        step_layout.addWidget(controller.step_label)
+
         # Status section
         status_layout = QHBoxLayout()
         controller.status_label = QLabel("Status: Idle")
@@ -749,12 +781,29 @@ class UIComponents:
         status_layout.addWidget(controller.status_label)
         status_layout.addWidget(controller.progress_bar)
 
-        # Step and action section
-        step_action_layout = QHBoxLayout()
-        controller.step_label = QLabel("Step: 0")
-        controller.last_action_label = QLabel("Last Action: None")
-        step_action_layout.addWidget(controller.step_label)
-        step_action_layout.addWidget(controller.last_action_label)
+        # Action history
+        action_history_group = QGroupBox("Action History")
+        action_history_layout = QVBoxLayout(action_history_group)
+        controller.action_history = QTextEdit()
+        controller.action_history.setReadOnly(True)
+        # Improve visibility and usability
+        try:
+            controller.action_history.setPlaceholderText(
+                "No actions yet. Actions performed will appear here.")
+        except Exception:
+            pass
+        controller.action_history.setStyleSheet("background-color: #333333; color: #FFFFFF;")
+        try:
+            from PySide6.QtWidgets import QTextEdit as _QTextEdit
+            controller.action_history.setLineWrapMode(_QTextEdit.LineWrapMode.WidgetWidth)
+        except Exception:
+            pass
+        # Allow the action history to expand, with a sensible minimum height
+        controller.action_history.setMinimumHeight(160)
+        controller.action_history.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.MinimumExpanding
+        )
+        action_history_layout.addWidget(controller.action_history)
 
         # Screenshot display
         controller.screenshot_label = QLabel()
@@ -782,8 +831,10 @@ class UIComponents:
         log_layout.addWidget(controller.log_output)
 
         # Add all sections to the layout
+        # Add step counter first, then status underneath
+        layout.addLayout(step_layout)
         layout.addLayout(status_layout)
-        layout.addLayout(step_action_layout)
+        layout.addWidget(action_history_group)
         layout.addWidget(controller.screenshot_label)
         layout.addWidget(log_group, 1)
 
@@ -922,9 +973,11 @@ class UIComponents:
         config_widgets["OPENROUTER_REFRESH_BTN"].setVisible(False)
 
         config_widgets["DEFAULT_MODEL_TYPE"] = QComboBox()
-        config_widgets["DEFAULT_MODEL_TYPE"].addItems(
-            ["flash-latest", "flash-latest-fast"]
-        )
+        # Start with explicit no-selection placeholder; provider change will populate
+        try:
+            config_widgets["DEFAULT_MODEL_TYPE"].addItem("No model selected")
+        except Exception:
+            config_widgets["DEFAULT_MODEL_TYPE"].addItems(["No model selected"])
         label_model_type = QLabel("Default Model Type: ")
         label_model_type.setToolTip(tooltips["DEFAULT_MODEL_TYPE"])
         # Place dropdown and refresh button side-by-side
@@ -938,7 +991,18 @@ class UIComponents:
         )
         config_widgets["OPENROUTER_SHOW_FREE_ONLY"].setVisible(False)
         _model_row_layout.addWidget(config_widgets["OPENROUTER_SHOW_FREE_ONLY"])
+
+        # Add a warning label for non-free models
+        config_widgets["OPENROUTER_NON_FREE_WARNING"] = QLabel("⚠️ This model may use your OpenRouter credit.")
+        config_widgets["OPENROUTER_NON_FREE_WARNING"].setStyleSheet("color: orange;")
+        config_widgets["OPENROUTER_NON_FREE_WARNING"].setVisible(False)
+        config_widgets["OPENROUTER_NON_FREE_WARNING"].setWordWrap(True)
+
+        warning_layout = QVBoxLayout()
+        warning_layout.addWidget(config_widgets["OPENROUTER_NON_FREE_WARNING"])
+
         ai_layout.addRow(label_model_type, _model_row_layout)
+        ai_layout.addRow(warning_layout)
 
         # Connect the AI provider selection to update model types and toggle refresh visibility
         def _on_provider_changed(provider: str):
@@ -1180,6 +1244,21 @@ class UIComponents:
                 )
                 return
             import requests
+
+            # Proactively delete any stale cache before fetching fresh data
+            try:
+                cache_path = UIComponents._get_openrouter_cache_path()
+                if os.path.exists(cache_path):
+                    os.remove(cache_path)
+                    logging.info("Deleted stale OpenRouter model cache before refresh.")
+                    try:
+                        config_handler.main_controller.log_message(
+                            "Deleted local OpenRouter cache.", "gray"
+                        )
+                    except Exception:
+                        pass
+            except Exception as cache_err:
+                logging.debug(f"Could not delete OpenRouter cache: {cache_err}")
 
             headers = {
                 "Authorization": f"Bearer {api_key}",

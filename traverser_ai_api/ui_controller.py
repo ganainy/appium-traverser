@@ -1,4 +1,4 @@
-﻿# ui_controller.py - Main UI controller for the Appium Crawler
+# ui_controller.py - Main UI controller for the Appium Crawler
 
 import sys
 import os
@@ -62,7 +62,7 @@ class CrawlerControllerWindow(QMainWindow):
         self.status_label = None
         self.progress_bar = None
         self.step_label = None
-        self.last_action_label = None
+        self.action_history = None
         self.app_scan_status_label = None
         self.logo_widget = None
 
@@ -181,15 +181,44 @@ class CrawlerControllerWindow(QMainWindow):
             logging.debug(log_message)
 
     def _audio_alert(self, kind: str = "finish") -> None:
-        """Play a simple audio alert using the system beep.
+        """Play an audible alert.
 
-        kind: 'finish' -> single beep; 'error' -> double beep.
+        kind:
+        - 'finish' -> single tone
+        - 'error'  -> double tone
+
+        Uses platform-specific methods on Windows for reliability, falls back to
+        Qt's QGuiApplication.beep elsewhere.
         """
+        # Prefer native Windows sounds if available for more reliable playback
+        try:
+            import sys
+            if sys.platform.startswith("win"):
+                try:
+                    import winsound
+                    if kind == "error":
+                        # Two short tones with slight pitch difference
+                        winsound.Beep(900, 150)
+                        QTimer.singleShot(220, lambda: winsound.Beep(700, 150))
+                    else:
+                        # Use system default notification sound when possible
+                        try:
+                            winsound.MessageBeep(winsound.MB_OK)
+                        except Exception:
+                            winsound.Beep(800, 200)
+                    return  # Already played via winsound
+                except Exception as e:
+                    logging.debug(f"winsound not available or failed: {e}")
+        except Exception:
+            # Ignore sys import/platform issues
+            pass
+
+        # Fallback: use Qt beep
         try:
             if kind == "error":
                 QGuiApplication.beep()
-                # Schedule a second beep shortly after
-                QTimer.singleShot(200, QGuiApplication.beep)
+                # Schedule a second beep shortly after; use lambda to ensure call
+                QTimer.singleShot(250, lambda: QGuiApplication.beep())
             else:
                 QGuiApplication.beep()
         except Exception as e:
@@ -704,11 +733,7 @@ class CrawlerControllerWindow(QMainWindow):
                 f"Log output not available, logging to console: {log_message}"
             )
 
-        # Also update status if last_action_label exists
-        if hasattr(self, "last_action_label") and self.last_action_label:
-            self.last_action_label.setText(
-                f"{prefix}Last Action: {action_type}{focus_text}"
-            )
+
 
         self.log_message(log_message, color)
 
