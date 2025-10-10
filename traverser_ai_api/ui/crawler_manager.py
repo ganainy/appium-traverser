@@ -471,6 +471,11 @@ class CrawlerManager(QObject):
             self.main_controller.progress_bar.setValue(0)
             self.main_controller.start_btn.setEnabled(False)
             self.main_controller.stop_btn.setEnabled(True)
+            try:
+                if hasattr(self.main_controller, 'generate_report_btn') and self.main_controller.generate_report_btn:
+                    self.main_controller.generate_report_btn.setEnabled(False)
+            except Exception:
+                pass
             
             # Use the same Python executable that's running this script
             python_exe = sys.executable
@@ -545,6 +550,13 @@ class CrawlerManager(QObject):
         
         if hasattr(self.main_controller, 'stop_btn'):
             self.main_controller.stop_btn.setEnabled(False)
+
+        # Enable report generation after finish
+        try:
+            if hasattr(self.main_controller, 'generate_report_btn') and self.main_controller.generate_report_btn:
+                self.main_controller.generate_report_btn.setEnabled(True)
+        except Exception:
+            pass
 
         # Play audio alert on normal finish (single beep)
         try:

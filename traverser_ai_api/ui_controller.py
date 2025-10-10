@@ -33,6 +33,14 @@ from PySide6.QtCore import Signal, Slot as slot
 from PySide6.QtGui import QPixmap, QColor, QTextCursor, QIcon, QImage, QGuiApplication
 
 from .config import Config
+try:
+    from .analysis_viewer import RunAnalyzer, XHTML2PDF_AVAILABLE
+except Exception:
+    try:
+        from analysis_viewer import RunAnalyzer, XHTML2PDF_AVAILABLE
+    except Exception:
+        RunAnalyzer = None
+        XHTML2PDF_AVAILABLE = False
 from .ui.components import UIComponents
 from .ui.config_manager import ConfigManager
 from .ui.crawler_manager import CrawlerManager
@@ -896,6 +904,115 @@ class CrawlerControllerWindow(QMainWindow):
     def run_mobsf_analysis(self):
         """Run MobSF analysis for the selected app."""
         self.mobsf_ui_manager.run_mobsf_analysis()
+
+    @slot()
+    def generate_report(self):
+        """Generate an analysis PDF for the latest run of the current session/app.
+
+        This mirrors the CLI behavior: determine latest run_id from the session's database
+        and write the PDF to the session 'reports' directory.
+        """
+        try:
+            if not RunAnalyzer or not XHTML2PDF_AVAILABLE:
+                self.log_message("Error: Analysis module or PDF library (xhtml2pdf) not available.", "red")
+                return
+
+            from pathlib import Path
+            import sqlite3
+
+            app_package = getattr(self.config, "APP_PACKAGE", None)
+            output_data_dir = getattr(self.config, "OUTPUT_DATA_DIR", None)
+            session_dir = getattr(self.config, "SESSION_DIR", None)
+            db_path = getattr(self.config, "DB_NAME", None)
+
+            if not app_package:
+                self.log_message("Error: No target app selected.", "red")
+                return
+            if not output_data_dir:
+                self.log_message("Error: OUTPUT_DATA_DIR is not configured.", "red")
+                return
+
+            # Prefer current session's DB if it exists; otherwise try to find latest session for this app
+            resolved_db_path: Path = None  # type: ignore
+            resolved_session_dir: Path = None  # type: ignore
+
+            if db_path and Path(db_path).exists():
+                resolved_db_path = Path(db_path)
+                resolved_session_dir = Path(session_dir) if session_dir else Path(db_path).parent.parent
+            else:
+                # Fallback: discover latest session_dir for the current app
+                try:
+                    candidates: list[Path] = []
+                    for sd in Path(output_data_dir).iterdir():
+                        if sd.is_dir() and "_" in sd.name:
+                            parts = sd.name.split("_")
+                            if len(parts) >= 2 and parts[1] == app_package:
+                                candidates.append(sd)
+                    if not candidates:
+                        self.log_message(f"Error: No session directories found for app '{app_package}'.", "red")
+                        return
+                    # Sort by timestamp inferred from name suffix; as a simple heuristic, use lexicographic desc
+                    candidates.sort(key=lambda p: p.name, reverse=True)
+                    resolved_session_dir = candidates[0]
+                    db_dir = resolved_session_dir / "database"
+                    found_dbs = list(db_dir.glob("*_crawl_data.db")) if db_dir.exists() else []
+                    if not found_dbs:
+                        self.log_message("Error: No database file found in the latest session.", "red")
+                        return
+                    resolved_db_path = found_dbs[0]
+                except Exception as e:
+                    self.log_message(f"Error discovering latest session DB: {e}", "red")
+                    return
+
+            # Determine latest run_id
+            try:
+                conn = sqlite3.connect(str(resolved_db_path))
+                cur = conn.cursor()
+                cur.execute("SELECT run_id FROM runs ORDER BY run_id DESC LIMIT 1")
+                row = cur.fetchone()
+                if row and row[0] is not None:
+                    run_id = int(row[0])
+                else:
+                    cur.execute("SELECT run_id FROM runs LIMIT 1")
+                    row2 = cur.fetchone()
+                    if row2 and row2[0] is not None:
+                        run_id = int(row2[0])
+                    else:
+                        self.log_message("Error: No runs found in the database. Cannot generate report.", "red")
+                        conn.close()
+                        return
+                conn.close()
+            except Exception as e:
+                self.log_message(f"Error reading database to determine run_id: {e}", "red")
+                return
+
+            # Prepare output directory and filename
+            reports_dir = Path(getattr(self.config, "PDF_REPORT_DIR", ""))
+            if not reports_dir:
+                reports_dir = resolved_session_dir / "reports"
+            reports_dir.mkdir(parents=True, exist_ok=True)
+
+            pdf_filename = f"{app_package}_analysis.pdf"
+            final_pdf_path = str(reports_dir / pdf_filename)
+
+            # Run analysis
+            try:
+                self.show_busy("Generating report...")
+                analyzer = RunAnalyzer(
+                    db_path=str(resolved_db_path),
+                    output_data_dir=output_data_dir,
+                    app_package_for_run=app_package,
+                )
+                ok = analyzer.analyze_run_to_pdf(run_id, final_pdf_path)
+            finally:
+                self.hide_busy()
+
+            if ok:
+                self.log_message(f"✅ Report generated: {final_pdf_path}", "green")
+            else:
+                self.log_message("Error: Failed to generate report.", "red")
+        except Exception as e:
+            self.log_message(f"Error generating report: {e}", "red")
 
     def _get_connected_devices(self) -> List[str]:
         """Get a list of connected ADB devices."""

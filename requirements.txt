@@ -8,6 +8,7 @@ colorlog  # Enhanced logging with colors for better readability
 python-dotenv  # Environment variable management for configuration
 PySide6  # Qt-based GUI for crawler control
 debugpy  # Remote debugging support for Visual Studio Code
+openai  # Needed for AI providers from OpenRouter (OpenAI Python SDK)
 # Agent architecture dependencies
 langchain  # Framework for building AI agents and chains
 langchain-google-genai  # LangChain integration with Google Generative AI

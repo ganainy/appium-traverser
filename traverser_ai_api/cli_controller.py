@@ -14,6 +14,7 @@ if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
 import json
+import requests
 import signal
 import subprocess
 import threading
@@ -24,6 +25,7 @@ import logging
 import sqlite3
 from typing import Optional, Dict, Any, List, Tuple
 import textwrap
+from typing import get_type_hints
 
 try:
     from config import Config
@@ -108,7 +110,23 @@ class CLIController:
     def set_config_value(self, key: str, value_str: str) -> bool:
         logging.debug(f"Attempting to set config: {key} = '{value_str}'")
         try:
-            self.cfg.update_setting_and_save(key, value_str)
+            # Try smarter parsing for complex types to improve CLI/UI parity
+            parsed_value: Any = value_str
+            type_hints = get_type_hints(Config)
+            target_hint = type_hints.get(key)
+            origin_type = getattr(target_hint, "__origin__", None) if target_hint else None
+
+            # If value looks like JSON or target expects list/dict, attempt JSON parse
+            looks_like_json = value_str.strip().startswith(('[', '{', '"'))
+            if looks_like_json or origin_type in (list, dict):
+                try:
+                    parsed_value = json.loads(value_str)
+                    logging.debug(f"Parsed JSON for {key}: type={type(parsed_value)}")
+                except Exception:
+                    # Fall back to raw string if JSON parsing fails
+                    parsed_value = value_str
+
+            self.cfg.update_setting_and_save(key, parsed_value)
             return True
         except Exception as e:
             logging.error(f"Failed to set config for {key}: {e}", exc_info=True)
@@ -257,6 +275,249 @@ class CLIController:
             return True
         except Exception as e:
             logging.error(f"Failed to start crawler: {e}", exc_info=True)
+            return False
+
+    # === Service Pre-checks (parity with UI "Pre-Check Services") ===
+    def _check_appium_server(self) -> bool:
+        try:
+            appium_url = getattr(self.cfg, 'APPIUM_SERVER_URL', 'http://127.0.0.1:4723')
+            response = requests.get(f"{appium_url}/status", timeout=3)
+            if response.status_code == 200:
+                status_data = response.json()
+                return bool(status_data.get('ready', False) or status_data.get('value', {}).get('ready', False))
+        except Exception as e:
+            logging.debug(f"Appium server check failed: {e}")
+        return False
+
+    def _check_mobsf_server(self) -> bool:
+        try:
+            mobsf_url = getattr(self.cfg, 'MOBSF_API_URL', 'http://localhost:8000/api/v1')
+            response = requests.get(f"{mobsf_url}/server_status", timeout=3)
+            return response.status_code == 200
+        except Exception as e:
+            logging.debug(f"MobSF server check failed: {e}")
+            return False
+
+    def _check_ollama_service(self) -> bool:
+        ollama_url = getattr(self.cfg, 'OLLAMA_BASE_URL', 'http://localhost:11434')
+        try:
+            response = requests.get(f"{ollama_url}/api/tags", timeout=1.5)
+            if response.status_code == 200:
+                logging.debug("Ollama service detected via HTTP API")
+                return True
+        except Exception as e:
+            logging.debug(f"Ollama HTTP API check failed: {e}")
+        try:
+            result = subprocess.run(['ollama', 'list'], capture_output=True, text=True, timeout=2,
+                                    creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0)
+            return result.returncode == 0
+        except Exception as e:
+            logging.debug(f"Ollama subprocess check failed: {e}")
+            return False
+
+    def _check_api_keys_and_env(self) -> Tuple[List[str], List[str]]:
+        issues: List[str] = []
+        warnings: List[str] = []
+        ai_provider = getattr(self.cfg, 'AI_PROVIDER', 'gemini').lower()
+        if ai_provider == 'gemini':
+            if not getattr(self.cfg, 'GEMINI_API_KEY', None):
+                issues.append("❌ Gemini API key is not set (check GEMINI_API_KEY in .env file)")
+        elif ai_provider == 'openrouter':
+            if not getattr(self.cfg, 'OPENROUTER_API_KEY', None):
+                issues.append("❌ OpenRouter API key is not set (check OPENROUTER_API_KEY in .env file)")
+        elif ai_provider == 'ollama':
+            if not getattr(self.cfg, 'OLLAMA_BASE_URL', None):
+                warnings.append("⚠️ Ollama base URL not set (using default localhost:11434)")
+
+        if getattr(self.cfg, 'ENABLE_TRAFFIC_CAPTURE', False):
+            if not getattr(self.cfg, 'PCAPDROID_API_KEY', None):
+                issues.append("❌ PCAPDroid API key is not set (check PCAPDROID_API_KEY in .env file)")
+
+        if getattr(self.cfg, 'ENABLE_MOBSF_ANALYSIS', False):
+            if not getattr(self.cfg, 'MOBSF_API_KEY', None):
+                issues.append("❌ MobSF API key is not set (check MOBSF_API_KEY in .env file)")
+        return issues, warnings
+
+    def precheck_services(self) -> bool:
+        print("\n🔍 Pre-Crawl Validation Details:")
+        print("=" * 50)
+        issues: List[str] = []
+        warnings: List[str] = []
+
+        # Appium
+        appium_running = self._check_appium_server()
+        appium_url = getattr(self.cfg, 'APPIUM_SERVER_URL', 'http://127.0.0.1:4723')
+        print(("✅" if appium_running else "❌") + f" Appium server at {appium_url}" + (" is running" if appium_running else " is not accessible"))
+        if not appium_running:
+            issues.append("❌ Appium server is not running or not accessible")
+
+        # MobSF (optional)
+        mobsf_running = self._check_mobsf_server()
+        mobsf_url = getattr(self.cfg, 'MOBSF_API_URL', 'http://localhost:8000/api/v1')
+        print(("✅" if mobsf_running else "⚠️") + f" MobSF server at {mobsf_url}" + (" is running" if mobsf_running else " is not accessible"))
+
+        # Ollama depending on provider
+        ai_provider = getattr(self.cfg, 'AI_PROVIDER', 'gemini').lower()
+        if ai_provider == 'ollama':
+            ollama_running = self._check_ollama_service()
+            print(("✅" if ollama_running else "❌") + " Ollama service" + (" is running" if ollama_running else " is not running"))
+            if not ollama_running:
+                issues.append("❌ Ollama service is not running")
+
+        # API keys and env
+        api_issues, api_warnings = self._check_api_keys_and_env()
+        for msg in api_issues:
+            print(msg)
+        for msg in api_warnings:
+            print(msg)
+        issues.extend(api_issues)
+        warnings.extend(api_warnings)
+
+        # Target app
+        app_pkg = getattr(self.cfg, 'APP_PACKAGE', None)
+        print(("✅" if app_pkg else "❌") + f" Target app: {app_pkg if app_pkg else 'Not selected'}")
+        if not app_pkg:
+            issues.append("❌ No target app selected")
+
+        # Summary
+        print("\n" + ("✅ All pre-crawl checks passed!" if not issues and not warnings else ("⚠️ Pre-crawl validation completed with warnings:" if not issues else "❌ Pre-crawl validation failed:")))
+        for msg in issues:
+            print(f"   {msg}")
+        for msg in warnings:
+            print(f"   {msg}")
+        if issues:
+            print("\n⚠️ Some requirements are not met. You can still start the crawler, but it may fail if services are not available.")
+        return len(issues) == 0
+
+    # === MobSF Parity Commands ===
+    def test_mobsf_connection(self) -> bool:
+        api_url = getattr(self.cfg, 'MOBSF_API_URL', '').strip() or getattr(self.cfg, 'MOBSF_API_URL', 'http://localhost:8000/api/v1')
+        api_key = getattr(self.cfg, 'MOBSF_API_KEY', '').strip()
+        if not getattr(self.cfg, 'ENABLE_MOBSF_ANALYSIS', False):
+            logging.error("MobSF Analysis is not enabled. Enable via set-config ENABLE_MOBSF_ANALYSIS=true")
+            return False
+        if not api_url or not api_key:
+            logging.error("MobSF API URL and API Key are required.")
+            return False
+        headers = {'Authorization': api_key}
+        test_url = f"{api_url.rstrip('/')}/scans"
+        try:
+            resp = requests.get(test_url, headers=headers, timeout=10)
+            if resp.status_code == 200:
+                print("MobSF connection successful!")
+                try:
+                    print(f"Server response: {resp.json()}")
+                except Exception:
+                    print(f"Response: {resp.text}")
+                print(f"API URL used: {test_url}")
+                return True
+            else:
+                logging.error(f"MobSF connection failed with status code: {resp.status_code}")
+                logging.error(f"Response: {resp.text}")
+                print(f"API URL used: {test_url}")
+                return False
+        except requests.RequestException as e:
+            logging.error(f"MobSF connection error: {e}")
+            print(f"API URL used: {test_url}")
+            return False
+
+    def run_mobsf_analysis(self) -> bool:
+        try:
+            from mobsf_manager import MobSFManager
+        except ImportError as e:
+            logging.error(f"Failed to import MobSFManager: {e}")
+            return False
+        if not getattr(self.cfg, 'ENABLE_MOBSF_ANALYSIS', False):
+            logging.error("MobSF Analysis is not enabled. Enable via set-config ENABLE_MOBSF_ANALYSIS=true")
+            return False
+        app_package = getattr(self.cfg, 'APP_PACKAGE', None)
+        if not app_package:
+            logging.error("No app selected. Please select an app first (scan-apps, list-apps, --select-app).")
+            return False
+        api_url = getattr(self.cfg, 'MOBSF_API_URL', None)
+        api_key = getattr(self.cfg, 'MOBSF_API_KEY', None)
+        if not api_url or not api_key:
+            logging.error("MobSF API URL and API Key are required.")
+            return False
+        mobsf = MobSFManager(self.cfg)
+        print(f"Starting MobSF analysis for package: {app_package}")
+        success, result = mobsf.perform_complete_scan(app_package)
+        if success:
+            print("MobSF analysis completed successfully!")
+            print(f"PDF Report: {result.get('pdf_report', 'Not available')}")
+            print(f"JSON Report: {result.get('json_report', 'Not available')}")
+            security_score = result.get('security_score', {})
+            if isinstance(security_score, dict):
+                print(f"Security Score: {security_score.get('score', 'Not available')}")
+            else:
+                print(f"Security Score: {security_score}")
+            return True
+        else:
+            logging.error(f"MobSF analysis failed: {result.get('error', 'Unknown error')}")
+            return False
+
+    # === Focus Areas Parity Commands ===
+    def list_focus_areas(self) -> bool:
+        areas = getattr(self.cfg, 'FOCUS_AREAS', []) or []
+        if not areas:
+            print("No focus areas configured.")
+            return True
+        print("\n=== Focus Areas ===")
+        for i, area in enumerate(areas):
+            name = area.get('title') or area.get('name') or f"Area {i+1}"
+            enabled = area.get('enabled', True)
+            priority = area.get('priority', i)
+            print(f"{i+1:2d}. {name} | enabled={enabled} | priority={priority}")
+        print("===================")
+        return True
+
+    def _find_focus_area_index(self, id_or_name: str) -> Optional[int]:
+        areas = getattr(self.cfg, 'FOCUS_AREAS', []) or []
+        try:
+            idx = int(id_or_name) - 1
+            if 0 <= idx < len(areas):
+                return idx
+        except ValueError:
+            name_lower = id_or_name.strip().lower()
+            for i, area in enumerate(areas):
+                if name_lower in (str(area.get('title', '')).lower() or str(area.get('name', '')).lower()):
+                    return i
+        return None
+
+    def set_focus_area_enabled(self, id_or_name: str, enabled: bool) -> bool:
+        areas = getattr(self.cfg, 'FOCUS_AREAS', []) or []
+        idx = self._find_focus_area_index(id_or_name)
+        if idx is None:
+            logging.error(f"Focus area '{id_or_name}' not found.")
+            return False
+        areas[idx]['enabled'] = enabled
+        try:
+            self.cfg.update_setting_and_save('FOCUS_AREAS', areas)
+            print(f"Focus area '{areas[idx].get('title', areas[idx].get('name', id_or_name))}' set enabled={enabled}")
+            return True
+        except Exception as e:
+            logging.error(f"Failed to update focus areas: {e}")
+            return False
+
+    def move_focus_area(self, from_index_str: str, to_index_str: str) -> bool:
+        areas = getattr(self.cfg, 'FOCUS_AREAS', []) or []
+        try:
+            from_idx = int(from_index_str) - 1
+            to_idx = int(to_index_str) - 1
+        except ValueError:
+            logging.error("--from-index and --to-index must be integers (1-based)")
+            return False
+        if not (0 <= from_idx < len(areas)) or not (0 <= to_idx < len(areas)):
+            logging.error("Index out of range for focus areas list")
+            return False
+        item = areas.pop(from_idx)
+        areas.insert(to_idx, item)
+        try:
+            self.cfg.update_setting_and_save('FOCUS_AREAS', areas)
+            print(f"Moved focus area to position {to_idx+1}")
+            return True
+        except Exception as e:
+            logging.error(f"Failed to reorder focus areas: {e}")
             return False
 
     def _monitor_crawler_output(self):
@@ -658,12 +919,13 @@ Examples:
     crawler_group.add_argument('--resume', action='store_true', help='Signal a paused crawler to resume execution.')
     crawler_group.add_argument('--stop', action='store_true', help='Signal the crawler to stop.')
     crawler_group.add_argument('--status', action='store_true', help='Show crawler status.')
+    crawler_group.add_argument('--precheck-services', action='store_true', help='Run pre-crawl validation checks for services and configuration.')
+    crawler_group.add_argument('--annotate-offline-after-run', action='store_true', help='After crawler exits, run offline UI annotator to overlay bounding boxes and generate a gallery.')
 
 
     config_group = parser.add_argument_group('Configuration Management')
     config_group.add_argument('--show-config', metavar='FILTER', nargs='?', const='', help='Show config (optionally filter by key).')
     config_group.add_argument('--set-config', metavar='K=V', action='append', help='Set config value (e.g., MAX_CRAWL_STEPS=100).')
-    config_group.add_argument('--save-config', action='store_true', help='Save current config settings.')
 
     analysis_group = parser.add_argument_group('Analysis (New Workflow)')
     analysis_group.add_argument('--list-analysis-targets', action='store_true',
@@ -685,9 +947,75 @@ Examples:
     analysis_group.add_argument('--pdf-output-name', metavar='FILENAME.pdf', type=str, default=None,
                                 help='Optional: Base filename for the PDF. If not given, a default name is used.')
 
+    mobsf_group = parser.add_argument_group('MobSF Integration')
+    mobsf_group.add_argument('--test-mobsf-connection', action='store_true', help='Test connection to MobSF server using current config (MOBSF_API_URL, MOBSF_API_KEY).')
+    mobsf_group.add_argument('--run-mobsf-analysis', action='store_true', help='Run MobSF analysis for the currently selected app (APP_PACKAGE).')
+
+    focus_group = parser.add_argument_group('Focus Areas')
+    focus_group.add_argument('--list-focus-areas', action='store_true', help='List configured privacy focus areas.')
+    focus_group.add_argument('--enable-focus-area', metavar='ID_OR_NAME', type=str, help='Enable a focus area by 1-based index or name substring.')
+    focus_group.add_argument('--disable-focus-area', metavar='ID_OR_NAME', type=str, help='Disable a focus area by 1-based index or name substring.')
+    focus_group.add_argument('--move-focus-area', action='store_true', help='Reorder focus areas using --from-index and --to-index (1-based).')
+    focus_group.add_argument('--from-index', metavar='NUMBER', type=str, help='Source index for --move-focus-area (1-based).')
+    focus_group.add_argument('--to-index', metavar='NUMBER', type=str, help='Target index for --move-focus-area (1-based).')
+
     parser.add_argument('--force-rescan', action='store_true', help='Force app rescan.')
     parser.add_argument('-v', '--verbose', action='store_true', help='Enable DEBUG logging.')
     return parser
+
+def _find_latest_session_for_app(cfg: Config) -> Optional[Tuple[str, str]]:
+    """Find the latest OUTPUT_DATA_DIR session for the configured APP_PACKAGE with an existing DB file."""
+    base = getattr(cfg, 'OUTPUT_DATA_DIR', None) or 'output_data'
+    app_pkg = getattr(cfg, 'APP_PACKAGE', None)
+    if not os.path.isdir(base) or not app_pkg:
+        return None
+    candidates: List[Tuple[float, str, str]] = []
+    try:
+        for name in os.listdir(base):
+            path = os.path.join(base, name)
+            if not os.path.isdir(path):
+                continue
+            if app_pkg in name:
+                db_dir = os.path.join(path, 'database')
+                if os.path.isdir(db_dir):
+                    for f in os.listdir(db_dir):
+                        if f.endswith('_crawl_data.db'):
+                            db_path = os.path.join(db_dir, f)
+                            try:
+                                mtime = os.path.getmtime(db_path)
+                            except Exception:
+                                mtime = 0.0
+                            candidates.append((mtime, path, db_path))
+    except Exception:
+        return None
+    if not candidates:
+        return None
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    _, session_dir, db_path = candidates[0]
+    return session_dir, db_path
+
+def _run_offline_ui_annotator(session_dir: str, db_path: str) -> bool:
+    """Invoke tools/ui_element_annotator.py to perform offline annotation for a completed run."""
+    try:
+        project_root = str(Path(__file__).resolve().parent.parent)
+        script_path = str(Path(project_root) / 'tools' / 'ui_element_annotator.py')
+        screenshots_dir = str(Path(session_dir) / 'screenshots')
+        out_dir = str(Path(session_dir) / 'annotated_screenshots')
+        cmd = [sys.executable, '-u', script_path, '--db-path', db_path, '--screens-dir', screenshots_dir, '--out-dir', out_dir]
+        logging.debug(f"Running offline UI annotator: {' '.join(cmd)}")
+        result = subprocess.run(cmd, cwd=project_root, capture_output=True, text=True)
+        if result.returncode == 0:
+            logging.info("Offline UI annotation completed successfully.")
+            logging.debug(result.stdout)
+            if result.stderr:
+                logging.debug(result.stderr)
+            return True
+        else:
+            logging.error(f"Offline UI annotation failed (code {result.returncode}). Output:\n{result.stdout}\n{result.stderr}")
+            return False
+    except Exception as e:
+        logging.error(f"Failed to run offline UI annotator: {e}", exc_info=True)
+        return False
 
 def main_cli():
     parser = create_parser()
@@ -738,21 +1066,53 @@ def main_cli():
         elif args.show_config is not None: action_taken = True; controller.show_config(args.show_config)
         elif args.set_config:
             action_taken = True
+            set_ok = True
             for item in args.set_config:
-                if '=' not in item: logging.error(f"Invalid config format: {item}"); exit_code=1; break
+                if '=' not in item:
+                    logging.error(f"Invalid config format: {item}")
+                    exit_code = 1
+                    set_ok = False
+                    break
                 key, val = item.split('=', 1)
-                if not controller.set_config_value(key, val): exit_code=1; break
-        elif args.save_config: action_taken = True; controller.save_all_changes()
+                if not controller.set_config_value(key, val):
+                    exit_code = 1
+                    set_ok = False
+                    break
+            # Automatically persist changes when configuration is successfully updated
+            if set_ok:
+                if controller.save_all_changes():
+                    logging.debug("Configuration updated via --set-config and saved to user_config.json.")
+                else:
+                    logging.error("Configuration was updated but failed to save to user_config.json.")
         elif args.status: action_taken = True; controller.status()
+        elif args.precheck_services: action_taken = True; controller.precheck_services()
         elif args.start:
             action_taken = True
             if controller.start_crawler() and controller.crawler_process:
                 try: controller.crawler_process.wait()
                 except KeyboardInterrupt: logging.debug("Crawler wait interrupted."); controller.stop_crawler()
+                # Post-run offline annotation (no AI calls)
+                if args.annotate_offline_after_run:
+                    try:
+                        latest = _find_latest_session_for_app(cfg=cli_cfg)
+                        if latest:
+                            session_dir, db_path = latest
+                            _run_offline_ui_annotator(session_dir=session_dir, db_path=db_path)
+                        else:
+                            logging.warning("No latest session found for selected APP_PACKAGE. Skipping offline annotation.")
+                    except Exception as e:
+                        logging.error(f"Offline annotator failed: {e}", exc_info=True)
             else: exit_code = 1
         elif args.stop: action_taken = True; controller.stop_crawler()
         elif args.pause: action_taken = True; controller.pause_crawler()
         elif args.resume: action_taken = True; controller.resume_crawler()
+
+        elif args.test_mobsf_connection:
+            action_taken = True
+            if not controller.test_mobsf_connection(): exit_code = 1
+        elif args.run_mobsf_analysis:
+            action_taken = True
+            if not controller.run_mobsf_analysis(): exit_code = 1
 
         elif args.list_analysis_targets:
             action_taken = True
@@ -812,6 +1172,24 @@ def main_cli():
                     target_identifier_val,
                     is_index_val
                 ): exit_code = 1
+
+        # Focus Areas commands
+        elif args.list_focus_areas:
+            action_taken = True
+            if not controller.list_focus_areas(): exit_code = 1
+        elif args.enable_focus_area:
+            action_taken = True
+            if not controller.set_focus_area_enabled(args.enable_focus_area, True): exit_code = 1
+        elif args.disable_focus_area:
+            action_taken = True
+            if not controller.set_focus_area_enabled(args.disable_focus_area, False): exit_code = 1
+        elif args.move_focus_area:
+            action_taken = True
+            if not args.from_index or not args.to_index:
+                logging.error("--move-focus-area requires --from-index and --to-index")
+                exit_code = 1
+            else:
+                if not controller.move_focus_area(args.from_index, args.to_index): exit_code = 1
 
         elif not action_taken:
             parser.print_help()

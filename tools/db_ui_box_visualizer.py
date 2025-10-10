@@ -1,19 +1,3 @@
-"""
-UI Element Annotator (Offline Only)
-
-Offline annotator that overlays bounding boxes for actions recorded in the crawl database
-onto the corresponding screenshots. No AI requests are performed.
-
-It reads target_bounding_box from mapped_action_json (preferred) or ai_suggestion_json
-in steps_log, resolves the screenshot for from/to screen_id, draws rectangles, and writes
-annotated images plus an index.html gallery in the output directory.
-
-Usage examples:
-  python -m tools.ui_element_annotator --db-path "path/to/_crawl_data.db"
-  python -m tools.ui_element_annotator --db-path "path/to/_crawl_data.db" --screens-dir ".../screenshots" --out-dir ".../annotated_screenshots"
-  python -m tools.ui_element_annotator --run-id 12  # uses latest session DB via config if no db-path
-"""
-
 import os
 import sys
 import json
@@ -31,6 +15,7 @@ try:
     from traverser_ai_api.database import DatabaseManager
     from traverser_ai_api.utils import draw_rectangle_on_image
 except Exception:
+    # Fallback for running directly or different working directories
     from config import Config
     from database import DatabaseManager
     from utils import draw_rectangle_on_image
@@ -143,12 +128,12 @@ def select_latest_run_from_steps(dm: DatabaseManager) -> Optional[int]:
     try:
         rows = dm.execute_query("SELECT DISTINCT run_id FROM steps_log ORDER BY run_id DESC LIMIT 1")
         if rows:
+            # rows may be list of tuples
             val = rows[0][0] if isinstance(rows[0], (tuple, list)) else rows[0]
             return int(val)
         return None
     except Exception:
         return None
-
 
 def find_latest_existing_session(cfg: Config) -> Optional[Tuple[str, str]]:
     """Find the latest session directory for the current APP_PACKAGE with an existing DB file."""
@@ -162,6 +147,7 @@ def find_latest_existing_session(cfg: Config) -> Optional[Tuple[str, str]]:
             path = os.path.join(base, name)
             if not os.path.isdir(path):
                 continue
+            # Template: {device_id}_{app_package}_{timestamp}
             if app_pkg in name:
                 db_dir = os.path.join(path, 'database')
                 if os.path.isdir(db_dir):
@@ -183,8 +169,8 @@ def find_latest_existing_session(cfg: Config) -> Optional[Tuple[str, str]]:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Offline UI element annotator: overlays bounding boxes from DB onto screenshots.")
-    parser.add_argument("--run-id", type=int, default=None, help="Run ID to annotate. If omitted, latest run is used.")
+    parser = argparse.ArgumentParser(description="Visualize UI element bounding boxes from DB after a run.")
+    parser.add_argument("--run-id", type=int, default=None, help="Run ID to visualize. If omitted, latest run is used.")
     parser.add_argument("--limit", type=int, default=0, help="Limit number of steps processed (0 = no limit).")
     parser.add_argument("--color", type=str, default="red", help="Primary rectangle color for bounding boxes.")
     parser.add_argument("--border-color", type=str, default="black", help="Border color for rectangles.")
@@ -206,6 +192,7 @@ def main():
         latest = find_latest_existing_session(cfg)
     if args.db_path or latest:
         if args.db_path:
+            # If explicit DB, derive session dir from parent
             db_path = os.path.abspath(args.db_path)
             session_dir = os.path.dirname(os.path.dirname(db_path))
         else:
@@ -215,6 +202,7 @@ def main():
         cfg.SCREENSHOTS_DIR = args.screens_dir or os.path.join(session_dir, 'screenshots')
         cfg.ANNOTATED_SCREENSHOTS_DIR = args.out_dir or os.path.join(session_dir, 'annotated_screenshots')
     elif args.screens_dir or args.out_dir:
+        # If the user overrides dirs without db, still set them
         if args.screens_dir:
             cfg.SCREENSHOTS_DIR = os.path.abspath(args.screens_dir)
         if args.out_dir:
@@ -228,19 +216,22 @@ def main():
     if run_id is not None:
         steps = dm.get_steps_for_run(run_id)
         if not steps:
-            print(f"Run {run_id} has 0 steps in steps_log. Nothing to annotate.")
+            print(f"Run {run_id} has 0 steps in steps_log. Nothing to visualize.")
             print(f"DB: {cfg.DB_NAME}")
             return 1
     else:
-        # Fallback: annotate across all steps in DB
+        # Fallback: visualize across all steps in DB
         try:
             steps = dm._execute_sql("SELECT * FROM steps_log ORDER BY step_log_id ASC", fetch_all=True, commit=False) or []
         except Exception:
             steps = []
         if not steps:
-            print("No steps found in database. Nothing to annotate.")
+            print("No steps found in database. Nothing to visualize.")
             print(f"DB: {cfg.DB_NAME}")
             return 1
+    if not steps:
+        print(f"No steps found for run_id={run_id}.")
+        return 1
 
     os.makedirs(cfg.ANNOTATED_SCREENSHOTS_DIR, exist_ok=True)
 
@@ -253,6 +244,10 @@ def main():
         if args.limit and processed >= args.limit:
             break
 
+        # steps is a tuple; map indices per schema
+        # (step_log_id, run_id, step_number, from_screen_id, to_screen_id,
+        #  action_description, ai_suggestion_json, mapped_action_json,
+        #  execution_success, error_message, timestamp, ai_response_time_ms, total_tokens)
         try:
             step_log_id = step[0]
             from_screen_id = step[3]
@@ -265,6 +260,7 @@ def main():
 
         screen_id = from_screen_id or to_screen_id
 
+        # Prefer mapped_action_json (post-validated), fallback to ai_suggestion_json
         bbox: Optional[Dict[str, Any]] = None
         action_type: Optional[str] = None
 
@@ -289,10 +285,14 @@ def main():
             skipped += 1
             continue
 
+        # Resolve screenshot path
         screenshot_path: Optional[str] = None
         if screen_id:
             try:
                 screen_row = dm.get_screen_by_id(screen_id)
+                # screens schema:
+                # (screen_id, composite_hash, xml_hash, visual_hash, screenshot_path,
+                #  activity_name, xml_content, first_seen_timestamp, first_seen_run_id, first_seen_step_number)
                 if screen_row and isinstance(screen_row, (tuple, list)):
                     screenshot_path = screen_row[4] if len(screen_row) >= 5 else None
             except Exception:
@@ -307,6 +307,7 @@ def main():
             skipped += 1
             continue
 
+        # Determine image dimensions
         try:
             with Image.open(screenshot_path) as im:
                 img_w, img_h = im.size
@@ -332,10 +333,11 @@ def main():
             skipped += 1
             continue
 
+        # Create output filename
         base_name = os.path.basename(screenshot_path)
         name_root, _ = os.path.splitext(base_name)
         action_suffix = action_type or "action"
-        out_name = f"annotated_{name_root}_step{step_log_id}_{action_suffix}.png"
+        out_name = f"db_annotated_{name_root}_step{step_log_id}_{action_suffix}.png"
         out_path = os.path.join(cfg.ANNOTATED_SCREENSHOTS_DIR, out_name)
 
         if save_bytes(out_path, out_bytes):
@@ -343,6 +345,7 @@ def main():
         else:
             skipped += 1
 
+    # Generate index.html for easy browsing
     generate_index_html(cfg.ANNOTATED_SCREENSHOTS_DIR)
 
     print(f"Annotated images saved: {processed}, skipped: {skipped}")
@@ -350,5 +353,5 @@ def main():
     return 0 if processed > 0 else 1
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     raise SystemExit(main())

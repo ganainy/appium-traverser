@@ -136,10 +136,23 @@ if __name__ == "__main__":
     # These checks can remain with bootstrap_logger
     if cfg.ENABLE_TRAFFIC_CAPTURE and not cfg.PCAPDROID_API_KEY and cfg.PCAPDROID_PACKAGE == "com.emanuelef.remote_capture":
         bootstrap_logger.warning("PCAPDROID_API_KEY is not set, but traffic capture is enabled for PCAPdroid. Capture might fail if API key is required.")
-    if not cfg.GEMINI_API_KEY:
-        bootstrap_logger.warning("GEMINI_API_KEY is not set. AI-dependent features will likely fail.")
-    else:
-        bootstrap_logger.info("GEMINI_API_KEY is set.")
+    # Provider-agnostic credential check
+    ai_provider = str(getattr(cfg, 'AI_PROVIDER', 'gemini')).lower()
+    if ai_provider == 'gemini':
+        if not getattr(cfg, 'GEMINI_API_KEY', None):
+            bootstrap_logger.warning("GEMINI_API_KEY is not set. AI-dependent features may fail when using provider 'gemini'.")
+        else:
+            bootstrap_logger.info("Gemini API key detected.")
+    elif ai_provider == 'openrouter':
+        if not getattr(cfg, 'OPENROUTER_API_KEY', None):
+            bootstrap_logger.warning("OPENROUTER_API_KEY is not set. AI-dependent features may fail when using provider 'openrouter'.")
+        else:
+            bootstrap_logger.info("OpenRouter API key detected.")
+    elif ai_provider == 'ollama':
+        if not getattr(cfg, 'OLLAMA_BASE_URL', None) and not os.getenv('OLLAMA_HOST', None):
+            bootstrap_logger.warning("OLLAMA_BASE_URL/OLLAMA_HOST is not set. AI-dependent features may fail when using provider 'ollama'.")
+        else:
+            bootstrap_logger.info("Ollama base URL detected.")
 
     current_app_package = cfg.APP_PACKAGE
     current_app_activity = cfg.APP_ACTIVITY
@@ -219,7 +232,8 @@ if __name__ == "__main__":
            and key not in ['DEFAULTS_MODULE_PATH', 'USER_CONFIG_FILE_PATH', 'BASE_DIR']
     }
     for const_key in ['APP_PACKAGE', 'APP_ACTIVITY', 'LOG_LEVEL', 'OUTPUT_DATA_DIR', 'LOG_DIR',
-                      'DB_NAME', 'GEMINI_API_KEY', 'ALLOWED_EXTERNAL_PACKAGES', 'SHUTDOWN_FLAG_PATH']:
+                      'DB_NAME', 'ALLOWED_EXTERNAL_PACKAGES', 'SHUTDOWN_FLAG_PATH',
+                      'GEMINI_API_KEY', 'OPENROUTER_API_KEY', 'OLLAMA_BASE_URL']:
         if hasattr(cfg, const_key):
              app_component_config[const_key] = getattr(cfg, const_key)
     
@@ -240,6 +254,150 @@ if __name__ == "__main__":
         root_logger.info("AppCrawler initialized. Starting crawl...")
         crawler_instance.run() # This internally calls asyncio.run()
         root_logger.info("AppCrawler crawl process finished normally.")
+
+        # --- Auto-run UI Element Annotation after each crawl (provider-agnostic) ---
+        try:
+            screenshots_dir = getattr(cfg, 'SCREENSHOTS_DIR', None)
+            app_identifier = getattr(cfg, 'APP_PACKAGE', None)
+
+            if not screenshots_dir or not os.path.isdir(screenshots_dir):
+                root_logger.debug("UI Annotation: No screenshots directory found; skipping auto-annotation.")
+            elif not app_identifier:
+                root_logger.debug("UI Annotation: APP_PACKAGE not set; skipping auto-annotation.")
+            else:
+                # Resolve provider, model, and API key/base URL from config
+                provider = str(getattr(cfg, 'AI_PROVIDER', 'gemini')).lower()
+                model_name = str(getattr(cfg, 'DEFAULT_MODEL_TYPE', '')).strip()
+                api_key_or_base = None
+                if provider == 'gemini':
+                    api_key_or_base = getattr(cfg, 'GEMINI_API_KEY', None)
+                elif provider == 'openrouter':
+                    api_key_or_base = getattr(cfg, 'OPENROUTER_API_KEY', None)
+                elif provider == 'ollama':
+                    # For Ollama, we pass base URL as the "api_key" param to the adapter
+                    api_key_or_base = getattr(cfg, 'OLLAMA_BASE_URL', None) or os.getenv('OLLAMA_HOST', None)
+
+                if not api_key_or_base:
+                    root_logger.debug(f"UI Annotation: Missing credentials/base for provider '{provider}'; skipping auto-annotation.")
+                elif not model_name:
+                    root_logger.debug("UI Annotation: DEFAULT_MODEL_TYPE not set; skipping auto-annotation.")
+                else:
+                    # Prepare output directory and file
+                    output_base_dir = os.path.join(getattr(cfg, 'OUTPUT_DATA_DIR', 'output_data'), 'annotations')
+                    os.makedirs(output_base_dir, exist_ok=True)
+                    output_file_path = os.path.join(output_base_dir, f"{app_identifier}_annotations.json")
+
+                    # Import model adapters and PIL
+                    try:
+                        try:
+                            from .model_adapters import create_model_adapter
+                        except ImportError:
+                            from model_adapters import create_model_adapter
+                        from PIL import Image
+                        import re
+                        import glob
+                    except Exception as imp_err:
+                        root_logger.error(f"UI Annotation: Failed to import dependencies: {imp_err}", exc_info=True)
+                        raise
+
+                    # Initialize adapter
+                    try:
+                        adapter = create_model_adapter(provider, api_key_or_base, model_name)
+                        generation_cfg = {
+                            'generation_config': {
+                                'temperature': 0.3,
+                                'top_p': 0.8,
+                                'top_k': 20,
+                                'max_output_tokens': 2048
+                            }
+                        }
+                        adapter.initialize(generation_cfg, safety_settings=getattr(cfg, 'AI_SAFETY_SETTINGS', {}))
+                    except Exception as init_err:
+                        root_logger.error(f"UI Annotation: Failed to initialize model adapter for provider '{provider}': {init_err}", exc_info=True)
+                        raise
+
+                    # Helper to clean JSON-like responses
+                    def _clean_json_response(text: str) -> str:
+                        try:
+                            text = re.sub(r"```(?:json)?\s*|\s*```", "", text or "")
+                            text = re.sub(r",(\s*[\]}])", r"\1", text)
+                            text = text.strip()
+                            if not text.startswith('['):
+                                si = text.find('[')
+                                if si != -1:
+                                    text = text[si:]
+                            if not text.endswith(']'):
+                                ei = text.rfind(']')
+                                if ei != -1:
+                                    text = text[:ei+1]
+                            return text
+                        except Exception:
+                            return text or "[]"
+
+                    # Build prompt (provider-agnostic)
+                    prompt = (
+                        "Analyze this screenshot and identify ALL UI elements visible in the image. "
+                        "For each element, return JSON with: type (button, editText, textView, etc.), "
+                        "description (optional), resource_id (optional), and normalized bounding_box coordinates "
+                        "with top_left [y1, x1] and bottom_right [y2, x2] where values are 0.0-1.0. "
+                        "IMPORTANT: Respond ONLY with a JSON array; no extra text."
+                    )
+
+                    # Collect screenshots (*.png, *.jpg, *.jpeg, *.webp)
+                    patterns = ["*.png", "*.jpg", "*.jpeg", "*.webp"]
+                    image_files = []
+                    for pat in patterns:
+                        image_files.extend(glob.glob(os.path.join(screenshots_dir, pat)))
+
+                    if not image_files:
+                        root_logger.debug("UI Annotation: No images found to annotate; skipping.")
+                    else:
+                        results = {}
+                        failed = []
+                        root_logger.info(f"UI Annotation: Starting automatic UI element annotation using provider '{provider}' and model '{model_name}'.")
+                        for img_path in sorted(image_files):
+                            try:
+                                with Image.open(img_path) as img:
+                                    response_text, meta = adapter.generate_response(
+                                        prompt=prompt,
+                                        image=img,
+                                        image_format=getattr(cfg, 'IMAGE_FORMAT', 'JPEG'),
+                                        image_quality=getattr(cfg, 'IMAGE_QUALITY', 70)
+                                    )
+                                cleaned = _clean_json_response(response_text)
+                                try:
+                                    data = json.loads(cleaned)
+                                    if isinstance(data, list):
+                                        results[os.path.basename(img_path)] = data
+                                    else:
+                                        root_logger.warning(f"UI Annotation: Non-list JSON for {os.path.basename(img_path)}; marking as failed.")
+                                        failed.append(os.path.basename(img_path))
+                                except json.JSONDecodeError:
+                                    root_logger.warning(f"UI Annotation: JSON decode failed for {os.path.basename(img_path)}; marking as failed.")
+                                    failed.append(os.path.basename(img_path))
+                            except Exception as per_img_err:
+                                root_logger.warning(f"UI Annotation: Error annotating {os.path.basename(img_path)}: {per_img_err}")
+                                failed.append(os.path.basename(img_path))
+
+                        # Save results
+                        if results:
+                            try:
+                                with open(output_file_path, 'w', encoding='utf-8') as f:
+                                    json.dump(results, f, indent=2, ensure_ascii=False)
+                                root_logger.info(f"UI Annotation: Completed. Results saved to: {output_file_path}")
+                            except Exception as save_err:
+                                root_logger.error(f"UI Annotation: Failed to save results: {save_err}", exc_info=True)
+                        # Save failed list if any
+                        if failed:
+                            try:
+                                failed_list_file = os.path.join(output_base_dir, f"{app_identifier}_annotations_failed.txt")
+                                with open(failed_list_file, 'w', encoding='utf-8') as f:
+                                    f.write('\n'.join(failed))
+                                root_logger.info(f"UI Annotation: Failed to process {len(failed)} images. List saved to: {failed_list_file}")
+                            except Exception as fail_save_err:
+                                root_logger.error(f"UI Annotation: Failed to save failed image list: {fail_save_err}", exc_info=True)
+        except Exception as outer_ann_err:
+            root_logger.error(f"UI Annotation: Unexpected error in auto-annotation block: {outer_ann_err}", exc_info=True)
 
     except KeyboardInterrupt:
         root_logger.warning("KeyboardInterrupt received in main.py. Signaling application shutdown.")

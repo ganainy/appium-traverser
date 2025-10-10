@@ -243,9 +243,13 @@ python demo_agent.py --api-key "your-api-key" --screenshot "path/to/screenshot.p
 
 ## Complete Setup & Usage
 
-📖 **[See CONSOLIDATED_SETUP_GUIDE.md](./CONSOLIDATED_SETUP_GUIDE.md)** for comprehensive setup instructions, usage examples, configuration options, and troubleshooting.
+📖 See the detailed guide: [INSTALLATION_AND_CLI_GUIDE.md](./docs/INSTALLATION_AND_CLI_GUIDE.md) for comprehensive setup instructions, full CLI reference, configuration options, and troubleshooting.
 
-### Running the UI in a Virtual Environment (Windows)
+## Additional Resources
+
+For full installation instructions, advanced configuration, service prerequisites (Appium, MobSF, PCAPdroid, Ollama), and the complete CLI command reference, please see:
+
+- docs/INSTALLATION_AND_CLI_GUIDE.md
 
 - Create the environment: `py -3 -m venv .venv`
 - Activate in PowerShell: `\.venv\Scripts\Activate.ps1`
