@@ -208,12 +208,12 @@ The agent-based architecture is centered around the `AgentAssistant` class in `t
 
 ### Health App List Caching
 
-When scanning installed apps and toggling AI filtering, the UI now maintains separate per-device caches to prevent overwriting:
+When scanning installed apps and toggling AI filtering, the system now stores caches in a stable, per-device directory (not tied to a run session), using device-specific filenames:
 
-- AI filtering OFF: `output_data/app_info/<device_id>/health_apps_all.json`
-- AI filtering ON:  `output_data/app_info/<device_id>/health_apps_ai.json`
+- AI filtering OFF: `output_data/app_info/<device_id>/device_<device_id>_all_apps.json`
+- AI filtering ON:  `output_data/app_info/<device_id>/device_<device_id>_filtered_health_apps.json`
 
-The application automatically reads and writes the appropriate cache based on your current AI filter setting and persists device-specific relative paths in the configuration.
+The application reads/writes these stable caches based on your current AI filter setting and persists device-specific relative paths in the configuration. Per-run session folders continue to store run-specific artifacts (logs, screenshots, DB, etc.), but app_info caches are maintained separately for reuse across runs.
 
 ### Testing
 
@@ -281,6 +281,13 @@ OpenRouter provides curated routing across high-quality models using an OpenAI-c
 
 Notes
 - If `OPENROUTER_MODELS` is missing in configuration, the app falls back to resilient defaults (`openrouter-auto`, `openrouter-auto-fast`). Model selection is dropdown-only.
+
+Refresh OpenRouter models metadata via CLI (same logic as the UI refresh button):
+
+```powershell
+python -m traverser_ai_api.cli_controller --refresh-openrouter-models
+```
+Requires `OPENROUTER_API_KEY` in `.env`. Cache is written to `output_data/cache/openrouter_models.json`.
 
 ## Architecture
 

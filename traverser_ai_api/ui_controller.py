@@ -410,14 +410,7 @@ class CrawlerControllerWindow(QMainWindow):
                         "orange",
                     )
 
-                    # Check if this is the generic health_apps.json file - if so, convert to device-specific
-                    filename = os.path.basename(self.current_health_app_list_file)
-                    if filename == "health_apps.json":
-                        device_id = self.health_app_scanner._get_current_device_id()
-                        self.log_message(
-                            f"Using generic health apps config with device ID: {device_id}",
-                            "blue",
-                        )
+                    # No longer support generic alias files; proceed to resolve device-specific path
 
             # If we reach here, we need to find the health app file for the current device
             self.log_message(
@@ -436,15 +429,15 @@ class CrawlerControllerWindow(QMainWindow):
                 self.current_health_app_list_file = device_file_path
                 self.health_app_scanner._load_health_apps_from_file(device_file_path)
 
-                # Update the config with the generic path, not device-specific
-                generic_path = os.path.join(
-                    getattr(self.config, "OUTPUT_DATA_DIR", "output_data"),
-                    "app_info",
-                    "health_apps.json",
-                )
+                # Persist device-specific path in config
+                # Use a relative path based on UI scanner's api_dir when available
+                try:
+                    rel_path = os.path.relpath(device_file_path, self.health_app_scanner.api_dir)
+                except Exception:
+                    rel_path = device_file_path
                 self.config.update_setting_and_save(
                     "CURRENT_HEALTH_APP_LIST_FILE",
-                    generic_path,
+                    rel_path,
                     self._sync_user_config_files,
                 )
                 return
@@ -457,15 +450,14 @@ class CrawlerControllerWindow(QMainWindow):
             # Store the path where the file would be created
             self.current_health_app_list_file = device_file_path
 
-            # Update config with generic path
-            generic_path = os.path.join(
-                getattr(self.config, "OUTPUT_DATA_DIR", "output_data"),
-                "app_info",
-                "health_apps.json",
-            )
+            # Persist expected device-specific path in config
+            try:
+                rel_path = os.path.relpath(device_file_path, self.health_app_scanner.api_dir)
+            except Exception:
+                rel_path = device_file_path
             self.config.update_setting_and_save(
                 "CURRENT_HEALTH_APP_LIST_FILE",
-                generic_path,
+                rel_path,
                 self._sync_user_config_files,
             )
 

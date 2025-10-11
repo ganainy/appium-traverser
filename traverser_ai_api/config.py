@@ -153,7 +153,9 @@ class Config:
         self._SESSION_DIR_TEMPLATE = (
             "{output_data_dir}/{{device_id}}_{{app_package}}_{{timestamp}}"
         )
-        self._APP_INFO_OUTPUT_DIR_TEMPLATE = "{session_dir}/app_info/{device_id}"
+        # Store app_info outside the per-run session so it can be reused across runs
+        # New stable location: <OUTPUT_DATA_DIR>/app_info/<device_id>
+        self._APP_INFO_OUTPUT_DIR_TEMPLATE = "{output_data_dir}/app_info/{device_id}"
         self._SCREENSHOTS_DIR_TEMPLATE = "{session_dir}/screenshots"
         self._ANNOTATED_SCREENSHOTS_DIR_TEMPLATE = "{session_dir}/annotated_screenshots"
         self._TRAFFIC_CAPTURE_OUTPUT_DIR_TEMPLATE = "{session_dir}/traffic_captures"
@@ -733,10 +735,27 @@ class Config:
         )
 
         resolved_path = template
+        # Replace known placeholders
         if "{session_dir}" in resolved_path:
             resolved_path = resolved_path.replace("{session_dir}", session_dir)
+        if "{output_data_dir}" in resolved_path:
+            # Ensure OUTPUT_DATA_DIR is resolved before use
+            output_dir = getattr(self, "OUTPUT_DATA_DIR", None)
+            if not output_dir:
+                # Resolve OUTPUT_DATA_DIR based on template if not already set
+                if not os.path.isabs(self._OUTPUT_DATA_DIR_TEMPLATE):
+                    output_dir = os.path.abspath(
+                        os.path.join(self.BASE_DIR, self._OUTPUT_DATA_DIR_TEMPLATE)
+                    )
+                else:
+                    output_dir = os.path.abspath(self._OUTPUT_DATA_DIR_TEMPLATE)
+                self.OUTPUT_DATA_DIR = output_dir
+            resolved_path = resolved_path.replace("{output_data_dir}", output_dir)
         if "{package}" in resolved_path:
             resolved_path = resolved_path.replace("{package}", package_segment)
+        if "{device_id}" in resolved_path:
+            device_id = getattr(self, "TARGET_DEVICE_UDID", None) or "unknown_device"
+            resolved_path = resolved_path.replace("{device_id}", device_id)
 
         if not os.path.isabs(resolved_path):
             return os.path.abspath(os.path.join(self.BASE_DIR, resolved_path))
@@ -893,7 +912,7 @@ ALLOWED_EXTERNAL_PACKAGES = [
 
 OUTPUT_DATA_DIR = "output_data"  # This is a template name, Config class makes it a path
 SESSION_DIR = "{output_data_dir}/{device_id}_{app_package}_{timestamp}"
-APP_INFO_OUTPUT_DIR = "{session_dir}/app_info"
+APP_INFO_OUTPUT_DIR = "{output_data_dir}/app_info/{device_id}"
 SCREENSHOTS_DIR = "{session_dir}/screenshots"
 ANNOTATED_SCREENSHOTS_DIR = "{session_dir}/annotated_screenshots"
 TRAFFIC_CAPTURE_OUTPUT_DIR = "{session_dir}/traffic_captures"

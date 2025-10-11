@@ -125,12 +125,12 @@ class HealthAppScanner(QObject):
     def _get_device_health_app_file_path(
         self, device_id=None, suffix: Optional[str] = None
     ):
-        """Get the path to the health app file for the current or specified device.
+        """Get the device-specific app info cache path for the current or specified device.
 
-        Caching change: maintain separate caches per device based on filtering mode.
-        - suffix='all'           -> all_apps.json
-        - suffix='health_filtered' -> health_apps_ai.json
-        - suffix=None            -> defaults to 'all'
+        Caching: maintain separate caches per device based on filtering mode using device-specific filenames.
+        - suffix='all'             -> device_<device_id>_all_apps.json
+        - suffix='health_filtered' -> device_<device_id>_filtered_health_apps.json
+        - suffix=None              -> defaults to 'all'
         """
         if not device_id:
             device_id = self._get_current_device_id()
@@ -142,13 +142,15 @@ class HealthAppScanner(QObject):
             device_id,
         )
         os.makedirs(app_info_dir, exist_ok=True)
-        # Determine filename by suffix
+        # Determine device-specific filename by suffix
         suffix = (suffix or "all").strip()
-        if suffix == "health_filtered":
-            filename = "health_apps_ai.json"
-        else:
-            # default and any unknown -> treat as all
-            filename = "all_apps.json"
+        if suffix not in ("all", "health_filtered"):
+            suffix = "all"
+        filename = (
+            f"device_{device_id}_all_apps.json"
+            if suffix == "all"
+            else f"device_{device_id}_filtered_health_apps.json"
+        )
         device_json_path = os.path.join(app_info_dir, filename)
         return device_json_path
 
@@ -771,9 +773,11 @@ class HealthAppScanner(QObject):
                     "app_info",
                     self._get_current_device_id(),
                 )
+                # Prefer device-specific cache files and ignore generic aliases
+                device_id = self._get_current_device_id()
                 candidate_files = [
-                    os.path.join(app_info_dir, "health_apps_ai.json"),
-                    os.path.join(app_info_dir, "all_apps.json"),
+                    os.path.join(app_info_dir, f"device_{device_id}_filtered_health_apps.json"),
+                    os.path.join(app_info_dir, f"device_{device_id}_all_apps.json"),
                 ]
                 existing_files = [p for p in candidate_files if os.path.exists(p)]
                 if existing_files:

@@ -1138,10 +1138,12 @@ class UIComponents:
 
     @staticmethod
     def _get_openrouter_cache_path() -> str:
-        base_dir = os.path.dirname(os.path.dirname(__file__))
-        cache_dir = os.path.join(base_dir, "output_data", "cache")
-        os.makedirs(cache_dir, exist_ok=True)
-        return os.path.join(cache_dir, "openrouter_models.json")
+        # Delegate to central utility to avoid UI-only coupling
+        try:
+            from ..openrouter_models import get_openrouter_cache_path
+        except ImportError:
+            from openrouter_models import get_openrouter_cache_path
+        return get_openrouter_cache_path()
 
     @staticmethod
     def _load_openrouter_models_from_cache() -> Optional[list]:
@@ -1182,24 +1184,13 @@ class UIComponents:
     @staticmethod
     def _save_openrouter_models_to_cache(models: List[Dict[str, Any]]) -> None:
         try:
-            cache_path = UIComponents._get_openrouter_cache_path()
-            # Build index mapping for fast lookup
-            index: Dict[str, int] = {}
-            for i, m in enumerate(models):
-                mid = m.get("id") or m.get("name")
-                if mid:
-                    index[str(mid)] = i
-            payload = {
-                "schema_version": 1,
-                "timestamp": int(time.time()),
-                "models": models,
-                "index": index,
-            }
-            with open(cache_path, "w", encoding="utf-8") as f:
-                json.dump(payload, f, ensure_ascii=False, indent=2)
-            logging.info(f"OpenRouter cache saved with schema v1; models: {len(models)}")
+            try:
+                from ..openrouter_models import save_openrouter_models_to_cache
+            except ImportError:
+                from openrouter_models import save_openrouter_models_to_cache
+            save_openrouter_models_to_cache(models)
         except Exception as e:
-            logging.debug(f"Failed to save OpenRouter cache: {e}")
+            logging.debug(f"Failed to save OpenRouter cache via central utility: {e}")
 
     @staticmethod
     def _is_openrouter_model_vision(model_id: str) -> bool:
@@ -1459,96 +1450,15 @@ class UIComponents:
 
     @staticmethod
     def _background_refresh_openrouter_models() -> None:
-        """Background refresh to upgrade old cache to enriched schema without UI coupling."""
-        def _worker():
-            try:
-                # Load API key via Config to respect .env
-                try:
-                    from ..config import Config
-                except ImportError:
-                    from config import Config
-                cfg = Config()
-                api_key = getattr(cfg, "OPENROUTER_API_KEY", None)
-                if not api_key:
-                    return
-                import requests
-                headers = {
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                }
-                resp = requests.get("https://openrouter.ai/api/v1/models", headers=headers, timeout=20)
-                if resp.status_code != 200:
-                    return
-                data = resp.json()
-                models = data.get("data") or data.get("models") or []
-                normalized: List[Dict[str, Any]] = []
-                for m in models:
-                    mid = m.get("id") or m.get("name")
-                    if not mid:
-                        continue
-                    name = m.get("name") or m.get("canonical_slug") or str(mid)
-                    architecture = m.get("architecture") or {}
-                    input_modalities = architecture.get("input_modalities") or []
-                    output_modalities = architecture.get("output_modalities") or []
-                    supported_parameters = m.get("supported_parameters") or []
-                    pricing = m.get("pricing") if isinstance(m.get("pricing"), dict) else None
-                    top_provider = m.get("top_provider") if isinstance(m.get("top_provider"), dict) else None
-                    context_length = (
-                        m.get("context_length")
-                        or (top_provider or {}).get("context_length")
-                    )
-                    supports_image = "image" in (input_modalities or [])
-                    def _pricing_is_free(p: Any) -> bool:
-                        try:
-                            if isinstance(p, dict):
-                                for v in p.values():
-                                    if isinstance(v, (int, float)) and v == 0:
-                                        return True
-                                    if isinstance(v, str) and ("free" in v.lower() or "$0" in v or v.strip() == "0"):
-                                        return True
-                                    if isinstance(v, dict):
-                                        for vv in v.values():
-                                            if isinstance(vv, (int, float)) and vv == 0:
-                                                return True
-                                            if isinstance(vv, str) and ("free" in vv.lower() or "$0" in vv or vv.strip() == "0"):
-                                                return True
-                            return False
-                        except Exception:
-                            return False
-                    is_free = _pricing_is_free(pricing) or ("(free" in name.lower()) or (str(mid).lower().endswith(":free"))
-                    supports_tools = "tools" in supported_parameters
-                    supports_structured_outputs = "structured_outputs" in supported_parameters or "response_format" in supported_parameters
-                    entry = {
-                        "id": mid,
-                        "name": name,
-                        "canonical_slug": m.get("canonical_slug"),
-                        "created": m.get("created") or m.get("created_at"),
-                        "description": m.get("description"),
-                        "context_length": context_length,
-                        "architecture": {
-                            "input_modalities": input_modalities,
-                            "output_modalities": output_modalities,
-                            "tokenizer": architecture.get("tokenizer"),
-                            "instruct_type": architecture.get("instruct_type"),
-                        },
-                        "supported_parameters": supported_parameters,
-                        "pricing": pricing,
-                        "top_provider": top_provider,
-                        "per_request_limits": m.get("per_request_limits"),
-                        "supports_image": supports_image,
-                        "is_free": is_free,
-                        "supports_tools": supports_tools,
-                        "supports_structured_outputs": supports_structured_outputs,
-                    }
-                    normalized.append(entry)
-                if normalized:
-                    UIComponents._save_openrouter_models_to_cache(normalized)
-            except Exception as e:
-                logging.debug(f"Background OpenRouter refresh failed: {e}")
+        """Background refresh delegating to central utility (UI-agnostic)."""
         try:
-            threading.Thread(target=_worker, daemon=True).start()
+            try:
+                from ..openrouter_models import background_refresh_openrouter_models
+            except ImportError:
+                from openrouter_models import background_refresh_openrouter_models
+            background_refresh_openrouter_models()
         except Exception as e:
-            logging.debug(f"Failed to start background refresh thread: {e}")
+            logging.debug(f"Failed to queue background OpenRouter refresh via central utility: {e}")
 
     @staticmethod
     def _create_focus_areas_group(

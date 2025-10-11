@@ -1,4 +1,3 @@
-<!-- filepath: e:\Vertiefung\appium-traverser-vertiefung\CONSOLIDATED_SETUP_GUIDE.md -->
 # AI-Driven Android App Crawler - Complete Setup & Usage Guide
 
 ## Table of Contents
@@ -15,6 +14,8 @@
   - [OpenRouter Models Metadata & Refresh](#openrouter-models-metadata--refresh)
 - [Usage Guide](#usage-guide)
   - [CLI Controller (Recommended for Automation)](#cli-controller-recommended-for-automation)
+    - [Available Commands](#available-commands)
+    - [Analysis Examples (Simplified Workflow)](#analysis-examples-simplified-workflow)
   - [Health App List Caching](#health-app-list-caching)
 - [Configuration Management](#configuration-management)
   - [Common Configuration Options (via CLI)](#common-configuration-options-via-cli)
@@ -116,9 +117,10 @@ appium --relaxed-security
 #### Terminal 2: Use CLI Controller (ensure .venv is active)
 
 ```powershell
-python traverser_ai_api/cli_controller.py --scan-apps
-python traverser_ai_api/cli_controller.py --list-apps
-python traverser_ai_api/cli_controller.py --select-app 1 # Or by name
+python traverser_ai_api/cli_controller.py --scan-health-apps --force-rescan # or --scan-all-apps
+python traverser_ai_api/cli_controller.py --list-health-apps # or --list-all-apps
+python traverser_ai_api/cli_controller.py --select-app 1                       # select by index
+python traverser_ai_api/cli_controller.py --select-app "com.example.healthapp" # or select by package/name
 python traverser_ai_api/cli_controller.py --start
 ```
 
@@ -252,6 +254,16 @@ OPENROUTER_API_KEY=your_openrouter_api_key_here
   - Auto-disabled: `Image context disabled due to provider payload limits (max X KB).`
   - Unknown capability: `Capability unknown; metadata not available.`
 
+CLI refresh (same logic as UI, runs in background):
+
+```powershell
+python -m traverser_ai_api.cli_controller --refresh-openrouter-models
+```
+
+Requirements:
+- Set `OPENROUTER_API_KEY` in `.env`
+- Cache path: `output_data/cache/openrouter_models.json`
+
 
 ## Usage Guide
 
@@ -307,12 +319,19 @@ python traverser_ai_api/cli_controller.py --start
 
 ### Health App List Caching
 
-When scanning installed apps from the UI, the application maintains separate per-device caches to prevent overwriting when toggling AI filtering:
+When scanning installed apps, the system writes device-specific cache files to the configured APP_INFO_OUTPUT_DIR. Two deterministic caches are maintained:
 
-- AI filtering OFF: `output_data/app_info/<device_id>/all_apps.json`
-- AI filtering ON:  `output_data/app_info/<device_id>/health_apps_ai.json`
+Default location (separated from run sessions):
 
-The UI automatically selects the appropriate cache based on the filter state and persists a device-specific relative path in the configuration.
+- `output_data/app_info/<device_id>/device_<device_id>_all_apps.json`
+- `output_data/app_info/<device_id>/device_<device_id>_filtered_health_apps.json`
+
+APP_INFO_OUTPUT_DIR resolves to `OUTPUT_DATA_DIR/app_info/<device_id>`, so caches are stable per device and reusable across multiple runs.
+
+- All apps (no AI filtering): `device_<device_id>_all_apps.json`
+- Health apps (AI-filtered):  `device_<device_id>_filtered_health_apps.json`
+
+Both caches use a unified list key `health_apps` in the JSON output. The CLI and UI read from `health_apps` only.
 Check crawler status (can be run while crawler is active or stopped):
 ```powershell
 python traverser_ai_api/cli_controller.py --status
@@ -336,8 +355,10 @@ python traverser_ai_api/cli_controller.py --stop
 #### Available Commands:
 
 ##### App Management:
-*   `--scan-apps`: Scans the connected device/emulator for health-related applications and updates a local cache.
-*   `--list-apps`: Lists applications found by the `--scan-apps` command.
+*   `--scan-all-apps`: Scans the connected device/emulator and caches ALL installed apps (no AI filtering).
+*   `--scan-health-apps`: Scans the device and caches AI-filtered health apps (requires AI provider configured).
+*   `--list-all-apps`: Lists ALL apps from the latest all-apps cache.
+*   `--list-health-apps`: Lists HEALTH apps from the latest health-filtered cache.
 *   `--select-app <APP_NAME_OR_INDEX>`: Selects an application (by its 1-based index from `--list-apps` or by its package name) to be the target for crawling.
 
 ##### Crawler Control:
@@ -509,7 +530,7 @@ pip install -r requirements.txt --force-reinstall
     *   Ensure USB debugging is enabled on the physical device and authorized.
     *   Try a different USB cable or port.
 *   **"App not found" or "Activity not found" when starting crawl**
-    *   Run `--scan-apps` and `--select-app` first via CLI, or ensure correct package/activity in GUI.
+    *   Run `--scan-health-apps` and `--select-app` first via CLI, or ensure correct package/activity in GUI.
     *   Verify the app is actually installed on the target device.
     *   Ensure the device is unlocked and on the home screen (or any neutral state) before starting.
 *   **Permission denied errors (file access, etc.)**
@@ -528,22 +549,60 @@ Set-ExecutionPolicy RemoteSigned -Scope CurrentUser -Force
 The AppTransverser supports integration with MobSF (Mobile Security Framework) for static analysis of Android applications. To use this feature:
 
 1. Install MobSF
-   - Follow the official installation guide at [https://github.com/MobSF/Mobile-Security-Framework-MobSF](https://github.com/MobSF/Mobile-Security-Framework-MobSF)
-   - Basic installation steps:
+   - Option A) Docker (recommended)
+     - Prerequisites: Install and start Docker Desktop (Windows/macOS) or Docker Engine (Linux). Wait until Docker reports “Running”.
+     - Windows tip: If you see pipe errors like `dockerDesktopLinuxEngine ... cannot find the file specified`, switch context to default:
+       ```powershell
+       docker context ls
+       docker context use default
+       ```
+     - Run MobSF (basic, ephemeral storage):
+       ```powershell
+       docker pull opensecurity/mobile-security-framework-mobsf:latest
+       docker run -d --name mobsf -p 8000:8000 opensecurity/mobile-security-framework-mobsf:latest
+       ```
+     - Optional: persist uploads and signatures (recommended)
+      - Windows (PowerShell):
+        ```powershell
+        mkdir C:\mobsf\uploads
+        mkdir C:\mobsf\signatures
+        # Use backtick (`) for line continuation in PowerShell and quote Windows paths
+        docker run -d --name mobsf -p 8000:8000 `
+          -v "C:\mobsf\uploads:/home/mobsf/Mobile-Security-Framework-MobSF/uploads" `
+          -v "C:\mobsf\signatures:/home/mobsf/Mobile-Security-Framework-MobSF/signatures" `
+          opensecurity/mobile-security-framework-mobsf:latest
+        ```
+       - macOS/Linux (bash):
+         ```bash
+         mkdir -p $PWD/mobsf/uploads $PWD/mobsf/signatures
+         docker run -d --name mobsf -p 8000:8000 \
+           -v "$PWD/mobsf/uploads:/home/mobsf/Mobile-Security-Framework-MobSF/uploads" \
+           -v "$PWD/mobsf/signatures:/home/mobsf/Mobile-Security-Framework-MobSF/signatures" \
+           opensecurity/mobile-security-framework-mobsf:latest
+         ```
+     - Common Docker commands:
+       ```powershell
+       docker ps --filter name=mobsf       # see status
+       docker start mobsf                  # start existing container
+       docker stop mobsf                   # stop
+       docker rm -f mobsf                  # remove (then re-run docker run)
+       ```
+   - Option B) Native install (without Docker)
+     - Follow the official guide: [https://github.com/MobSF/Mobile-Security-Framework-MobSF](https://github.com/MobSF/Mobile-Security-Framework-MobSF)
+     - Basic steps:
+       ```bash
+       # Clone the repository
+       git clone https://github.com/MobSF/Mobile-Security-Framework-MobSF.git
+       cd Mobile-Security-Framework-MobSF
 
-     ```bash
-     # Clone the repository
-     git clone https://github.com/MobSF/Mobile-Security-Framework-MobSF.git
-     cd Mobile-Security-Framework-MobSF
-
-     # Setup
-     ./setup.sh    # For Linux/Mac
-     setup.bat     # For Windows
-     
-     # Run MobSF
-     ./run.sh      # For Linux/Mac
-     run.bat       # For Windows
-     ```
+       # Setup
+       ./setup.sh    # For Linux/Mac
+       setup.bat     # For Windows
+       
+       # Run MobSF
+       ./run.sh      # For Linux/Mac
+       run.bat       # For Windows
+       ```
 
 2. Get your MobSF API Key
    - Start MobSF and access the web interface (typically at [http://localhost:8000](http://localhost:8000))
@@ -608,23 +667,63 @@ This section consolidates installing and configuring the required services and t
 ## 4) MobSF (Mobile Security Framework)
 Recommended via Docker.
 
-- Pull and run MobSF:
-  ```powershell
-  docker run -d --name mobsf -p 8000:8000 opensecurity/mobile-security-framework-mobsf:latest
-  ```
-- Open the UI: http://localhost:8000
-- Copy your API Key from the MobSF UI.
-- Configure:
-  - `MOBSF_API_URL`: `http://localhost:8000`
-  - `MOBSF_API_KEY`: your key
-- Test via CLI:
-  ```powershell
-  python -m traverser_ai_api.cli_controller --test-mobsf-connection
-  ```
-- Run analysis for the selected app:
-  ```powershell
-  python -m traverser_ai_api.cli_controller --run-mobsf-analysis
-  ```
+1. Ensure Docker is running
+   - Windows/macOS: Start Docker Desktop and wait until it shows “Running”.
+   - Windows tip: If you get pipe errors referring to `dockerDesktopLinuxEngine`, switch context to default:
+     ```powershell
+     docker context ls
+     docker context use default
+     ```
+
+2. Pull the image
+   ```powershell
+   docker pull opensecurity/mobile-security-framework-mobsf:latest
+   ```
+
+3. Run MobSF
+   - Quick start (no persistent volumes):
+     ```powershell
+     docker run -d --name mobsf -p 8000:8000 opensecurity/mobile-security-framework-mobsf:latest
+     ```
+   - With persistence (recommended):
+    - Windows (PowerShell):
+      ```powershell
+      mkdir C:\mobsf\uploads
+      mkdir C:\mobsf\signatures
+      docker run -d --name mobsf -p 8000:8000 `
+        -v "C:\mobsf\uploads:/home/mobsf/Mobile-Security-Framework-MobSF/uploads" `
+        -v "C:\mobsf\signatures:/home/mobsf/Mobile-Security-Framework-MobSF/signatures" `
+        opensecurity/mobile-security-framework-mobsf:latest
+      ```
+     - macOS/Linux (bash):
+       ```bash
+       mkdir -p $PWD/mobsf/uploads $PWD/mobsf/signatures
+       docker run -d --name mobsf -p 8000:8000 \
+         -v "$PWD/mobsf/uploads:/home/mobsf/Mobile-Security-Framework-MobSF/uploads" \
+         -v "$PWD/mobsf/signatures:/home/mobsf/Mobile-Security-Framework-MobSF/signatures" \
+         opensecurity/mobile-security-framework-mobsf:latest
+       ```
+
+4. Verify and manage
+   ```powershell
+   docker ps --filter name=mobsf    # should show mobsf with port 8000
+   docker start mobsf               # start existing container
+   docker stop mobsf                # stop
+   docker rm -f mobsf               # remove
+   ```
+
+5. Open MobSF UI and configure
+   - Open the UI: http://localhost:8000
+   - Copy your API Key from Settings.
+   - AppTransverser configuration:
+     - `MOBSF_API_URL`: `http://localhost:8000`
+     - `MOBSF_API_KEY`: your key
+
+6. Test and run analysis
+   ```powershell
+   python -m traverser_ai_api.cli_controller --test-mobsf-connection
+   python -m traverser_ai_api.cli_controller --run-mobsf-analysis
+   ```
 
 ## 5) PCAPDroid (Optional: Traffic Capture)
 PCAPDroid captures device network traffic. Install on your Android device (F-Droid or official sources).
@@ -676,8 +775,10 @@ python -m traverser_ai_api.cli_controller <options>
 - `--force-rescan` — Force app rescan when scanning.
 
 ## App Management
-- `--scan-apps` — Scan device for health-related apps.
-- `--list-apps` — List available health apps from last scan.
+- `--scan-all-apps` — Scan device and cache ALL installed apps (no AI filtering).
+- `--scan-health-apps` — Scan device and cache AI-filtered HEALTH apps.
+- `--list-all-apps` — List all apps from the latest all-apps cache.
+- `--list-health-apps` — List health apps from the latest health-filtered cache.
 - `--select-app ID_OR_NAME` — Select app by 1-based index or name/package substring.
 
 ## Crawler Control
@@ -716,6 +817,10 @@ python -m traverser_ai_api.cli_controller <options>
 - `--move-focus-area --from-index N --to-index M` — Reorder areas (1-based indices).
 
 ---
+
+## AI Providers
+
+- `--refresh-openrouter-models` — Fetch latest OpenRouter models and refresh the local cache (background). Requires `OPENROUTER_API_KEY` in `.env`. Writes to `output_data/cache/openrouter_models.json`.
 
 # Pre-Crawl Checklist
 

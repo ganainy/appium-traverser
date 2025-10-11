@@ -13,9 +13,10 @@ health, fitness, wellness, medical, medication management, or mental health
 categories.
 
 Output:
-- A JSON file named `<device_id>_app_info_<all|health_filtered>.json` will be
-  created in the app_info_output_dir defined by the Config object, containing a
-  list of app information dictionaries.
+- A JSON file named `device_<device_id>_<all_apps|filtered_health_apps>.json` will be
+  created in the app_info_output_dir defined by the Config object (default:
+  `OUTPUT_DATA_DIR/app_info/<device_id>`), containing a list of app information
+  dictionaries.
 """
 
 import subprocess
@@ -34,19 +35,22 @@ except ImportError:
     try:
         from .model_adapters import create_model_adapter, check_dependencies
     except ImportError as e:
-        sys.stderr.write(f"FATAL: Could not import 'model_adapters'. Ensure the module is accessible. Error: {e}\n")
+        sys.stderr.write(
+            f"FATAL: Could not import 'model_adapters'. Ensure the module is accessible. Error: {e}\n"
+        )
         sys.exit(1)
 
 # --- Try importing AI Libraries (handled via adapters) ---
-
 
 
 # --- Centralized Configuration Setup ---
 CURRENT_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 # Assuming find_app_info.py is in the same directory as config.py (e.g., within traverser_ai_api)
 # If config.py is in the project root (one level up), this needs adjustment.
-DEFAULT_CONFIG_MODULE_PATH_FOR_FIND_APP = os.path.join(CURRENT_SCRIPT_DIR, 'config.py')
-USER_CONFIG_JSON_PATH_FOR_FIND_APP = os.path.join(CURRENT_SCRIPT_DIR, "user_config.json")
+DEFAULT_CONFIG_MODULE_PATH_FOR_FIND_APP = os.path.join(CURRENT_SCRIPT_DIR, "config.py")
+USER_CONFIG_JSON_PATH_FOR_FIND_APP = os.path.join(
+    CURRENT_SCRIPT_DIR, "user_config.json"
+)
 
 # Import the Config class itself
 # This import path assumes config.py is in the same directory as find_app_info.py
@@ -58,7 +62,9 @@ except ImportError as e:
     try:
         from .config import Config
     except ImportError:
-        sys.stderr.write(f"FATAL: Could not import 'Config' class. Ensure config.py is accessible and there are no circular imports. Error: {e}\n")
+        sys.stderr.write(
+            f"FATAL: Could not import 'Config' class. Ensure config.py is accessible and there are no circular imports. Error: {e}\n"
+        )
         sys.exit(1)
 
 
@@ -66,7 +72,7 @@ except ImportError as e:
 try:
     cfg = Config(
         defaults_module_path=DEFAULT_CONFIG_MODULE_PATH_FOR_FIND_APP,
-        user_config_json_path=USER_CONFIG_JSON_PATH_FOR_FIND_APP
+        user_config_json_path=USER_CONFIG_JSON_PATH_FOR_FIND_APP,
     )
 except Exception as e:
     sys.stderr.write(f"CRITICAL ERROR initializing Config in find_app_info.py: {e}\n")
@@ -75,12 +81,14 @@ except Exception as e:
 
 # --- Now use cfg for all configurations ---
 
-if not hasattr(cfg, 'MAX_APPS_TO_SEND_TO_AI'):
+if not hasattr(cfg, "MAX_APPS_TO_SEND_TO_AI"):
     raise ValueError("MAX_APPS_TO_SEND_TO_AI must be defined in Config object")
-if not hasattr(cfg, 'THIRD_PARTY_APPS_ONLY'):
+if not hasattr(cfg, "THIRD_PARTY_APPS_ONLY"):
     raise ValueError("THIRD_PARTY_APPS_ONLY must be defined in Config object")
-if not hasattr(cfg, 'USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY'): # Used later
-    raise ValueError("USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY must be defined in Config object")
+if not hasattr(cfg, "USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY"):  # Used later
+    raise ValueError(
+        "USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY must be defined in Config object"
+    )
 
 
 CAN_ENABLE_AI_FILTERING_GLOBALLY = True  # Assume possible until checks fail
@@ -90,37 +98,41 @@ DEFAULT_AI_MODEL_NAME = None
 AI_MODEL_SAFETY_SETTINGS = None
 PROVIDER_API_KEY_OR_URL = None
 
-APP_INFO_DIR = cfg.APP_INFO_OUTPUT_DIR or os.path.join(os.getcwd(), 'app_info') # Default if None
+APP_INFO_DIR = cfg.APP_INFO_OUTPUT_DIR or os.path.join(
+    os.getcwd(), "app_info"
+)  # Default if None
 if not isinstance(APP_INFO_DIR, str):
-    APP_INFO_DIR = os.path.join(os.getcwd(), 'app_info')  # Fallback if invalid type
-os.makedirs(APP_INFO_DIR, exist_ok=True) # Ensure it exists
+    APP_INFO_DIR = os.path.join(os.getcwd(), "app_info")  # Fallback if invalid type
+os.makedirs(APP_INFO_DIR, exist_ok=True)  # Ensure it exists
 
 print("Validating AI prerequisites for filtering (using Config instance)...")
 
 # Determine which AI provider to use
-AI_PROVIDER = getattr(cfg, 'AI_PROVIDER', 'gemini').lower()
+AI_PROVIDER = getattr(cfg, "AI_PROVIDER", "gemini").lower()
 print(f"Using AI provider: {AI_PROVIDER}")
 
 # Check dependencies for selected provider
 deps_ok, deps_msg = check_dependencies(AI_PROVIDER)
 if not deps_ok:
-    print(f"Error: {deps_msg} AI Filtering will be globally unavailable.", file=sys.stderr)
+    print(
+        f"Error: {deps_msg} AI Filtering will be globally unavailable.", file=sys.stderr
+    )
     CAN_ENABLE_AI_FILTERING_GLOBALLY = False
 
 if CAN_ENABLE_AI_FILTERING_GLOBALLY:
     # Select models dict and required credentials per provider
-    model_type = getattr(cfg, 'DEFAULT_MODEL_TYPE', None)
+    model_type = getattr(cfg, "DEFAULT_MODEL_TYPE", None)
     selected_models = None
-    if AI_PROVIDER == 'gemini':
-        PROVIDER_API_KEY_OR_URL = getattr(cfg, 'GEMINI_API_KEY', None)
-        selected_models = getattr(cfg, 'GEMINI_MODELS', None)
-    elif AI_PROVIDER == 'openrouter':
-        PROVIDER_API_KEY_OR_URL = getattr(cfg, 'OPENROUTER_API_KEY', None)
-        selected_models = getattr(cfg, 'OPENROUTER_MODELS', None)
-    elif AI_PROVIDER == 'ollama':
+    if AI_PROVIDER == "gemini":
+        PROVIDER_API_KEY_OR_URL = getattr(cfg, "GEMINI_API_KEY", None)
+        selected_models = getattr(cfg, "GEMINI_MODELS", None)
+    elif AI_PROVIDER == "openrouter":
+        PROVIDER_API_KEY_OR_URL = getattr(cfg, "OPENROUTER_API_KEY", None)
+        selected_models = getattr(cfg, "OPENROUTER_MODELS", None)
+    elif AI_PROVIDER == "ollama":
         # For Ollama, "api_key" arg is actually the base URL
-        PROVIDER_API_KEY_OR_URL = getattr(cfg, 'OLLAMA_BASE_URL', None)
-        selected_models = getattr(cfg, 'OLLAMA_MODELS', None)
+        PROVIDER_API_KEY_OR_URL = getattr(cfg, "OLLAMA_BASE_URL", None)
+        selected_models = getattr(cfg, "OLLAMA_MODELS", None)
     else:
         print(f"Error: Unsupported AI provider: {AI_PROVIDER}.", file=sys.stderr)
         CAN_ENABLE_AI_FILTERING_GLOBALLY = False
@@ -128,246 +140,380 @@ if CAN_ENABLE_AI_FILTERING_GLOBALLY:
     # Validate credential / URL presence
     if CAN_ENABLE_AI_FILTERING_GLOBALLY and not PROVIDER_API_KEY_OR_URL:
         missing_key_name = {
-            'gemini': 'GEMINI_API_KEY',
-            'openrouter': 'OPENROUTER_API_KEY',
-            'ollama': 'OLLAMA_BASE_URL'
-        }.get(AI_PROVIDER, 'API_KEY')
-        print(f"Error: {missing_key_name} not found in configuration (via Config). AI Filtering will be globally unavailable.", file=sys.stderr)
+            "gemini": "GEMINI_API_KEY",
+            "openrouter": "OPENROUTER_API_KEY",
+            "ollama": "OLLAMA_BASE_URL",
+        }.get(AI_PROVIDER, "API_KEY")
+        print(
+            f"Error: {missing_key_name} not found in configuration (via Config). AI Filtering will be globally unavailable.",
+            file=sys.stderr,
+        )
         CAN_ENABLE_AI_FILTERING_GLOBALLY = False
 
     # Validate model selection (with provider-specific fallbacks)
     if CAN_ENABLE_AI_FILTERING_GLOBALLY:
         if not model_type:
-            print("Error: DEFAULT_MODEL_TYPE missing in Config. AI Filtering will be globally unavailable.", file=sys.stderr)
+            print(
+                "Error: DEFAULT_MODEL_TYPE missing in Config. AI Filtering will be globally unavailable.",
+                file=sys.stderr,
+            )
             CAN_ENABLE_AI_FILTERING_GLOBALLY = False
         else:
             # Gemini requires a valid mapping entry to resolve the concrete model name
-            if AI_PROVIDER == 'gemini':
-                if not selected_models or not isinstance(selected_models, dict) or not selected_models.get(model_type):
-                    print("Error: DEFAULT_MODEL_TYPE or GEMINI_MODELS mapping not valid in Config. AI Filtering will be globally unavailable.", file=sys.stderr)
+            if AI_PROVIDER == "gemini":
+                if (
+                    not selected_models
+                    or not isinstance(selected_models, dict)
+                    or not selected_models.get(model_type)
+                ):
+                    print(
+                        "Error: DEFAULT_MODEL_TYPE or GEMINI_MODELS mapping not valid in Config. AI Filtering will be globally unavailable.",
+                        file=sys.stderr,
+                    )
                     CAN_ENABLE_AI_FILTERING_GLOBALLY = False
                 else:
                     model_details = selected_models[model_type]
-                    DEFAULT_AI_MODEL_NAME = model_details.get('name')
+                    DEFAULT_AI_MODEL_NAME = model_details.get("name")
                     if not DEFAULT_AI_MODEL_NAME:
-                        print(f"Error: 'name' for model type '{model_type}' not in GEMINI_MODELS (Config). AI Filtering will be globally unavailable.", file=sys.stderr)
+                        print(
+                            f"Error: 'name' for model type '{model_type}' not in GEMINI_MODELS (Config). AI Filtering will be globally unavailable.",
+                            file=sys.stderr,
+                        )
                         CAN_ENABLE_AI_FILTERING_GLOBALLY = False
                     else:
-                        print(f"Using AI Model from Config: {DEFAULT_AI_MODEL_NAME} (type: {model_type})")
+                        print(
+                            f"Using AI Model from Config: {DEFAULT_AI_MODEL_NAME} (type: {model_type})"
+                        )
             # OpenRouter and Ollama can accept a raw model alias directly, even if not present in *_MODELS mapping
-            elif AI_PROVIDER in ['openrouter', 'ollama']:
-                if isinstance(selected_models, dict) and selected_models.get(model_type):
+            elif AI_PROVIDER in ["openrouter", "ollama"]:
+                if isinstance(selected_models, dict) and selected_models.get(
+                    model_type
+                ):
                     model_details = selected_models[model_type]
-                    DEFAULT_AI_MODEL_NAME = model_details.get('name') or model_type
-                    print(f"Using AI Model from Config: {DEFAULT_AI_MODEL_NAME} (type: {model_type})")
+                    DEFAULT_AI_MODEL_NAME = model_details.get("name") or model_type
+                    print(
+                        f"Using AI Model from Config: {DEFAULT_AI_MODEL_NAME} (type: {model_type})"
+                    )
                 else:
                     # Fallback: use the DEFAULT_MODEL_TYPE value as the raw model alias/name
                     DEFAULT_AI_MODEL_NAME = model_type
                     print(
                         f"Warning: {AI_PROVIDER.upper()}_MODELS missing or alias '{model_type}' not found. "
                         f"Proceeding with raw model alias from DEFAULT_MODEL_TYPE: '{DEFAULT_AI_MODEL_NAME}'.",
-                        file=sys.stderr
+                        file=sys.stderr,
                     )
             else:
                 # Unknown provider already handled above, keep safety
-                print(f"Error: Unsupported AI provider: {AI_PROVIDER}.", file=sys.stderr)
+                print(
+                    f"Error: Unsupported AI provider: {AI_PROVIDER}.", file=sys.stderr
+                )
                 CAN_ENABLE_AI_FILTERING_GLOBALLY = False
 
 # Load safety settings if available (primarily for Gemini)
 if CAN_ENABLE_AI_FILTERING_GLOBALLY:
-    if hasattr(cfg, 'AI_SAFETY_SETTINGS') and isinstance(cfg.AI_SAFETY_SETTINGS, dict):
+    if hasattr(cfg, "AI_SAFETY_SETTINGS") and isinstance(cfg.AI_SAFETY_SETTINGS, dict):
         AI_MODEL_SAFETY_SETTINGS = cfg.AI_SAFETY_SETTINGS
         print(f"Using AI Safety Settings from Config: {AI_MODEL_SAFETY_SETTINGS}")
     else:
         # Not fatal for non-Gemini providers
-        if AI_PROVIDER == 'gemini':
-            print("Warning: AI_SAFETY_SETTINGS missing or invalid. Proceeding without explicit safety settings.", file=sys.stderr)
+        if AI_PROVIDER == "gemini":
+            print(
+                "Warning: AI_SAFETY_SETTINGS missing or invalid. Proceeding without explicit safety settings.",
+                file=sys.stderr,
+            )
 
 if not CAN_ENABLE_AI_FILTERING_GLOBALLY:
-    print("Warning: AI filtering is GLOBALLY UNAVAILABLE for this script run due to missing prerequisites or configuration.", file=sys.stderr)
+    print(
+        "Warning: AI filtering is GLOBALLY UNAVAILABLE for this script run due to missing prerequisites or configuration.",
+        file=sys.stderr,
+    )
 else:
-    print("AI filtering is GLOBALLY AVAILABLE for this script run (prerequisites met via Config).")
+    print(
+        "AI filtering is GLOBALLY AVAILABLE for this script run (prerequisites met via Config)."
+    )
 
 
 def run_adb_command(command_list):
     """Executes ADB, handles errors, returns stdout."""
     try:
-        adb_command = ['adb'] + command_list
+        adb_command = ["adb"] + command_list
         result = subprocess.run(
             adb_command,
-            capture_output=True, text=True, check=True,
-            encoding='utf-8', errors='ignore'
+            capture_output=True,
+            text=True,
+            check=True,
+            encoding="utf-8",
+            errors="ignore",
         )
         if result.stderr:
-            clean_stderr = "\n".join(line for line in result.stderr.splitlines() if not line.strip().startswith("Warning:"))
+            clean_stderr = "\n".join(
+                line
+                for line in result.stderr.splitlines()
+                if not line.strip().startswith("Warning:")
+            )
             if clean_stderr:
                 # Only print if there's non-warning stderr content
-                print(f"--- ADB STDERR for `{' '.join(adb_command)}`:\n{clean_stderr.strip()}", file=sys.stderr)
+                print(
+                    f"--- ADB STDERR for `{' '.join(adb_command)}`:\n{clean_stderr.strip()}",
+                    file=sys.stderr,
+                )
         return result.stdout.strip()
 
     except FileNotFoundError:
-        print("Fatal Error: 'adb' command not found. Make sure ADB is installed and in your system PATH.", file=sys.stderr)
+        print(
+            "Fatal Error: 'adb' command not found. Make sure ADB is installed and in your system PATH.",
+            file=sys.stderr,
+        )
         sys.exit(1)
     except subprocess.CalledProcessError as e:
         stderr_lower = e.stderr.lower() if e.stderr else ""
         if "device unauthorized" in stderr_lower:
-            print("\nFatal Error: Device unauthorized. Please check your device and allow USB debugging. ***", file=sys.stderr)
+            print(
+                "\nFatal Error: Device unauthorized. Please check your device and allow USB debugging. ***",
+                file=sys.stderr,
+            )
             sys.exit(1)
-        elif "device" in stderr_lower and ("not found" in stderr_lower or "offline" in stderr_lower):
-            print("\nFatal Error: Device not found or offline. Ensure device is connected and USB debugging is enabled. Check 'adb devices'.", file=sys.stderr)
+        elif "device" in stderr_lower and (
+            "not found" in stderr_lower or "offline" in stderr_lower
+        ):
+            print(
+                "\nFatal Error: Device not found or offline. Ensure device is connected and USB debugging is enabled. Check 'adb devices'.",
+                file=sys.stderr,
+            )
             sys.exit(1)
-        
+
         is_relevant_error = True
-        if "No activity found" in str(e.output): is_relevant_error = False
+        if "No activity found" in str(e.output):
+            is_relevant_error = False
         # "exit status 1" can be noisy from pm path if package doesn't exist, but pm list should be fine
-        if "aapt" in ' '.join(e.cmd) and not ("error:" in stderr_lower or "failed" in stderr_lower):
+        if "aapt" in " ".join(e.cmd) and not (
+            "error:" in stderr_lower or "failed" in stderr_lower
+        ):
             is_relevant_error = False
 
         if is_relevant_error:
-            relevant_stderr = "\n".join(line for line in e.stderr.splitlines() if not line.strip().startswith("Warning:")) if e.stderr else ""
-            if relevant_stderr: # Only print if there's non-warning stderr content
-                print(f"Warning: ADB command `{' '.join(e.cmd)}` failed.", file=sys.stderr)
+            relevant_stderr = (
+                "\n".join(
+                    line
+                    for line in e.stderr.splitlines()
+                    if not line.strip().startswith("Warning:")
+                )
+                if e.stderr
+                else ""
+            )
+            if relevant_stderr:  # Only print if there's non-warning stderr content
+                print(
+                    f"Warning: ADB command `{' '.join(e.cmd)}` failed.", file=sys.stderr
+                )
                 print(f"Stderr: {relevant_stderr.strip()}", file=sys.stderr)
         return None
+
 
 def get_device_serial():
     """Gets a unique device identifier."""
     try:
-        result = subprocess.run(['adb', 'get-serialno'], capture_output=True, text=True, timeout=5)
-        if result.returncode == 0 and result.stdout.strip() and result.stdout.strip() != "unknown":
+        result = subprocess.run(
+            ["adb", "get-serialno"], capture_output=True, text=True, timeout=5
+        )
+        if (
+            result.returncode == 0
+            and result.stdout.strip()
+            and result.stdout.strip() != "unknown"
+        ):
             device_id = result.stdout.strip()
             # Clean the device ID to make it safe for filenames
-            safe_device_id = re.sub(r'[^\w\-.]', '_', device_id)
+            safe_device_id = re.sub(r"[^\w\-.]", "_", device_id)
             return safe_device_id
-            
+
         # Fallback to devices command if get-serialno fails
-        devices_result = subprocess.run(['adb', 'devices'], capture_output=True, text=True, timeout=5)
+        devices_result = subprocess.run(
+            ["adb", "devices"], capture_output=True, text=True, timeout=5
+        )
         if devices_result.returncode == 0:
             lines = devices_result.stdout.strip().splitlines()
-            device_lines = [line for line in lines[1:] if line.strip() and '\tdevice' in line]
+            device_lines = [
+                line for line in lines[1:] if line.strip() and "\tdevice" in line
+            ]
             if device_lines:
-                device_id = device_lines[0].split('\t')[0].strip()
+                device_id = device_lines[0].split("\t")[0].strip()
                 # Clean the device ID to make it safe for filenames
-                safe_device_id = re.sub(r'[^\w\-.]', '_', device_id)
+                safe_device_id = re.sub(r"[^\w\-.]", "_", device_id)
                 return safe_device_id
-                
+
         return "unknown_device"
     except Exception as e:
         print(f"Error getting device ID: {e}", file=sys.stderr)
         return "unknown_device"
 
-def get_installed_packages(third_party_only_from_param=True): # Parameter name more specific
+
+def get_installed_packages(
+    third_party_only_from_param=True,
+):  # Parameter name more specific
     """Retrieves list of installed package names."""
     # This function can be called with a specific override.
     # If not, it defaults to the cfg setting when called internally by generate_app_info_cache.
-    command = ['shell', 'pm', 'list', 'packages']
+    command = ["shell", "pm", "list", "packages"]
     if third_party_only_from_param:
-        command.append('-3')
+        command.append("-3")
 
     output = run_adb_command(command)
     if output is None:
         print("Error: Failed to list packages via ADB.", file=sys.stderr)
         return []
-    packages = [line.split(":", 1)[1] for line in output.splitlines() if line.strip().startswith("package:")]
+    packages = [
+        line.split(":", 1)[1]
+        for line in output.splitlines()
+        if line.strip().startswith("package:")
+    ]
     return packages
+
 
 def get_app_label(package_name):
     """Retrieves the user-facing application label (name) for a given package."""
     if not package_name:
         return None
-    path_output = run_adb_command(['shell', 'pm', 'path', package_name])
+    path_output = run_adb_command(["shell", "pm", "path", package_name])
     apk_path = None
     if path_output:
         # Find the line starting with 'package:' which contains the base APK path
-        base_apk_line = next((line for line in path_output.splitlines() if line.startswith('package:')), None)
+        base_apk_line = next(
+            (line for line in path_output.splitlines() if line.startswith("package:")),
+            None,
+        )
         if base_apk_line:
-            apk_path = base_apk_line.split(':', 1)[1]
+            apk_path = base_apk_line.split(":", 1)[1]
     if apk_path:
-        aapt_command = ['shell', 'aapt', 'dump', 'badging', apk_path]
+        aapt_command = ["shell", "aapt", "dump", "badging", apk_path]
         aapt_output = run_adb_command(aapt_command)
         if aapt_output:
-            label_match = re.search(r"application-label(?:-[a-zA-Z_]+)*:['\"]([^'\"]+)['\"]", aapt_output)
-            if label_match: return label_match.group(1).strip()
+            label_match = re.search(
+                r"application-label(?:-[a-zA-Z_]+)*:['\"]([^'\"]+)['\"]", aapt_output
+            )
+            if label_match:
+                return label_match.group(1).strip()
             # Alternative common pattern for app label in aapt output
-            label_match_alt = re.search(r"application:\s*.*?label=['\"]([^'\"]+)['\"].*?", aapt_output)
-            if label_match_alt: return label_match_alt.group(1).strip()
+            label_match_alt = re.search(
+                r"application:\s*.*?label=['\"]([^'\"]+)['\"].*?", aapt_output
+            )
+            if label_match_alt:
+                return label_match_alt.group(1).strip()
 
     # Fallback to dumpsys if aapt fails or doesn't yield label
-    dumpsys_command = ['shell', 'dumpsys', 'package', package_name]
+    dumpsys_command = ["shell", "dumpsys", "package", package_name]
     dumpsys_output = run_adb_command(dumpsys_command)
     if dumpsys_output:
         # More specific patterns first
-        label_match_dumpsys_specific = re.search(r"^\s*Application label(?:-[a-zA-Z_]+)*:\s*(.+)$", dumpsys_output, re.MULTILINE | re.IGNORECASE)
+        label_match_dumpsys_specific = re.search(
+            r"^\s*Application label(?:-[a-zA-Z_]+)*:\s*(.+)$",
+            dumpsys_output,
+            re.MULTILINE | re.IGNORECASE,
+        )
         if label_match_dumpsys_specific:
             label = label_match_dumpsys_specific.group(1).strip()
-            if not (label.startswith("0x") and len(label) > 5): return label # Avoid raw resource IDs
+            if not (label.startswith("0x") and len(label) > 5):
+                return label  # Avoid raw resource IDs
 
-        label_match_dumpsys_quoted = re.search(r"^\s*label=['\"]([^'\"]+)['\"]", dumpsys_output, re.MULTILINE)
+        label_match_dumpsys_quoted = re.search(
+            r"^\s*label=['\"]([^'\"]+)['\"]", dumpsys_output, re.MULTILINE
+        )
         if label_match_dumpsys_quoted:
             label = label_match_dumpsys_quoted.group(1).strip()
-            if not (label.startswith("0x") and len(label) > 5): return label
-        
+            if not (label.startswith("0x") and len(label) > 5):
+                return label
+
         # General pattern within ApplicationInfo block
-        app_info_match = re.search(r'ApplicationInfo\{.*?label=([^}\s,]+).*?\}', dumpsys_output, re.DOTALL)
+        app_info_match = re.search(
+            r"ApplicationInfo\{.*?label=([^}\s,]+).*?\}", dumpsys_output, re.DOTALL
+        )
         if app_info_match:
             label = app_info_match.group(1).strip()
-            if not (label.startswith("0x") and len(label) > 5): return label
-        
-        label_match_dumpsys_simple = re.search(r'^\s*label=([^\s]+)$', dumpsys_output, re.MULTILINE)
+            if not (label.startswith("0x") and len(label) > 5):
+                return label
+
+        label_match_dumpsys_simple = re.search(
+            r"^\s*label=([^\s]+)$", dumpsys_output, re.MULTILINE
+        )
         if label_match_dumpsys_simple:
             label = label_match_dumpsys_simple.group(1).strip()
-            if not (label.startswith("0x") and len(label) > 5): return label
+            if not (label.startswith("0x") and len(label) > 5):
+                return label
     return None
+
 
 def find_main_activity(package_name):
     """Finds the main launcher activity for a package."""
-    if not package_name: return None
+    if not package_name:
+        return None
     resolve_cmd = [
-        'shell', 'cmd', 'package', 'resolve-activity', '--brief',
-        '-a', 'android.intent.action.MAIN',
-        '-c', 'android.intent.category.LAUNCHER',
-        package_name
+        "shell",
+        "cmd",
+        "package",
+        "resolve-activity",
+        "--brief",
+        "-a",
+        "android.intent.action.MAIN",
+        "-c",
+        "android.intent.category.LAUNCHER",
+        package_name,
     ]
     output_resolve = run_adb_command(resolve_cmd)
     if output_resolve:
-        activity_line = output_resolve.splitlines()[-1].strip() # Get the last line
-        if '/' in activity_line and "No activity found" not in activity_line and "does not handle" not in activity_line:
-            parts = activity_line.split('/')
+        activity_line = output_resolve.splitlines()[-1].strip()  # Get the last line
+        if (
+            "/" in activity_line
+            and "No activity found" not in activity_line
+            and "does not handle" not in activity_line
+        ):
+            parts = activity_line.split("/")
             # pkg_from_resolve = parts[0] # Not always the same as input package_name
             act_relative = parts[1]
-            if act_relative.startswith('.'): return f"{package_name}{act_relative}" # Prepend original package if relative
-            if '.' in act_relative: return act_relative # It's already fully qualified (or just activity name if in same package)
-            return f"{package_name}.{act_relative}" # Assume it's a class in the package
+            if act_relative.startswith("."):
+                return f"{package_name}{act_relative}"  # Prepend original package if relative
+            if "." in act_relative:
+                return act_relative  # It's already fully qualified (or just activity name if in same package)
+            return (
+                f"{package_name}.{act_relative}"  # Assume it's a class in the package
+            )
 
     # Fallback to dumpsys package info
-    output_dumpsys = run_adb_command(['shell', 'dumpsys', 'package', package_name])
-    if not output_dumpsys: return None
+    output_dumpsys = run_adb_command(["shell", "dumpsys", "package", package_name])
+    if not output_dumpsys:
+        return None
     # Regex to find LAUNCHER activity in dumpsys output
     regex = re.compile(
-        r'^\s+Activity\s+Record\{.*? ' + re.escape(package_name) + r'/([^\s\}]+)\s*.*?\}\n' # Capture activity name
-        r'(?:.*?\n)*?' # Non-greedy match for any lines in between
-        r'^\s+IntentFilter\{.*?\n' # Start of IntentFilter block
-        r'(?:.*?\n)*?'
-        r'^\s+Action: "android\.intent\.action\.MAIN"\n' # MAIN action
-        r'(?:.*?\n)*?'
-        r'^\s+Category: "android\.intent\.category\.LAUNCHER"\n' # LAUNCHER category
-        r'(?:.*?\n)*?'
-        r'^\s+\}', # End of IntentFilter block
-        re.MULTILINE | re.DOTALL
+        r"^\s+Activity\s+Record\{.*? "
+        + re.escape(package_name)
+        + r"/([^\s\}]+)\s*.*?\}\n"  # Capture activity name
+        r"(?:.*?\n)*?"  # Non-greedy match for any lines in between
+        r"^\s+IntentFilter\{.*?\n"  # Start of IntentFilter block
+        r"(?:.*?\n)*?"
+        r'^\s+Action: "android\.intent\.action\.MAIN"\n'  # MAIN action
+        r"(?:.*?\n)*?"
+        r'^\s+Category: "android\.intent\.category\.LAUNCHER"\n'  # LAUNCHER category
+        r"(?:.*?\n)*?"
+        r"^\s+\}",  # End of IntentFilter block
+        re.MULTILINE | re.DOTALL,
     )
     match = regex.search(output_dumpsys)
     if match:
         activity_part = match.group(1)
-        if activity_part.startswith('.'): return package_name + activity_part
-        elif '.' in activity_part: return activity_part # Already qualified or just class name
-        else: return package_name + '.' + activity_part # Prepend package name
+        if activity_part.startswith("."):
+            return package_name + activity_part
+        elif "." in activity_part:
+            return activity_part  # Already qualified or just class name
+        else:
+            return package_name + "." + activity_part  # Prepend package name
     return None
+
 
 def filter_apps_with_ai(app_data_list: list):
     """Uses AI (provider-agnostic adapters) to filter apps for health/fitness categories."""
     print("\n--- Filtering apps using AI ---")
     if not CAN_ENABLE_AI_FILTERING_GLOBALLY:
-        print("AI Filtering globally disabled - will NOT filter app list.", file=sys.stderr)
+        print(
+            "AI Filtering globally disabled - will NOT filter app list.",
+            file=sys.stderr,
+        )
         return app_data_list
     else:
         print("AI Filtering globally enabled - will attempt to filter app list.")
@@ -381,21 +527,25 @@ def filter_apps_with_ai(app_data_list: list):
         adapter = create_model_adapter(
             AI_PROVIDER,
             api_key=PROVIDER_API_KEY_OR_URL,
-            model_name=DEFAULT_AI_MODEL_NAME
+            model_name=DEFAULT_AI_MODEL_NAME,
         )
         # Pick provider-specific model config
-        model_type = getattr(cfg, 'DEFAULT_MODEL_TYPE', None)
-        if AI_PROVIDER == 'gemini':
-            model_config = getattr(cfg, 'GEMINI_MODELS', {}).get(model_type, {})
-        elif AI_PROVIDER == 'openrouter':
-            model_config = getattr(cfg, 'OPENROUTER_MODELS', {}).get(model_type, {})
-        elif AI_PROVIDER == 'ollama':
-            model_config = getattr(cfg, 'OLLAMA_MODELS', {}).get(model_type, {})
+        model_type = getattr(cfg, "DEFAULT_MODEL_TYPE", None)
+        if AI_PROVIDER == "gemini":
+            model_config = getattr(cfg, "GEMINI_MODELS", {}).get(model_type, {})
+        elif AI_PROVIDER == "openrouter":
+            model_config = getattr(cfg, "OPENROUTER_MODELS", {}).get(model_type, {})
+        elif AI_PROVIDER == "ollama":
+            model_config = getattr(cfg, "OLLAMA_MODELS", {}).get(model_type, {})
         else:
             model_config = {}
 
-        adapter.initialize(model_config=model_config, safety_settings=AI_MODEL_SAFETY_SETTINGS)
-        print(f"Initialized AI adapter for provider '{AI_PROVIDER}' with model '{DEFAULT_AI_MODEL_NAME}'.")
+        adapter.initialize(
+            model_config=model_config, safety_settings=AI_MODEL_SAFETY_SETTINGS
+        )
+        print(
+            f"Initialized AI adapter for provider '{AI_PROVIDER}' with model '{DEFAULT_AI_MODEL_NAME}'."
+        )
     except Exception as init_error:
         print(f"Error initializing AI adapter: {init_error}", file=sys.stderr)
         traceback.print_exc()
@@ -404,7 +554,9 @@ def filter_apps_with_ai(app_data_list: list):
     filtered_results = []
     for i in range(0, len(app_data_list), cfg.MAX_APPS_TO_SEND_TO_AI):
         chunk = app_data_list[i : i + cfg.MAX_APPS_TO_SEND_TO_AI]
-        print(f"Processing chunk {i//cfg.MAX_APPS_TO_SEND_TO_AI + 1}/{(len(app_data_list) + cfg.MAX_APPS_TO_SEND_TO_AI - 1)//cfg.MAX_APPS_TO_SEND_TO_AI} ({len(chunk)} apps)...")
+        print(
+            f"Processing chunk {i//cfg.MAX_APPS_TO_SEND_TO_AI + 1}/{(len(app_data_list) + cfg.MAX_APPS_TO_SEND_TO_AI - 1)//cfg.MAX_APPS_TO_SEND_TO_AI} ({len(chunk)} apps)..."
+        )
 
         try:
             app_data_json_str = json.dumps(chunk, indent=2)
@@ -413,8 +565,7 @@ def filter_apps_with_ai(app_data_list: list):
             continue
 
         print(f"Sending {len(chunk)} apps to AI model {DEFAULT_AI_MODEL_NAME}...")
-        prompt = (
-            f"""Analyze the following list of Android applications provided in JSON format. Each entry includes the application's package name (`package_name`), its user-facing label (`app_name`, which *might be null* if the retrieval script failed), and its main activity (`activity_name`).
+        prompt = f"""Analyze the following list of Android applications provided in JSON format. Each entry includes the application's package name (`package_name`), its user-facing label (`app_name`, which *might be null* if the retrieval script failed), and its main activity (`activity_name`).
 
 Your tasks are:
 1.  **Filter:** Identify ONLY the applications from the input list that are primarily related to **health, fitness, wellness, medical purposes, medication management, or mental health**. Exclude general utilities, system apps, games (unless specifically health/fitness focused), social media, etc. Focus on the app's *primary purpose*.
@@ -431,7 +582,6 @@ Do not include any explanatory text, comments, markdown formatting like ```json 
 
 Input JSON:
 {app_data_json_str}"""
-        )
 
         try:
             # Generate response via adapter
@@ -454,17 +604,30 @@ Input JSON:
             try:
                 chunk_filtered_list = json.loads(response_text)
                 if isinstance(chunk_filtered_list, list):
-                    print(f"AI identified {len(chunk_filtered_list)} relevant apps in this chunk.")
+                    print(
+                        f"AI identified {len(chunk_filtered_list)} relevant apps in this chunk."
+                    )
                     filtered_results.extend(chunk_filtered_list)
                 else:
-                    print(f"Warning: AI response was not a JSON list. Snippet: {response_text[:200]}...", file=sys.stderr)
+                    print(
+                        f"Warning: AI response was not a JSON list. Snippet: {response_text[:200]}...",
+                        file=sys.stderr,
+                    )
             except json.JSONDecodeError as e:
-                print(f"Error: Could not parse AI response as JSON: {e}. Snippet: {response_text[:500]}...", file=sys.stderr)
+                print(
+                    f"Error: Could not parse AI response as JSON: {e}. Snippet: {response_text[:500]}...",
+                    file=sys.stderr,
+                )
         except Exception as e:  # Catch errors from generate_content or parsing
-            print(f"Error during AI API call or processing for chunk: {e}", file=sys.stderr)
+            print(
+                f"Error during AI API call or processing for chunk: {e}",
+                file=sys.stderr,
+            )
             traceback.print_exc()  # Print full traceback for debugging
 
-    print(f"\n--- AI Filtering Finished. Total relevant apps identified: {len(filtered_results)} ---")
+    print(
+        f"\n--- AI Filtering Finished. Total relevant apps identified: {len(filtered_results)} ---"
+    )
     return filtered_results
 
 
@@ -473,89 +636,132 @@ def generate_app_info_cache(perform_ai_filtering_on_this_call: bool = False):
     Discovers app information, optionally filters it, and saves it.
     Returns the path to the cache file and the list of app_info.
     """
-    print(f"--- Generating App Info Cache (AI filter specifically requested for this call: {perform_ai_filtering_on_this_call}) ---")
+    print(
+        f"--- Generating App Info Cache (AI filter specifically requested for this call: {perform_ai_filtering_on_this_call}) ---"
+    )
     device_id = get_device_serial()
     if not device_id or device_id == "unknown_device":
-        print("Critical Error: Could not obtain valid device ID. Cannot generate cache.", file=sys.stderr)
+        print(
+            "Critical Error: Could not obtain valid device ID. Cannot generate cache.",
+            file=sys.stderr,
+        )
         return None, []
 
     print(f"Device ID: {device_id}")
     # Use THIRD_PARTY_APPS_ONLY from cfg instance
-    print(f"\n--- Discovering installed packages (Third-party only: {cfg.THIRD_PARTY_APPS_ONLY}) ---")
-    packages = get_installed_packages(third_party_only_from_param=cfg.THIRD_PARTY_APPS_ONLY) # Use cfg value
+    print(
+        f"\n--- Discovering installed packages (Third-party only: {cfg.THIRD_PARTY_APPS_ONLY}) ---"
+    )
+    packages = get_installed_packages(
+        third_party_only_from_param=cfg.THIRD_PARTY_APPS_ONLY
+    )  # Use cfg value
     if not packages:
-        print("No packages found. Ensure device is connected and has third-party apps if filter is on.", file=sys.stderr)
+        print(
+            "No packages found. Ensure device is connected and has third-party apps if filter is on.",
+            file=sys.stderr,
+        )
         return None, []
     print(f"Found {len(packages)} packages.")
 
     all_apps_info = []
-    print(f"\n--- Retrieving App Info (Label & Main Activity) for {len(packages)} packages ---")
+    print(
+        f"\n--- Retrieving App Info (Label & Main Activity) for {len(packages)} packages ---"
+    )
     for i, package_name in enumerate(packages):
         app_label = get_app_label(package_name)
         main_activity = find_main_activity(package_name)
-        all_apps_info.append({"package_name": package_name, "app_name": app_label, "activity_name": main_activity})
-        if (i + 1) % 20 == 0 or (i + 1) == len(packages): # Progress update
+        all_apps_info.append(
+            {
+                "package_name": package_name,
+                "app_name": app_label,
+                "activity_name": main_activity,
+            }
+        )
+        if (i + 1) % 20 == 0 or (i + 1) == len(packages):  # Progress update
             print(f"  Processed {i+1}/{len(packages)} packages...")
-    print(f"\n--- Retrieved info for {len(all_apps_info)} apps before any explicit AI filtering for this call ---")
+    print(
+        f"\n--- Retrieved info for {len(all_apps_info)} apps before any explicit AI filtering for this call ---"
+    )
 
-    apps_to_save = list(all_apps_info) # Default to all apps
+    apps_to_save = list(all_apps_info)  # Default to all apps
     ai_filter_was_effectively_applied = False
 
     if perform_ai_filtering_on_this_call:
         if not CAN_ENABLE_AI_FILTERING_GLOBALLY:
-            print("Warning: AI Filtering requested for this cache generation, but it's globally unavailable (prerequisites failed). Skipping.", file=sys.stderr)
+            print(
+                "Warning: AI Filtering requested for this cache generation, but it's globally unavailable (prerequisites failed). Skipping.",
+                file=sys.stderr,
+            )
         else:
-            print("Attempting AI filtering for this cache generation as requested and globally available...")
-            filtered_apps_from_ai = filter_apps_with_ai(list(all_apps_info)) # Pass a copy
-            
+            print(
+                "Attempting AI filtering for this cache generation as requested and globally available..."
+            )
+            filtered_apps_from_ai = filter_apps_with_ai(
+                list(all_apps_info)
+            )  # Pass a copy
+
             if filtered_apps_from_ai is not None:
                 apps_to_save = filtered_apps_from_ai
                 # Check if the list actually changed due to filtering
-                if len(apps_to_save) < len(all_apps_info) or \
-                   (len(apps_to_save) == len(all_apps_info) and apps_to_save != all_apps_info): # Content check if lengths are same
+                if len(apps_to_save) < len(all_apps_info) or (
+                    len(apps_to_save) == len(all_apps_info)
+                    and apps_to_save != all_apps_info
+                ):  # Content check if lengths are same
                     ai_filter_was_effectively_applied = True
-                print(f"AI filtering for cache resulted in {len(apps_to_save)} apps. Filter effectively applied: {ai_filter_was_effectively_applied}")
-            else: # filter_apps_with_ai might return original list on some errors, or None if very problematic
-                print("AI filtering process returned None or an unchanged list. Using all discovered apps for safety.", file=sys.stderr)
-                apps_to_save = list(all_apps_info) # Ensure we use the original if AI func returns None
+                print(
+                    f"AI filtering for cache resulted in {len(apps_to_save)} apps. Filter effectively applied: {ai_filter_was_effectively_applied}"
+                )
+            else:  # filter_apps_with_ai might return original list on some errors, or None if very problematic
+                print(
+                    "AI filtering process returned None or an unchanged list. Using all discovered apps for safety.",
+                    file=sys.stderr,
+                )
+                apps_to_save = list(
+                    all_apps_info
+                )  # Ensure we use the original if AI func returns None
     else:
-        print("AI Filtering not specifically requested for this cache generation call. Using all discovered apps.")
+        print(
+            "AI Filtering not specifically requested for this cache generation call. Using all discovered apps."
+        )
 
     # Add timestamp to the output
     import datetime
+
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     result_data = {
         "timestamp": timestamp,
         "device_id": device_id,
-        "ai_filtered": perform_ai_filtering_on_this_call and ai_filter_was_effectively_applied,
-        "health_apps": apps_to_save
+        "ai_filtered": perform_ai_filtering_on_this_call
+        and ai_filter_was_effectively_applied,
+        "health_apps": apps_to_save,
     }
 
     # APP_INFO_DIR is an absolute path from cfg and directory is already created
-    file_suffix = "health_filtered" if perform_ai_filtering_on_this_call and ai_filter_was_effectively_applied else "all"
-    
-    # Use device-specific file path
-    output_filename = f"{device_id}_app_info_{file_suffix}.json"
-    output_path = os.path.join(APP_INFO_DIR, output_filename)
-    
-    # Also save a copy to the generic path for backward compatibility
-    generic_path = os.path.join(APP_INFO_DIR, "health_apps.json")
+    file_suffix = (
+        "health_filtered"
+        if perform_ai_filtering_on_this_call and ai_filter_was_effectively_applied
+        else "all"
+    )
 
-    print(f"\n--- Saving app info to: {output_path} (Suffix based on effective filtering: {file_suffix}) ---")
+    # Use device-specific file path (declarative naming)
+    if file_suffix == "all":
+        output_filename = f"device_{device_id}_all_apps.json"
+    else:
+        output_filename = f"device_{device_id}_filtered_health_apps.json"
+    output_path = os.path.join(APP_INFO_DIR, output_filename)
+
+    print(
+        f"\n--- Saving app info to: {output_path} (Suffix based on effective filtering: {file_suffix}) ---"
+    )
     try:
         # Save to device-specific path
-        with open(output_path, 'w', encoding='utf-8') as f:
+        with open(output_path, "w", encoding="utf-8") as f:
             json.dump(result_data, f, indent=4, ensure_ascii=False)
         print(f"Successfully saved {len(apps_to_save)} app(s) to {output_path}")
-        
-        # Also save to generic path
-        with open(generic_path, 'w', encoding='utf-8') as f:
-            json.dump(result_data, f, indent=4, ensure_ascii=False)
-        print(f"Also saved to generic path: {generic_path}")
     except IOError as e:
         print(f"Error writing to file {output_path}: {e}", file=sys.stderr)
         traceback.print_exc()
-        return None, result_data # Return current data even if save fails
+        return None, result_data  # Return current data even if save fails
     return output_path, result_data
 
 
@@ -568,9 +774,11 @@ def filter_existing_app_info_file(input_filepath: str):
         print(f"Error: Input file not found: {input_filepath}", file=sys.stderr)
         return None
 
-    print(f"--- Processing existing app info file for AI filtering: {input_filepath} ---")
+    print(
+        f"--- Processing existing app info file for AI filtering: {input_filepath} ---"
+    )
     try:
-        with open(input_filepath, 'r', encoding='utf-8') as f:
+        with open(input_filepath, "r", encoding="utf-8") as f:
             all_apps_data = json.load(f)
     except Exception as e:
         print(f"Error loading JSON from {input_filepath}: {e}", file=sys.stderr)
@@ -579,38 +787,53 @@ def filter_existing_app_info_file(input_filepath: str):
     if not isinstance(all_apps_data, list):
         print(f"Error: Data in {input_filepath} is not a JSON list.", file=sys.stderr)
         return None
-    
+
     if not CAN_ENABLE_AI_FILTERING_GLOBALLY:
-        print("Warning: AI Filtering is globally unavailable. Cannot filter existing file.", file=sys.stderr)
-        return None # Or return input_filepath if you want to signify no operation could be done
+        print(
+            "Warning: AI Filtering is globally unavailable. Cannot filter existing file.",
+            file=sys.stderr,
+        )
+        return None  # Or return input_filepath if you want to signify no operation could be done
 
-    print(f"Sending {len(all_apps_data)} apps from input file to AI for health filtering...")
-    ai_filtered_list = filter_apps_with_ai(list(all_apps_data)) # Pass a copy
+    print(
+        f"Sending {len(all_apps_data)} apps from input file to AI for health filtering..."
+    )
+    ai_filtered_list = filter_apps_with_ai(list(all_apps_data))  # Pass a copy
 
-    if ai_filtered_list is None or (len(ai_filtered_list) == len(all_apps_data) and ai_filtered_list == all_apps_data):
-        print("AI filtering returned None, failed, or did not change the app list. No new output file will be saved from this operation.", file=sys.stderr)
-        return input_filepath # Return original path if no effective filtering occurred
+    if ai_filtered_list is None or (
+        len(ai_filtered_list) == len(all_apps_data)
+        and ai_filtered_list == all_apps_data
+    ):
+        print(
+            "AI filtering returned None, failed, or did not change the app list. No new output file will be saved from this operation.",
+            file=sys.stderr,
+        )
+        return input_filepath  # Return original path if no effective filtering occurred
 
     base, ext = os.path.splitext(os.path.basename(input_filepath))
     # Ensure output has a distinct name, avoiding simple overwrite if possible
     if "_all" in base:
         new_suffix = "health_filtered_from_all"
         output_base = base.replace("_all", "")
-    elif "_health_filtered" in base: # If re-filtering an already filtered list
+    elif "_health_filtered" in base:  # If re-filtering an already filtered list
         new_suffix = "health_filtered_again"
         output_base = base.replace("_health_filtered", "")
     else:
         new_suffix = "health_filtered"
-        output_base = base # Use original base if no known suffix
-        
+        output_base = base  # Use original base if no known suffix
+
     output_filename = f"{output_base}_{new_suffix}{ext}"
-    output_filepath = os.path.join(APP_INFO_DIR, output_filename) # APP_INFO_DIR from cfg
+    output_filepath = os.path.join(
+        APP_INFO_DIR, output_filename
+    )  # APP_INFO_DIR from cfg
 
     print(f"--- Saving AI-filtered app info to: {output_filepath} ---")
     try:
-        with open(output_filepath, 'w', encoding='utf-8') as f:
+        with open(output_filepath, "w", encoding="utf-8") as f:
             json.dump(ai_filtered_list, f, indent=4, ensure_ascii=False)
-        print(f"Successfully saved {len(ai_filtered_list)} filtered app(s) to {output_filepath}")
+        print(
+            f"Successfully saved {len(ai_filtered_list)} filtered app(s) to {output_filepath}"
+        )
         return output_filepath
     except IOError as e:
         print(f"Error writing to file {output_filepath}: {e}", file=sys.stderr)
@@ -618,57 +841,71 @@ def filter_existing_app_info_file(input_filepath: str):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Android App Info Finder and AI Filter.")
+    parser = argparse.ArgumentParser(
+        description="Android App Info Finder and AI Filter."
+    )
     parser.add_argument(
         "--mode",
-        choices=['discover', 'filter-existing'],
-        default='discover',
-        help="Operation mode: 'discover' new app info (default), or 'filter-existing' an input JSON file."
+        choices=["discover", "filter-existing"],
+        default="discover",
+        help="Operation mode: 'discover' new app info (default), or 'filter-existing' an input JSON file.",
     )
     parser.add_argument(
         "--input-file",
         type=str,
-        help="Path to an existing app info JSON file to be filtered. Required if --mode is 'filter-existing'."
+        help="Path to an existing app info JSON file to be filtered. Required if --mode is 'filter-existing'.",
     )
     parser.add_argument(
         "--ai-filter",
-        action='store_true', # If present, args.ai_filter is True, else False
-        help="Explicitly enable AI-based health app filtering during 'discover' mode. If not set, behavior depends on cfg.USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY."
+        action="store_true",  # If present, args.ai_filter is True, else False
+        help="Explicitly enable AI-based health app filtering during 'discover' mode. If not set, behavior depends on cfg.USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY.",
     )
 
     args = parser.parse_args()
     start_time = time.time()
 
     should_attempt_ai_filtering_for_discover = False
-    if args.mode == 'discover':
+    if args.mode == "discover":
         # 1. If --ai-filter flag is explicitly used, it takes precedence.
-        if args.ai_filter: # This means --ai-filter was given on command line
+        if args.ai_filter:  # This means --ai-filter was given on command line
             should_attempt_ai_filtering_for_discover = True
             print("CLI --ai-filter flag is set, will attempt AI filtering.")
         # 2. If --ai-filter flag is NOT used, rely on the config setting.
         #    This is the typical path when called by UI/CLI controllers.
         else:
             # cfg.USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY should be a boolean from your Config
-            should_attempt_ai_filtering_for_discover = cfg.USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY
-            print(f"CLI --ai-filter flag NOT set. Defaulting to Config 'USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY': {should_attempt_ai_filtering_for_discover}")
+            should_attempt_ai_filtering_for_discover = (
+                cfg.USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY
+            )
+            print(
+                f"CLI --ai-filter flag NOT set. Defaulting to Config 'USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY': {should_attempt_ai_filtering_for_discover}"
+            )
 
-
-    if args.mode == 'filter-existing':
+    if args.mode == "filter-existing":
         if not args.input_file:
-            print("Error: --input-file is required for 'filter-existing' mode.", file=sys.stderr)
+            print(
+                "Error: --input-file is required for 'filter-existing' mode.",
+                file=sys.stderr,
+            )
             sys.exit(1)
         print("--- Starting App Info Filter (Filter Existing File Mode) ---")
         # The parameter for filter_existing_app_info_file is input_filepath not args.input_filepath
-        output_file_path = filter_existing_app_info_file(args.input_file) 
+        output_file_path = filter_existing_app_info_file(args.input_file)
         if output_file_path and output_file_path != args.input_file:
             print(f"Filtered file generated at: {output_file_path}")
-        elif output_file_path == args.input_file :
-            print(f"AI Filtering did not result in a changed app list. Original file remains: {output_file_path}")
+        elif output_file_path == args.input_file:
+            print(
+                f"AI Filtering did not result in a changed app list. Original file remains: {output_file_path}"
+            )
         else:
-            print("App info filtering (filter-existing mode) failed or did not produce a file.")
+            print(
+                "App info filtering (filter-existing mode) failed or did not produce a file."
+            )
 
-    elif args.mode == 'discover':
-        print(f"--- Starting App Info Finder (Discovery Mode, Attempt AI Filter: {should_attempt_ai_filtering_for_discover}) ---")
+    elif args.mode == "discover":
+        print(
+            f"--- Starting App Info Finder (Discovery Mode, Attempt AI Filter: {should_attempt_ai_filtering_for_discover}) ---"
+        )
         output_file_path, result_data = generate_app_info_cache(
             perform_ai_filtering_on_this_call=should_attempt_ai_filtering_for_discover
         )
@@ -676,20 +913,31 @@ if __name__ == "__main__":
             # This print is crucial for ui_controller.py/cli_controller.py to parse the path
             print(f"\nCache file generated at: {output_file_path}")
             # Output a JSON string with the summary for better parsing by the caller
-            app_count = len(result_data.get("health_apps", [])) if isinstance(result_data, dict) else 0
-            summary_json = json.dumps({
-                "status": "success",
-                "file_path": output_file_path,
-                "app_count": app_count,
-                "timestamp": result_data.get("timestamp") if isinstance(result_data, dict) else ""
-            })
+            app_count = (
+                len(result_data.get("health_apps", []))
+                if isinstance(result_data, dict)
+                else 0
+            )
+            summary_json = json.dumps(
+                {
+                    "status": "success",
+                    "file_path": output_file_path,
+                    "app_count": app_count,
+                    "timestamp": (
+                        result_data.get("timestamp")
+                        if isinstance(result_data, dict)
+                        else ""
+                    ),
+                }
+            )
             print(f"\nSUMMARY_JSON: {summary_json}")
         else:
-            print("\nApp info cache generation (discover mode) failed or did not produce a file.")
-            error_json = json.dumps({
-                "status": "error",
-                "message": "Failed to generate app info cache"
-            })
+            print(
+                "\nApp info cache generation (discover mode) failed or did not produce a file."
+            )
+            error_json = json.dumps(
+                {"status": "error", "message": "Failed to generate app info cache"}
+            )
             print(f"\nSUMMARY_JSON: {error_json}")
 
     end_time = time.time()
