@@ -40,11 +40,10 @@ python -m pip install -r requirements.txt
 appium --relaxed-security  # Terminal 1
 
 # CLI Controller (Terminal 2, venv active)
-python -m traverser_ai_api.cli_controller --scan-apps --list-apps --select-app 1 --start
+python run_cli.py --scan-apps --list-apps --select-app 1 --start
 
 # UI Controller (Terminal 2, venv active)
-# Preferred (venv activated):
-python -m traverser_ai_api.ui_controller  # Opens graphical interface
+python run_ui.py 
 
 ```
 
@@ -254,8 +253,8 @@ For full installation instructions, advanced configuration, service prerequisite
 - Create the environment: `py -3 -m venv .venv`
 - Activate in PowerShell: `\.venv\Scripts\Activate.ps1`
 - Install deps: `pip install -r requirements.txt`
-- Run the UI: `python -m traverser_ai_api.ui_controller`
-- Without activation: `\.venv\Scripts\python.exe -m traverser_ai_api.ui_controller`
+- Run the UI: `python run_ui.py`
+- Without activation: `.\.venv\Scripts\python.exe run_ui.py`
 
 Notes
 - If using the OpenRouter provider, install the OpenAI SDK inside the venv: `pip install openai`.

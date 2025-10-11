@@ -59,10 +59,7 @@ class UIComponents:
             model_dropdown.addItem("No model selected")
 
         # Get provider capabilities from config
-        try:
-            from ..config import AI_PROVIDER_CAPABILITIES
-        except ImportError:
-            from config import AI_PROVIDER_CAPABILITIES
+        from traverser_ai_api.config import AI_PROVIDER_CAPABILITIES
 
         capabilities = AI_PROVIDER_CAPABILITIES.get(
             provider.lower(), AI_PROVIDER_CAPABILITIES.get("gemini", {})
@@ -781,7 +778,10 @@ class UIComponents:
         status_layout.addWidget(controller.status_label)
         status_layout.addWidget(controller.progress_bar)
 
-        # Action history
+        # Create side-by-side layout for Action History and Screenshot
+        history_screenshot_layout = QHBoxLayout()
+        
+        # Action history (left side)
         action_history_group = QGroupBox("Action History")
         action_history_layout = QVBoxLayout(action_history_group)
         controller.action_history = QTextEdit()
@@ -792,25 +792,43 @@ class UIComponents:
                 "No actions yet. Actions performed will appear here.")
         except Exception:
             pass
-        controller.action_history.setStyleSheet("background-color: #333333; color: #FFFFFF;")
+        controller.action_history.setStyleSheet("""
+            background-color: #333333; 
+            color: #FFFFFF; 
+            font-size: 11px; 
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+            border: 1px solid #555555;
+        """)
         try:
             from PySide6.QtWidgets import QTextEdit as _QTextEdit
             controller.action_history.setLineWrapMode(_QTextEdit.LineWrapMode.WidgetWidth)
         except Exception:
             pass
-        # Allow the action history to expand, with a sensible minimum height
-        controller.action_history.setMinimumHeight(160)
+        # Significantly increase minimum height and make it expandable
+        controller.action_history.setMinimumHeight(400)
         controller.action_history.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.MinimumExpanding
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
         action_history_layout.addWidget(controller.action_history)
 
-        # Screenshot display
+        # Screenshot display (right side)
+        screenshot_group = QGroupBox("Current Screenshot")
+        screenshot_layout = QVBoxLayout(screenshot_group)
         controller.screenshot_label = QLabel()
         controller.screenshot_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         controller.screenshot_label.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
+        controller.screenshot_label.setMinimumHeight(400)
+        controller.screenshot_label.setStyleSheet("""
+            border: 1px solid #555555;
+            background-color: #2a2a2a;
+        """)
+        screenshot_layout.addWidget(controller.screenshot_label)
+        
+        # Add both to the horizontal layout with equal space allocation
+        history_screenshot_layout.addWidget(action_history_group, 1)
+        history_screenshot_layout.addWidget(screenshot_group, 1)
 
         # Log output section
         log_group = QGroupBox("Logs")
@@ -834,9 +852,9 @@ class UIComponents:
         # Add step counter first, then status underneath
         layout.addLayout(step_layout)
         layout.addLayout(status_layout)
-        layout.addWidget(action_history_group)
-        layout.addWidget(controller.screenshot_label)
-        layout.addWidget(log_group, 1)
+        # Add the side-by-side action history and screenshot layout with more space
+        layout.addLayout(history_screenshot_layout, 2)  # Give more space to this section
+        layout.addWidget(log_group, 1)  # Logs get less space
 
         return panel
 

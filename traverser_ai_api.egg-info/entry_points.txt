@@ -1,0 +1,2 @@
+[console_scripts]
+run-cli = traverser_ai_api.cli_controller:main_cli

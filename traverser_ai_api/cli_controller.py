@@ -28,6 +28,15 @@ import textwrap
 from typing import get_type_hints
 import glob
 
+import sys
+import os
+from pathlib import Path
+
+# Determine project root and add to path
+_project_root = Path(__file__).resolve().parent
+if str(_project_root) not in sys.path:
+    sys.path.insert(0, str(_project_root))
+
 try:
     from config import Config
 except ImportError as e:
@@ -1613,10 +1622,24 @@ def _run_offline_ui_annotator(session_dir: str, db_path: str) -> bool:
 
 
 def main_cli():
+    # Initially set logging to WARNING to suppress verbose initialization messages
+    logging.basicConfig(
+        level=logging.WARNING,
+        format="[%(levelname)s] %(asctime)s %(module)s: %(message)s",
+        datefmt="%H:%M:%S",
+        handlers=[logging.StreamHandler(sys.stdout)],
+    )
+    
     parser = create_parser()
     args = parser.parse_args()
 
-    log_level = "DEBUG" if args.verbose else "INFO"
+    # Now set the actual desired log level based on verbose flag
+    log_level = "DEBUG" if args.verbose else "WARNING"
+    
+    # Re-configure logging with the correct level
+    for handler in logging.root.handlers[:]:
+        logging.root.removeHandler(handler)
+    
     logging.basicConfig(
         level=log_level,
         format="[%(levelname)s] %(asctime)s %(module)s: %(message)s",

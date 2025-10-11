@@ -14,12 +14,9 @@ if not logger.handlers:
     logging.basicConfig(level=logging.DEBUG, format='[%(levelname)s] %(asctime)s %(module)s: %(message)s')
 
 try:
-    logger.info("Attempting to import xhtml2pdf.pisa in analysis_viewer.py...")
     from xhtml2pdf import pisa
-    logger.info("Successfully imported xhtml2pdf.pisa in analysis_viewer.py.")
     XHTML2PDF_AVAILABLE = True
-except ImportError as e:
-    logger.error(f"Failed to import xhtml2pdf.pisa in analysis_viewer.py. Error: {e}", exc_info=True)
+except ImportError:
     XHTML2PDF_AVAILABLE = False
     pisa = None
 
