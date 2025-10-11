@@ -281,12 +281,7 @@ OpenRouter provides curated routing across high-quality models using an OpenAI-c
 Notes
 - If `OPENROUTER_MODELS` is missing in configuration, the app falls back to resilient defaults (`openrouter-auto`, `openrouter-auto-fast`). Model selection is dropdown-only.
 
-Refresh OpenRouter models metadata via CLI (same logic as the UI refresh button):
 
-```powershell
-python -m traverser_ai_api.cli_controller --refresh-openrouter-models
-```
-Requires `OPENROUTER_API_KEY` in `.env`. Cache is written to `output_data/cache/openrouter_models.json`.
 
 ## Architecture
 

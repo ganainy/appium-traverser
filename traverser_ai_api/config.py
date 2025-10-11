@@ -965,7 +965,7 @@ GEMINI_MODELS = {
         "online": True,
     },
     "flash-latest-fast": {
-        "name": "gemini-2.5-flash-preview-05-20",
+        "name": "gemini-2.5-flash-image",
         "description": "Latest Flash model (2.5) with settings optimized for faster responses.",
         "generation_config": {
             "temperature": 0.3,
@@ -974,6 +974,7 @@ GEMINI_MODELS = {
             "max_output_tokens": 2048,
         },
         "online": True,
+        "vision_supported": True,
     },
 }
 
@@ -1331,29 +1332,6 @@ AI_PROVIDER_CAPABILITIES = {
         "description": "OpenRouter - Unified gateway to multiple model providers",
         "online": True,
     },
-    # Future providers can be easily added here, e.g.:
-    # 'claude': {
-    #     'xml_max_len': 200000,
-    #     'image_supported': True,
-    #     'image_max_width': 600,
-    #     'image_quality': 70,
-    #     'image_format': 'JPEG',
-    #     'payload_max_size_kb': 500,
-    #     'auto_disable_image_context': False,
-    #     'description': 'Anthropic Claude - Balanced capabilities',
-    #     'online': True
-    # },
-    # 'ollama': {
-    #     'xml_max_len': 100000,
-    #     'image_supported': False,
-    #     'image_max_width': None,
-    #     'image_quality': None,
-    #     'image_format': None,
-    #     'payload_max_size_kb': None,
-    #     'auto_disable_image_context': False,
-    #     'description': 'Ollama - Local LLM provider',
-    #     'online': False  # Local provider
-    # }
 }
 OPENROUTER_MODELS = {}
 OPENROUTER_REFRESH_BTN = False

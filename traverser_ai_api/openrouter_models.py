@@ -15,24 +15,43 @@ import json
 import time
 import threading
 import logging
+import requests
 from typing import Any, Dict, List, Optional
 
 
 def get_openrouter_cache_path() -> str:
-    """Return the cache path used to store OpenRouter models.
-
-    Matches the path used by UI components: traverser_ai_api/output_data/cache/openrouter_models.json
-    """
-    base_dir = os.path.dirname(__file__)  # traverser_ai_api
-    cache_dir = os.path.join(base_dir, "output_data", "cache")
+    """Determine the full path to the OpenRouter models cache file."""
+    # Use the traverser_ai_api directory as the base
+    traverser_ai_api_dir = os.path.dirname(os.path.abspath(__file__))
+    logging.debug(f"Traverser AI API Dir: {traverser_ai_api_dir}")
+    cache_dir = os.path.join(traverser_ai_api_dir, "output_data", "cache")
+    logging.debug(f"Cache Dir: {cache_dir}")
     os.makedirs(cache_dir, exist_ok=True)
-    return os.path.join(cache_dir, "openrouter_models.json")
+    cache_file_path = os.path.join(cache_dir, "openrouter_models.json")
+    logging.debug(f"Cache File Path: {cache_file_path}")
+    return cache_file_path
+
+
+def normalize_openrouter_model(model: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize a single OpenRouter model for cache storage."""
+    return {
+        "id": model.get("id", ""),
+        "name": model.get("name", ""),
+        "description": model.get("description", ""),
+        "context_length": model.get("context_length", 0),
+        "pricing": model.get("pricing", {}),
+        "top_provider": model.get("top_provider", {}),
+        "per_request_limits": model.get("per_request_limits", {}),
+        "architecture": model.get("architecture", {}),
+        "capabilities": model.get("capabilities", [])
+    }
 
 
 def save_openrouter_models_to_cache(models: List[Dict[str, Any]]) -> None:
     """Write normalized model list to cache with schema v1 and index mapping."""
     try:
         cache_path = get_openrouter_cache_path()
+        logging.debug(f"Saving OpenRouter models to: {cache_path}")
         # Build index mapping for fast lookup
         index: Dict[str, int] = {}
         for i, m in enumerate(models):
@@ -48,106 +67,112 @@ def save_openrouter_models_to_cache(models: List[Dict[str, Any]]) -> None:
         with open(cache_path, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2)
         logging.info(f"OpenRouter cache saved with schema v1; models: {len(models)}")
+        logging.debug(f"Successfully wrote {len(models)} models to cache.")
     except Exception as e:
-        logging.debug(f"Failed to save OpenRouter cache: {e}")
+        logging.debug(f"Failed to save OpenRouter cache: {e}", exc_info=True)
+        logging.debug(f"ERROR saving to cache: {e}")
+        import traceback
+        traceback.print_exc()
 
 
-def background_refresh_openrouter_models() -> None:
-    """Queue a background refresh that fetches and saves models to cache.
-
-    This mirrors UIComponents._background_refresh_openrouter_models but is UI-agnostic.
+def background_refresh_openrouter_models(wait_for_completion: bool = False) -> bool:
+    """Start a background thread to refresh OpenRouter models cache.
+    
+    Args:
+        wait_for_completion: If True, wait for the refresh to complete before returning
+        
+    Returns:
+        True if successful (or if background thread started), False on error
     """
-    def _worker():
-        try:
-            # Load API key via Config to respect .env
-            try:
-                from .config import Config
-            except ImportError:
-                from config import Config  # fallback
-            cfg = Config()
-            api_key = getattr(cfg, "OPENROUTER_API_KEY", None)
-            if not api_key:
-                logging.warning("OpenRouter refresh requested but API key is missing.")
-                return
-            import requests
-            headers = {
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            }
-            resp = requests.get("https://openrouter.ai/api/v1/models", headers=headers, timeout=20)
-            if resp.status_code != 200:
-                logging.warning(f"OpenRouter API returned HTTP {resp.status_code}")
-                return
-            data = resp.json()
-            models = data.get("data") or data.get("models") or []
-            normalized: List[Dict[str, Any]] = []
-            for m in models:
-                mid = m.get("id") or m.get("name")
-                if not mid:
-                    continue
-                name = m.get("name") or m.get("canonical_slug") or str(mid)
-                architecture = m.get("architecture") or {}
-                input_modalities = architecture.get("input_modalities") or []
-                output_modalities = architecture.get("output_modalities") or []
-                supported_parameters = m.get("supported_parameters") or []
-                pricing = m.get("pricing") if isinstance(m.get("pricing"), dict) else None
-                top_provider = m.get("top_provider") if isinstance(m.get("top_provider"), dict) else None
-                context_length = (
-                    m.get("context_length")
-                    or (top_provider or {}).get("context_length")
-                )
-                supports_image = "image" in (input_modalities or [])
-
-                def _pricing_is_free(p: Any) -> bool:
-                    try:
-                        if isinstance(p, dict):
-                            for v in p.values():
-                                if isinstance(v, (int, float)) and v == 0:
-                                    return True
-                                if isinstance(v, str) and ("free" in v.lower() or "$0" in v or v.strip() == "0"):
-                                    return True
-                                if isinstance(v, dict):
-                                    for vv in v.values():
-                                        if isinstance(vv, (int, float)) and vv == 0:
-                                            return True
-                                        if isinstance(vv, str) and ("free" in vv.lower() or "$0" in vv or vv.strip() == "0"):
-                                            return True
-                        return False
-                    except Exception:
-                        return False
-
-                is_free = _pricing_is_free(pricing) or ("(free" in name.lower()) or (str(mid).lower().endswith(":free"))
-                supports_tools = "tools" in supported_parameters
-                supports_structured_outputs = "structured_outputs" in supported_parameters or "response_format" in supported_parameters
-                entry = {
-                    "id": mid,
-                    "name": name,
-                    "canonical_slug": m.get("canonical_slug"),
-                    "created": m.get("created") or m.get("created_at"),
-                    "description": m.get("description"),
-                    "context_length": context_length,
-                    "architecture": {
-                        "input_modalities": input_modalities,
-                        "output_modalities": output_modalities,
-                        "tokenizer": architecture.get("tokenizer"),
-                        "instruct_type": architecture.get("instruct_type"),
-                    },
-                    "supported_parameters": supported_parameters,
-                    "pricing": pricing,
-                    "top_provider": top_provider,
-                    "per_request_limits": m.get("per_request_limits"),
-                    "supports_image": supports_image,
-                    "is_free": is_free,
-                    "supports_tools": supports_tools,
-                    "supports_structured_outputs": supports_structured_outputs,
-                }
-                normalized.append(entry)
-            if normalized:
-                save_openrouter_models_to_cache(normalized)
-        except Exception as e:
-            logging.debug(f"Background OpenRouter refresh failed: {e}")
-
     try:
-        threading.Thread(target=_worker, daemon=True).start()
+        logging.debug("Starting background OpenRouter refresh thread")
+        completion_event = threading.Event()
+        success_flag = {"success": False}
+        
+        def worker_with_event():
+            try:
+                result = _worker()
+                success_flag["success"] = True
+                completion_event.set()
+                return result
+            except Exception as e:
+                logging.error(f"Background worker failed: {e}", exc_info=True)
+                success_flag["success"] = False
+                completion_event.set()
+                raise
+        
+        thread = threading.Thread(target=worker_with_event, daemon=not wait_for_completion)
+        thread.start()
+        logging.debug("Background thread started successfully")
+        
+        if wait_for_completion:
+            logging.debug("Waiting for background refresh to complete...")
+            completion_event.wait(timeout=30)  # 30 second timeout
+            if completion_event.is_set():
+                logging.debug("Background refresh completed")
+                return success_flag["success"]
+            else:
+                logging.warning("Background refresh timed out after 30 seconds")
+                return False
+        
+        return True
+        
     except Exception as e:
         logging.debug(f"Failed to start background refresh thread: {e}")
+        return False
+def _worker() -> bool:
+    """Background thread worker for refreshing OpenRouter models.
+    
+    Returns:
+        True if successful, False on error
+    """
+    try:
+        logging.debug("_worker() thread started")
+        api_key = os.getenv("OPENROUTER_API_KEY")
+        if not api_key:
+            logging.debug("ERROR - No OPENROUTER_API_KEY found in environment")
+            logging.warning("No OPENROUTER_API_KEY found for background refresh")
+            return False
+        logging.debug(f"Found API key (length: {len(api_key)})")
+        
+        url = "https://openrouter.ai/api/v1/models"
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        logging.debug(f"Making request to {url}")
+        
+        # Use a longer timeout for background refresh
+        response = requests.get(url, headers=headers, timeout=60)
+        logging.debug(f"Response status code: {response.status_code}")
+        
+        if response.status_code != 200:
+            logging.debug(f"ERROR - Non-200 response: {response.status_code}")
+            logging.warning(f"Non-200 response from OpenRouter: {response.status_code}")
+            return False
+        
+        data = response.json()
+        models = data.get("data", [])
+        logging.debug(f"Received {len(models)} models from API")
+        
+        if not models:
+            logging.debug("ERROR - No models received from API")
+            logging.warning("No models received from OpenRouter API")
+            return False
+        
+        # Normalize and add metadata
+        normalized_models = []
+        for model in models:
+            normalized = normalize_openrouter_model(model)
+            normalized_models.append(normalized)
+        
+        logging.debug(f"Normalized {len(normalized_models)} models")
+        logging.debug("Calling save_openrouter_models_to_cache()")
+        save_openrouter_models_to_cache(normalized_models)
+        logging.debug("_worker() completed successfully")
+        return True
+        
+    except Exception as e:
+        logging.debug(f"ERROR in _worker(): {e}")
+        logging.error(f"Error in background OpenRouter refresh: {e}", exc_info=True)
+        return False

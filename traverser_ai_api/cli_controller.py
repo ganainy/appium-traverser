@@ -1785,10 +1785,16 @@ def main_cli():
                 from .openrouter_models import background_refresh_openrouter_models
             except ImportError:
                 from openrouter_models import background_refresh_openrouter_models
-            background_refresh_openrouter_models()
-            logging.info(
-                "Queued background refresh of OpenRouter models; cache will be saved to output_data/cache/openrouter_models.json"
-            )
+            
+            # Use synchronous refresh for CLI to provide immediate feedback
+            success = background_refresh_openrouter_models(wait_for_completion=True)
+            if success:
+                logging.info(
+                    "OpenRouter models cache refreshed successfully; saved to traverser_ai_api/output_data/cache/openrouter_models.json"
+                )
+            else:
+                logging.error("Failed to refresh OpenRouter models cache")
+                exit_code = 1
 
         elif args.list_analysis_targets:
             action_taken = True

@@ -639,6 +639,14 @@ def generate_app_info_cache(perform_ai_filtering_on_this_call: bool = False):
     print(
         f"--- Generating App Info Cache (AI filter specifically requested for this call: {perform_ai_filtering_on_this_call}) ---"
     )
+    if perform_ai_filtering_on_this_call:
+        # Check if the AI model name is set and not empty in the config.
+        # The actual config variable might be something like cfg.DEFAULT_AI_MODEL_NAME
+        if not getattr(cfg, "DEFAULT_AI_MODEL_NAME", None):
+            print("Warning: AI model is not set. AI filtering cannot be performed.", file=sys.stderr)
+            print("Please configure an AI model to use this feature.", file=sys.stderr)
+            return None, [] # Stop execution
+
     device_id = get_device_serial()
     if not device_id or device_id == "unknown_device":
         print(
