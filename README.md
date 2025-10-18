@@ -299,7 +299,7 @@ Notes
 - **`agent_assistant.py`** - Core agent orchestrating AI-driven actions
 - **`ai_assistant.py` & `model_adapters.py`** - Unified AI integration via provider adapters (Gemini, Ollama, OpenRouter)
 - **`agent_tools.py`** - Tools for the agent to interact with the app
-- **`cli_controller.py`** - Command-line interface
+- **`cli/`** - Modular command-line interface
 - **`ui_controller.py`** - Graphical user interface
 - **`screen_state_manager.py`** - Screen state and transition management
 

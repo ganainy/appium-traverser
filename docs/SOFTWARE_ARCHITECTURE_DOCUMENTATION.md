@@ -67,6 +67,7 @@ This section provides a concise overview of the project's structure and where to
 ┌─────────────────────────────────────────────────────────────────┐
 │                        Core Orchestration                       │
 ├─────────────────────────────────────────────────────────────────┤
+│                    Shared Orchestration Layer                   │
 │                         main.py                                 │
 │                        crawler.py                               │
 └─────────────────────────────────────────────────────────────────┘
@@ -95,7 +96,7 @@ This section provides a concise overview of the project's structure and where to
 ```
 ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
 │ CLI         │───▶│ Main        │───▶│ Crawler     │───▶│ AI          │
-│ Controller  │    │ Entry Point │    │ Orchestrate │    │ Assistant   │
+│ Controllers │    │ Entry Point │    │ Orchestrate │    │ Assistant   │
 └─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘
                                             │                    │
                                             ▼                    ▼
@@ -159,7 +160,59 @@ def _step_crawl_action(self) -> Tuple[bool, Optional[str]]:
     """Execute one crawling step with AI guidance"""
 ```
 
-### 3. Agent Assistant (`agent_assistant.py`)
+### 3. Shared Orchestration Layer (`core/`)
+
+The Shared Orchestration Layer provides common functionality used by both CLI and UI interfaces:
+
+#### Key Components
+
+**CrawlerOrchestrator** (`core/controller.py`)
+- Main orchestrator for crawler lifecycle management
+- Handles process launch, monitoring, and termination
+- Provides unified interface for both CLI and UI
+
+**CrawlerLaunchPlan** (`core/controller.py`)
+- Encapsulates all parameters needed to launch a crawler process
+- Includes execution parameters, configuration, and validation results
+
+**Process Backends** (`core/adapters.py`)
+- `SubprocessBackend`: For CLI environments using subprocess
+- `QtProcessBackend`: For UI environments using QProcess
+- Abstracts process handling differences between environments
+
+**FlagController** (`core/controller.py`)
+- Manages flag files for crawler process control (shutdown, pause)
+- Provides unified flag management for both CLI and UI
+
+**ValidationService** (`core/validation.py`)
+- Provides shared validation utilities for pre-flight checks
+- Validates Appium, MobSF, Ollama, and API key configurations
+
+#### Benefits
+
+1. **Code Reuse**: Eliminates duplication between CLI and UI implementations
+2. **Consistency**: Ensures consistent behavior across interfaces
+3. **Maintainability**: Centralized orchestration logic is easier to maintain
+4. **Testability**: Shared components can be tested independently
+
+#### Usage Example
+
+```python
+# Create orchestrator with appropriate backend
+backend = create_process_backend(use_qt=False)  # For CLI
+orchestrator = CrawlerOrchestrator(config, backend)
+
+# Start crawler
+success = orchestrator.start_crawler()
+
+# Get status
+status = orchestrator.get_status()
+
+# Stop crawler
+orchestrator.stop_crawler()
+```
+
+### 4. Agent Assistant (`agent_assistant.py`)
 **Purpose**: Primary decision-making agent that integrates with provider-specific model adapters (Gemini, OpenRouter, Ollama) and enforces structured prompting tailored for mobile UI testing.
 
 **Key Responsibilities**:
@@ -419,7 +472,7 @@ class Config:
 ### Dynamic Configuration Updates
 ```python
 # CLI Updates
-cli_controller.py --set-config MAX_CRAWL_STEPS=15
+python run_cli.py --set-config MAX_CRAWL_STEPS=15
 
 # Programmatic Updates
 config.update_setting_and_save('MAX_CRAWL_STEPS', 15)
@@ -980,3 +1033,67 @@ For new developers joining the project, start by:
 4. Contributing to specific components based on your expertise area
 
 For questions or contributions, please refer to the project's issue tracker and contribution guidelines.
+
+---
+
+## Modular CLI Architecture
+
+### Overview
+
+The project includes a refactored modular CLI architecture that replaces the monolithic `cli_controller.py` with a clean, maintainable structure. The new architecture provides better separation of concerns, improved testability, and easier extensibility.
+
+### Architecture
+
+#### Project Structure
+```
+traverser_ai_api/cli/
+├── __init__.py              # Package initialization
+├── main.py                  # Main entry point and command orchestration
+├── parser.py                # Argument parser builder
+├── shared/                  # Shared utilities and context
+│   ├── __init__.py
+│   ├── context.py           # CLIContext and ServiceRegistry
+│   └── serializers.py       # JSON serialization utilities
+├── services/                # Business logic services
+│   ├── __init__.py
+│   ├── config_service.py    # Configuration management
+│   ├── process_utils.py     # Process and PID management
+│   └── telemetry.py         # Logging and status reporting
+└── commands/                # CLI command implementations
+    ├── __init__.py
+    ├── base.py              # Base command infrastructure
+    ├── config.py            # Configuration commands
+    └── services_check.py    # Service validation commands
+```
+
+#### Key Components
+
+1. **CLIContext**: Central dependency injection container providing Config, LoggerManager, and ServiceRegistry
+2. **CommandHandler Protocol**: Standard interface for all commands with `register()` and `run()` methods
+3. **Service Layer**: Business logic separation with ConfigService, ProcessUtils, and TelemetryService
+4. **Command Groups**: Logical grouping of related commands (device, apps, crawler, etc.)
+
+#### Command Structure
+- **Standalone Commands**: `show-config`, `set-config`, `precheck-services`
+- **Command Groups**: `device list`, `apps scan-health`, `crawler start`, etc.
+
+#### Entry Points
+- **Modular CLI**: `python run_cli.py` (recommended)
+
+#### Benefits
+- **Maintainability**: Clear separation of concerns and modular structure
+- **Extensibility**: Easy to add new commands and services
+- **Testability**: Dependency injection enables proper unit testing
+- **User Experience**: Hierarchical commands with better help organization
+
+#### Migration Status
+| Legacy Command | New Command | Status |
+|----------------|--------------|---------|
+| `--show-config` | `show-config` | ✅ Implemented |
+| `--set-config K=V` | `set-config K=V` | ✅ Implemented |
+| `--precheck-services` | `precheck-services` | ✅ Implemented |
+| `--list-devices` | `device list` | 🚧 Planned |
+| `--scan-health-apps` | `apps scan-health` | 🚧 Planned |
+| `--start` | `crawler start` | 🚧 Planned |
+
+For detailed documentation, see `docs/MODULAR_CLI_ARCHITECTURE.md`.

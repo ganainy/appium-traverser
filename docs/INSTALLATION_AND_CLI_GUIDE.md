@@ -926,3 +926,84 @@ Use the CLI to validate setup before starting:
 python run_cli.py --precheck-services
 ```
 You should see green checks for Appium, provider services (e.g., Ollama), required API keys, and a selected target app.
+
+## CLI Testing
+
+The project includes a comprehensive pytest-based test suite for CLI functionality to ensure reliability after updates.
+
+### Running CLI Tests
+
+**Prerequisites:**
+- Install pytest: `pip install pytest`
+- Ensure your virtual environment is active
+
+**Run all CLI tests:**
+```powershell
+pytest -m cli
+```
+
+**Run specific test categories:**
+```powershell
+# Run only entry point tests
+pytest tests/cli/test_entrypoint.py
+
+# Run parser tests
+pytest tests/cli/test_parser.py
+
+# Run command tests
+pytest tests/cli/commands/
+
+# Run service tests
+pytest tests/cli/services/
+
+# Run legacy migration tests
+pytest tests/cli/test_legacy_migration.py
+```
+
+**Run with verbose output:**
+```powershell
+pytest -m cli -v
+```
+
+**Run with coverage:**
+```powershell
+pytest -m cli --cov=traverser_ai_api.cli --cov-report=html
+```
+
+### Test Structure
+
+The CLI test suite is organized under `tests/cli/`:
+
+- `test_entrypoint.py` - Tests for CLI bootstrap and main entry point
+- `test_parser.py` - Tests for argument parsing and validation
+- `commands/` - Tests for CLI command handlers
+  - `test_crawler.py` - Crawler control commands
+  - `test_apps.py` - App management commands
+- `services/` - Tests for CLI services
+  - `test_crawler_service.py` - Crawler service functionality
+- `test_legacy_migration.py` - Migrated tests from legacy scripts
+
+### Configuration
+
+Test configuration is defined in:
+- `pytest.ini` - Pytest configuration and markers
+- `pyproject.toml` - Project-level pytest settings
+- `tests/conftest.py` - Shared fixtures and test utilities
+
+### Markers
+
+Tests use pytest markers for categorization:
+- `@pytest.mark.cli` - Marks CLI-specific tests
+- `@pytest.mark.integration` - Integration tests
+- `@pytest.mark.unit` - Unit tests
+
+### Continuous Integration
+
+The CLI test suite is designed to run automatically after each update to ensure:
+- CLI entry point functionality works correctly
+- Argument parsing handles all expected scenarios
+- Command handlers execute properly
+- Services integrate correctly
+- Legacy functionality remains compatible
+
+For development, run the CLI test suite before committing changes to ensure compatibility.

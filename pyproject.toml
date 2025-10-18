@@ -7,8 +7,18 @@ name = "traverser-ai-api"
 version = "0.1.0"
 
 [project.scripts]
-run-cli = "traverser_ai_api.cli_controller:main_cli"
+run-cli = "traverser_ai_api.cli:run"
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["traverser_ai_api*"]
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = "-ra -q --strict-markers"
+testpaths = ["tests"]
+markers = [
+    "cli: marks tests as CLI tests (deselect with '-m \"not cli\"')",
+    "integration: marks tests as integration tests",
+    "unit: marks tests as unit tests"
+]

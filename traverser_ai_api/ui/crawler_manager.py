@@ -11,6 +11,17 @@ from typing import Optional, Dict, Any, List, Tuple
 from PySide6.QtCore import QObject, QProcess, QTimer, Slot, Signal, QThread, QRunnable, QThreadPool
 from PySide6.QtWidgets import QApplication
 
+# Import shared orchestrator components
+try:
+    from ..core.controller import CrawlerOrchestrator
+    from ..core.adapters import create_process_backend
+    from ..core.validation import ValidationService
+except ImportError:
+    # Fallback for direct execution
+    from traverser_ai_api.core.controller import CrawlerOrchestrator
+    from traverser_ai_api.core.adapters import create_process_backend
+    from traverser_ai_api.core.validation import ValidationService
+
 
 class ValidationWorker(QRunnable):
     """Worker class to run validation checks asynchronously."""
@@ -61,7 +72,6 @@ class CrawlerManager(QObject):
         super().__init__()
         self.main_controller = main_controller
         self.config = main_controller.config
-        self.crawler_process: Optional[QProcess] = None
         self.step_count = 0
         self.last_action = "None"
         self.current_screenshot = None
@@ -70,9 +80,107 @@ class CrawlerManager(QObject):
         self.shutdown_timer.setSingleShot(True)
         self.shutdown_timer.timeout.connect(self.force_stop_crawler_on_timeout)
         
+        # Initialize shared orchestrator
+        backend = create_process_backend(use_qt=True)  # UI uses Qt backend
+        self.orchestrator = CrawlerOrchestrator(self.config, backend)
+        
         # Initialize thread pool for async validation
         self.thread_pool = QThreadPool()
         self.validation_worker = None
+        
+        # Connect orchestrator signals to UI
+        self._connect_orchestrator_signals()
+    
+    def _connect_orchestrator_signals(self):
+        """Connect orchestrator output callbacks to UI signals."""
+        # Register callbacks with the orchestrator
+        self.orchestrator.register_callback('step', self._on_step_callback)
+        self.orchestrator.register_callback('action', self._on_action_callback)
+        self.orchestrator.register_callback('screenshot', self._on_screenshot_callback)
+        self.orchestrator.register_callback('status', self._on_status_callback)
+        self.orchestrator.register_callback('focus', self._on_focus_callback)
+        self.orchestrator.register_callback('end', self._on_end_callback)
+        self.orchestrator.register_callback('log', self._on_log_callback)
+    
+    def _on_step_callback(self, step_num: int):
+        """Handle step callback from orchestrator."""
+        self.step_count = step_num
+        self.step_updated.emit(step_num)
+        self.main_controller.step_label.setText(f"Step: {step_num}")
+        self.update_progress()
+    
+    def _on_action_callback(self, action: str):
+        """Handle action callback from orchestrator."""
+        self.last_action = action
+        self.action_updated.emit(action)
+        self.main_controller.action_history.append(f"{action}")
+        try:
+            sb = self.main_controller.action_history.verticalScrollBar()
+            if sb:
+                sb.setValue(sb.maximum())
+        except Exception:
+            pass
+    
+    def _on_screenshot_callback(self, screenshot_path: str):
+        """Handle screenshot callback from orchestrator."""
+        if os.path.exists(screenshot_path):
+            self.current_screenshot = screenshot_path
+            self.screenshot_updated.emit(screenshot_path)
+            self.main_controller.update_screenshot(screenshot_path)
+    
+    def _on_status_callback(self, status: str):
+        """Handle status callback from orchestrator."""
+        self.main_controller.status_label.setText(f"Status: {status}")
+    
+    def _on_focus_callback(self, focus_data: str):
+        """Handle focus callback from orchestrator."""
+        try:
+            import json
+            focus_data_dict = json.loads(focus_data)
+            self.main_controller.log_action_with_focus(focus_data_dict)
+        except Exception as e:
+            self.main_controller.log_message(f"Error parsing focus data: {e}", "red")
+            logging.error(f"Error parsing focus data: {e}")
+    
+    def _on_end_callback(self, end_status: str):
+        """Handle end callback from orchestrator."""
+        self.main_controller.log_message(f"Final status: {end_status}", "blue")
+        # Play audio based on final status content
+        try:
+            if hasattr(self.main_controller, '_audio_alert'):
+                if end_status.startswith('COMPLETED'):
+                    self.main_controller._audio_alert('finish')
+                else:
+                    self.main_controller._audio_alert('error')
+        except Exception:
+            pass
+    
+    def _on_log_callback(self, message: str):
+        """Handle log callback from orchestrator."""
+        # Parse log level and color
+        color = 'white'
+        log_message = message
+        
+        prefixes = {
+            '[INFO]': 'blue',
+            'INFO:': 'blue',
+            '[WARNING]': 'orange',
+            'WARNING:': 'orange',
+            '[ERROR]': 'red',
+            'ERROR:': 'red',
+            '[CRITICAL]': 'red',
+            'CRITICAL:': 'red',
+            '[DEBUG]': 'gray',
+            'DEBUG:': 'gray',
+        }
+        
+        for prefix, p_color in prefixes.items():
+            if message.startswith(prefix):
+                log_message = message[len(prefix):].lstrip()
+                color = p_color
+                break
+        
+        self.main_controller.log_message(log_message, color)
     
     def validate_pre_crawl_requirements(self) -> Tuple[bool, List[str]]:
         """
@@ -216,60 +324,9 @@ class CrawlerManager(QObject):
         Returns:
             Dictionary with service status details
         """
-        details = {}
-        
-        # Appium status
-        appium_running = self._check_appium_server()
-        appium_url = getattr(self.config, 'APPIUM_SERVER_URL', 'http://127.0.0.1:4723')
-        details['appium'] = {
-            'running': appium_running,
-            'url': appium_url,
-            'required': True,
-            'message': f"Appium server at {appium_url}" + (" is running ✅" if appium_running else " is not accessible ❌")
-        }
-        
-        # MobSF status (always check, but mark as optional)
-        mobsf_running = self._check_mobsf_server()
-        mobsf_url = getattr(self.config, 'MOBSF_API_URL', 'http://localhost:8000/api/v1')
-        mobsf_enabled = getattr(self.config, 'ENABLE_MOBSF_ANALYSIS', False)
-        details['mobsf'] = {
-            'running': mobsf_running,
-            'url': mobsf_url,
-            'required': False,  # MobSF is now optional
-            'enabled': mobsf_enabled,
-            'message': f"MobSF server at {mobsf_url}" + (" is running ✅" if mobsf_running else " is not accessible ⚠️")
-        }
-        
-        # Ollama status
-        ai_provider = getattr(self.config, 'AI_PROVIDER', 'gemini').lower()
-        if ai_provider == 'ollama':
-            ollama_running = self._check_ollama_service()
-            details['ollama'] = {
-                'running': ollama_running,
-                'required': True,
-                'message': "Ollama service" + (" is running ✅" if ollama_running else " is not running ❌")
-            }
-        
-        # API Keys status
-        api_issues, api_warnings = self._check_api_keys_and_env()
-        all_api_messages = api_issues + api_warnings
-        details['api_keys'] = {
-            'valid': len(api_issues) == 0,  # Only blocking issues make it invalid
-            'issues': all_api_messages,
-            'required': True,
-            'message': f"API keys: {len(api_issues)} issue(s), {len(api_warnings)} warning(s)" if all_api_messages else "API keys: All required keys present ✅"
-        }
-        
-        # Target app
-        app_package = getattr(self.config, 'APP_PACKAGE', None)
-        details['target_app'] = {
-            'selected': app_package is not None,
-            'package': app_package,
-            'required': True,
-            'message': f"Target app: {app_package}" if app_package else "Target app: Not selected ❌"
-        }
-        
-        return details
+        # Use the shared validation service
+        validation_service = ValidationService(self.config)
+        return validation_service.get_service_status_details()
     
     def update_progress(self):
         """Update the progress bar based on the current step count."""
