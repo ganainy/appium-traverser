@@ -879,6 +879,146 @@ class CLIController:
             logging.error(f"Failed to reorder focus areas: {e}")
             return False
 
+    def add_focus_area(self, title: str, description: str = "", priority: int = 999, enabled: bool = True) -> bool:
+        """Add a new focus area."""
+        areas = getattr(self.cfg, "FOCUS_AREAS", []) or []
+        
+        # Check for duplicate title
+        for area in areas:
+            if area.get("title", "").lower() == title.lower():
+                print(f"Error: Focus area with title '{title}' already exists.")
+                return False
+        
+        # Create new focus area
+        new_area = {
+            "title": title,
+            "description": description,
+            "priority": priority,
+            "enabled": enabled
+        }
+        
+        areas.append(new_area)
+        try:
+            self.cfg.update_setting_and_save("FOCUS_AREAS", areas)
+            print(f"✅ Successfully added focus area: {title}")
+            return True
+        except Exception as e:
+            print(f"Error adding focus area: {e}")
+            return False
+
+    def edit_focus_area(self, id_or_name: str, title: Optional[str] = None, description: Optional[str] = None, priority: Optional[int] = None, enabled: Optional[bool] = None) -> bool:
+        """Edit an existing focus area."""
+        areas = getattr(self.cfg, "FOCUS_AREAS", []) or []
+        idx = self._find_focus_area_index(id_or_name)
+        if idx is None:
+            print(f"Error: Focus area '{id_or_name}' not found.")
+            return False
+        
+        area = areas[idx]
+        
+        # Update fields if provided
+        if title is not None:
+            area["title"] = title
+        if description is not None:
+            area["description"] = description
+        if priority is not None:
+            area["priority"] = priority
+        if enabled is not None:
+            area["enabled"] = enabled
+        
+        try:
+            self.cfg.update_setting_and_save("FOCUS_AREAS", areas)
+            print(f"✅ Successfully updated focus area: {area.get('title', 'Unknown')}")
+            return True
+        except Exception as e:
+            print(f"Error updating focus area: {e}")
+            return False
+
+    def remove_focus_area(self, id_or_name: str) -> bool:
+        """Remove a focus area."""
+        areas = getattr(self.cfg, "FOCUS_AREAS", []) or []
+        idx = self._find_focus_area_index(id_or_name)
+        if idx is None:
+            print(f"Error: Focus area '{id_or_name}' not found.")
+            return False
+        
+        removed_area = areas.pop(idx)
+        try:
+            self.cfg.update_setting_and_save("FOCUS_AREAS", areas)
+            print(f"✅ Successfully removed focus area: {removed_area.get('title', 'Unknown')}")
+            return True
+        except Exception as e:
+            print(f"Error removing focus area: {e}")
+            return False
+
+    def import_focus_areas(self, file_path: str) -> bool:
+        """Import focus areas from a JSON file."""
+        if not os.path.exists(file_path):
+            print(f"Error: File '{file_path}' not found.")
+            return False
+        
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                imported_areas = json.load(f)
+            
+            if not isinstance(imported_areas, list):
+                print("Error: Import file must contain a JSON array of focus areas.")
+                return False
+            
+            # Validate structure
+            for i, area in enumerate(imported_areas):
+                if not isinstance(area, dict):
+                    print(f"Error: Item {i+1} is not a valid focus area object.")
+                    return False
+                if "title" not in area:
+                    print(f"Error: Item {i+1} missing required 'title' field.")
+                    return False
+            
+            # Get current areas and merge
+            current_areas = getattr(self.cfg, "FOCUS_AREAS", []) or []
+            
+            # Add imported areas with priority adjustment to avoid conflicts
+            max_priority = max([area.get("priority", 0) for area in current_areas], default=0)
+            for area in imported_areas:
+                # Adjust priority to be after existing areas
+                area["priority"] = max_priority + area.get("priority", 0)
+                # Ensure enabled field exists
+                if "enabled" not in area:
+                    area["enabled"] = True
+            
+            merged_areas = current_areas + imported_areas
+            
+            self.cfg.update_setting_and_save("FOCUS_AREAS", merged_areas)
+            print(f"✅ Successfully imported {len(imported_areas)} focus areas from '{file_path}'")
+            return True
+        except json.JSONDecodeError as e:
+            print(f"Error parsing JSON file: {e}")
+            return False
+        except Exception as e:
+            print(f"Error importing focus areas: {e}")
+            return False
+
+    def export_focus_areas(self, file_path: str) -> bool:
+        """Export focus areas to a JSON file."""
+        areas = getattr(self.cfg, "FOCUS_AREAS", []) or []
+        
+        if not areas:
+            print("No focus areas to export.")
+            return False
+        
+        try:
+            # Create directory if it doesn't exist
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+            
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump(areas, f, indent=2, ensure_ascii=False)
+            
+            print(f"✅ Successfully exported {len(areas)} focus areas to '{file_path}'")
+            return True
+        except Exception as e:
+            print(f"Error exporting focus areas: {e}")
+            return False
+
     def _monitor_crawler_output(self):
         if not self.crawler_process or not self.crawler_process.stdout:
             return
@@ -1408,6 +1548,90 @@ class CLIController:
             print(f"Error printing summary: {e}")
             return False
 
+    # === Device Management ===
+    def list_devices(self) -> bool:
+        """List all connected ADB devices."""
+        try:
+            result = subprocess.run(
+                ["adb", "devices"], capture_output=True, text=True, check=True
+            )
+            devices = []
+            for line in result.stdout.strip().split("\n")[1:]:
+                if "\tdevice" in line:
+                    devices.append(line.split("\t")[0])
+            
+            if not devices:
+                print("No connected devices found.")
+                return True
+                
+            print("\n=== Connected Devices ===")
+            for i, device in enumerate(devices):
+                print(f"{i+1}. {device}")
+            print("==========================")
+            return True
+        except FileNotFoundError:
+            print("ERROR: 'adb' command not found. Is Android SDK platform-tools in your PATH?")
+            return False
+        except Exception as e:
+            print(f"Error getting connected devices: {e}")
+            return False
+
+    def select_device(self, device_udid: str, force: bool = False) -> bool:
+        """Select a device by UDID and save it to configuration."""
+        # First verify the device exists
+        try:
+            result = subprocess.run(
+                ["adb", "devices"], capture_output=True, text=True, check=True
+            )
+            devices = []
+            for line in result.stdout.strip().split("\n")[1:]:
+                if "\tdevice" in line:
+                    devices.append(line.split("\t")[0])
+            
+            if device_udid not in devices:
+                print(f"Device '{device_udid}' not found in connected devices.")
+                return False
+        except FileNotFoundError:
+            print("ERROR: 'adb' command not found. Is Android SDK platform-tools in your PATH?")
+            return False
+        except Exception as e:
+            print(f"Error verifying device: {e}")
+            return False
+        
+        # Save to configuration
+        try:
+            self.cfg.update_setting_and_save("DEVICE_UDID", device_udid)
+            print(f"✅ Successfully selected device: {device_udid}")
+            return True
+        except Exception as e:
+            print(f"Error saving device selection: {e}")
+            return False
+
+    def auto_select_device(self) -> bool:
+        """Automatically select the first available device."""
+        try:
+            result = subprocess.run(
+                ["adb", "devices"], capture_output=True, text=True, check=True
+            )
+            devices = []
+            for line in result.stdout.strip().split("\n")[1:]:
+                if "\tdevice" in line:
+                    devices.append(line.split("\t")[0])
+            
+            if not devices:
+                print("No connected devices found.")
+                return False
+            
+            # Select the first device
+            first_device = devices[0]
+            return self.select_device(first_device)
+        except FileNotFoundError:
+            print("ERROR: 'adb' command not found. Is Android SDK platform-tools in your PATH?")
+            return False
+        except Exception as e:
+            print(f"Error auto-selecting device: {e}")
+            return False
+
     # === OpenRouter Model Management ===
     def list_openrouter_models(self, free_only: Optional[bool] = None) -> bool:
         """List available OpenRouter models from the local cache.
@@ -1417,98 +1641,68 @@ class CLIController:
                       If None, use the OPENROUTER_SHOW_FREE_ONLY config setting.
         """
         try:
-            from openrouter_models import get_openrouter_cache_path
+            from openrouter_models import load_openrouter_models_cache, is_openrouter_model_free
         except ImportError:
-            from .openrouter_models import get_openrouter_cache_path
+            from .openrouter_models import load_openrouter_models_cache, is_openrouter_model_free
         
-        cache_path = get_openrouter_cache_path()
+        models = load_openrouter_models_cache()
         
-        if not os.path.exists(cache_path):
+        if not models:
             print("OpenRouter models cache not found. Run '--refresh-openrouter-models' first.")
             return False
         
-        try:
-            with open(cache_path, "r", encoding="utf-8") as f:
-                cache_data = json.load(f)
-            
-            models = cache_data.get("models", [])
-            if not models:
-                print("No models found in cache. Run '--refresh-openrouter-models' to update.")
+        # Determine if we should filter to free-only models
+        if free_only is None:
+            free_only = getattr(self.cfg, "OPENROUTER_SHOW_FREE_ONLY", False)
+        
+        # Filter models if free_only is True
+        if free_only:
+            filtered_models = [m for m in models if is_openrouter_model_free(m)]
+            if not filtered_models:
+                print("No free models found in cache. Run '--refresh-openrouter-models' to update.")
                 return False
+            display_models = filtered_models
+            filter_msg = " (Free Only)"
+        else:
+            display_models = models
+            filter_msg = ""
+        
+        print(f"\n=== Available OpenRouter Models{filter_msg} ({len(display_models)}) ===")
+        for i, model in enumerate(display_models):
+            model_id = model.get("id", "N/A")
+            model_name = model.get("name", "N/A")
+            context_length = model.get("context_length", "N/A")
+            pricing = model.get("pricing", {})
+            prompt_price = pricing.get("prompt", "N/A")
+            completion_price = pricing.get("completion", "N/A")
             
-            # Determine if we should filter to free-only models
-            if free_only is None:
-                free_only = getattr(self.cfg, "OPENROUTER_SHOW_FREE_ONLY", False)
+            # Check if model is free for display
+            free_indicator = " [FREE]" if is_openrouter_model_free(model) else ""
             
-            # Helper function to determine if a model is free
-            def is_model_free(model):
-                pricing = model.get("pricing", {})
-                prompt_price = pricing.get("prompt", "0")
-                completion_price = pricing.get("completion", "0")
-                # Model is considered free if both prices are 0 or missing/empty
-                return (not prompt_price or prompt_price == "0" or float(prompt_price) == 0) and \
-                       (not completion_price or completion_price == "0" or float(completion_price) == 0)
-            
-            # Filter models if free_only is True
-            if free_only:
-                filtered_models = [m for m in models if is_model_free(m)]
-                if not filtered_models:
-                    print("No free models found in cache. Run '--refresh-openrouter-models' to update.")
-                    return False
-                display_models = filtered_models
-                filter_msg = " (Free Only)"
-            else:
-                display_models = models
-                filter_msg = ""
-            
-            print(f"\n=== Available OpenRouter Models{filter_msg} ({len(display_models)}) ===")
-            for i, model in enumerate(display_models):
-                model_id = model.get("id", "N/A")
-                model_name = model.get("name", "N/A")
-                context_length = model.get("context_length", "N/A")
-                pricing = model.get("pricing", {})
-                prompt_price = pricing.get("prompt", "N/A")
-                completion_price = pricing.get("completion", "N/A")
-                
-                # Check if model is free for display
-                free_indicator = " [FREE]" if is_model_free(model) else ""
-                
-                print(f"{i+1:2d}. ID: {model_id}{free_indicator}")
-                print(f"    Name: {model_name}")
-                print(f"    Context: {context_length}")
-                print(f"    Pricing: Prompt {prompt_price} | Completion {completion_price}\n")
-            print("=====================================")
-            print("Use '--select-openrouter-model <index_or_name>' to select a model.")
-            if free_only:
-                print("Showing free models only. Use '--list-openrouter-models --all' to see all models.")
-            return True
-        except Exception as e:
-            logging.error(f"Failed to read OpenRouter cache: {e}", exc_info=True)
-            print(f"Error reading models cache: {e}")
-            return False
+            print(f"{i+1:2d}. ID: {model_id}{free_indicator}")
+            print(f"    Name: {model_name}")
+            print(f"    Context: {context_length}")
+            print(f"    Pricing: Prompt {prompt_price} | Completion {completion_price}\n")
+        print("=====================================")
+        print("Use '--select-openrouter-model <index_or_name>' to select a model.")
+        if free_only:
+            print("Showing free models only. Use '--list-openrouter-models --all' to see all models.")
+        return True
     
     def select_openrouter_model(self, model_identifier: str) -> bool:
         """Select an OpenRouter model by index or name/ID fragment."""
         try:
-            from openrouter_models import get_openrouter_cache_path
+            from openrouter_models import load_openrouter_models_cache, is_openrouter_model_free
         except ImportError:
-            from .openrouter_models import get_openrouter_cache_path
+            from .openrouter_models import load_openrouter_models_cache, is_openrouter_model_free
         
-        cache_path = get_openrouter_cache_path()
+        models = load_openrouter_models_cache()
         
-        if not os.path.exists(cache_path):
+        if not models:
             print("OpenRouter models cache not found. Run '--refresh-openrouter-models' first.")
             return False
         
         try:
-            with open(cache_path, "r", encoding="utf-8") as f:
-                cache_data = json.load(f)
-            
-            models = cache_data.get("models", [])
-            if not models:
-                print("No models found in cache. Run '--refresh-openrouter-models' to update.")
-                return False
-            
             selected_model = None
             
             # Try to find by index first
@@ -1538,15 +1732,9 @@ class CLIController:
             prompt_price = pricing.get("prompt", "0")
             completion_price = pricing.get("completion", "0")
             
-            # Helper function to determine if a model is free
-            def is_model_free():
-                # Model is considered free if both prices are 0 or missing/empty
-                return (not prompt_price or prompt_price == "0" or float(prompt_price) == 0) and \
-                       (not completion_price or completion_price == "0" or float(completion_price) == 0)
-            
             # Show warning if this is a paid model and warnings are enabled
             show_warning = getattr(self.cfg, "OPENROUTER_NON_FREE_WARNING", False)
-            is_free = is_model_free()
+            is_free = is_openrouter_model_free(selected_model)
             
             if not is_free and show_warning:
                 print("\n⚠️  WARNING: You've selected a PAID model!")
@@ -1569,7 +1757,7 @@ class CLIController:
                 print(f"   💰 This is a PAID model. Costs will be incurred for usage.")
             else:
                 print(f"   🆓 This is a FREE model.")
-                
+                 
             print(f"   Use '--show-openrouter-selection' to view this information again.")
             
             return True
@@ -1595,39 +1783,177 @@ class CLIController:
             
             # Try to get more details from cache
             try:
-                from openrouter_models import get_openrouter_cache_path
+                from openrouter_models import get_openrouter_model_meta
             except ImportError:
-                from .openrouter_models import get_openrouter_cache_path
+                from .openrouter_models import get_openrouter_model_meta
             
-            cache_path = get_openrouter_cache_path()
+            model_meta = get_openrouter_model_meta(current_model)
             
-            if os.path.exists(cache_path):
-                try:
-                    with open(cache_path, "r", encoding="utf-8") as f:
-                        cache_data = json.load(f)
-                    
-                    models = cache_data.get("models", [])
-                    for model in models:
-                        if model.get("id") == current_model:
-                            model_name = model.get("name", "N/A")
-                            context_length = model.get("context_length", "N/A")
-                            pricing = model.get("pricing", {})
-                            prompt_price = pricing.get("prompt", "N/A")
-                            completion_price = pricing.get("completion", "N/A")
-                            
-                            print(f"  Model Name: {model_name}")
-                            print(f"  Context Length: {context_length}")
-                            print(f"  Pricing: Prompt {prompt_price} | Completion {completion_price}")
-                            break
-                    else:
-                        print("  Model details not found in cache. Run '--refresh-openrouter-models' to update.")
-                except Exception as e:
-                    logging.debug(f"Error reading model details from cache: {e}")
-                    print("  Could not fetch model details from cache.")
+            if model_meta:
+                model_name = model_meta.get("name", "N/A")
+                context_length = model_meta.get("context_length", "N/A")
+                pricing = model_meta.get("pricing", {})
+                prompt_price = pricing.get("prompt", "N/A")
+                completion_price = pricing.get("completion", "N/A")
+                
+                print(f"  Model Name: {model_name}")
+                print(f"  Context Length: {context_length}")
+                print(f"  Pricing: Prompt {prompt_price} | Completion {completion_price}")
             else:
-                print("  Model cache not found. Run '--refresh-openrouter-models' to update.")
+                print("  Model details not found in cache. Run '--refresh-openrouter-models' to update.")
         
         print("========================================")
+        return True
+
+    def configure_openrouter_image_context(self, model_identifier: Optional[str] = None, enabled: Optional[bool] = None) -> bool:
+        """Configure image context settings for OpenRouter models with tri-state handling."""
+        current_provider = getattr(self.cfg, "AI_PROVIDER", "").lower()
+        if current_provider != "openrouter":
+            print("Error: This command is only available when OpenRouter is selected as the AI provider.")
+            print("Use '--select-openrouter-model <model>' to select an OpenRouter model first.")
+            return False
+        
+        # Get the current model if none specified
+        if not model_identifier:
+            model_identifier = getattr(self.cfg, "DEFAULT_MODEL_TYPE", "")
+            if not model_identifier or model_identifier == "No model selected":
+                print("Error: No OpenRouter model selected. Use '--select-openrouter-model <model>' first.")
+                return False
+        
+        # Get model metadata
+        try:
+            from openrouter_models import get_openrouter_model_meta, is_openrouter_model_vision
+        except ImportError:
+            from .openrouter_models import get_openrouter_model_meta, is_openrouter_model_vision
+        
+        selected_model = get_openrouter_model_meta(model_identifier)
+        
+        if not selected_model:
+            print(f"Error: Model '{model_identifier}' not found in cache.")
+            return False
+        
+        # Check image support
+        supports_image = selected_model.get("supports_image")
+        model_name = selected_model.get("name", "Unknown")
+        
+        print(f"\n=== OpenRouter Image Context Configuration ===")
+        print(f"Model: {model_name} ({model_identifier})")
+        print(f"Image Support: {'Yes' if supports_image else 'No'}")
+        
+        if supports_image is True:
+            # Model supports images - allow user to choose
+            if enabled is None:
+                current_setting = getattr(self.cfg, "ENABLE_IMAGE_CONTEXT", False)
+                print(f"Current image context setting: {'Enabled' if current_setting else 'Disabled'}")
+                print("This model supports image inputs.")
+                return True
+            else:
+                self.cfg.update_setting_and_save("ENABLE_IMAGE_CONTEXT", enabled)
+                print(f"✅ Image context {'enabled' if enabled else 'disabled'} for model {model_name}")
+                return True
+        elif supports_image is False:
+            # Model doesn't support images - force disable
+            if enabled is True:
+                print("⚠️ Warning: This model does not support image inputs. Cannot enable image context.")
+            self.cfg.update_setting_and_save("ENABLE_IMAGE_CONTEXT", False)
+            print("✅ Image context disabled (model does not support images)")
+            return True
+        else:
+            # Unknown capability - use heuristic
+            heuristic = is_openrouter_model_vision(model_identifier)
+            if heuristic:
+                if enabled is None:
+                    current_setting = getattr(self.cfg, "ENABLE_IMAGE_CONTEXT", False)
+                    print(f"Current image context setting: {'Enabled' if current_setting else 'Disabled'}")
+                    print("Model capability unknown; heuristic suggests it supports images.")
+                    return True
+                else:
+                    self.cfg.update_setting_and_save("ENABLE_IMAGE_CONTEXT", enabled)
+                    print(f"✅ Image context {'enabled' if enabled else 'disabled'} (heuristic-based)")
+                    return True
+            else:
+                if enabled is True:
+                    print("⚠️ Warning: Model capability unknown; heuristic suggests it does not support images.")
+                self.cfg.update_setting_and_save("ENABLE_IMAGE_CONTEXT", False)
+                print("✅ Image context disabled (heuristic-based)")
+                return True
+
+    def show_openrouter_model_details(self, model_identifier: Optional[str] = None) -> bool:
+        """Show detailed information about an OpenRouter model including pricing and capabilities."""
+        current_provider = getattr(self.cfg, "AI_PROVIDER", "").lower()
+        if current_provider != "openrouter":
+            print("Error: This command is only available when OpenRouter is selected as the AI provider.")
+            return False
+        
+        # Get the current model if none specified
+        if not model_identifier:
+            model_identifier = getattr(self.cfg, "DEFAULT_MODEL_TYPE", "")
+            if not model_identifier or model_identifier == "No model selected":
+                print("Error: No OpenRouter model selected. Use '--select-openrouter-model <model>' first.")
+                return False
+        
+        # Get model metadata
+        try:
+            from openrouter_models import get_openrouter_model_meta, is_openrouter_model_free
+        except ImportError:
+            from .openrouter_models import get_openrouter_model_meta, is_openrouter_model_free
+        
+        selected_model = get_openrouter_model_meta(model_identifier)
+        
+        if not selected_model:
+            print(f"Error: Model '{model_identifier}' not found in cache.")
+            return False
+        
+        # Display detailed information
+        print(f"\n=== OpenRouter Model Details ===")
+        print(f"ID: {selected_model.get('id', 'N/A')}")
+        print(f"Name: {selected_model.get('name', 'N/A')}")
+        print(f"Description: {selected_model.get('description', 'N/A')}")
+        print(f"Context Length: {selected_model.get('context_length', 'N/A')}")
+        
+        # Pricing information
+        pricing = selected_model.get('pricing', {})
+        if pricing:
+            print(f"\nPricing:")
+            print(f"  Prompt: {pricing.get('prompt', 'N/A')}")
+            print(f"  Completion: {pricing.get('completion', 'N/A')}")
+            print(f"  Image: {pricing.get('image', 'N/A')}")
+            
+            # Free status
+            is_free = is_openrouter_model_free(selected_model)
+            print(f"  Free Model: {'Yes' if is_free else 'No'}")
+        else:
+            print(f"\nPricing: Not available")
+        
+        # Capabilities
+        architecture = selected_model.get('architecture', {})
+        if architecture:
+            print(f"\nCapabilities:")
+            input_modalities = architecture.get('input_modalities', [])
+            output_modalities = architecture.get('output_modalities', [])
+            print(f"  Input Modalities: {', '.join(input_modalities) if input_modalities else 'N/A'}")
+            print(f"  Output Modalities: {', '.join(output_modalities) if output_modalities else 'N/A'}")
+            
+            supports_image = selected_model.get('supports_image')
+            print(f"  Image Support: {'Yes' if supports_image else 'No'}")
+            
+            supported_parameters = architecture.get('supported_parameters', [])
+            if supported_parameters:
+                print(f"  Supported Parameters: {', '.join(supported_parameters)}")
+        
+        # Provider information
+        top_provider = selected_model.get('top_provider', {})
+        if top_provider:
+            print(f"\nProvider Information:")
+            print(f"  Provider Name: {top_provider.get('provider_name', 'N/A')}")
+            print(f"  Model Format: {top_provider.get('model_format', 'N/A')}")
+        
+        # Current configuration
+        current_image_context = getattr(self.cfg, "ENABLE_IMAGE_CONTEXT", False)
+        print(f"\nCurrent Configuration:")
+        print(f"  Image Context: {'Enabled' if current_image_context else 'Disabled'}")
+        
+        print("=================================")
         return True
 
 
@@ -1638,19 +1964,22 @@ def create_parser() -> argparse.ArgumentParser:
         epilog=textwrap.dedent(
             """
 Examples:
-  %(prog)s status
-  %(prog)s --scan-health-apps
-  %(prog)s --scan-all-apps
-  %(prog)s --list-health-apps
-  %(prog)s --list-all-apps
-  %(prog)s --select-app "Your App Name"  # Or use index: %(prog)s --select-app 1
-  %(prog)s --show-selected-app
-  %(prog)s show-config
-  %(prog)s set-config MAX_CRAWL_STEPS=50
-  %(prog)s start
-  %(prog)s stop
-  %(prog)s pause
-  %(prog)s resume
+ %(prog)s status
+ %(prog)s --list-devices
+ %(prog)s --select-device emulator-5554
+ %(prog)s --auto-select-device
+ %(prog)s --scan-health-apps
+ %(prog)s --scan-all-apps
+ %(prog)s --list-health-apps
+ %(prog)s --list-all-apps
+ %(prog)s --select-app "Your App Name"  # Or use index: %(prog)s --select-app 1
+ %(prog)s --show-selected-app
+ %(prog)s show-config
+ %(prog)s set-config MAX_CRAWL_STEPS=50
+ %(prog)s start
+ %(prog)s stop
+ %(prog)s pause
+ %(prog)s resume
                                
   # New Analysis Commands:
   %(prog)s --list-analysis-targets
@@ -1663,14 +1992,44 @@ Examples:
   %(prog)s --print-analysis-summary --target-index 1
   %(prog)s --print-analysis-summary --target-app-package com.example.app
 
+  # Focus Areas Management:
+  %(prog)s --list-focus-areas
+  %(prog)s --add-focus-area "Privacy Settings" --focus-description "Areas related to privacy" --focus-priority 1
+  %(prog)s --edit-focus-area "Privacy Settings" --focus-description "Updated description"
+  %(prog)s --remove-focus-area "Privacy Settings"
+  %(prog)s --import-focus-areas focus_areas.json
+  %(prog)s --export-focus-areas my_focus_areas.json
+
   # OpenRouter Model Management:
   %(prog)s --refresh-openrouter-models
   %(prog)s --list-openrouter-models
   %(prog)s --select-openrouter-model "gpt-4"  # Or use index: %(prog)s --select-openrouter-model 1
   %(prog)s --show-openrouter-selection
+  %(prog)s --show-openrouter-model-details "gpt-4"
+  %(prog)s --configure-openrouter-image-context
+  %(prog)s --enable-image-context
+  %(prog)s --disable-image-context
         """
         ),
     )
+    
+    device_group = parser.add_argument_group("Device Management")
+    device_group.add_argument(
+        "--list-devices",
+        action="store_true",
+        help="List all connected ADB devices.",
+    )
+    device_group.add_argument(
+        "--select-device",
+        metavar="UDID",
+        help="Select a device by UDID for Appium operations.",
+    )
+    device_group.add_argument(
+        "--auto-select-device",
+        action="store_true",
+        help="Automatically select the first available device.",
+    )
+    
     app_group = parser.add_argument_group("App Management")
     app_group.add_argument(
         "--scan-all-apps",
@@ -1841,6 +2200,48 @@ Examples:
         type=str,
         help="Target index for --move-focus-area (1-based).",
     )
+    focus_group.add_argument(
+        "--add-focus-area",
+        metavar="TITLE",
+        type=str,
+        help="Add a new focus area with the given title.",
+    )
+    focus_group.add_argument(
+        "--focus-description",
+        metavar="TEXT",
+        type=str,
+        help="Description for the focus area (used with --add-focus-area or --edit-focus-area).",
+    )
+    focus_group.add_argument(
+        "--focus-priority",
+        metavar="NUMBER",
+        type=int,
+        help="Priority for the focus area (used with --add-focus-area or --edit-focus-area).",
+    )
+    focus_group.add_argument(
+        "--edit-focus-area",
+        metavar="ID_OR_NAME",
+        type=str,
+        help="Edit an existing focus area by index or name.",
+    )
+    focus_group.add_argument(
+        "--remove-focus-area",
+        metavar="ID_OR_NAME",
+        type=str,
+        help="Remove a focus area by index or name.",
+    )
+    focus_group.add_argument(
+        "--import-focus-areas",
+        metavar="FILE_PATH",
+        type=str,
+        help="Import focus areas from a JSON file.",
+    )
+    focus_group.add_argument(
+        "--export-focus-areas",
+        metavar="FILE_PATH",
+        type=str,
+        help="Export focus areas to a JSON file.",
+    )
 
     parser.add_argument("--force-rescan", action="store_true", help="Force app rescan.")
     parser.add_argument(
@@ -1881,6 +2282,30 @@ Examples:
         "--show-openrouter-selection",
         action="store_true",
         help="Show the currently selected OpenRouter model.",
+    )
+    ai_group.add_argument(
+        "--configure-openrouter-image-context",
+        nargs="?",
+        const=None,
+        metavar="MODEL_ID",
+        help="Configure image context settings for OpenRouter models with tri-state handling.",
+    )
+    ai_group.add_argument(
+        "--enable-image-context",
+        action="store_true",
+        help="Enable image context for the current OpenRouter model.",
+    )
+    ai_group.add_argument(
+        "--disable-image-context",
+        action="store_true",
+        help="Disable image context for the current OpenRouter model.",
+    )
+    ai_group.add_argument(
+        "--show-openrouter-model-details",
+        nargs="?",
+        const=None,
+        metavar="MODEL_ID",
+        help="Show detailed information about an OpenRouter model including pricing and capabilities.",
     )
     return parser
 
@@ -2016,6 +2441,20 @@ def main_cli():
     exit_code = 0
 
     try:
+        # Device Management commands
+        if getattr(args, "list_devices", False):
+            action_taken = True
+            if not controller.list_devices():
+                exit_code = 1
+        elif args.select_device:
+            action_taken = True
+            if not controller.select_device(args.select_device):
+                exit_code = 1
+        elif getattr(args, "auto_select_device", False):
+            action_taken = True
+            if not controller.auto_select_device():
+                exit_code = 1
+                
         # New explicit scan commands
         if getattr(args, "scan_all_apps", False):
             action_taken = True
@@ -2154,6 +2593,26 @@ def main_cli():
             action_taken = True
             if not controller.show_selected_openrouter_model():
                 exit_code = 1
+        
+        # OpenRouter parity features
+        elif args.configure_openrouter_image_context is not None:
+            action_taken = True
+            model_id = args.configure_openrouter_image_context
+            if not controller.configure_openrouter_image_context(model_id):
+                exit_code = 1
+        elif args.enable_image_context:
+            action_taken = True
+            if not controller.configure_openrouter_image_context(enabled=True):
+                exit_code = 1
+        elif args.disable_image_context:
+            action_taken = True
+            if not controller.configure_openrouter_image_context(enabled=False):
+                exit_code = 1
+        elif args.show_openrouter_model_details is not None:
+            action_taken = True
+            model_id = args.show_openrouter_model_details
+            if not controller.show_openrouter_model_details(model_id):
+                exit_code = 1
 
         elif args.list_analysis_targets:
             action_taken = True
@@ -2249,6 +2708,33 @@ def main_cli():
             else:
                 if not controller.move_focus_area(args.from_index, args.to_index):
                     exit_code = 1
+
+        # Focus Areas CRUD operations
+        elif args.add_focus_area:
+            action_taken = True
+            description = getattr(args, "focus_description", "") or ""
+            priority = getattr(args, "focus_priority", 999)
+            if not controller.add_focus_area(args.add_focus_area, description, priority):
+                exit_code = 1
+        elif args.edit_focus_area:
+            action_taken = True
+            title = None
+            description = getattr(args, "focus_description", None)
+            priority = getattr(args, "focus_priority", None)
+            if not controller.edit_focus_area(args.edit_focus_area, title, description, priority):
+                exit_code = 1
+        elif args.remove_focus_area:
+            action_taken = True
+            if not controller.remove_focus_area(args.remove_focus_area):
+                exit_code = 1
+        elif args.import_focus_areas:
+            action_taken = True
+            if not controller.import_focus_areas(args.import_focus_areas):
+                exit_code = 1
+        elif args.export_focus_areas:
+            action_taken = True
+            if not controller.export_focus_areas(args.export_focus_areas):
+                exit_code = 1
 
         elif not action_taken:
             parser.print_help()

@@ -368,3 +368,18 @@ Session-based output structure (per device/app run):
 - Logs: `<session_dir>/logs/`
 - Reports: `<session_dir>/reports/`
 - Extracted APK: `<session_dir>/extracted_apk/`
+
+
+### Recent Updates
+
+**Device Management**
+- New commands: `--list-devices`, `--select-device UDID`, `--auto-select-device` for easier ADB device selection.
+
+**Focus Areas CRUD**
+- Manage focus areas with: `--add-focus-area`, `--edit-focus-area`, `--remove-focus-area`, `--import-focus-areas`, `--export-focus-areas`, plus description and priority options.
+
+**OpenRouter Features**
+- View model details, configure image context, toggle image context, and improved model selection with pricing info.
+
+**Docs**
+- CLI reference and workflow examples updated for all new commands and features.

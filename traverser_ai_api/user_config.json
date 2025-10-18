@@ -53,7 +53,14 @@
     "UI_MODE": "Basic",
     "MOBSF_API_URL": "http://localhost:8000/api/v1",
     "ENABLE_MOBSF_ANALYSIS": true,
-    "FOCUS_AREAS": [],
+    "FOCUS_AREAS": [
+        {
+            "title": "privacy",
+            "description": "",
+            "priority": null,
+            "enabled": true
+        }
+    ],
     "FOCUS_MAX_ACTIVE": 5,
     "MAX_SAME_ACTION_REPEAT": 2,
     "DISABLE_EXPENSIVE_XPATH": false,

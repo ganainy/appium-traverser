@@ -154,3 +154,172 @@ def _worker() -> bool:
     except Exception as e:
         logging.error(f"Error in background OpenRouter refresh: {e}", exc_info=True)
         return False
+
+
+def load_openrouter_models_cache() -> Optional[List[Dict[str, Any]]]:
+    """Load and return the list of models from cache, respecting TTL and triggering background refresh if needed.
+    
+    Returns:
+        List of model dicts if cache exists and valid, None otherwise
+    """
+    try:
+        cache_path = get_openrouter_cache_path()
+        if not os.path.exists(cache_path):
+            return None
+        
+        with open(cache_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        
+        # New schema: { schema_version, timestamp, models, index }
+        if isinstance(data, dict) and data.get("schema_version") and isinstance(data.get("models"), list):
+            models = data.get("models")
+            # TTL check: if cache older than 24h, queue background refresh
+            try:
+                ttl_seconds = 24 * 3600
+                ts = int(data.get("timestamp") or 0)
+                if ts and (int(time.time()) - ts) > ttl_seconds:
+                    logging.info("OpenRouter model cache older than 24h; queuing background refresh.")
+                    background_refresh_openrouter_models()
+            except Exception as e:
+                logging.debug(f"TTL check failed: {e}")
+            return models if models else None
+        
+        # Old schema: { models: [...] } or raw list
+        models = data.get("models") if isinstance(data, dict) else data
+        if isinstance(models, list) and len(models) > 0:
+            # Trigger background upgrade to new schema if possible
+            try:
+                logging.info("Detected old OpenRouter cache schema; queuing background schema upgrade.")
+                background_refresh_openrouter_models()
+            except Exception as e:
+                logging.debug(f"Background cache upgrade skipped: {e}")
+            return models
+        return None
+    except Exception as e:
+        logging.debug(f"Failed to read OpenRouter cache: {e}")
+        return None
+
+
+def get_openrouter_model_meta(model_id: str) -> Optional[Dict[str, Any]]:
+    """Lookup a model's metadata by id from the cache (supports both schemas).
+    
+    Args:
+        model_id: The model ID to look up
+        
+    Returns:
+        Model metadata dict if found, None otherwise
+    """
+    try:
+        cache_path = get_openrouter_cache_path()
+        if not os.path.exists(cache_path):
+            return None
+        
+        with open(cache_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        
+        if isinstance(data, dict) and data.get("schema_version") and isinstance(data.get("models"), list):
+            index = data.get("index") or {}
+            models = data.get("models") or []
+            i = index.get(str(model_id))
+            if isinstance(i, int) and 0 <= i < len(models):
+                return models[i]
+            # Fallback linear search
+            for m in models:
+                if str(m.get("id")) == str(model_id):
+                    return m
+            return None
+        
+        # Old schema: list or {models:[]}
+        models = data.get("models") if isinstance(data, dict) else data
+        if isinstance(models, list):
+            for m in models:
+                if str(m.get("id")) == str(model_id) or str(m.get("name")) == str(model_id):
+                    return m
+        return None
+    except Exception as e:
+        logging.debug(f"Failed to lookup model meta: {e}")
+        return None
+
+
+def is_openrouter_model_free(model_meta: Any) -> bool:
+    """Determine free status strictly using prompt/completion/image pricing and known indicators.
+    
+    Args:
+        model_meta: Either a model metadata dict or a model name/id string
+        
+    Returns:
+        True if the model is free, False otherwise
+    """
+    try:
+        def _val_is_zero(v: Any) -> bool:
+            try:
+                if isinstance(v, (int, float)):
+                    return v == 0
+                if isinstance(v, str):
+                    s = v.strip().lower()
+                    return s == "0" or s == "$0" or "free" in s
+                return False
+            except Exception:
+                return False
+
+        # Accept either dict meta or name string
+        if isinstance(model_meta, dict):
+            pricing = model_meta.get("pricing") if isinstance(model_meta.get("pricing"), dict) else None
+            supports_image = bool(model_meta.get("supports_image"))
+            if not supports_image:
+                # Try to infer supports_image from architecture if flag missing
+                try:
+                    arch = model_meta.get("architecture") or {}
+                    supports_image = "image" in (arch.get("input_modalities") or [])
+                except Exception:
+                    supports_image = False
+            prompt_zero = _val_is_zero((pricing or {}).get("prompt"))
+            completion_zero = _val_is_zero((pricing or {}).get("completion"))
+            image_zero = _val_is_zero((pricing or {}).get("image"))
+            if prompt_zero and completion_zero and (not supports_image or image_zero):
+                return True
+            # Fallback to name/id indicators
+            name = (model_meta.get("name") or "").lower()
+            mid = (model_meta.get("id") or "").lower()
+            return "(free" in name or mid.endswith(":free")
+        # If just a name string
+        name_str = str(model_meta).lower()
+        return "(free" in name_str or name_str.endswith(":free")
+    except Exception:
+        return False
+
+
+def is_openrouter_model_vision(model_id: str) -> bool:
+    """Determine vision support using cache metadata; fallback to heuristics.
+    
+    Args:
+        model_id: The model ID to check
+        
+    Returns:
+        True if the model supports vision, False otherwise
+    """
+    if not model_id:
+        return False
+    try:
+        meta = get_openrouter_model_meta(model_id)
+        if isinstance(meta, dict) and "supports_image" in meta:
+            return bool(meta.get("supports_image"))
+    except Exception:
+        pass
+    # Fallback to name-based heuristics
+    mid = str(model_id).lower()
+    patterns = [
+        "vision",
+        "vl",
+        "gpt-4o",
+        "gpt-4.1",
+        "o-mini",
+        "omni",
+        "llava",
+        "qwen-vl",
+        "minicpm-v",
+        "moondream",
+        "gemma3",
+        "image",
+    ]
+    return any(p in mid for p in patterns)

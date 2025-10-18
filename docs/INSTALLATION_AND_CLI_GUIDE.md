@@ -58,15 +58,39 @@ Available Interfaces:
 ### 1. Prerequisites Installation
 
 Required Software:
-*   Python 3.8+ - Download here (ensure it's added to PATH)
-*   Node.js & npm - Download here (for Appium)
-*   Android SDK - Usually comes with Android Studio
-*   Java 8+ - For Android tools
+*   [Python 3.8+](https://www.python.org/downloads/) (ensure it's added to PATH)
+*   [Node.js & npm](https://nodejs.org/) -(for using Appium)
+*   [Android SDK](https://developer.android.com/studio) - Usually comes with Android Studio if you have it installed
 
-Environment Variables:
-*   `ANDROID_HOME` or `ANDROID_SDK_ROOT` pointing to your Android SDK directory
-*   `GEMINI_API_KEY` in `.env` file for AI features
-*   `PCAPDROID_API_KEY` in `.env` file for traffic capture functionality
+### Required Environment Variables
+
+#### 1. .env File Variables
+Add the following API keys to your `.env` file:
+
+- `GEMINI_API_KEY`: API key for Gemini AI features
+- `PCAPDROID_API_KEY`: API key for traffic capture functionality
+- `OPENROUTER_API_KEY`: API key for using OpenRouter AI models ([Get your key](https://openrouter.ai/))
+- `MOBSF_API_KEY`: API key for Mobile Security Framework (MobSF) ([MobSF API Docs](https://mobsf.github.io/docs/#/api/))
+
+Example `.env` snippet:
+```env
+GEMINI_API_KEY=your-gemini-key-here
+PCAPDROID_API_KEY=your-pcapdroid-key-here
+OPENROUTER_API_KEY=your-openrouter-key-here
+MOBSF_API_KEY=your-mobsf-key-here
+```
+
+#### 2. Windows System Environment Variables
+Set the following variable(s) in your Windows system environment:
+
+- `ANDROID_HOME` or `ANDROID_SDK_ROOT`: Path to your Android SDK directory
+
+Example value:
+```
+ANDROID_HOME=C:/Users/youruser/AppData/Local/Android/Sdk
+```
+
+Refer to the documentation for each service to obtain your API keys and set up access.
 
 ### 2. Quick Installation
 
@@ -278,6 +302,12 @@ python run_cli.py --help
 
 #### Typical Workflow:
 
+**New Features:**
+- Device management commands: add, edit, remove, and list devices for ADB integration.
+- Focus areas CRUD: add, edit, remove, import, export focus areas with description and priority options.
+- OpenRouter parity: improved model selection, metadata display, image context support, and pricing info for models.
+- Documentation updates: CLI reference and workflow examples expanded for new features.
+
 **1. Start Appium Server (in a separate terminal):**
 ```bash
 appium --relaxed-security --address 0.0.0.0 --port 4723
@@ -368,6 +398,10 @@ python run_cli.py --stop
 *   `--list-health-apps`: Lists HEALTH apps from the latest health-filtered cache.
 *   `--select-app <APP_NAME_OR_INDEX>`: Selects an application (by its 1-based index from `--list-health-apps`/`--list-all-apps` or by its package name) to be the target for crawling.
 *   `--show-selected-app`: Displays the currently selected app information (name, package, and activity).
+*   `--add-device`: Add a new device for management (ADB integration).
+*   `--remove-device`: Remove a managed device.
+*   `--edit-device`: Edit device details.
+*   `--list-devices`: List all managed devices.
 
 ##### Crawler Control:
 *   `--start`: Starts the crawling process on the currently selected application.
@@ -825,6 +859,11 @@ python run_cli.py <options>
 - `--enable-focus-area ID_OR_NAME` — Enable by index or name substring.
 - `--disable-focus-area ID_OR_NAME` — Disable by index or name substring.
 - `--move-focus-area --from-index N --to-index M` — Reorder areas (1-based indices).
+- `--add-focus-area` — Add a new focus area with description and priority.
+- `--edit-focus-area` — Edit an existing focus area.
+- `--remove-focus-area` — Remove a focus area.
+- `--import-focus-areas` — Import focus areas from a file.
+- `--export-focus-areas` — Export current focus areas to a file.
 
 ---
 
@@ -836,6 +875,9 @@ python run_cli.py <options>
 - `--list-openrouter-models --all` — List all models (overrides OPENROUTER_SHOW_FREE_ONLY config).
 - `--select-openrouter-model ID_OR_NAME` — Select an OpenRouter model by 1-based index or name/ID fragment. Automatically sets AI_PROVIDER to "openrouter".
 - `--show-openrouter-selection` — Show the currently selected OpenRouter model details.
+- `--show-openrouter-model-details` — Display detailed metadata for the selected model, including pricing and capabilities.
+- `--enable-image-context` — Enable image context for vision-capable models (auto-detects support).
+- `--set-openrouter-model-pricing` — Show or update model pricing information for selection.
 
 ### OpenRouter Model Management Workflow
 
