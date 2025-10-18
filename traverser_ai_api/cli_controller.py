@@ -1408,6 +1408,228 @@ class CLIController:
             print(f"Error printing summary: {e}")
             return False
 
+    # === OpenRouter Model Management ===
+    def list_openrouter_models(self, free_only: Optional[bool] = None) -> bool:
+        """List available OpenRouter models from the local cache.
+        
+        Args:
+            free_only: If True, only show free models. If False, show all models.
+                      If None, use the OPENROUTER_SHOW_FREE_ONLY config setting.
+        """
+        try:
+            from openrouter_models import get_openrouter_cache_path
+        except ImportError:
+            from .openrouter_models import get_openrouter_cache_path
+        
+        cache_path = get_openrouter_cache_path()
+        
+        if not os.path.exists(cache_path):
+            print("OpenRouter models cache not found. Run '--refresh-openrouter-models' first.")
+            return False
+        
+        try:
+            with open(cache_path, "r", encoding="utf-8") as f:
+                cache_data = json.load(f)
+            
+            models = cache_data.get("models", [])
+            if not models:
+                print("No models found in cache. Run '--refresh-openrouter-models' to update.")
+                return False
+            
+            # Determine if we should filter to free-only models
+            if free_only is None:
+                free_only = getattr(self.cfg, "OPENROUTER_SHOW_FREE_ONLY", False)
+            
+            # Helper function to determine if a model is free
+            def is_model_free(model):
+                pricing = model.get("pricing", {})
+                prompt_price = pricing.get("prompt", "0")
+                completion_price = pricing.get("completion", "0")
+                # Model is considered free if both prices are 0 or missing/empty
+                return (not prompt_price or prompt_price == "0" or float(prompt_price) == 0) and \
+                       (not completion_price or completion_price == "0" or float(completion_price) == 0)
+            
+            # Filter models if free_only is True
+            if free_only:
+                filtered_models = [m for m in models if is_model_free(m)]
+                if not filtered_models:
+                    print("No free models found in cache. Run '--refresh-openrouter-models' to update.")
+                    return False
+                display_models = filtered_models
+                filter_msg = " (Free Only)"
+            else:
+                display_models = models
+                filter_msg = ""
+            
+            print(f"\n=== Available OpenRouter Models{filter_msg} ({len(display_models)}) ===")
+            for i, model in enumerate(display_models):
+                model_id = model.get("id", "N/A")
+                model_name = model.get("name", "N/A")
+                context_length = model.get("context_length", "N/A")
+                pricing = model.get("pricing", {})
+                prompt_price = pricing.get("prompt", "N/A")
+                completion_price = pricing.get("completion", "N/A")
+                
+                # Check if model is free for display
+                free_indicator = " [FREE]" if is_model_free(model) else ""
+                
+                print(f"{i+1:2d}. ID: {model_id}{free_indicator}")
+                print(f"    Name: {model_name}")
+                print(f"    Context: {context_length}")
+                print(f"    Pricing: Prompt {prompt_price} | Completion {completion_price}\n")
+            print("=====================================")
+            print("Use '--select-openrouter-model <index_or_name>' to select a model.")
+            if free_only:
+                print("Showing free models only. Use '--list-openrouter-models --all' to see all models.")
+            return True
+        except Exception as e:
+            logging.error(f"Failed to read OpenRouter cache: {e}", exc_info=True)
+            print(f"Error reading models cache: {e}")
+            return False
+    
+    def select_openrouter_model(self, model_identifier: str) -> bool:
+        """Select an OpenRouter model by index or name/ID fragment."""
+        try:
+            from openrouter_models import get_openrouter_cache_path
+        except ImportError:
+            from .openrouter_models import get_openrouter_cache_path
+        
+        cache_path = get_openrouter_cache_path()
+        
+        if not os.path.exists(cache_path):
+            print("OpenRouter models cache not found. Run '--refresh-openrouter-models' first.")
+            return False
+        
+        try:
+            with open(cache_path, "r", encoding="utf-8") as f:
+                cache_data = json.load(f)
+            
+            models = cache_data.get("models", [])
+            if not models:
+                print("No models found in cache. Run '--refresh-openrouter-models' to update.")
+                return False
+            
+            selected_model = None
+            
+            # Try to find by index first
+            try:
+                index = int(model_identifier) - 1
+                if 0 <= index < len(models):
+                    selected_model = models[index]
+            except ValueError:
+                # Not an index, search by name or ID
+                model_identifier_lower = model_identifier.lower()
+                for model in models:
+                    model_id = model.get("id", "").lower()
+                    model_name = model.get("name", "").lower()
+                    if model_identifier_lower in model_id or model_identifier_lower in model_name:
+                        selected_model = model
+                        break
+            
+            if not selected_model:
+                print(f"Model '{model_identifier}' not found.")
+                return False
+            
+            model_id = selected_model.get("id")
+            model_name = selected_model.get("name")
+            
+            # Check if this is a paid model and show warning if needed
+            pricing = selected_model.get("pricing", {})
+            prompt_price = pricing.get("prompt", "0")
+            completion_price = pricing.get("completion", "0")
+            
+            # Helper function to determine if a model is free
+            def is_model_free():
+                # Model is considered free if both prices are 0 or missing/empty
+                return (not prompt_price or prompt_price == "0" or float(prompt_price) == 0) and \
+                       (not completion_price or completion_price == "0" or float(completion_price) == 0)
+            
+            # Show warning if this is a paid model and warnings are enabled
+            show_warning = getattr(self.cfg, "OPENROUTER_NON_FREE_WARNING", False)
+            is_free = is_model_free()
+            
+            if not is_free and show_warning:
+                print("\n⚠️  WARNING: You've selected a PAID model!")
+                print(f"   Prompt price: {prompt_price} | Completion price: {completion_price}")
+                print("   This model will incur costs for each API call.")
+                print("   To disable this warning, set OPENROUTER_NON_FREE_WARNING=false in config.")
+                print("   To see only free models, use --list-openrouter-models --free-only")
+                print()
+            
+            # Set AI provider to OpenRouter and update the model
+            self.cfg.update_setting_and_save("AI_PROVIDER", "openrouter")
+            self.cfg.update_setting_and_save("DEFAULT_MODEL_TYPE", model_id)
+            
+            print(f"✅ Successfully selected OpenRouter model:")
+            print(f"   Model ID: {model_id}")
+            print(f"   Model Name: {model_name}")
+            print(f"   Pricing: Prompt {prompt_price} | Completion {completion_price}")
+            
+            if not is_free:
+                print(f"   💰 This is a PAID model. Costs will be incurred for usage.")
+            else:
+                print(f"   🆓 This is a FREE model.")
+                
+            print(f"   Use '--show-openrouter-selection' to view this information again.")
+            
+            return True
+        except Exception as e:
+            logging.error(f"Failed to select OpenRouter model: {e}", exc_info=True)
+            print(f"Error selecting model: {e}")
+            return False
+    
+    def show_selected_openrouter_model(self) -> bool:
+        """Show the currently selected OpenRouter model."""
+        print("\n=== Currently Selected OpenRouter Model ===")
+        
+        current_provider = getattr(self.cfg, "AI_PROVIDER", "")
+        current_model = getattr(self.cfg, "DEFAULT_MODEL_TYPE", "")
+        
+        if current_provider.lower() != "openrouter":
+            print(f"  Current provider: {current_provider}")
+            print("  OpenRouter is not currently selected as the AI provider.")
+            print("  Use '--select-openrouter-model <model>' to select an OpenRouter model.")
+        else:
+            print(f"  Provider: {current_provider}")
+            print(f"  Model ID: {current_model}")
+            
+            # Try to get more details from cache
+            try:
+                from openrouter_models import get_openrouter_cache_path
+            except ImportError:
+                from .openrouter_models import get_openrouter_cache_path
+            
+            cache_path = get_openrouter_cache_path()
+            
+            if os.path.exists(cache_path):
+                try:
+                    with open(cache_path, "r", encoding="utf-8") as f:
+                        cache_data = json.load(f)
+                    
+                    models = cache_data.get("models", [])
+                    for model in models:
+                        if model.get("id") == current_model:
+                            model_name = model.get("name", "N/A")
+                            context_length = model.get("context_length", "N/A")
+                            pricing = model.get("pricing", {})
+                            prompt_price = pricing.get("prompt", "N/A")
+                            completion_price = pricing.get("completion", "N/A")
+                            
+                            print(f"  Model Name: {model_name}")
+                            print(f"  Context Length: {context_length}")
+                            print(f"  Pricing: Prompt {prompt_price} | Completion {completion_price}")
+                            break
+                    else:
+                        print("  Model details not found in cache. Run '--refresh-openrouter-models' to update.")
+                except Exception as e:
+                    logging.debug(f"Error reading model details from cache: {e}")
+                    print("  Could not fetch model details from cache.")
+            else:
+                print("  Model cache not found. Run '--refresh-openrouter-models' to update.")
+        
+        print("========================================")
+        return True
+
 
 def create_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -1435,11 +1657,17 @@ Examples:
   %(prog)s --list-runs-for-target --target-index 1
   %(prog)s --list-runs-for-target --target-app-package com.example.app
 
-  %(prog)s --generate-analysis-pdf --target-index 1 
+  %(prog)s --generate-analysis-pdf --target-index 1
   %(prog)s --generate-analysis-pdf --target-app-package com.example.app
   %(prog)s --generate-analysis-pdf --target-app-package com.example.app --pdf-output-name "custom_report.pdf"
   %(prog)s --print-analysis-summary --target-index 1
   %(prog)s --print-analysis-summary --target-app-package com.example.app
+
+  # OpenRouter Model Management:
+  %(prog)s --refresh-openrouter-models
+  %(prog)s --list-openrouter-models
+  %(prog)s --select-openrouter-model "gpt-4"  # Or use index: %(prog)s --select-openrouter-model 1
+  %(prog)s --show-openrouter-selection
         """
         ),
     )
@@ -1628,6 +1856,31 @@ Examples:
             "Fetch latest OpenRouter models and refresh the local cache (background). "
             "Requires OPENROUTER_API_KEY in .env; writes to output_data/cache/openrouter_models.json."
         ),
+    )
+    ai_group.add_argument(
+        "--list-openrouter-models",
+        action="store_true",
+        help="List available OpenRouter models from the local cache.",
+    )
+    ai_group.add_argument(
+        "--free-only",
+        action="store_true",
+        help="Show only free models when listing OpenRouter models (overrides OPENROUTER_SHOW_FREE_ONLY config).",
+    )
+    ai_group.add_argument(
+        "--all",
+        action="store_true",
+        help="Show all models when listing OpenRouter models (overrides OPENROUTER_SHOW_FREE_ONLY config).",
+    )
+    ai_group.add_argument(
+        "--select-openrouter-model",
+        metavar="ID_OR_NAME",
+        help="Select an OpenRouter model by index or name/ID fragment.",
+    )
+    ai_group.add_argument(
+        "--show-openrouter-selection",
+        action="store_true",
+        help="Show the currently selected OpenRouter model.",
     )
     return parser
 
@@ -1867,7 +2120,7 @@ def main_cli():
                 from .openrouter_models import background_refresh_openrouter_models
             except ImportError:
                 from openrouter_models import background_refresh_openrouter_models
-            
+
             # Use synchronous refresh for CLI to provide immediate feedback
             success = background_refresh_openrouter_models(wait_for_completion=True)
             if success:
@@ -1876,6 +2129,30 @@ def main_cli():
                 )
             else:
                 logging.error("Failed to refresh OpenRouter models cache")
+                exit_code = 1
+        
+        # OpenRouter model management
+        elif args.list_openrouter_models:
+            action_taken = True
+            # Determine free_only flag based on arguments
+            free_only = None
+            if args.free_only:
+                free_only = True
+            elif args.all:
+                free_only = False
+            # If neither flag is specified, use None to respect config setting
+            
+            if not controller.list_openrouter_models(free_only=free_only):
+                exit_code = 1
+        
+        elif args.select_openrouter_model:
+            action_taken = True
+            if not controller.select_openrouter_model(args.select_openrouter_model):
+                exit_code = 1
+        
+        elif args.show_openrouter_selection:
+            action_taken = True
+            if not controller.show_selected_openrouter_model():
                 exit_code = 1
 
         elif args.list_analysis_targets:
