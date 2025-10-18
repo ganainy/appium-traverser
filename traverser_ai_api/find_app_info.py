@@ -128,7 +128,8 @@ if CAN_ENABLE_AI_FILTERING_GLOBALLY:
         selected_models = getattr(cfg, "GEMINI_MODELS", None)
     elif AI_PROVIDER == "openrouter":
         PROVIDER_API_KEY_OR_URL = getattr(cfg, "OPENROUTER_API_KEY", None)
-        selected_models = getattr(cfg, "OPENROUTER_MODELS", None)
+        # Aliases are deprecated for OpenRouter; use DEFAULT_MODEL_TYPE as the exact model id
+        selected_models = None
     elif AI_PROVIDER == "ollama":
         # For Ollama, "api_key" arg is actually the base URL
         PROVIDER_API_KEY_OR_URL = getattr(cfg, "OLLAMA_BASE_URL", None)
@@ -159,49 +160,12 @@ if CAN_ENABLE_AI_FILTERING_GLOBALLY:
             )
             CAN_ENABLE_AI_FILTERING_GLOBALLY = False
         else:
-            # Gemini requires a valid mapping entry to resolve the concrete model name
-            if AI_PROVIDER == "gemini":
-                if (
-                    not selected_models
-                    or not isinstance(selected_models, dict)
-                    or not selected_models.get(model_type)
-                ):
-                    print(
-                        "Error: DEFAULT_MODEL_TYPE or GEMINI_MODELS mapping not valid in Config. AI Filtering will be globally unavailable.",
-                        file=sys.stderr,
-                    )
-                    CAN_ENABLE_AI_FILTERING_GLOBALLY = False
-                else:
-                    model_details = selected_models[model_type]
-                    DEFAULT_AI_MODEL_NAME = model_details.get("name")
-                    if not DEFAULT_AI_MODEL_NAME:
-                        print(
-                            f"Error: 'name' for model type '{model_type}' not in GEMINI_MODELS (Config). AI Filtering will be globally unavailable.",
-                            file=sys.stderr,
-                        )
-                        CAN_ENABLE_AI_FILTERING_GLOBALLY = False
-                    else:
-                        print(
-                            f"Using AI Model from Config: {DEFAULT_AI_MODEL_NAME} (type: {model_type})"
-                        )
-            # OpenRouter and Ollama can accept a raw model alias directly, even if not present in *_MODELS mapping
-            elif AI_PROVIDER in ["openrouter", "ollama"]:
-                if isinstance(selected_models, dict) and selected_models.get(
-                    model_type
-                ):
-                    model_details = selected_models[model_type]
-                    DEFAULT_AI_MODEL_NAME = model_details.get("name") or model_type
-                    print(
-                        f"Using AI Model from Config: {DEFAULT_AI_MODEL_NAME} (type: {model_type})"
-                    )
-                else:
-                    # Fallback: use the DEFAULT_MODEL_TYPE value as the raw model alias/name
-                    DEFAULT_AI_MODEL_NAME = model_type
-                    print(
-                        f"Warning: {AI_PROVIDER.upper()}_MODELS missing or alias '{model_type}' not found. "
-                        f"Proceeding with raw model alias from DEFAULT_MODEL_TYPE: '{DEFAULT_AI_MODEL_NAME}'.",
-                        file=sys.stderr,
-                    )
+            # Resolve model name directly from DEFAULT_MODEL_TYPE for all providers
+            if AI_PROVIDER in ["gemini", "openrouter", "ollama"]:
+                DEFAULT_AI_MODEL_NAME = model_type
+                print(
+                    f"Using direct model id from Config: {DEFAULT_AI_MODEL_NAME} (provider: {AI_PROVIDER})"
+                )
             else:
                 # Unknown provider already handled above, keep safety
                 print(
@@ -310,7 +274,26 @@ def run_adb_command(command_list):
 
 
 def get_device_serial():
-    """Gets a unique device identifier."""
+    """Gets a unique device identifier.
+
+    Order of attempts:
+    - Use configured `TARGET_DEVICE_UDID` if present in Config
+    - Try `adb get-serialno` (fast path)
+    - Fallback to `adb devices` parsing
+    - On timeout, reattempt `adb devices` with a slightly longer timeout
+    """
+    # 1) Use configured UDID if available
+    try:
+        udid = getattr(cfg, "TARGET_DEVICE_UDID", None)
+        if isinstance(udid, str):
+            candidate = udid.strip()
+            if candidate and candidate.lower() not in ("unknown", "unknown_device", "no devices found"):
+                return re.sub(r"[^\w\-.]", "_", candidate)
+    except Exception:
+        # Ignore config lookup issues, proceed to ADB-based detection
+        pass
+
+    # 2) Try get-serialno (fast path)
     try:
         result = subprocess.run(
             ["adb", "get-serialno"], capture_output=True, text=True, timeout=5
@@ -321,13 +304,11 @@ def get_device_serial():
             and result.stdout.strip() != "unknown"
         ):
             device_id = result.stdout.strip()
-            # Clean the device ID to make it safe for filenames
-            safe_device_id = re.sub(r"[^\w\-.]", "_", device_id)
-            return safe_device_id
+            return re.sub(r"[^\w\-.]", "_", device_id)
 
-        # Fallback to devices command if get-serialno fails
+        # 3) Fallback to `adb devices`
         devices_result = subprocess.run(
-            ["adb", "devices"], capture_output=True, text=True, timeout=5
+            ["adb", "devices"], capture_output=True, text=True, timeout=6
         )
         if devices_result.returncode == 0:
             lines = devices_result.stdout.strip().splitlines()
@@ -336,10 +317,25 @@ def get_device_serial():
             ]
             if device_lines:
                 device_id = device_lines[0].split("\t")[0].strip()
-                # Clean the device ID to make it safe for filenames
-                safe_device_id = re.sub(r"[^\w\-.]", "_", device_id)
-                return safe_device_id
-
+                return re.sub(r"[^\w\-.]", "_", device_id)
+        return "unknown_device"
+    except subprocess.TimeoutExpired as e:
+        # 4) On timeout, try `adb devices` with a slightly longer timeout
+        try:
+            devices_result = subprocess.run(
+                ["adb", "devices"], capture_output=True, text=True, timeout=10
+            )
+            if devices_result.returncode == 0:
+                lines = devices_result.stdout.strip().splitlines()
+                device_lines = [
+                    line for line in lines[1:] if line.strip() and "\tdevice" in line
+                ]
+                if device_lines:
+                    device_id = device_lines[0].split("\t")[0].strip()
+                    return re.sub(r"[^\w\-.]", "_", device_id)
+        except Exception as inner_e:
+            print(f"Error getting device ID after timeout: {inner_e}", file=sys.stderr)
+        print(f"Error getting device ID: {e}", file=sys.stderr)
         return "unknown_device"
     except Exception as e:
         print(f"Error getting device ID: {e}", file=sys.stderr)
@@ -529,16 +525,17 @@ def filter_apps_with_ai(app_data_list: list):
             api_key=PROVIDER_API_KEY_OR_URL,
             model_name=DEFAULT_AI_MODEL_NAME,
         )
-        # Pick provider-specific model config
-        model_type = getattr(cfg, "DEFAULT_MODEL_TYPE", None)
-        if AI_PROVIDER == "gemini":
-            model_config = getattr(cfg, "GEMINI_MODELS", {}).get(model_type, {})
-        elif AI_PROVIDER == "openrouter":
-            model_config = getattr(cfg, "OPENROUTER_MODELS", {}).get(model_type, {})
-        elif AI_PROVIDER == "ollama":
-            model_config = getattr(cfg, "OLLAMA_MODELS", {}).get(model_type, {})
-        else:
-            model_config = {}
+        # Build a minimal, direct model config; adapters apply provider defaults
+        model_config = {
+            "name": DEFAULT_AI_MODEL_NAME,
+            "description": f"Direct model id '{DEFAULT_AI_MODEL_NAME}'",
+            "generation_config": {
+                "temperature": 0.7,
+                "top_p": 0.95,
+                "max_output_tokens": 4096,
+            },
+            "online": AI_PROVIDER in ["gemini", "openrouter"],
+        }
 
         adapter.initialize(
             model_config=model_config, safety_settings=AI_MODEL_SAFETY_SETTINGS
@@ -640,20 +637,83 @@ def generate_app_info_cache(perform_ai_filtering_on_this_call: bool = False):
         f"--- Generating App Info Cache (AI filter specifically requested for this call: {perform_ai_filtering_on_this_call}) ---"
     )
     if perform_ai_filtering_on_this_call:
-        # Check if the AI model name is set and not empty in the config.
-        # The actual config variable might be something like cfg.DEFAULT_AI_MODEL_NAME
-        if not getattr(cfg, "DEFAULT_AI_MODEL_NAME", None):
-            print("Warning: AI model is not set. AI filtering cannot be performed.", file=sys.stderr)
+        # Check if the computed AI model name is available; use local DEFAULT_AI_MODEL_NAME
+        # This value is resolved above based on provider and model type (including raw alias fallback).
+        if not DEFAULT_AI_MODEL_NAME or not str(DEFAULT_AI_MODEL_NAME).strip():
+            print(
+                "Warning: AI model is not set. AI filtering cannot be performed.",
+                file=sys.stderr,
+            )
+            # Provide CLI-based configuration steps tailored to the current provider
             print("Please configure an AI model to use this feature.", file=sys.stderr)
-            return None, [] # Stop execution
+            print("\nHow to configure via CLI:", file=sys.stderr)
+            print("1) Inspect current settings:", file=sys.stderr)
+            print("   python run_cli.py --show-config AI_", file=sys.stderr)
+            print("   python run_cli.py --show-config DEFAULT_MODEL_TYPE", file=sys.stderr)
+            print("2) Select provider and model:", file=sys.stderr)
+            print(
+                f"   python run_cli.py --set-config AI_PROVIDER={AI_PROVIDER}",
+                file=sys.stderr,
+            )
+            # Suggest a provider-specific DEFAULT_MODEL_TYPE example
+            if AI_PROVIDER == "openrouter":
+                print(
+                    "   python run_cli.py --set-config DEFAULT_MODEL_TYPE=openai/gpt-oss-20b:free",
+                    file=sys.stderr,
+                )
+                print(
+                    "   (Optional) Refresh model list: python run_cli.py --refresh-openrouter-models",
+                    file=sys.stderr,
+                )
+                print(
+                    "3) Set provider credentials (PowerShell):",
+                    file=sys.stderr,
+                )
+                print(
+                    "   setx OPENROUTER_API_KEY \"sk-or-...\"   # or add to .env",
+                    file=sys.stderr,
+                )
+            elif AI_PROVIDER == "gemini":
+                print(
+                    "   python run_cli.py --set-config DEFAULT_MODEL_TYPE=gemini-2.5-flash-image",
+                    file=sys.stderr,
+                )
+                print(
+                    "3) Set provider credentials (PowerShell):",
+                    file=sys.stderr,
+                )
+                print(
+                    "   setx GEMINI_API_KEY \"AIza...\"       # or add to .env",
+                    file=sys.stderr,
+                )
+            elif AI_PROVIDER == "ollama":
+                print(
+                    "   python run_cli.py --set-config DEFAULT_MODEL_TYPE=llama3.2-vision",
+                    file=sys.stderr,
+                )
+                print(
+                    "3) Set provider URL and ensure Ollama is running:",
+                    file=sys.stderr,
+                )
+                print(
+                    "   setx OLLAMA_BASE_URL \"http://localhost:11434\"",
+                    file=sys.stderr,
+                )
+                print(
+                    "   ollama serve   # in a separate terminal",
+                    file=sys.stderr,
+                )
+            # Fall back to generating the cache without AI filtering rather than failing outright
+            perform_ai_filtering_on_this_call = False
 
     device_id = get_device_serial()
     if not device_id or device_id == "unknown_device":
         print(
-            "Critical Error: Could not obtain valid device ID. Cannot generate cache.",
+            "Warning: Could not obtain a valid device ID quickly. Proceeding with ADB-based discovery attempts.",
             file=sys.stderr,
         )
-        return None, []
+        # Continue with discovery; downstream ADB commands will surface clearer errors
+        # (e.g., device not found or offline) if no device is actually available.
 
     print(f"Device ID: {device_id}")
     # Use THIRD_PARTY_APPS_ONLY from cfg instance

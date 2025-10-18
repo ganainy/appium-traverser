@@ -1,5 +1,7 @@
 # AI-Driven Android App Crawler - Software Architecture Documentation
 
+Status: Development
+
 ## Table of Contents
 1. [Project Overview](#project-overview)
 2. [System Architecture](#system-architecture)
@@ -37,6 +39,10 @@ The AI-Driven Android App Crawler is an automated testing and exploration tool t
  - **PDF Generation**: xhtml2pdf (optional; install with `pip install xhtml2pdf`)
 - **Network Capture**: PCAPdroid integration
 
+### Interfaces & Entry Points
+- **CLI Controller**: run via `python run_cli.py`
+- **UI Controller**: run via `python run_ui.py`
+
 ## Project Architecture
 
 This section provides a concise overview of the project's structure and where to find in-depth details:
@@ -54,7 +60,7 @@ This section provides a concise overview of the project's structure and where to
 ┌─────────────────────────────────────────────────────────────────┐
 │                         User Interface Layer                    │
 ├─────────────────────────────────────────────────────────────────┤
-│  CLI Controller  │  PowerShell Scripts  │  Configuration Files  │
+│  CLI Controller (run_cli.py)  │  UI Controller (run_ui.py)  │  Configuration Files  │
 └─────────────────────────────────────────────────────────────────┘
                                 │
                                 ▼
@@ -498,11 +504,11 @@ CREATE TABLE IF NOT EXISTS run_meta (
 #### Model Configuration
 ```python
 MODEL_CONFIGS = {
-    "flash-latest-fast": {
-        "model_name": "gemini-2.5-flash-preview-05-20",
-        "description": "Latest Flash model with faster responses",
+    "gemini-2.5-flash-image": {
+        "model_name": "gemini-2.5-flash-image",
+        "description": "Gemini 2.5 Flash, optimized for fast multimodal responses",
         "generation_config": {
-            "temperature": 0.1,
+            "temperature": 0.3,
             "top_p": 0.8,
             "top_k": 20,
             "max_output_tokens": 2048
@@ -865,7 +871,7 @@ COPY . /app
 WORKDIR /app
 
 # Run crawler
-CMD ["python", "traverser_ai_api/cli_controller.py"]
+CMD ["python", "run_cli.py"]
 ```
 
 ### Monitoring & Alerting

@@ -3,121 +3,71 @@
 
 ### Copilot Code Editing Guidelines
 
-1. **Honor the Existing System**
 
-   * Understand the code’s role in the larger architecture before editing.
-   * Respect dependencies, assumptions, and historical decisions.
-   * Precision matters more than adding unnecessary code.
-
-2. **Seek the Minimal Viable Intervention**
-
-   * Ask: What is the smallest change that fulfills the requirement?
    * Leave as much of the system untouched as possible.
-   * Preserve existing patterns while addressing the need.
-
-3. **Preserve Working Systems**
-
-   * Value existing tested reliability and edge-case handling.
-   * Default to surgical precision.
    * Don’t rebuild what already works.
 
-4. **Apply the Three-Tier Approach**
+   * If unsure, request clarification instead of assuming broader changes.   * Example: *“I can update line 42 as requested. Do you also want related functions updated?”*
 
-   * First: Offer a minimal, focused change.
-   * If needed: Suggest a moderate refactoring.
-   * Only on explicit request: Consider a full restructuring.
+   * Note potential improvements without implementing them. * Example: *“I updated function X. Functions Y and Z may need similar changes later.”*
 
-5. **Ask for Scope Clarification**
-
-   * If unsure, request clarification instead of assuming broader changes.
-   * Example: *“I can update line 42 as requested. Do you also want related functions updated?”*
-
-6. **Remember: Less is Often More**
-
-   * A precise change shows deeper understanding than a rewrite.
-   * Small, targeted edits are better than large overhauls.
-
-7. **Document the Path Not Taken**
-
-   * Note potential improvements without implementing them.
-   * Example: *“I updated function X. Functions Y and Z may need similar changes later.”*
-
-8. **Embrace the Power of Reversion**
-
-   * Be ready to revert if a change doesn’t work.
-   * Reversion is maintaining integrity, not failure.
-
-9. **Prioritize Clarity and Readability**
-
-   * Use meaningful names.
    * Keep functions small and focused.
-   * Follow style guides (e.g., PEP 8, Prettier).
-
-10. **Maintain Consistency**
 
     * Follow existing project conventions.
     * Reuse existing libraries unless there’s a strong reason not to.
 
-11. **Implement Robust Error Handling**
-
-    * Anticipate failure points (network, file I/O, invalid input).
     * Use proper error handling (try-catch, error codes, specific exceptions).
     * Provide clear error messages.
-
-12. **Consider Security**
-
     * Sanitize user input.
     * Don’t hardcode secrets; use environment variables or config tools.
-    * Watch for vulnerabilities in external libraries.
-
-13. **Write Testable Code**
-
-    * Design functions for testability.
-    * Use dependency injection where possible.
-    * Aim for high coverage in critical parts.
-
+ 
 14. **Add Necessary Documentation**
 
     * Comment complex logic or assumptions.
     * Use standard doc formats (e.g., JSDoc, DocStrings).
 
-15. **Commit Messages (Conventional Commits)**
-
-    * Follow: `type(scope): description` format.
-    * Use imperative mood.
-    * Types: `feat`, `fix`, `chore`, `refactor`, `test`, `docs`.
-
-15. **Use PowerShell Syntax When Applicable**
-
-   * Always write PowerShell commands using valid PowerShell syntax.
-   * Follow standard formatting (e.g., Verb-Noun convention for cmdlets).
-   * Prefer built-in cmdlets over custom scripts unless required.
-   * Ensure compatibility across PowerShell 5.1+ and PowerShell Core where possible.
 ---
-
-### Verification Rules for Copilot
-
-* If you **cannot verify** something, say:
-
-  * *"I cannot verify this."*
-  * *"I do not have access to that information."*
-  * *"My knowledge base does not contain that."*
-
-* Label unverified content clearly at the start:
-
-  * `[Inference]` `[Speculation]` `[Unverified]`
 
 * Do **not** guess or fill gaps. Ask for clarification instead.
 
-* If you use strong claims (e.g., *prevent, guarantee, ensures that*), label the response as **\[Unverified]** unless sourced.
-
-* For LLM behavior claims (including yourself), mark as **\[Inference]** or **\[Unverified]**.
-
-* If you forget to label something unverified, respond with:
-
-  > Correction: I previously made an unverified claim. That was incorrect and should have been labeled.
-
-* Never override or alter user input unless explicitly asked.
-
 ---
+
+### Project-specific rules: appium-traverser-master-arbeit
+
+Use these concrete rules when editing this repo so changes align with the crawler’s contracts and runtime behavior.
+
+- Keep stdout prefixes stable: `UI_STATUS:`, `UI_STEP:`, `UI_ACTION:`, `UI_SCREENSHOT:`, `UI_ANNOTATED_SCREENSHOT:`, `UI_FOCUS:`, `UI_END:`. Do not rename or reformat; external UIs parse these.
+- AI JSON output contract (see `traverser_ai_api/agent_assistant.py`):
+   - Keys: `action`, `target_identifier`, `target_bounding_box`, `input_text`, `reasoning`, `focus_influence`.
+   - `target_identifier` must be a single raw attribute value only: either resource-id like `com.pkg:id/name`, or content-desc, or visible text. Do not include `id=`/`content-desc=` prefixes and never combine with `|`.
+   - `target_bounding_box` must be an object: `{ "top_left": [y, x], "bottom_right": [y, x] }` using absolute pixels or normalized 0..1. Do not use string formats like `[x,y][x2,y2]`. Use null if not applicable.
+   - Example (valid):
+      ```json
+      {
+         "action": "click",
+         "target_identifier": "com.example:id/continue",
+         "target_bounding_box": {"top_left": [420, 80], "bottom_right": [520, 280]},
+         "input_text": null,
+         "reasoning": "Primary progression CTA",
+         "focus_influence": ["onboarding", "progression"]
+      }
+      ```
+- Element finding priorities (see `crawler.py` and `action_mapper.py`): try in order: ID (full resource-id or package-prefixed), Accessibility ID, text/content-desc (case-insensitive), class contains. Heavier XPath strategies (`xpath_contains`, `xpath_flexible`) are included only when `DISABLE_EXPENSIVE_XPATH` is False. Respect `ELEMENT_STRATEGY_MAX_ATTEMPTS` caps.
+- Mapping and fallbacks:
+   - Prefer element-based actions when `target_identifier` resolves. If not found and `USE_COORDINATE_FALLBACK` is True, fall back to bbox center tap; clamp to screen bounds.
+   - Long press maps to a tap-and-hold at element/bbox center; default duration from `LONG_PRESS_MIN_DURATION_MS`.
+   - Input flow must verify focus before typing; if native send_keys fails, ADB text fallback is controlled by `USE_ADB_INPUT_FALLBACK`.
+   - Before non-input actions, hide keyboard when `AUTO_HIDE_KEYBOARD_BEFORE_NON_INPUT` is True. Respect toast overlays; wait up to `TOAST_DISMISS_WAIT_MS`.
+- Tap safety (see `appium_driver.py`): honor `SAFE_TAP_MARGIN_RATIO` and `SAFE_TAP_EDGE_HANDLING` (`snap` or `reject`) when computing coordinate taps.
+- Loop/no-op control (see `crawler.py`):
+   - After `MAX_CONSECUTIVE_NO_OP_FAILURES`, select next from `FALLBACK_ACTIONS_SEQUENCE`.
+   - Limit repeats per screen via `MAX_SAME_ACTION_REPEAT`; set `last_action_feedback_for_ai` to force different actions.
+- Provider/image/XML settings (see `config.py`):
+   - `ENABLE_IMAGE_CONTEXT` may be auto-toggled based on `AI_PROVIDER_CAPABILITIES`; don’t hardcode image-on assumptions.
+   - `XML_SNIPPET_MAX_LEN` auto-adjusts by provider; use `utils.simplify_xml_for_ai(...)` and per-screen cache keyed by hash/provider/limit.
+   - Screenshot preprocessing uses `IMAGE_MAX_WIDTH`, `IMAGE_FORMAT`, `IMAGE_QUALITY`, and optional top/bottom bar cropping; adapters handle final encoding.
+- Do not break path templates or persistence: `Config` resolves and persists paths (session dirs, `OUTPUT_DATA_DIR` template, app_info cache). When adding settings, wire them into `Config._get_user_savable_config()` if they’re user-facing.
+- Maintain adapter boundaries: implement model-specific logic inside `model_adapters.py`; keep `AgentAssistant` provider-agnostic.
+- Tests/docs: when changing public behavior, add a brief note in README or docs and, if feasible, a minimal test harness under `tests/` replicating the JSON contract and mapping edge cases.
+
 

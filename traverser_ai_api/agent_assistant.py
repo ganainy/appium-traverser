@@ -59,98 +59,27 @@ class AgentAssistant:
         else:
             raise ValueError(f"Unsupported AI provider: {self.ai_provider}")
 
-        model_alias = model_alias_override or self.cfg.DEFAULT_MODEL_TYPE
-        # For OpenRouter, allow raw alias when dropdown-selected model isn't in predefined aliases
-        openrouter_raw_alias = False
-        # Respect explicit no-selection from UI
-        if not model_alias or str(model_alias).strip() in ["", "No model selected"]:
+        # Use DEFAULT_MODEL_TYPE directly as a provider-specific model identifier
+        model_id = model_alias_override or self.cfg.DEFAULT_MODEL_TYPE
+        if not model_id or str(model_id).strip() in ["", "No model selected"]:
             raise ValueError("No model selected. Please choose a model in AI Settings (Default Model Type).")
 
-        # Get the models configuration based on the provider
-        if self.ai_provider == 'gemini':
-            models_config = self.cfg.GEMINI_MODELS
-            if not models_config or not isinstance(models_config, dict):
-                raise ValueError("GEMINI_MODELS must be defined in app_config and be a non-empty dictionary.")
-        elif self.ai_provider == 'ollama':
-            models_config = self.cfg.OLLAMA_MODELS
-            if not models_config or not isinstance(models_config, dict):
-                raise ValueError("OLLAMA_MODELS must be defined in app_config and be a non-empty dictionary.")
-        elif self.ai_provider == 'openrouter':
-            models_config = getattr(self.cfg, 'OPENROUTER_MODELS', None)
-            if not models_config or not isinstance(models_config, dict) or len(models_config) == 0:
-                # Allow direct ID if user selected a raw OpenRouter model string
-                if isinstance(model_alias, str) and '/' in model_alias:
-                    openrouter_raw_alias = True
-                    models_config = {}
-                    logging.info("OpenRouter: using direct model id without configured aliases.")
-                else:
-                    raise ValueError("OPENROUTER_MODELS is not configured and no direct model id provided. Please select a model in AI Settings.")
-        else:
-            raise ValueError(f"Unsupported AI provider: {self.ai_provider}")
+        # Treat the selected value as the actual model name across providers
+        self.model_alias = str(model_id)
+        self.actual_model_name = str(model_id)
 
-        available_model_aliases = list(models_config.keys())
-        if not available_model_aliases and not (self.ai_provider == 'openrouter' and 'openrouter_raw_alias' in locals() and openrouter_raw_alias):
-            raise ValueError(f"{self.ai_provider.upper()}_MODELS in app_config is empty. Please configure models or select a direct model id.")
-        
-        # Handle model alias that doesn't match the provider
-        requested_alias = model_alias
-        if model_alias not in available_model_aliases:
-            # If OpenRouter and alias is a direct id, treat as raw alias
-            if self.ai_provider == 'openrouter' and '/' in str(model_alias):
-                openrouter_raw_alias = True
-                logging.info(f"OpenRouter: using direct model id '{model_alias}'.")
-            # For Ollama, try to extract the base model name by removing tags
-            elif self.ai_provider == 'ollama':
-                base_model_alias = self._extract_base_model_name(model_alias)
-                
-                # First try exact match with base name
-                if base_model_alias in available_model_aliases:
-                    model_alias = base_model_alias
-                    logging.debug(f"Matched base model alias '{base_model_alias}' from model name '{model_alias}'")
-                else:
-                    # Try fuzzy matching by finding aliases that start with the base name
-                    matching_aliases = [alias for alias in available_model_aliases if alias.startswith(base_model_alias)]
-                    if matching_aliases:
-                        model_alias = matching_aliases[0]
-                        logging.debug(f"Fuzzy-matched model alias '{model_alias}' from base name '{base_model_alias}'")
-                    else:
-                        logging.warning(f"Model alias '{model_alias}' (base: '{base_model_alias}') not found in {self.ai_provider.upper()}_MODELS. " +
-                                    f"Using default model for {self.ai_provider} provider.")
-                        # Use the first available model for this provider
-                        model_alias = available_model_aliases[0]
-                        # Also update the config to match
-                        if hasattr(self.cfg, 'update_setting_and_save'):
-                            self.cfg.update_setting_and_save("DEFAULT_MODEL_TYPE", model_alias)
-                            logging.debug(f"Updated DEFAULT_MODEL_TYPE setting to '{model_alias}' to match {self.ai_provider} provider")
-            elif self.ai_provider in ['openrouter'] and not openrouter_raw_alias:
-                # Do not auto-fallback; require explicit selection
-                raise ValueError(f"OpenRouter: alias '{requested_alias}' not found in configured OPENROUTER_MODELS and no direct model id was provided.")
-            else:
-                logging.warning(f"Model alias '{model_alias}' not found in {self.ai_provider.upper()}_MODELS. " +
-                               f"Using default model for {self.ai_provider} provider.")
-                # Do not auto-select; require explicit selection
-                raise ValueError(f"Model alias '{model_alias}' not found in {self.ai_provider.upper()}_MODELS. Please select a model explicitly.")
-
-        model_config_from_file = models_config.get(model_alias)
-        if (not model_config_from_file or not isinstance(model_config_from_file, dict)):
-            if self.ai_provider == 'openrouter' and openrouter_raw_alias:
-                # Build a fallback config using the raw alias as the actual model name
-                model_config_from_file = {
-                    'name': model_alias,
-                    'description': f"Direct OpenRouter model '{model_alias}'",
-                    'generation_config': {'temperature': 0.7, 'top_p': 0.95, 'max_output_tokens': 4096},
-                    'online': True
-                }
-                logging.info(f"OpenRouter: using direct model '{model_alias}' with default generation settings.")
-            else:
-                raise ValueError(f"Model configuration for alias '{model_alias}' not found or invalid.")
-
-        actual_model_name = model_config_from_file.get('name')
-        if not actual_model_name:
-            raise ValueError(f"'name' field missing in app_config for alias '{model_alias}'.")
-
-        self.model_alias = model_alias
-        self.actual_model_name = actual_model_name
+        # Construct a minimal provider-agnostic model config. Adapters apply defaults.
+        model_config_from_file = {
+            'name': self.actual_model_name,
+            'description': f"Direct model id '{self.actual_model_name}' for provider '{self.ai_provider}'",
+            'generation_config': {
+                # Keep conservative defaults; adapters may override or apply safer fallbacks
+                'temperature': 0.7,
+                'top_p': 0.95,
+                'max_output_tokens': 4096
+            },
+            'online': self.ai_provider in ['gemini', 'openrouter']
+        }
 
         # Initialize model using the adapter
         self._initialize_model(model_config_from_file, safety_settings_override)

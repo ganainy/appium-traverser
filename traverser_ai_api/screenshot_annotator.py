@@ -38,10 +38,7 @@ class ScreenshotAnnotator:
             # Potentially raise an error or set a flag indicating this annotator is partially non-functional
             self.master_annotation_file_path = None # Or some other indicator of a problem
 
-        logging.debug(f"ScreenshotAnnotator initialized. Annotated screenshots will be saved to: {self.cfg.ANNOTATED_SCREENSHOTS_DIR}")
-        if self.master_annotation_file_path:
-            logging.debug(f"Master UI element annotation file will be managed at: {self.master_annotation_file_path}")
-        else:
+        if not self.master_annotation_file_path:
             logging.error("Master annotation file path could not be determined due to missing SCREENSHOTS_DIR config.")
 
     # ... (rest of the save_annotated_screenshot and update_master_annotation_file methods from previous response) ...

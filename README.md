@@ -1,7 +1,7 @@
 # AI-Driven Android App Crawler
 
 [![Python Version](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/)
-[![Status](https://img.shields.io/badge/status-production-green.svg)]()
+[![Status](https://img.shields.io/badge/status-development-yellow.svg)]()
 
 ## Table of Contents
 
@@ -40,7 +40,16 @@ python -m pip install -r requirements.txt
 appium --relaxed-security  # Terminal 1
 
 # CLI Controller (Terminal 2, venv active)
-python run_cli.py --scan-apps --list-apps --select-app 1 --start
+# Scan installed health apps (or use --scan-all-apps)
+python run_cli.py --scan-health-apps --force-rescan
+# List scanned health apps (or use --list-all-apps)
+python run_cli.py --list-health-apps
+# Select target app by index or package name
+python run_cli.py --select-app 1 --verbose
+# View currently selected app information
+python run_cli.py --show-selected-app
+# Start crawler (optional: annotate screenshots after run)
+python run_cli.py --start --annotate-offline-after-run
 
 # UI Controller (Terminal 2, venv active)
 python run_ui.py 
@@ -351,7 +360,7 @@ ports:
 
 Session-based output structure (per device/app run):
 
-- Base session directory: `traverser_ai_api/output_data/<device_id>_<app_package>_<timestamp>/`
+- Base session directory: `output_data/<device_id>_<app_package>_<timestamp>/`
 - Screenshots: `<session_dir>/screenshots/`
 - Annotated screenshots: `<session_dir>/annotated_screenshots/`
 - Database: `<session_dir>/database/<app_package>_crawl_data.db`

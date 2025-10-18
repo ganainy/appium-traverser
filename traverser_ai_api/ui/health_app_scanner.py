@@ -156,11 +156,10 @@ class HealthAppScanner(QObject):
 
     def trigger_scan_for_health_apps(self):
         """Starts the process of scanning for health apps, forcing a rescan."""
-        # Add debug logging
+        # UI log is sufficient; remove duplicate debug log
         self.main_controller.log_message(
             "DEBUG: trigger_scan_for_health_apps called", "blue"
         )
-        logging.debug("DEBUG: trigger_scan_for_health_apps called")
 
         # Get the current device ID first to update main_controller.current_health_app_list_file
         device_id = self._get_current_device_id()
@@ -215,11 +214,10 @@ class HealthAppScanner(QObject):
 
     def _execute_scan_for_health_apps(self, force_rescan: bool = False):
         """Execute the health app scan process."""
-        # Add debug logging
+        # UI log is sufficient; remove duplicate debug log
         self.main_controller.log_message(
             "DEBUG: _execute_scan_for_health_apps called", "blue"
         )
-        logging.debug("DEBUG: _execute_scan_for_health_apps called")
 
         # Get the device ID and determine the file path for this device
         device_id = self._get_current_device_id()

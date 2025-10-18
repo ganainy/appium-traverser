@@ -49,7 +49,11 @@
     "CLEANUP_DEVICE_PCAP_FILE": true,
     "ENABLE_VIDEO_RECORDING": true,
     "CURRENT_HEALTH_APP_LIST_FILE": "output_data\\app_info\\279cb9b1\\device_279cb9b1_filtered_health_apps.json",
-    "LAST_SELECTED_APP": null,
+    "LAST_SELECTED_APP": {
+        "package_name": "de.gesund.app",
+        "activity_name": "de.gesund.app.MainActivity",
+        "app_name": "Gesund App"
+    },
     "UI_MODE": "Expert",
     "MOBSF_API_URL": "http://localhost:8000/api/v1",
     "ENABLE_MOBSF_ANALYSIS": true,

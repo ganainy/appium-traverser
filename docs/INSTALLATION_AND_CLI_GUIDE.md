@@ -117,11 +117,11 @@ appium --relaxed-security
 #### Terminal 2: Use CLI Controller (ensure .venv is active)
 
 ```powershell
-python traverser_ai_api/cli_controller.py --scan-health-apps --force-rescan # or --scan-all-apps
-python traverser_ai_api/cli_controller.py --list-health-apps # or --list-all-apps
-python traverser_ai_api/cli_controller.py --select-app 1                       # select by index
-python traverser_ai_api/cli_controller.py --select-app "com.example.healthapp" # or select by package/name
-python traverser_ai_api/cli_controller.py --start
+python run_cli.py --scan-health-apps --force-rescan   # or use --scan-all-apps
+python run_cli.py --list-health-apps                  # or use --list-all-apps
+python run_cli.py --select-app 1                      # select by index
+python run_cli.py --select-app "com.example.healthapp"  # or select by package/name
+python run_cli.py --start --annotate-offline-after-run
 ```
 
 ### 4. Start Crawling (UI Method)
@@ -135,7 +135,7 @@ appium --relaxed-security
 #### Terminal 2: Launch UI Controller (ensure .venv is active)
 
 ```powershell
-python traverser_ai_api/ui_controller.py
+python run_ui.py
 ```
 
 **Using the UI Controller:**
@@ -179,7 +179,6 @@ Install Node.js from nodejs.org, then:
 ```bash
 npm install -g appium
 appium driver install uiautomator2
-# appium driver install xcuitest  # Optional for iOS
 ```
 Verify installation:
 ```bash
@@ -191,7 +190,7 @@ appium driver list --installed
 *   Install Android Studio or standalone SDK tools.
 *   Set environment variable `ANDROID_HOME` (or `ANDROID_SDK_ROOT`) to your SDK path (e.g., `C:\Users\YourUser\AppData\Local\Android\Sdk`).
 *   Add SDK `platform-tools` to your system PATH (e.g., `%ANDROID_HOME%\platform-tools`).
-*   Verify: `adb devices` (should show connected devices/emulators after setup).
+*   Verify: `adb devices` (should show connected Android devices after setup).
 
 **Device Setup:**
 
@@ -257,7 +256,7 @@ OPENROUTER_API_KEY=your_openrouter_api_key_here
 CLI refresh (same logic as UI, runs in background):
 
 ```powershell
-python -m traverser_ai_api.cli_controller --refresh-openrouter-models
+python run_cli.py --refresh-openrouter-models
 ```
 
 Requirements:
@@ -270,11 +269,11 @@ Requirements:
 ### CLI Controller (Recommended for Automation)
 
 #### Execution:
-Navigate to the `traverser_ai_api` directory and ensure your virtual environment is active.
+From the project root (ensure your virtual environment is active):
 
 Example:
 ```powershell
-python traverser_ai_api/cli_controller.py --help
+python run_cli.py --help
 ```
 
 #### Typical Workflow:
@@ -290,31 +289,39 @@ Activate virtual environment if not already active:
 ```powershell
 # .\.venv\Scripts\Activate.ps1
 ```
-Scan for installed (health-related) apps on the connected device/emulator:
+Scan for installed apps on the connected Android device:
 ```powershell
-python traverser_ai_api/cli_controller.py --scan-apps
+# Health-focused scan (AI-filtered)
+python run_cli.py --scan-health-apps
+# OR deterministic scan of ALL apps
+python run_cli.py --scan-all-apps
 ```
 List the apps found by the scan:
 ```powershell
-python traverser_ai_api/cli_controller.py --list-apps
+python run_cli.py --list-health-apps   # If you scanned health apps
+python run_cli.py --list-all-apps      # If you scanned all apps
 ```
 Select an app to target for crawling (use its index number from the list or package name):
 ```powershell
-python traverser_ai_api/cli_controller.py --select-app 1
+python run_cli.py --select-app 1
 # OR select an app using its package name
-python traverser_ai_api/cli_controller.py --select-app "com.example.healthapp"
+python run_cli.py --select-app "com.example.healthapp"
+```
+View the currently selected app information:
+```powershell
+python run_cli.py --show-selected-app
 ```
 View current crawler configuration:
 ```powershell
-python traverser_ai_api/cli_controller.py --show-config
+python run_cli.py --show-config
 ```
 Modify configuration if needed (e.g., set max crawl steps):
 ```powershell
-python traverser_ai_api/cli_controller.py --set-config MAX_CRAWL_STEPS=15
+python run_cli.py --set-config MAX_CRAWL_STEPS=15
 ```
 Start the crawling process for the selected app:
 ```powershell
-python traverser_ai_api/cli_controller.py --start
+python run_cli.py --start
 ```
 
 ### Health App List Caching
@@ -334,32 +341,33 @@ APP_INFO_OUTPUT_DIR resolves to `OUTPUT_DATA_DIR/app_info/<device_id>`, so cache
 Both caches use a unified list key `health_apps` in the JSON output. The CLI and UI read from `health_apps` only.
 Check crawler status (can be run while crawler is active or stopped):
 ```powershell
-python traverser_ai_api/cli_controller.py --status
+python run_cli.py --status
 ```
 
 Pause a running crawler:
 ```powershell
-python traverser_ai_api/cli_controller.py --pause
+python run_cli.py --pause
 ```
 
 Resume a paused crawler:
 ```powershell
-python traverser_ai_api/cli_controller.py --resume
+python run_cli.py --resume
 ```
 
 Stop a running crawler gracefully:
 ```powershell
-python traverser_ai_api/cli_controller.py --stop
+python run_cli.py --stop
 ```
 
 #### Available Commands:
 
 ##### App Management:
-*   `--scan-all-apps`: Scans the connected device/emulator and caches ALL installed apps (no AI filtering).
+*   `--scan-all-apps`: Scans the connected Android device and caches ALL installed apps (no AI filtering).
 *   `--scan-health-apps`: Scans the device and caches AI-filtered health apps (requires AI provider configured).
 *   `--list-all-apps`: Lists ALL apps from the latest all-apps cache.
 *   `--list-health-apps`: Lists HEALTH apps from the latest health-filtered cache.
-*   `--select-app <APP_NAME_OR_INDEX>`: Selects an application (by its 1-based index from `--list-apps` or by its package name) to be the target for crawling.
+*   `--select-app <APP_NAME_OR_INDEX>`: Selects an application (by its 1-based index from `--list-health-apps`/`--list-all-apps` or by its package name) to be the target for crawling.
+*   `--show-selected-app`: Displays the currently selected app information (name, package, and activity).
 
 ##### Crawler Control:
 *   `--start`: Starts the crawling process on the currently selected application.
@@ -386,7 +394,7 @@ python traverser_ai_api/cli_controller.py --stop
         ```
 
 ##### Options:
-*   `--force-rescan`: Forces the `--scan-apps` command to re-scan even if a cached app list exists.
+*   `--force-rescan`: Forces the scan commands to re-scan even if a cached app list exists.
 *   `--verbose` or `-v`: Enables verbose (DEBUG level) logging for the CLI session.
 
 ##### Offline UI Annotation (No AI Calls):
@@ -403,7 +411,7 @@ python -m tools.ui_element_annotator --db-path "path\to\your_crawl_data.db" --sc
 
 **1. List all apps that have crawl data (databases)**
 ```powershell
-python traverser_ai_api/cli_controller.py --list-analysis-targets
+python run_cli.py --list-analysis-targets
 # Example output might show:
 #   1. App Package: com.example.app1, DB File: com.example.app1_crawl_data.db
 #   2. App Package: com.another.app, DB File: com.another.app_crawl_data.db
@@ -411,22 +419,22 @@ python traverser_ai_api/cli_controller.py --list-analysis-targets
 
 **2. (Optional) List runs for a specific app to see what run IDs are available**
 ```powershell
-python traverser_ai_api/cli_controller.py --list-runs-for-target --target-index 1
+python run_cli.py --list-runs-for-target --target-index 1
 ```
 
 **3. Generate PDF for the automatically selected run (latest/only) of 'com.example.app1' (using index)**
 ```powershell
-python traverser_ai_api/cli_controller.py --generate-analysis-pdf --target-index 1
+python run_cli.py --generate-analysis-pdf --target-index 1
 ```
 
 **4. Generate PDF for the automatically selected run of 'com.another.app' (using package name)**
 ```powershell
-python traverser_ai_api/cli_controller.py --generate-analysis-pdf --target-app-package com.another.app
+python run_cli.py --generate-analysis-pdf --target-app-package com.another.app
 ```
 
 **5. Generate PDF for the automatically selected run of 'com.another.app' with a custom output name**
 ```powershell
-python traverser_ai_api/cli_controller.py --generate-analysis-pdf --target-app-package com.another.app --pdf-output-name "my_custom_report.pdf"
+python run_cli.py --generate-analysis-pdf --target-app-package com.another.app --pdf-output-name "my_custom_report.pdf"
 # This would create a file like: com.another.app_run_<AUTO_SELECTED_ID>_my_custom_report.pdf
 ```
 
@@ -437,25 +445,25 @@ python traverser_ai_api/cli_controller.py --generate-analysis-pdf --target-app-p
 
 #### Device Settings:
 ```powershell
-python traverser_ai_api/cli_controller.py --set-config TARGET_DEVICE_UDID=emulator-5554
-python traverser_ai_api/cli_controller.py --set-config APPIUM_SERVER_URL="http://127.0.0.1:4723" # Ensure quotes if URL has special chars
+python run_cli.py --set-config TARGET_DEVICE_UDID=DEVICE_SERIAL  # Use the serial shown by `adb devices`
+python run_cli.py --set-config APPIUM_SERVER_URL="http://127.0.0.1:4723" # Ensure quotes if URL has special chars
 ```
 
 #### Crawler Behavior:
 Steps-based crawling:
 ```powershell
-python traverser_ai_api/cli_controller.py --set-config CRAWL_MODE=steps
-python traverser_ai_api/cli_controller.py --set-config MAX_CRAWL_STEPS=15
+python run_cli.py --set-config CRAWL_MODE=steps
+python run_cli.py --set-config MAX_CRAWL_STEPS=15
 ```
 Time-based crawling:
 ```powershell
-python traverser_ai_api/cli_controller.py --set-config CRAWL_MODE=time
-python traverser_ai_api/cli_controller.py --set-config MAX_CRAWL_DURATION_SECONDS=300
+python run_cli.py --set-config CRAWL_MODE=time
+python run_cli.py --set-config MAX_CRAWL_DURATION_SECONDS=300
 ```
 Other options:
 ```powershell
-python traverser_ai_api/cli_controller.py --set-config ENABLE_TRAFFIC_CAPTURE=true # or false
-python traverser_ai_api/cli_controller.py --set-config CONTINUE_EXISTING_RUN=true # or false
+python run_cli.py --set-config ENABLE_TRAFFIC_CAPTURE=true # or false
+python run_cli.py --set-config CONTINUE_EXISTING_RUN=true # or false
 ```
 
 ### Configuration Files:
@@ -494,7 +502,7 @@ Restart ADB server:
 adb kill-server
 adb start-server
 ```
-List connected devices/emulators:
+List connected Android devices:
 ```powershell
 adb devices # Ensure your target device is listed and 'device' state
 ```
@@ -621,7 +629,7 @@ The AppTransverser supports integration with MobSF (Mobile Security Framework) f
 
 4. Test the connection
    - In the UI Controller: Click "Test MobSF Connection" button
-   - In the CLI: Run `python traverser_ai_api/cli_controller.py --test-mobsf-connection`
+- In the CLI: Run `python run_cli.py --test-mobsf-connection`
    - Check that the connection succeeds without errors
 
 5. Usage
@@ -720,10 +728,10 @@ Recommended via Docker.
      - `MOBSF_API_KEY`: your key
 
 6. Test and run analysis
-   ```powershell
-   python -m traverser_ai_api.cli_controller --test-mobsf-connection
-   python -m traverser_ai_api.cli_controller --run-mobsf-analysis
-   ```
+```powershell
+python run_cli.py --test-mobsf-connection
+python run_cli.py --run-mobsf-analysis
+```
 
 ## 5) PCAPDroid (Optional: Traffic Capture)
 PCAPDroid captures device network traffic. Install on your Android device (F-Droid or official sources).
@@ -767,7 +775,7 @@ Install Ollama for local models (including vision-capable ones). See the “Usin
 
 Run commands from the project root with venv activated:
 ```powershell
-python -m traverser_ai_api.cli_controller <options>
+python run_cli.py <options>
 ```
 
 ## General Options
@@ -780,6 +788,7 @@ python -m traverser_ai_api.cli_controller <options>
 - `--list-all-apps` — List all apps from the latest all-apps cache.
 - `--list-health-apps` — List health apps from the latest health-filtered cache.
 - `--select-app ID_OR_NAME` — Select app by 1-based index or name/package substring.
+- `--show-selected-app` — Display the currently selected app information (name, package, and activity).
 
 ## Crawler Control
 - `--start` — Start the crawler.
@@ -826,6 +835,6 @@ python -m traverser_ai_api.cli_controller <options>
 
 Use the CLI to validate setup before starting:
 ```powershell
-python -m traverser_ai_api.cli_controller --precheck-services
+python run_cli.py --precheck-services
 ```
 You should see green checks for Appium, provider services (e.g., Ollama), required API keys, and a selected target app.

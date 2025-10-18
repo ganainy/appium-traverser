@@ -87,13 +87,35 @@ class CLIController:
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
 
-        if self.cfg.CURRENT_HEALTH_APP_LIST_FILE and os.path.exists(
-            self.cfg.CURRENT_HEALTH_APP_LIST_FILE
-        ):
-            logging.debug(
-                f"Attempting to auto-load health apps from: {self.cfg.CURRENT_HEALTH_APP_LIST_FILE}"
-            )
-            self._load_health_apps_from_file(self.cfg.CURRENT_HEALTH_APP_LIST_FILE)
+        # Attempt to auto-load cached health apps on startup
+        cached_path = self.cfg.CURRENT_HEALTH_APP_LIST_FILE
+        if cached_path:
+            # Normalize relative path to absolute based on api_dir
+            if not os.path.isabs(cached_path):
+                cached_path = os.path.join(self.api_dir, cached_path)
+
+            if os.path.exists(cached_path):
+                logging.debug(
+                    f"Attempting to auto-load health apps from: {cached_path}"
+                )
+                self._load_health_apps_from_file(cached_path)
+            else:
+                logging.debug(
+                    f"Configured health app file not found: {cached_path}"
+                )
+                # Fallback: try resolving the latest device-specific 'health_filtered' cache
+                fallback = self._resolve_latest_cache_file_by_suffix(
+                    "health_filtered"
+                )
+                if fallback and os.path.exists(fallback):
+                    logging.debug(
+                        f"Falling back to resolved cache: {fallback}"
+                    )
+                    self._load_health_apps_from_file(fallback)
+                else:
+                    logging.debug(
+                        "No pre-existing health app list file found or file does not exist."
+                    )
         else:
             logging.debug(
                 "No pre-existing health app list file found or file does not exist."
@@ -394,14 +416,49 @@ class CLIController:
         if not pkg or not act:
             logging.error(f"Selected app '{name}' missing package/activity.")
             return False
-        logging.debug(f"Selecting app: '{name}' (Package: {pkg})")
         self.cfg.update_setting_and_save("APP_PACKAGE", pkg)
         self.cfg.update_setting_and_save("APP_ACTIVITY", act)
         self.cfg.update_setting_and_save(
             "LAST_SELECTED_APP",
             {"package_name": pkg, "activity_name": act, "app_name": name},
         )
+        
+        # Display confirmation of selection
+        print(f"\n✅ Successfully selected app:")
+        print(f"   App Name:    {name}")
+        print(f"   Package:     {pkg}")
+        print(f"   Activity:    {act}")
+        print(f"   Use 'python run_cli.py --show-selected-app' to view this information again.")
+        
         return True
+
+    def show_selected_app(self):
+        """Display the currently selected app information."""
+        print("\n=== Currently Selected App ===")
+        
+        # Try to get app info from LAST_SELECTED_APP first
+        selected_app = self.cfg.LAST_SELECTED_APP
+        
+        if selected_app:
+            app_name = selected_app.get("app_name", "Unknown")
+            package_name = selected_app.get("package_name", "Unknown")
+            activity_name = selected_app.get("activity_name", "Unknown")
+        else:
+            # Fallback to individual config values
+            app_name = "Unknown"
+            package_name = self.cfg.APP_PACKAGE or "Not Set"
+            activity_name = self.cfg.APP_ACTIVITY or "Not Set"
+        
+        print(f"  App Name:    {app_name}")
+        print(f"  Package:     {package_name}")
+        print(f"  Activity:    {activity_name}")
+        
+        if package_name == "Not Set" and activity_name == "Not Set":
+            print("\n  No app is currently selected.")
+            print("  Use 'python run_cli.py --list-health-apps' to see available apps")
+            print("  and 'python run_cli.py --select-app <index>' to select one.")
+        
+        print("==============================")
 
     def pause_crawler(self) -> bool:
         logging.debug("Signaling crawler to pause...")
@@ -465,6 +522,22 @@ class CLIController:
         if not self.cfg.APP_PACKAGE or not self.cfg.APP_ACTIVITY:
             logging.error("APP_PACKAGE and APP_ACTIVITY must be set.")
             return False
+
+        # Log the selected app and key info before starting
+        try:
+            selected_name = (
+                self.cfg.LAST_SELECTED_APP.get("app_name", self.cfg.APP_PACKAGE)
+                if self.cfg.LAST_SELECTED_APP
+                else self.cfg.APP_PACKAGE
+            )
+        except Exception:
+            selected_name = self.cfg.APP_PACKAGE
+        logging.warning(
+            f"Selected app: '{selected_name}' ({self.cfg.APP_PACKAGE or 'Not Set'})"
+        )
+        logging.warning(
+            f"App info: package='{self.cfg.APP_PACKAGE or 'Not Set'}', activity='{self.cfg.APP_ACTIVITY or 'Not Set'}'"
+        )
 
         logging.debug("Starting crawler process...")
         try:
@@ -1349,6 +1422,7 @@ Examples:
   %(prog)s --list-health-apps
   %(prog)s --list-all-apps
   %(prog)s --select-app "Your App Name"  # Or use index: %(prog)s --select-app 1
+  %(prog)s --show-selected-app
   %(prog)s show-config
   %(prog)s set-config MAX_CRAWL_STEPS=50
   %(prog)s start
@@ -1394,6 +1468,11 @@ Examples:
         "--select-app",
         metavar="ID_OR_NAME",
         help="Select app by name or 1-based index.",
+    )
+    app_group.add_argument(
+        "--show-selected-app",
+        action="store_true",
+        help="Show the currently selected app information.",
     )
 
     crawler_group = parser.add_argument_group("Crawler Control")
@@ -1701,6 +1780,9 @@ def main_cli():
         elif args.select_app:
             action_taken = True
             controller.select_app(args.select_app)
+        elif getattr(args, "show_selected_app", False):
+            action_taken = True
+            controller.show_selected_app()
         elif args.show_config is not None:
             action_taken = True
             controller.show_config(args.show_config)

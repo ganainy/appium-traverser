@@ -182,7 +182,6 @@ except Exception as e:
         with open(script_path, 'w', encoding='utf-8') as f:
             f.write(script_content)
         
-        logging.debug(f"Created temporary MobSF analysis script: {script_path}")
     
     @Slot()
     def _on_mobsf_analysis_output(self):
@@ -199,7 +198,6 @@ except Exception as e:
         if os.path.exists(script_path):
             try:
                 os.remove(script_path)
-                logging.debug(f"Removed temporary MobSF analysis script: {script_path}")
             except Exception as e:
                 logging.warning(f"Could not remove temporary script: {e}")
                 

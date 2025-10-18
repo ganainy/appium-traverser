@@ -47,7 +47,6 @@ class LogoWidget(QLabel):
             logo_path = os.path.join(base_dir, "crawler_logo.png")
             
             if os.path.exists(logo_path):
-                logging.debug(f"Loading logo from: {logo_path}")
                 pixmap = QPixmap(logo_path)
                 scaled_pixmap = pixmap.scaled(
                     self.logo_width, self.logo_height,

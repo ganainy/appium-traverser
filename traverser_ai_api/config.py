@@ -436,6 +436,11 @@ class Config:
             logging.debug(
                 f"User configuration file ({file_path}) not found. Using defaults and environment variables."
             )
+        # Normalize DEFAULT_MODEL_TYPE to direct model IDs for the selected provider
+        try:
+            self._normalize_default_model_type()
+        except Exception as e:
+            logging.debug(f"Normalization of DEFAULT_MODEL_TYPE failed: {e}")
         self._resolve_all_paths(create_session_dirs=False)
 
         # Adjust XML limits based on AI provider
@@ -536,39 +541,28 @@ class Config:
                 vision_ok = False
                 try:
                     if provider == "gemini":
-                        # Gemini models are multimodal by default in this configuration
+                        # Most Gemini 2.x Flash/Pro models support multimodal inputs
                         vision_ok = True
                     elif provider == "ollama":
-                        model_info = self.OLLAMA_MODELS.get(model_alias)
-                        if model_info and model_info.get("vision_supported"):
+                        # Normalize potential display decorations and tags
+                        name = model_alias.lower().replace("(local)", "").replace("👁️", "").strip()
+                        base = name.split(":")[0]
+                        tokens = [
+                            "vision",
+                            "llava",
+                            "bakllava",
+                            "vl",
+                            "minicpm",
+                            "moondream",
+                            "qwen",
+                            "gemma3",
+                            "llama3.2",
+                            "llama4",
+                        ]
+                        if any(t in base for t in tokens):
                             vision_ok = True
-                        else:
-                            # Heuristic based on common vision model naming
-                            name = (
-                                model_info.get("name", "")
-                                if model_info
-                                else model_alias
-                            ).lower()
-                            tokens = [
-                                "vision",
-                                "llava",
-                                "bakllava",
-                                "vl",
-                                "minicpm",
-                                "moondream",
-                                "qwen2.5vl",
-                                "granite3.2-vision",
-                                "llama3.2",
-                                "llama4",
-                                "gemma3",
-                            ]
-                            if any(t in name for t in tokens):
-                                vision_ok = True
                     elif provider == "openrouter":
-                        model_info = self.OPENROUTER_MODELS.get(model_alias)
-                        name = (
-                            model_info.get("name", "") if model_info else model_alias
-                        ).lower()
+                        name = model_alias.lower()
                         tokens = [
                             "vision",
                             "vl",
@@ -607,8 +601,61 @@ class Config:
                             )
                 elif not vision_ok:
                     logging.debug(
-                        f"Selected provider/model ('{provider}', '{model_alias}') may not support images; leaving ENABLE_IMAGE_CONTEXT as-is."
+                            f"Selected provider/model ('{provider}', '{model_alias}') may not support images; leaving ENABLE_IMAGE_CONTEXT as-is."
                     )
+
+    def _normalize_default_model_type(self) -> None:
+        """Normalize legacy model aliases to direct provider model IDs and persist if changed.
+
+        This migrates old alias values (e.g., 'flash-latest-fast') to stable model IDs
+        (e.g., 'gemini-2.5-flash-image') based on the currently selected provider.
+        """
+        try:
+            provider = str(getattr(self, "AI_PROVIDER", "gemini") or "gemini").lower().strip()
+        except Exception:
+            provider = "gemini"
+
+        try:
+            current = str(getattr(self, "DEFAULT_MODEL_TYPE", "") or "").strip()
+        except Exception:
+            current = ""
+
+        normalized = current
+        changed = False
+
+        if provider == "gemini":
+            legacy_map = {
+                "flash-latest-fast": "gemini-2.5-flash-image",
+                "flash-latest": "gemini-2.5-flash-preview-05-20",
+            }
+            if current in legacy_map:
+                normalized = legacy_map[current]
+                changed = True
+            if not normalized:
+                normalized = "gemini-2.5-flash-image"
+                changed = True
+        elif provider == "ollama":
+            # Clean common display decorations and fallback to a sensible default
+            name = current.replace("(local)", "").replace("👁️", "").strip()
+            normalized = name or "llama3.2:latest"
+            changed = (normalized != current)
+        elif provider == "openrouter":
+            # Default to a free, OSS option if empty
+            if not current:
+                normalized = "openai/gpt-oss-20b:free"
+                changed = True
+
+        if changed and normalized:
+            try:
+                old_value = getattr(self, "DEFAULT_MODEL_TYPE", None)
+                self.DEFAULT_MODEL_TYPE = normalized
+                logging.debug(
+                    f"Normalized DEFAULT_MODEL_TYPE from '{old_value}' to '{normalized}' for provider '{provider}'."
+                )
+                # Persist normalization for transparency
+                self.save_user_config()
+            except Exception as e:
+                logging.warning(f"Failed to persist normalized DEFAULT_MODEL_TYPE: {e}")
 
     def _get_user_savable_config(self) -> Dict[str, Any]:
         savable_keys = [
@@ -879,6 +926,13 @@ class Config:
             if key == "APP_PACKAGE" or is_output_dir_template_update:
                 self._resolve_all_paths(create_session_dirs=False)
 
+            # Normalize model alias to direct provider ID when relevant
+            try:
+                if key in ["DEFAULT_MODEL_TYPE", "AI_PROVIDER"]:
+                    self._normalize_default_model_type()
+            except Exception as e:
+                logging.debug(f"Normalization skipped due to error: {e}")
+
             self.save_user_config()
 
             # Call synchronization callback if provided
@@ -938,8 +992,8 @@ APPIUM_SERVER_URL = "http://127.0.0.1:4723"
 TARGET_DEVICE_UDID = None
 USE_COORDINATE_FALLBACK = True
 
-AI_PROVIDER = "gemini"  # 'gemini' or 'deepseek' - Gemini has generous free tier
-DEFAULT_MODEL_TYPE = "flash-latest-fast"
+AI_PROVIDER = "gemini"  # Available providers: 'gemini', 'openrouter', 'ollama'
+DEFAULT_MODEL_TYPE = "gemini-2.5-flash-image"
 USE_CHAT_MEMORY = False
 MAX_CHAT_HISTORY = 10
 ENABLE_IMAGE_CONTEXT = False

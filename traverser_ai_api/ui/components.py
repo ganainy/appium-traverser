@@ -66,8 +66,11 @@ class UIComponents:
         )
 
         if provider.lower() == "gemini":
-            # Populate Gemini models after the placeholder; do not auto-select
-            model_dropdown.addItems(["flash-latest", "flash-latest-fast"])
+            # Populate Gemini models using direct model IDs; do not auto-select
+            model_dropdown.addItems([
+                "gemini-2.5-flash-preview-05-20",
+                "gemini-2.5-flash-image",
+            ])
             # Try to restore saved selection if present
             try:
                 if previous_text:
@@ -250,7 +253,6 @@ class UIComponents:
                     # Ensure placeholder remains at index 0
                     insert_index = 1
                     try:
-                        # If there are already user aliases at the top, insert after them
                         # Find first index after placeholder that doesn't equal NO_SELECTION_LABEL
                         for i in range(model_dropdown.count()):
                             if model_dropdown.itemText(i) != NO_SELECTION_LABEL:
@@ -260,20 +262,6 @@ class UIComponents:
                         insert_index = 1
                     model_dropdown.insertItem(insert_index, preset)
 
-            # Include configured display aliases from OPENROUTER_MODELS at the very top
-            try:
-                try:
-                    from ..config import OPENROUTER_MODELS
-                except ImportError:
-                    from config import OPENROUTER_MODELS
-                if isinstance(OPENROUTER_MODELS, dict):
-                    # Insert user-defined aliases so saved DEFAULT_MODEL_TYPE can be restored
-                    for alias in reversed(list(OPENROUTER_MODELS.keys())):
-                        if model_dropdown.findText(alias) == -1:
-                            # Keep placeholder first; insert aliases after it
-                            model_dropdown.insertItem(1, alias)
-            except Exception as e:
-                logging.debug(f"Could not insert OPENROUTER_MODELS aliases into dropdown: {e}")
 
             # Restore saved selection if available; otherwise keep placeholder (no auto-selection)
             try:
