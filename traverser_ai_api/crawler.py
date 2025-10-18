@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 # crawler.py
+import asyncio
+import csv  # For AI output logging
+import json
 import logging
-import time
 import os
 import re
-import json
-import csv # For AI output logging
-import threading # For logging thread IDs if needed
-from datetime import datetime
-from typing import Optional, Tuple, List, Dict, Any
-import asyncio
+import threading  # For logging thread IDs if needed
+import time
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple
 
 try:
     from traverser_ai_api.config import Config
@@ -30,9 +30,9 @@ try:
 except ImportError:
     from appium_driver import AppiumDriver
 try:
-    from traverser_ai_api.screen_state_manager import ScreenStateManager, ScreenRepresentation
+    from traverser_ai_api.screen_state_manager import ScreenRepresentation, ScreenStateManager
 except ImportError:
-    from screen_state_manager import ScreenStateManager, ScreenRepresentation
+    from screen_state_manager import ScreenRepresentation, ScreenStateManager
 try:
     from traverser_ai_api.database import DatabaseManager
 except ImportError:
@@ -58,10 +58,9 @@ try:
 except ImportError:
     from screenshot_annotator import ScreenshotAnnotator
 
-from selenium.webdriver.remote.webelement import WebElement
 from appium.webdriver.common.appiumby import AppiumBy
 from selenium.common.exceptions import WebDriverException
-
+from selenium.webdriver.remote.webelement import WebElement
 
 UI_STATUS_PREFIX = "UI_STATUS:"
 UI_STEP_PREFIX = "UI_STEP:"
@@ -727,7 +726,7 @@ class AppCrawler:
             try:
                 # Import here to avoid circular imports
                 from mobsf_manager import MobSFManager
-                
+
                 # Create MobSF manager and run analysis
                 mobsf_manager = MobSFManager(self.cfg)
                 

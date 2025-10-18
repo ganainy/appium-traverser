@@ -1,22 +1,24 @@
 #!/usr/bin/env python3
-import logging
-import time
-import sys
-import os
 import io
 import json
+import logging
+import os
+import sys
+import time
+
 try:
-    from .config import Config
+    from config import Config
 except ImportError:
     from config import Config
-import shutil
-from typing import Tuple, Optional, Any, cast, List, Dict, Set
 
 import hashlib
+import shutil
+import xml.etree.ElementTree as std_etree
+from typing import Any, Dict, List, Optional, Set, Tuple, cast
+
 import imagehash
 from PIL import Image, ImageDraw
 
-import xml.etree.ElementTree as std_etree
 try:
     import lxml.etree as lxml_etree
     USING_LXML = True
@@ -285,7 +287,7 @@ def simplify_xml_for_ai(xml_string: str, max_len: int, provider: str = "gemini",
 
     # Get provider capabilities from config
     try:
-        from .config import AI_PROVIDER_CAPABILITIES
+        from config import AI_PROVIDER_CAPABILITIES
     except ImportError:
         from config import AI_PROVIDER_CAPABILITIES
     

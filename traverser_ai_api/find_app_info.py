@@ -19,21 +19,21 @@ Output:
   dictionaries.
 """
 
-import subprocess
-import sys
-import re
+import argparse
 import json
 import os
-import traceback
-import argparse
+import re
+import subprocess
+import sys
 import time
+import traceback
 
 # Provider-agnostic model adapters
 try:
-    from model_adapters import create_model_adapter, check_dependencies
+    from model_adapters import check_dependencies, create_model_adapter
 except ImportError:
     try:
-        from .model_adapters import create_model_adapter, check_dependencies
+        from model_adapters import check_dependencies, create_model_adapter
     except ImportError as e:
         sys.stderr.write(
             f"FATAL: Could not import 'model_adapters'. Ensure the module is accessible. Error: {e}\n"
@@ -60,7 +60,7 @@ try:
 except ImportError as e:
     # Try relative import if it's part of a package and config.py is in the same package
     try:
-        from .config import Config
+        from config import Config
     except ImportError:
         sys.stderr.write(
             f"FATAL: Could not import 'Config' class. Ensure config.py is accessible and there are no circular imports. Error: {e}\n"

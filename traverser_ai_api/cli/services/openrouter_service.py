@@ -6,7 +6,7 @@ OpenRouter service for managing AI model selection and metadata.
 import logging
 from typing import Dict, List, Optional, Tuple
 
-from ..shared.context import CLIContext
+from traverser_ai_api.cli.shared.context import CLIContext
 
 
 class OpenRouterService:
@@ -55,7 +55,7 @@ class OpenRouterService:
             Tuple of (success, models_list)
         """
         try:
-            from openrouter_models import load_openrouter_models_cache, is_openrouter_model_free
+            from openrouter_models import is_openrouter_model_free, load_openrouter_models_cache
         except ImportError as e:
             self.logger.error(f"Failed to import openrouter_models: {e}")
             return False, None
@@ -70,7 +70,7 @@ class OpenRouterService:
         if free_only is None:
             config_service = self.context.services.get("config")
             if config_service:
-                free_only = config_service.get_value("OPENROUTER_SHOW_FREE_ONLY", False)
+                free_only = config_service.get_config_value("OPENROUTER_SHOW_FREE_ONLY", False)
             else:
                 free_only = False
         
@@ -94,7 +94,7 @@ class OpenRouterService:
             Tuple of (success, selected_model_dict)
         """
         try:
-            from openrouter_models import load_openrouter_models_cache, is_openrouter_model_free
+            from openrouter_models import is_openrouter_model_free, load_openrouter_models_cache
         except ImportError as e:
             self.logger.error(f"Failed to import openrouter_models: {e}")
             return False, None
@@ -137,7 +137,7 @@ class OpenRouterService:
             
             # Show warning if this is a paid model and warnings are enabled
             config_service = self.context.services.get("config")
-            show_warning = config_service.get_value("OPENROUTER_NON_FREE_WARNING", False) if config_service else False
+            show_warning = config_service.get_config_value("OPENROUTER_NON_FREE_WARNING", False) if config_service else False
             is_free = is_openrouter_model_free(selected_model)
             
             if not is_free and show_warning:
@@ -150,9 +150,9 @@ class OpenRouterService:
             
             # Set AI provider to OpenRouter and update the model
             if config_service:
-                config_service.set_value("AI_PROVIDER", "openrouter")
-                config_service.set_value("DEFAULT_MODEL_TYPE", model_id)
-                config_service.save()
+                config_service.set_config_value("AI_PROVIDER", "openrouter")
+                config_service.set_config_value("DEFAULT_MODEL_TYPE", model_id)
+                config_service.save_all_changes()
                 
                 print(f"✅ Successfully selected OpenRouter model:")
                 print(f"   Model ID: {model_id}")
@@ -186,8 +186,8 @@ class OpenRouterService:
             self.logger.error("Config service not available")
             return None
         
-        current_provider = config_service.get_value("AI_PROVIDER", "")
-        current_model = config_service.get_value("DEFAULT_MODEL_TYPE", "")
+        current_provider = config_service.get_config_value("AI_PROVIDER", "")
+        current_model = config_service.get_config_value("DEFAULT_MODEL_TYPE", "")
         
         if current_provider.lower() != "openrouter":
             return None
@@ -219,14 +219,14 @@ class OpenRouterService:
             self.logger.error("Config service not available")
             return False
         
-        current_provider = config_service.get_value("AI_PROVIDER", "")
+        current_provider = config_service.get_config_value("AI_PROVIDER", "")
         if current_provider.lower() != "openrouter":
             print("Error: This command is only available when OpenRouter is selected as the AI provider.")
             return False
         
         # Get the current model if none specified
         if not model_identifier:
-            model_identifier = config_service.get_value("DEFAULT_MODEL_TYPE", "")
+            model_identifier = config_service.get_config_value("DEFAULT_MODEL_TYPE", "")
             if not model_identifier or model_identifier == "No model selected":
                 print("Error: No OpenRouter model selected. Use '--select-openrouter-model <model>' first.")
                 return False
@@ -255,21 +255,21 @@ class OpenRouterService:
         if supports_image is True:
             # Model supports images - allow user to choose
             if enabled is None:
-                current_setting = config_service.get_value("ENABLE_IMAGE_CONTEXT", False)
+                current_setting = config_service.get_config_value("ENABLE_IMAGE_CONTEXT", False)
                 print(f"Current image context setting: {'Enabled' if current_setting else 'Disabled'}")
                 print("This model supports image inputs.")
                 return True
             else:
-                config_service.set_value("ENABLE_IMAGE_CONTEXT", enabled)
-                config_service.save()
+                config_service.set_config_value("ENABLE_IMAGE_CONTEXT", str(enabled).lower())
+                config_service.save_all_changes()
                 print(f"✅ Image context {'enabled' if enabled else 'disabled'} for model {model_name}")
                 return True
         elif supports_image is False:
             # Model doesn't support images - force disable
             if enabled is True:
                 print("⚠️ Warning: This model does not support image inputs. Cannot enable image context.")
-            config_service.set_value("ENABLE_IMAGE_CONTEXT", False)
-            config_service.save()
+            config_service.set_config_value("ENABLE_IMAGE_CONTEXT", "false")
+            config_service.save_all_changes()
             print("✅ Image context disabled (model does not support images)")
             return True
         else:
@@ -277,20 +277,20 @@ class OpenRouterService:
             heuristic = is_openrouter_model_vision(model_identifier)
             if heuristic:
                 if enabled is None:
-                    current_setting = config_service.get_value("ENABLE_IMAGE_CONTEXT", False)
+                    current_setting = config_service.get_config_value("ENABLE_IMAGE_CONTEXT", False)
                     print(f"Current image context setting: {'Enabled' if current_setting else 'Disabled'}")
                     print("Model capability unknown; heuristic suggests it supports images.")
                     return True
                 else:
-                    config_service.set_value("ENABLE_IMAGE_CONTEXT", enabled)
-                    config_service.save()
+                    config_service.set_config_value("ENABLE_IMAGE_CONTEXT", str(enabled).lower())
+                    config_service.save_all_changes()
                     print(f"✅ Image context {'enabled' if enabled else 'disabled'} (heuristic-based)")
                     return True
             else:
                 if enabled is True:
                     print("⚠️ Warning: Model capability unknown; heuristic suggests it does not support images.")
-                config_service.set_value("ENABLE_IMAGE_CONTEXT", False)
-                config_service.save()
+                config_service.set_config_value("ENABLE_IMAGE_CONTEXT", "false")
+                config_service.save_all_changes()
                 print("✅ Image context disabled (heuristic-based)")
                 return True
     
@@ -308,14 +308,14 @@ class OpenRouterService:
             self.logger.error("Config service not available")
             return False
         
-        current_provider = config_service.get_value("AI_PROVIDER", "")
+        current_provider = config_service.get_config_value("AI_PROVIDER", "")
         if current_provider.lower() != "openrouter":
             print("Error: This command is only available when OpenRouter is selected as the AI provider.")
             return False
         
         # Get the current model if none specified
         if not model_identifier:
-            model_identifier = config_service.get_value("DEFAULT_MODEL_TYPE", "")
+            model_identifier = config_service.get_config_value("DEFAULT_MODEL_TYPE", "")
             if not model_identifier or model_identifier == "No model selected":
                 print("Error: No OpenRouter model selected. Use '--select-openrouter-model <model>' first.")
                 return False
@@ -378,7 +378,7 @@ class OpenRouterService:
             print(f"  Model Format: {top_provider.get('model_format', 'N/A')}")
         
         # Current configuration
-        current_image_context = config_service.get_value("ENABLE_IMAGE_CONTEXT", False)
+        current_image_context = config_service.get_config_value("ENABLE_IMAGE_CONTEXT", False)
         print(f"\nCurrent Configuration:")
         print(f"  Image Context: {'Enabled' if current_image_context else 'Disabled'}")
         

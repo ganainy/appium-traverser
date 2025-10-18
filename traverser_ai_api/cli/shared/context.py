@@ -6,7 +6,7 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
 
 # Determine project root
 _project_root = Path(__file__).resolve().parent.parent.parent
@@ -84,9 +84,15 @@ class CLIContext:
     def _initialize_config(self) -> None:
         """Initialize configuration and final logging setup."""
         # Config is in the parent traverser_ai_api directory, not in cli
-        api_dir = Path(__file__).resolve().parent.parent
+        # We're in traverser_ai_api/cli/shared/context.py, so we need to go up three levels to reach traverser_ai_api
+        api_dir = Path(__file__).resolve().parent.parent.parent
         default_config_path = str(api_dir / "config.py")
         user_config_path = str(api_dir / "user_config.json")
+        
+        # Debug logging to verify paths
+        logging.debug(f"API directory: {api_dir}")
+        logging.debug(f"Default config path: {default_config_path}")
+        logging.debug(f"User config path: {user_config_path}")
         
         try:
             self._config = Config(
@@ -114,7 +120,7 @@ class CLIContext:
         self._logger_manager = LoggerManager()
         
         # Setup log file path
-        log_file_base = Path(self._config.OUTPUT_DATA_DIR or Path(__file__).resolve().parent.parent)
+        log_file_base = Path(self._config.OUTPUT_DATA_DIR or Path(__file__).resolve().parent.parent.parent)
         log_file_path = log_file_base / "logs" / "cli" / f"cli_{self._config.LOG_FILE_NAME}"
         log_file_path.parent.mkdir(parents=True, exist_ok=True)
         
@@ -147,7 +153,7 @@ class CLIContext:
     
     def get_api_dir(self) -> str:
         """Get the API directory path."""
-        return str(Path(__file__).resolve().parent.parent)
+        return str(Path(__file__).resolve().parent.parent.parent)
     
     def get_project_root(self) -> str:
         """Get the project root directory."""

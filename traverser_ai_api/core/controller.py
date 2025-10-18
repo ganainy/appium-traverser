@@ -5,18 +5,18 @@ This module provides the core orchestration logic used by both CLI and UI interf
 to manage crawler lifecycle, validation, and process handling.
 """
 
-import os
-import sys
 import logging
+import os
 import signal
+import sys
 import threading
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, Dict, Any, List, Callable, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
-from ..config import Config
+from traverser_ai_api.config import Config
 
 
 @dataclass
@@ -238,7 +238,7 @@ class CrawlerOrchestrator:
         
         # Set up flag paths from config
         shutdown_flag_path = getattr(config, 'SHUTDOWN_FLAG_PATH',
-                                   os.path.join(config.BASE_DIR or '.', 'crawler_shutdown.flag'))
+                                os.path.join(config.BASE_DIR or '.', 'crawler_shutdown.flag'))
         pause_flag_path = getattr(config, 'PAUSE_FLAG_PATH',
                                 os.path.join(config.BASE_DIR or '.', 'crawler_pause.flag'))
         
@@ -247,15 +247,15 @@ class CrawlerOrchestrator:
     def prepare_plan(self) -> CrawlerLaunchPlan:
         """Prepare a launch plan with validation."""
         # Get paths from config
-        api_dir = os.path.dirname(__file__)
-        project_root = os.path.dirname(api_dir)
-        main_script = os.path.join(api_dir, "main.py")
+        api_dir = os.path.dirname(__file__)  # traverser_ai_api/core/
+        project_root = os.path.dirname(api_dir)  # traverser_ai_api/
+        main_script = os.path.join(project_root, "main.py")  # traverser_ai_api/main.py
         
         # Resolve paths
         output_data_dir = getattr(self.config, 'OUTPUT_DATA_DIR', 
-                                 os.path.join(project_root, 'output_data'))
+                                os.path.join(project_root, 'output_data'))
         log_dir = getattr(self.config, 'LOG_DIR', 
-                         os.path.join(output_data_dir, 'logs'))
+                        os.path.join(output_data_dir, 'logs'))
         log_file_path = os.path.join(log_dir, getattr(self.config, 'LOG_FILE_NAME', 'crawler.log'))
         
         # PID file path
@@ -288,7 +288,7 @@ class CrawlerOrchestrator:
     
     def _validate_plan(self, plan: CrawlerLaunchPlan):
         """Validate the launch plan."""
-        from .validation import ValidationService
+        from traverser_ai_api.core.validation import ValidationService
         
         validation_service = ValidationService(self.config)
         is_valid, messages = validation_service.validate_all()

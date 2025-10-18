@@ -1,23 +1,22 @@
-import logging
-import shlex # For escaping text in ADB commands
-import subprocess
-import re
 import base64
-from typing import Optional, List, Dict, Any, Tuple
+import logging
+import re
+import shlex  # For escaping text in ADB commands
+import subprocess
+import time
+from typing import Any, Dict, List, Optional, Tuple
 
-from appium.webdriver.webdriver import WebDriver as AppiumRemote
 from appium.options.android.uiautomator2.base import UiAutomator2Options
 from appium.webdriver.common.appiumby import AppiumBy
+from appium.webdriver.webdriver import WebDriver as AppiumRemote
 from selenium.common.exceptions import (
+    InvalidElementStateException,
+    NoSuchElementException,
     StaleElementReferenceException,
     WebDriverException,
-    NoSuchElementException,
-    InvalidElementStateException
 )
+from selenium.webdriver.common.by import By  # For finding all elements
 from selenium.webdriver.remote.webelement import WebElement
-from selenium.webdriver.common.by import By # For finding all elements
-
-import time
 
 # Import your main Config class
 # Adjust the import path based on your project structure
@@ -25,9 +24,9 @@ import time
 # Assuming it's in a config.py file at the same level or accessible in PYTHONPATH
 # For the AppCrawler example, we used 'from .config import Config' implying it's in the same package.
 try:
-    from traverser_ai_api.config import Config # This assumes AppiumDriver is in the same package as config.py
+    from traverser_ai_api.config import Config  # This assumes AppiumDriver is in the same package as config.py
 except ImportError:
-    from config import Config # This assumes AppiumDriver is in the same package as config.py
+    from config import Config  # This assumes AppiumDriver is in the same package as config.py
 
 class AppiumDriver:
     """Wrapper for Appium WebDriver interactions, using a centralized Config object."""

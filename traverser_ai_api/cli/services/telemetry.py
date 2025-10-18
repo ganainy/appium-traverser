@@ -4,8 +4,8 @@ Telemetry service for CLI operations.
 
 import logging
 import sys
-from typing import Any, Dict, List, Optional
 from datetime import datetime
+from typing import Any, Dict, List, Optional
 
 
 class TelemetryService:

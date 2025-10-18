@@ -1,29 +1,32 @@
 # ui/components.py - UI components for the Appium Crawler Controller
 
-import os
-import logging
-from typing import Dict, Any, Callable, Optional, List
 import json
-import time
+import logging
+import os
 import threading
-from PySide6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
-    QHBoxLayout,
-    QLabel,
-    QPushButton,
-    QLineEdit,
-    QCheckBox,
-    QTextEdit,
-    QFormLayout,
-    QGroupBox,
-    QScrollArea,
-    QSizePolicy,
-    QProgressBar,
-)
-from .custom_widgets import NoScrollSpinBox as QSpinBox, NoScrollComboBox as QComboBox
+import time
+from typing import Any, Callable, Dict, List, Optional
+
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPixmap
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QProgressBar,
+    QPushButton,
+    QScrollArea,
+    QSizePolicy,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
+
+from traverser_ai_api.ui.custom_widgets import NoScrollComboBox as QComboBox
+from traverser_ai_api.ui.custom_widgets import NoScrollSpinBox as QSpinBox
 
 
 class UIComponents:
@@ -436,7 +439,8 @@ class UIComponents:
             # Try to show warning in UI if main controller is available
             try:
                 from PySide6.QtWidgets import QApplication
-                from ..ui_controller import CrawlerControllerWindow
+
+                from traverser_ai_api.ui_controller import CrawlerControllerWindow
 
                 # Get the main window instance if it exists
                 app = QApplication.instance()
@@ -1146,7 +1150,7 @@ class UIComponents:
     def _get_openrouter_cache_path() -> str:
         # Delegate to central utility to avoid UI-only coupling
         try:
-            from ..openrouter_models import get_openrouter_cache_path
+            from traverser_ai_api.openrouter_models import get_openrouter_cache_path
         except ImportError:
             from openrouter_models import get_openrouter_cache_path
         return get_openrouter_cache_path()
@@ -1156,7 +1160,7 @@ class UIComponents:
         try:
             # Delegate to central utility
             try:
-                from ..openrouter_models import load_openrouter_models_cache
+                from traverser_ai_api.openrouter_models import load_openrouter_models_cache
             except ImportError:
                 from openrouter_models import load_openrouter_models_cache
             return load_openrouter_models_cache()
@@ -1168,7 +1172,7 @@ class UIComponents:
     def _save_openrouter_models_to_cache(models: List[Dict[str, Any]]) -> None:
         try:
             try:
-                from ..openrouter_models import save_openrouter_models_to_cache
+                from traverser_ai_api.openrouter_models import save_openrouter_models_to_cache
             except ImportError:
                 from openrouter_models import save_openrouter_models_to_cache
             save_openrouter_models_to_cache(models)
@@ -1181,7 +1185,7 @@ class UIComponents:
         try:
             # Delegate to central utility
             try:
-                from ..openrouter_models import is_openrouter_model_vision
+                from traverser_ai_api.openrouter_models import is_openrouter_model_vision
             except ImportError:
                 from openrouter_models import is_openrouter_model_vision
             return is_openrouter_model_vision(model_id)
@@ -1350,7 +1354,7 @@ class UIComponents:
         try:
             # Delegate to central utility
             try:
-                from ..openrouter_models import is_openrouter_model_free
+                from traverser_ai_api.openrouter_models import is_openrouter_model_free
             except ImportError:
                 from openrouter_models import is_openrouter_model_free
             return is_openrouter_model_free(model_meta)
@@ -1364,7 +1368,7 @@ class UIComponents:
         try:
             # Delegate to central utility
             try:
-                from ..openrouter_models import get_openrouter_model_meta
+                from traverser_ai_api.openrouter_models import get_openrouter_model_meta
             except ImportError:
                 from openrouter_models import get_openrouter_model_meta
             return get_openrouter_model_meta(model_id)
@@ -1378,7 +1382,7 @@ class UIComponents:
         try:
             # Delegate to central utility
             try:
-                from ..openrouter_models import background_refresh_openrouter_models
+                from traverser_ai_api.openrouter_models import background_refresh_openrouter_models
             except ImportError:
                 from openrouter_models import background_refresh_openrouter_models
             background_refresh_openrouter_models()
@@ -1398,7 +1402,7 @@ class UIComponents:
 
         # Import the focus areas widget
         try:
-            from .focus_areas_widget import FocusAreasWidget
+            from traverser_ai_api.ui.focus_areas_widget import FocusAreasWidget
         except ImportError:
             from focus_areas_widget import FocusAreasWidget
 
@@ -1410,7 +1414,7 @@ class UIComponents:
         if focus_areas_data is None or len(focus_areas_data) == 0:
             # Import defaults if not set or empty
             try:
-                from .focus_areas_widget import DEFAULT_PRIVACY_FOCUS_AREAS
+                from traverser_ai_api.ui.focus_areas_widget import DEFAULT_PRIVACY_FOCUS_AREAS
             except ImportError:
                 from focus_areas_widget import DEFAULT_PRIVACY_FOCUS_AREAS
             focus_areas_data = DEFAULT_PRIVACY_FOCUS_AREAS

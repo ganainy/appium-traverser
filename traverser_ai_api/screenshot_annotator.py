@@ -1,9 +1,10 @@
+import json  # For annotations.json
 import logging
 import os
 from io import BytesIO
-from PIL import Image, ImageDraw # Added ImageDraw
-from typing import Optional, Dict, Any, TYPE_CHECKING, List
-import json # For annotations.json
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
+
+from PIL import Image, ImageDraw  # Added ImageDraw
 
 if TYPE_CHECKING:
     from appium_driver import AppiumDriver

@@ -6,8 +6,8 @@ App management commands.
 import argparse
 from typing import List
 
-from .base import CommandHandler, CommandGroup, CommandResult
-from ..shared.context import CLIContext
+from traverser_ai_api.cli.commands.base import CommandGroup, CommandHandler, CommandResult
+from traverser_ai_api.cli.shared.context import CLIContext
 
 
 class ScanAllAppsCommand(CommandHandler):
@@ -327,11 +327,20 @@ class ShowSelectedAppCommand(CommandHandler):
                 exit_code=1
             )
         
-        last_selected = config_service.get_value("LAST_SELECTED_APP")
-        app_package = config_service.get_value("APP_PACKAGE")
-        app_activity = config_service.get_value("APP_ACTIVITY")
+        import json
         
-        if last_selected:
+        last_selected = config_service.get_config_value("LAST_SELECTED_APP")
+        app_package = config_service.get_config_value("APP_PACKAGE")
+        app_activity = config_service.get_config_value("APP_ACTIVITY")
+        
+        # Handle case where LAST_SELECTED_APP might be stored as JSON string
+        if last_selected and isinstance(last_selected, str):
+            try:
+                last_selected = json.loads(last_selected)
+            except json.JSONDecodeError:
+                last_selected = None
+        
+        if last_selected and isinstance(last_selected, dict):
             name = last_selected.get("app_name", "Unknown")
             package = last_selected.get("package_name", "Unknown")
             activity = last_selected.get("activity_name", "Unknown")

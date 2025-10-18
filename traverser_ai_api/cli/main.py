@@ -7,9 +7,9 @@ import logging
 import sys
 from typing import List, Optional
 
-from .commands.base import CommandRegistry
-from .parser import build_parser
-from .shared.context import CLIContext
+from traverser_ai_api.cli.commands.base import CommandRegistry
+from traverser_ai_api.cli.parser import build_parser
+from traverser_ai_api.cli.shared.context import CLIContext
 
 
 def run(args: Optional[List[str]] = None) -> int:
@@ -38,17 +38,17 @@ def run(args: Optional[List[str]] = None) -> int:
         context = CLIContext(verbose=getattr(parsed_args, 'verbose', False))
 
         # Register telemetry service
-        from .services.telemetry import TelemetryService
+        from traverser_ai_api.cli.services.telemetry import TelemetryService
         context.services.register("telemetry", TelemetryService())
 
         # Register core services
-        from .services.config_service import ConfigService
-        from .services.device_service import DeviceService
-        from .services.app_scan_service import AppScanService
-        from .services.crawler_service import CrawlerService
-        from .services.analysis_service import AnalysisService
-        from .services.focus_area_service import FocusAreaService
-        from .services.openrouter_service import OpenRouterService
+        from traverser_ai_api.cli.services.analysis_service import AnalysisService
+        from traverser_ai_api.cli.services.app_scan_service import AppScanService
+        from traverser_ai_api.cli.services.config_service import ConfigService
+        from traverser_ai_api.cli.services.crawler_service import CrawlerService
+        from traverser_ai_api.cli.services.device_service import DeviceService
+        from traverser_ai_api.cli.services.focus_area_service import FocusAreaService
+        from traverser_ai_api.cli.services.openrouter_service import OpenRouterService
 
         context.services.register("config", ConfigService(context))
         context.services.register("device", DeviceService(context))
@@ -89,12 +89,16 @@ def _register_commands(registry: CommandRegistry) -> None:
     """
     # Import command modules (lazy loading to avoid circular imports)
     try:
-        from .commands import config
-        from .commands import services_check
-        from .commands import device
-        from .commands import apps
-        from .commands import crawler
-        from .commands import focus
+        from traverser_ai_api.cli.commands import (
+            analysis,
+            apps,
+            config,
+            crawler,
+            device,
+            focus,
+            openrouter,
+            services_check,
+        )
         
         logging.debug("Registering standalone commands...")
         # Register standalone commands
@@ -108,18 +112,19 @@ def _register_commands(registry: CommandRegistry) -> None:
         apps_group = apps.AppsCommandGroup()
         crawler_group = crawler.CrawlerCommandGroup()
         focus_group = focus.FocusCommandGroup()
+        openrouter_group = openrouter.OpenRouterCommandGroup()
+        analysis_group = analysis.AnalysisCommandGroup()
         
         # Register groups instead of individual commands
         registry.add_group(device_group)
         registry.add_group(apps_group)
         registry.add_group(crawler_group)
         registry.add_group(focus_group)
+        registry.add_group(openrouter_group)
+        registry.add_group(analysis_group)
         
         logging.debug(f"Registered {len(registry.groups)} groups and {len(registry.standalone_commands)} standalone commands.")
         
-        # TODO: Register remaining command groups as they are implemented
-        # analysis_group = analysis.AnalysisCommandGroup()
-        # openrouter_group = openrouter.OpenRouterCommandGroup()
         
     except ImportError as e:
         logging.error(f"Failed to import command modules: {e}")

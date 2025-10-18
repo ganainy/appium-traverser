@@ -5,17 +5,17 @@ This module provides adapters for running crawler processes in different
 environments (CLI subprocess vs UI QProcess).
 """
 
-import os
-import sys
-import logging
-import threading
 import errno
+import logging
+import os
 import subprocess
+import sys
+import threading
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Optional, Callable
+from typing import Callable, Optional
 
-from .controller import ProcessBackend, CrawlerLaunchPlan, OutputParser
+from traverser_ai_api.core.controller import CrawlerLaunchPlan, OutputParser, ProcessBackend
 
 
 class SubprocessBackend(ProcessBackend):
@@ -117,7 +117,7 @@ class QtProcessBackend(ProcessBackend):
     
     def __init__(self):
         try:
-            from PySide6.QtCore import QProcess, QObject, Signal
+            from PySide6.QtCore import QObject, QProcess, Signal
             self.QProcess = QProcess
             self.QObject = QObject
             self.Signal = Signal

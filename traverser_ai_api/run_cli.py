@@ -4,8 +4,8 @@ Simple wrapper script to run the CLI controller.
 This can be used as an alternative entry point.
 """
 
-import sys
 import os
+import sys
 
 # Add the project root to the Python path
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))

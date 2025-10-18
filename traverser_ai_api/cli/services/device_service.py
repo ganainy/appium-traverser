@@ -7,7 +7,7 @@ import logging
 import subprocess
 from typing import List, Optional
 
-from ..shared.context import CLIContext
+from traverser_ai_api.cli.shared.context import CLIContext
 
 
 class DeviceService:
@@ -61,8 +61,8 @@ class DeviceService:
         try:
             config_service = self.context.services.get("config")
             if config_service:
-                config_service.set_value("DEVICE_UDID", device_udid)
-                config_service.save()
+                config_service.set_config_value("DEVICE_UDID", device_udid)
+                config_service.save_all_changes()
                 self.logger.info(f"Successfully selected device: {device_udid}")
                 return True
             else:

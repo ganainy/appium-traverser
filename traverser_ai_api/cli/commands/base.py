@@ -6,7 +6,7 @@ import argparse
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional
 
-from ..shared.context import CLIContext
+from traverser_ai_api.cli.shared.context import CLIContext
 
 
 class CommandResult:

@@ -1,11 +1,11 @@
 # traffic_capture_manager.py
+import asyncio  # For async wrappers
 import logging
 import os
 import re
 import subprocess
 import time
-import asyncio # For async wrappers
-from typing import List, Tuple, Optional, Dict, Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 # Assuming AppiumDriver is type hinted correctly
 if TYPE_CHECKING:
@@ -13,9 +13,9 @@ if TYPE_CHECKING:
 
 # Import your main Config class
 try:
-    from traverser_ai_api.config import Config # Adjust path as necessary
+    from traverser_ai_api.config import Config  # Adjust path as necessary
 except ImportError:
-    from config import Config # Adjust path as necessary
+    from config import Config  # Adjust path as necessary
 
 class TrafficCaptureManager:
     def __init__(self, driver: 'AppiumDriver', app_config: Config):

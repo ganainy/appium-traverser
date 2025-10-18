@@ -1,7 +1,8 @@
-import sqlite3
-import json
-from pathlib import Path
 import collections
+import json
+import sqlite3
+from pathlib import Path
+
 
 def analyze_databases(output_dir: Path):
     """

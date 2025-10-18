@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
 # mobsf_manager.py
 
-import os
+import base64
 import json
 import logging
-import requests
-import subprocess
-from typing import Optional, Dict, Any, List, Tuple, Union
-import time
-import base64
+import os
 import re
+import subprocess
+import time
+from typing import Any, Dict, List, Optional, Tuple, Union
 
+import requests
 from config import Config
+
 
 class MobSFManager:
     """

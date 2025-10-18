@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from ..shared.context import CLIContext
+from traverser_ai_api.cli.shared.context import CLIContext
 
 
 class AnalysisService:
@@ -36,7 +36,7 @@ class AnalysisService:
             self.logger.error("Config service not available")
             return False
         
-        output_data_dir = config_service.get_value("OUTPUT_DATA_DIR")
+        output_data_dir = config_service.get_config_value("OUTPUT_DATA_DIR")
         if not output_data_dir:
             if not quiet:
                 self.logger.error("OUTPUT_DATA_DIR is not configured.")
@@ -94,7 +94,7 @@ class AnalysisService:
         if not config_service:
             return False, []
         
-        output_data_dir = config_service.get_value("OUTPUT_DATA_DIR")
+        output_data_dir = config_service.get_config_value("OUTPUT_DATA_DIR")
         if not output_data_dir:
             self.logger.error("OUTPUT_DATA_DIR is not set in the configuration.")
             return False, []
@@ -174,7 +174,7 @@ class AnalysisService:
         if not config_service:
             return False
         
-        output_data_dir = config_service.get_value("OUTPUT_DATA_DIR")
+        output_data_dir = config_service.get_config_value("OUTPUT_DATA_DIR")
         if not output_data_dir:
             self.logger.error("OUTPUT_DATA_DIR is not configured.")
             return False
@@ -225,7 +225,7 @@ class AnalysisService:
             return False
         
         try:
-            from analysis_viewer import RunAnalyzer, XHTML2PDF_AVAILABLE
+            from analysis_viewer import XHTML2PDF_AVAILABLE, RunAnalyzer
         except ImportError as e:
             self.logger.error(f"Failed to import analysis modules: {e}")
             return False
@@ -239,7 +239,7 @@ class AnalysisService:
         if not config_service:
             return False
         
-        output_data_dir = config_service.get_value("OUTPUT_DATA_DIR")
+        output_data_dir = config_service.get_config_value("OUTPUT_DATA_DIR")
         if not output_data_dir:
             self.logger.error("OUTPUT_DATA_DIR is not configured.")
             return False
@@ -313,7 +313,7 @@ class AnalysisService:
         if not config_service:
             return False
         
-        output_data_dir = config_service.get_value("OUTPUT_DATA_DIR")
+        output_data_dir = config_service.get_config_value("OUTPUT_DATA_DIR")
         if not output_data_dir:
             self.logger.error("OUTPUT_DATA_DIR is not configured.")
             return False

@@ -8,8 +8,9 @@ import json
 import os
 from typing import List
 
-from .base import CommandHandler, CommandGroup, CommandResult
-from ..shared.context import CLIContext
+from traverser_ai_api.cli.commands.base import CommandGroup, CommandHandler, CommandResult
+from traverser_ai_api.cli.shared.context import CLIContext
+
 
 class ListFocusAreasCommand(CommandHandler):
     """List all configured focus areas."""

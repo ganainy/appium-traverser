@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 # ui/health_app_scanner.py - Health app discovery for the UI controller
 
-import os
-import sys
 import json
 import logging
+import os
 import re
-import subprocess
 import shutil
-from typing import Optional, Dict, Any, List
-from PySide6.QtCore import QObject, QProcess, Slot, Signal
+import subprocess
+import sys
+from typing import Any, Dict, List, Optional
+
+from PySide6.QtCore import QObject, QProcess, Signal, Slot
 
 
 class HealthAppScanner(QObject):

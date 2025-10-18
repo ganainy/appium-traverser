@@ -11,7 +11,7 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Optional, Dict, Any, Callable
+from typing import Any, Callable, Dict, Optional
 
 
 class ProcessUtils:

@@ -1,21 +1,22 @@
+import io
+import json
+import logging
+import os
+import re
+import time
+from collections import OrderedDict
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple
+
 import google.generativeai as genai
+from google.ai import generativelanguage as glm
+from google.ai.generativelanguage import Content, Part, Schema
+from google.ai.generativelanguage import Type as GLMType
 from google.generativeai.client import configure as genai_configure
 from google.generativeai.generative_models import GenerativeModel
 from google.generativeai.types import GenerationConfig
-from google.ai import generativelanguage as glm
-from google.ai.generativelanguage import Schema, Type as GLMType, Content, Part
-
-
-import logging
-import time
-from typing import Any, Dict, List, Optional, Tuple
-from collections import OrderedDict
-import json
 from PIL import Image
-import io
-import re
-import os
-from datetime import datetime
+
 
 class AIAssistant:
     """

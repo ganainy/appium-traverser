@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from ..shared.context import CLIContext
+from traverser_ai_api.cli.shared.context import CLIContext
 
 
 class AppScanService:
@@ -85,8 +85,8 @@ class AppScanService:
             # Update config with health app list file
             config_service = self.context.services.get("config")
             if config_service:
-                config_service.set_value("CURRENT_HEALTH_APP_LIST_FILE", output_path)
-                config_service.save()
+                config_service.set_config_value("CURRENT_HEALTH_APP_LIST_FILE", output_path)
+                config_service.save_all_changes()
             
             return True, output_path
             
@@ -141,7 +141,7 @@ class AppScanService:
             if not config_service:
                 return None
                 
-            out_dir = config_service.get_value("APP_INFO_OUTPUT_DIR") or os.path.join(
+            out_dir = config_service.get_config_value("APP_INFO_OUTPUT_DIR") or os.path.join(
                 self.api_dir, "..", "..", "output_data", "app_info"
             )
             
@@ -178,7 +178,7 @@ class AppScanService:
             return []
             
         # Try configured path first
-        cache_path = config_service.get_value("CURRENT_HEALTH_APP_LIST_FILE")
+        cache_path = config_service.get_config_value("CURRENT_HEALTH_APP_LIST_FILE")
         if cache_path and os.path.exists(cache_path):
             success, apps = self.load_apps_from_file(cache_path)
             if success:
@@ -241,12 +241,12 @@ class AppScanService:
         # Save to config
         config_service = self.context.services.get("config")
         if config_service:
-            config_service.set_value("APP_PACKAGE", pkg)
-            config_service.set_value("APP_ACTIVITY", act)
-            config_service.set_value(
+            config_service.set_config_value("APP_PACKAGE", pkg)
+            config_service.set_config_value("APP_ACTIVITY", act)
+            config_service.set_config_value(
                 "LAST_SELECTED_APP",
-                {"package_name": pkg, "activity_name": act, "app_name": name},
+                json.dumps({"package_name": pkg, "activity_name": act, "app_name": name}),
             )
-            config_service.save()
+            config_service.save_all_changes()
         
         return True, selected_app

@@ -1,12 +1,13 @@
-import os
-import logging
-import time
-import json
-from typing import Any, Dict, List, Optional, Tuple
-import re
-from PIL import Image
 import io
+import json
+import logging
+import os
+import re
+import time
 from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple
+
+from PIL import Image
 
 # Try both relative and absolute imports to support different execution contexts
 try:
@@ -198,7 +199,7 @@ class AgentAssistant:
             
             # Get provider capabilities from config
             try:
-                from .config import AI_PROVIDER_CAPABILITIES
+                from config import AI_PROVIDER_CAPABILITIES
             except ImportError:
                 from config import AI_PROVIDER_CAPABILITIES
             
@@ -252,7 +253,8 @@ class AgentAssistant:
                 logging.debug("Converted image to RGB format for optimal compression")
             
             # Apply sharpening to maintain text clarity after compression
-            from PIL import ImageFilter, ImageEnhance
+            from PIL import ImageEnhance, ImageFilter
+
             # Mild sharpening to preserve text readability
             img = img.filter(ImageFilter.UnsharpMask(radius=0.5, percent=150, threshold=3))
             

@@ -15,11 +15,11 @@ api_dir = project_root / "traverser_ai_api"
 sys.path.insert(0, str(api_dir))
 
 try:
-    from cli.services.crawler_service import CrawlerService
-    from cli.commands.base import CommandResult
-    from cli.shared.context import CLIContext
-    from core.controller import CrawlerOrchestrator
-    from core.adapters import create_process_backend
+    from traverser_ai_api.cli.services.crawler_service import CrawlerService
+    from traverser_ai_api.cli.commands.base import CommandResult
+    from traverser_ai_api.cli.shared.context import CLIContext
+    from traverser_ai_api.core.controller import CrawlerOrchestrator
+    from traverser_ai_api.core.adapters import create_process_backend
 except ImportError as e:
     pytest.skip(f"Crawler service module not available: {e}", allow_module_level=True)
 

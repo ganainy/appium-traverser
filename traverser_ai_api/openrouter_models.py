@@ -10,13 +10,14 @@ Requirements:
 - OPENROUTER_API_KEY must be available via traverser_ai_api.config.Config
 """
 
-import os
 import json
-import time
-import threading
 import logging
-import requests
+import os
+import threading
+import time
 from typing import Any, Dict, List, Optional
+
+import requests
 
 
 def get_openrouter_cache_path() -> str:

@@ -1,22 +1,22 @@
-import logging
-import time
-import sys
-import os
+import asyncio
 import json
+import logging
+import os
 import shutil
-import asyncio 
+import sys
+import time
 from typing import Optional
 
 try:
-    from .config import Config
+    from config import Config
 except ImportError:
     from config import Config
 
 try:
     try:
-        from .utils import SCRIPT_START_TIME, LoggerManager, ElapsedTimeFormatter
+        from utils import SCRIPT_START_TIME, ElapsedTimeFormatter, LoggerManager
     except ImportError:
-        from utils import SCRIPT_START_TIME, LoggerManager, ElapsedTimeFormatter
+        from utils import SCRIPT_START_TIME, ElapsedTimeFormatter, LoggerManager
 except ImportError as e:
     sys.stderr.write(f"Error: Could not import logging utilities from utils.py: {e}\n")
     if 'SCRIPT_START_TIME' not in globals():
@@ -247,7 +247,7 @@ if __name__ == "__main__":
         if _current_script_dir not in sys.path:
             sys.path.insert(0, _current_script_dir) 
         try:
-            from .crawler import AppCrawler 
+            from crawler import AppCrawler  
         except ImportError:
             from crawler import AppCrawler 
         crawler_instance = AppCrawler(app_config=cfg)
@@ -290,12 +290,13 @@ if __name__ == "__main__":
                     # Import model adapters and PIL
                     try:
                         try:
-                            from .model_adapters import create_model_adapter
+                            from model_adapters import create_model_adapter
                         except ImportError:
                             from model_adapters import create_model_adapter
-                        from PIL import Image
-                        import re
                         import glob
+                        import re
+
+                        from PIL import Image
                     except Exception as imp_err:
                         root_logger.error(f"UI Annotation: Failed to import dependencies: {imp_err}", exc_info=True)
                         raise

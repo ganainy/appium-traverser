@@ -5,8 +5,8 @@ Configuration commands for CLI operations.
 import argparse
 from typing import Optional
 
-from .base import CommandHandler, CommandResult, CommandGroup
-from ..shared.context import CLIContext
+from traverser_ai_api.cli.commands.base import CommandGroup, CommandHandler, CommandResult
+from traverser_ai_api.cli.shared.context import CLIContext
 
 
 class ShowConfigCommand(CommandHandler):
@@ -37,7 +37,7 @@ class ShowConfigCommand(CommandHandler):
         return parser
     
     def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
-        from ..services.config_service import ConfigService
+        from traverser_ai_api.cli.services.config_service import ConfigService
         
         config_service = ConfigService(context)
         config_data = config_service.show_config(args.filter)
@@ -78,7 +78,7 @@ class SetConfigCommand(CommandHandler):
         return parser
     
     def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
-        from ..services.config_service import ConfigService
+        from traverser_ai_api.cli.services.config_service import ConfigService
         
         config_service = ConfigService(context)
         telemetry = context.services.get("telemetry")

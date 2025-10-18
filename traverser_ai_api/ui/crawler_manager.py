@@ -1,25 +1,26 @@
 #!/usr/bin/env python3
 # ui/crawler_manager.py - Crawler process management for the UI controller
 
-import os
 import logging
-import sys
+import os
 import re
-import requests
 import subprocess
-from typing import Optional, Dict, Any, List, Tuple
-from PySide6.QtCore import QObject, QProcess, QTimer, Slot, Signal, QThread, QRunnable, QThreadPool
+import sys
+from typing import Any, Dict, List, Optional, Tuple
+
+import requests
+from PySide6.QtCore import QObject, QProcess, QRunnable, QThread, QThreadPool, QTimer, Signal, Slot
 from PySide6.QtWidgets import QApplication
 
 # Import shared orchestrator components
 try:
-    from ..core.controller import CrawlerOrchestrator
-    from ..core.adapters import create_process_backend
-    from ..core.validation import ValidationService
+    from traverser_ai_api.core.adapters import create_process_backend
+    from traverser_ai_api.core.controller import CrawlerOrchestrator
+    from traverser_ai_api.core.validation import ValidationService
 except ImportError:
     # Fallback for direct execution
-    from traverser_ai_api.core.controller import CrawlerOrchestrator
     from traverser_ai_api.core.adapters import create_process_backend
+    from traverser_ai_api.core.controller import CrawlerOrchestrator
     from traverser_ai_api.core.validation import ValidationService
 
 

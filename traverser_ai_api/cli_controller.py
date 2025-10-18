@@ -4,8 +4,8 @@ CLI Controller for Appium Crawler
 Uses the centralized Config class.
 """
 
-import sys
 import os
+import sys
 from pathlib import Path
 
 # Determine project root
@@ -13,24 +13,23 @@ _project_root = Path(__file__).resolve().parent.parent
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
-import json
-import requests
-import signal
-import subprocess
-import threading
-import errno
-import time
 import argparse
-import logging
-import sqlite3
-from typing import Optional, Dict, Any, List, Tuple
-import textwrap
-from typing import get_type_hints
+import errno
 import glob
-
-import sys
+import json
+import logging
 import os
+import signal
+import sqlite3
+import subprocess
+import sys
+import textwrap
+import threading
+import time
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple, get_type_hints
+
+import requests
 
 # Determine project root and add to path
 _project_root = Path(__file__).resolve().parent
@@ -58,7 +57,7 @@ except ImportError as e:
     sys.exit(1)
 
 try:
-    from analysis_viewer import RunAnalyzer, XHTML2PDF_AVAILABLE
+    from analysis_viewer import XHTML2PDF_AVAILABLE, RunAnalyzer
 except ImportError as e:
     sys.stderr.write(f"FATAL: Could not import from analysis_viewer.py: {e}\n")
     sys.stderr.write(
@@ -1641,9 +1640,9 @@ class CLIController:
                       If None, use the OPENROUTER_SHOW_FREE_ONLY config setting.
         """
         try:
-            from openrouter_models import load_openrouter_models_cache, is_openrouter_model_free
+            from openrouter_models import is_openrouter_model_free, load_openrouter_models_cache
         except ImportError:
-            from .openrouter_models import load_openrouter_models_cache, is_openrouter_model_free
+            from openrouter_models import is_openrouter_model_free, load_openrouter_models_cache
         
         models = load_openrouter_models_cache()
         
@@ -1692,9 +1691,9 @@ class CLIController:
     def select_openrouter_model(self, model_identifier: str) -> bool:
         """Select an OpenRouter model by index or name/ID fragment."""
         try:
-            from openrouter_models import load_openrouter_models_cache, is_openrouter_model_free
+            from openrouter_models import is_openrouter_model_free, load_openrouter_models_cache
         except ImportError:
-            from .openrouter_models import load_openrouter_models_cache, is_openrouter_model_free
+            from openrouter_models import is_openrouter_model_free, load_openrouter_models_cache
         
         models = load_openrouter_models_cache()
         
@@ -1785,7 +1784,7 @@ class CLIController:
             try:
                 from openrouter_models import get_openrouter_model_meta
             except ImportError:
-                from .openrouter_models import get_openrouter_model_meta
+                from openrouter_models import get_openrouter_model_meta
             
             model_meta = get_openrouter_model_meta(current_model)
             
@@ -1824,7 +1823,7 @@ class CLIController:
         try:
             from openrouter_models import get_openrouter_model_meta, is_openrouter_model_vision
         except ImportError:
-            from .openrouter_models import get_openrouter_model_meta, is_openrouter_model_vision
+            from openrouter_models import get_openrouter_model_meta, is_openrouter_model_vision
         
         selected_model = get_openrouter_model_meta(model_identifier)
         
@@ -1896,7 +1895,7 @@ class CLIController:
         try:
             from openrouter_models import get_openrouter_model_meta, is_openrouter_model_free
         except ImportError:
-            from .openrouter_models import get_openrouter_model_meta, is_openrouter_model_free
+            from openrouter_models import get_openrouter_model_meta, is_openrouter_model_free
         
         selected_model = get_openrouter_model_meta(model_identifier)
         
@@ -2556,7 +2555,7 @@ def main_cli():
         elif args.refresh_openrouter_models:
             action_taken = True
             try:
-                from .openrouter_models import background_refresh_openrouter_models
+                from openrouter_models import background_refresh_openrouter_models
             except ImportError:
                 from openrouter_models import background_refresh_openrouter_models
 

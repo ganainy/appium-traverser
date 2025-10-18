@@ -1,14 +1,22 @@
 # ui/focus_areas_widget.py - Widget for managing privacy-focused focus areas
 
 import logging
-from typing import List, Dict, Any, Optional
-from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QCheckBox,
-    QScrollArea, QFrame, QPushButton, QGridLayout
-)
-from PySide6.QtCore import Qt, Signal, QMimeData
-from PySide6.QtGui import QPixmap, QPainter, QColor, QDrag
 from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
+
+from PySide6.QtCore import QMimeData, Qt, Signal
+from PySide6.QtGui import QColor, QDrag, QPainter, QPixmap
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
+)
 
 
 @dataclass

@@ -6,23 +6,23 @@ Tests for the shared crawler orchestrator.
 import os
 import sys
 import unittest
-from unittest.mock import Mock, MagicMock, patch
 from pathlib import Path
+from unittest.mock import MagicMock, Mock, patch
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 try:
-    from traverser_ai_api.core.controller import CrawlerOrchestrator, CrawlerLaunchPlan, FlagController
-    from traverser_ai_api.core.adapters import SubprocessBackend
-    from traverser_ai_api.core.validation import ValidationService
     from traverser_ai_api.config import Config
+    from traverser_ai_api.core.adapters import SubprocessBackend
+    from traverser_ai_api.core.controller import CrawlerLaunchPlan, CrawlerOrchestrator, FlagController
+    from traverser_ai_api.core.validation import ValidationService
 except ImportError:
     # Fallback for direct execution
-    from core.controller import CrawlerOrchestrator, CrawlerLaunchPlan, FlagController
-    from core.adapters import SubprocessBackend
-    from core.validation import ValidationService
     from config import Config
+    from core.adapters import SubprocessBackend
+    from core.controller import CrawlerLaunchPlan, CrawlerOrchestrator, FlagController
+    from core.validation import ValidationService
 
 
 class TestCrawlerOrchestrator(unittest.TestCase):

@@ -176,11 +176,11 @@ def test_show_selected_app_command_with_selection(cli_context, sample_app_data: 
     # Mock config service (ShowSelectedAppCommand uses config service, not app_scan)
     mock_config_service = Mock()
     selected_app = sample_app_data['apps'][0]
-    mock_config_service.get_value.side_effect = lambda key: {
+    mock_config_service.get_value.side_effect = lambda key, default=None: {
         "LAST_SELECTED_APP": selected_app,
         "APP_PACKAGE": selected_app['package_name'],
         "APP_ACTIVITY": selected_app.get('activity_name', 'MainActivity')
-    }.get(key)
+    }.get(key, default)
     cli_context.services.register("config", mock_config_service)
     
     result = command.run(args, cli_context)

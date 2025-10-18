@@ -1,9 +1,9 @@
 # database.py
+import logging
 import os
 import sqlite3
-import logging
-import threading # Added for thread identification
-from typing import List, Tuple, Optional, Union, Any
+import threading  # Added for thread identification
+from typing import Any, List, Optional, Tuple, Union
 
 try:
     from traverser_ai_api.config import Config

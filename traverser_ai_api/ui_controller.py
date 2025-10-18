@@ -1,54 +1,54 @@
 # ui_controller.py - Main UI controller for the Appium Crawler
 
-import sys
-import os
-import logging
 import json
-import subprocess
+import logging
+import os
 import re
-from typing import Optional, Dict, Any, List, TYPE_CHECKING
+import subprocess
+import sys
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
+from config import Config
+from PySide6.QtCore import QProcess, Qt, QThread, QTimer, Signal
+from PySide6.QtCore import Slot as slot
+from PySide6.QtGui import QColor, QGuiApplication, QIcon, QImage, QPixmap, QTextCursor
 from PySide6.QtWidgets import (
     QApplication,
-    QMainWindow,
-    QWidget,
-    QVBoxLayout,
-    QHBoxLayout,
-    QLabel,
-    QPushButton,
-    QLineEdit,
     QCheckBox,
-    QSpinBox,
-    QTextEdit,
+    QComboBox,
     QFormLayout,
     QFrame,
-    QComboBox,
     QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMainWindow,
+    QProgressBar,
+    QPushButton,
     QScrollArea,
     QSizePolicy,
-    QProgressBar,
+    QSpinBox,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
 )
-from PySide6.QtCore import Qt, QProcess, QTimer, QThread
-from PySide6.QtCore import Signal, Slot as slot
-from PySide6.QtGui import QPixmap, QColor, QTextCursor, QIcon, QImage, QGuiApplication
 
-from .config import Config
 try:
-    from .analysis_viewer import RunAnalyzer, XHTML2PDF_AVAILABLE
+    from analysis_viewer import XHTML2PDF_AVAILABLE, RunAnalyzer
 except Exception:
     try:
-        from analysis_viewer import RunAnalyzer, XHTML2PDF_AVAILABLE
+        from analysis_viewer import XHTML2PDF_AVAILABLE, RunAnalyzer
     except Exception:
         RunAnalyzer = None
         XHTML2PDF_AVAILABLE = False
-from .ui.components import UIComponents
-from .ui.config_manager import ConfigManager
-from .ui.crawler_manager import CrawlerManager
-from .ui.health_app_scanner import HealthAppScanner
-from .ui.mobsf_ui_manager import MobSFUIManager
-from .ui.logo import LogoWidget
-from .ui.utils import update_screenshot
-from .ui.custom_widgets import BusyDialog
+from ui.components import UIComponents
+from ui.config_manager import ConfigManager
+from ui.crawler_manager import CrawlerManager
+from ui.custom_widgets import BusyDialog
+from ui.health_app_scanner import HealthAppScanner
+from ui.logo import LogoWidget
+from ui.mobsf_ui_manager import MobSFUIManager
+from ui.utils import update_screenshot
 
 
 class CrawlerControllerWindow(QMainWindow):
@@ -909,8 +909,8 @@ class CrawlerControllerWindow(QMainWindow):
                 self.log_message("Error: Analysis module or PDF library (xhtml2pdf) not available.", "red")
                 return
 
-            from pathlib import Path
             import sqlite3
+            from pathlib import Path
 
             app_package = getattr(self.config, "APP_PACKAGE", None)
             output_data_dir = getattr(self.config, "OUTPUT_DATA_DIR", None)
@@ -1077,7 +1077,7 @@ class CrawlerControllerWindow(QMainWindow):
 if __name__ == "__main__":
     # Import LoggerManager for proper logging setup
     try:
-        from .utils import LoggerManager
+        from utils import LoggerManager
     except ImportError:
         from utils import LoggerManager
 

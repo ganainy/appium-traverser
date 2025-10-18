@@ -1,16 +1,16 @@
 # app_context_manager.py
 import logging
 import time
-from typing import TYPE_CHECKING, Optional, List
+from typing import TYPE_CHECKING, List, Optional
 
 # Import your main Config class and AppiumDriver
 # Adjust paths based on your project structure
 if TYPE_CHECKING:
-    from appium_driver import AppiumDriver # For type hinting
+    from appium_driver import AppiumDriver  # For type hinting
 try:
-    from traverser_ai_api.config import Config # Assuming Config class is in config.py in the same package
+    from traverser_ai_api.config import Config  # Assuming Config class is in config.py in the same package
 except ImportError:
-    from config import Config # Assuming Config class is in config.py in the same package
+    from config import Config  # Assuming Config class is in config.py in the same package
 
 class AppContextManager:
     """Manages the application context, including launching and ensuring the app is in focus,

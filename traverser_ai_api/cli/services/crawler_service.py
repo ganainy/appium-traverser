@@ -13,16 +13,16 @@ import threading
 from pathlib import Path
 from typing import Optional
 
-from ..shared.context import CLIContext
+from traverser_ai_api.cli.shared.context import CLIContext
 
 # Import shared orchestrator components
 try:
-    from ..core.controller import CrawlerOrchestrator
-    from ..core.adapters import create_process_backend
+    from traverser_ai_api.cli.core.adapters import create_process_backend
+    from traverser_ai_api.cli.core.controller import CrawlerOrchestrator
 except ImportError:
     # Fallback for direct execution
-    from traverser_ai_api.core.controller import CrawlerOrchestrator
     from traverser_ai_api.core.adapters import create_process_backend
+    from traverser_ai_api.core.controller import CrawlerOrchestrator
 
 
 class CrawlerService:
@@ -36,12 +36,12 @@ class CrawlerService:
         config_service = self.context.services.get("config")
         if config_service:
             self.api_dir = os.path.dirname(os.path.abspath(__file__))
-            self.base_dir = config_service.get_value("BASE_DIR") or self.api_dir
+            self.base_dir = config_service.get_config_value("BASE_DIR") or self.api_dir
             self.pid_file_path = os.path.join(self.base_dir, "crawler.pid")
-            self.shutdown_flag_path = config_service.get_value("SHUTDOWN_FLAG_PATH") or os.path.join(
+            self.shutdown_flag_path = config_service.get_config_value("SHUTDOWN_FLAG_PATH") or os.path.join(
                 self.base_dir, "crawler_shutdown.flag"
             )
-            self.pause_flag_path = config_service.get_value("PAUSE_FLAG_PATH") or os.path.join(
+            self.pause_flag_path = config_service.get_config_value("PAUSE_FLAG_PATH") or os.path.join(
                 self.base_dir, "crawler_pause.flag"
             )
         else:
@@ -49,7 +49,7 @@ class CrawlerService:
             raise RuntimeError("Config service is required")
         
         # Initialize shared orchestrator
-        config = config_service.get_config()
+        config = config_service.config
         backend = create_process_backend(use_qt=False)  # CLI uses subprocess backend
         self.orchestrator = CrawlerOrchestrator(config, backend)
         
@@ -102,10 +102,28 @@ class CrawlerService:
             self.orchestrator.register_callback('status', self._handle_status_output)
             self.orchestrator.register_callback('focus', self._handle_focus_output)
             self.orchestrator.register_callback('end', self._handle_end_output)
+            
+            # Wait for the crawler process to complete (blocking)
+            self._wait_for_crawler()
         else:
             self.logger.error("Failed to start crawler via shared orchestrator")
         
         return success
+    
+    def _wait_for_crawler(self):
+        """Wait for the crawler process to complete."""
+        self.logger.info("Waiting for crawler to complete...")
+        
+        # Get the backend process
+        backend = self.orchestrator.backend
+        
+        # Wait for the process to finish
+        if hasattr(backend, 'process') and backend.process:
+            try:
+                return_code = backend.process.wait()
+                self.logger.info(f"Crawler process exited with code {return_code}")
+            except Exception as e:
+                self.logger.error(f"Error waiting for crawler: {e}")
     
     def _handle_log_output(self, message: str):
         """Handle log output from the crawler."""

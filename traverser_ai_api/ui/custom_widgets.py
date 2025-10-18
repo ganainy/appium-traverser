@@ -1,13 +1,13 @@
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QSpinBox,
     QComboBox,
     QDialog,
-    QVBoxLayout,
-    QWidget,
     QLabel,
     QProgressBar,
+    QSpinBox,
+    QVBoxLayout,
+    QWidget,
 )
-from PySide6.QtCore import Qt
 
 
 class NoScrollSpinBox(QSpinBox):

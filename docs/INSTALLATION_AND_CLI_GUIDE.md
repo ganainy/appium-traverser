@@ -141,12 +141,13 @@ appium --relaxed-security
 #### Terminal 2: Use CLI Controller (ensure .venv is active)
 
 ```powershell
-python run_cli.py --scan-health-apps --force-rescan   # or use --scan-all-apps
-python run_cli.py --list-health-apps                  # or use --list-all-apps
-python run_cli.py --select-app 1                      # select by index
-python run_cli.py --select-app "com.example.healthapp"  # or select by package/name
-python run_cli.py --start --annotate-offline-after-run  # starts crawler and creates annotated screenshots after completion
+python run_cli.py apps scan-health --force-rescan   # or use apps scan-all
+python run_cli.py apps list-health                  # or use apps list-all
+python run_cli.py apps select 1                     # select by index
+python run_cli.py apps select "com.example.healthapp"  # or select by package/name
+python run_cli.py crawler start --annotate-offline-after-run  # starts crawler and creates annotated screenshots after completion
 ```
+
 
 ### 4. Start Crawling (UI Method)
 
@@ -277,13 +278,6 @@ OPENROUTER_API_KEY=your_openrouter_api_key_here
   - Auto-disabled: `Image context disabled due to provider payload limits (max X KB).`
   - Unknown capability: `Capability unknown; metadata not available.`
 
-CLI refresh (same logic as UI, runs in background):
-
-```powershell
-python run_cli.py --refresh-openrouter-models
-```
-
-Requirements:
 - Set `OPENROUTER_API_KEY` in `.env`
 - Cache path: `output_data/cache/openrouter_models.json`
 
@@ -322,9 +316,9 @@ Activate virtual environment if not already active:
 Scan for installed apps on the connected Android device:
 ```powershell
 # Health-focused scan (AI-filtered)
-python run_cli.py --scan-health-apps
+python run_cli.py apps scan-health
 # OR deterministic scan of ALL apps
-python run_cli.py --scan-all-apps
+python run_cli.py apps scan-all
 ```
 List the apps found by the scan:
 ```powershell
@@ -869,55 +863,78 @@ python run_cli.py <options>
 
 ## AI Providers
 
-- `--refresh-openrouter-models` — Fetch latest OpenRouter models and refresh the local cache (background). Requires `OPENROUTER_API_KEY` in `.env`. Writes to `output_data/cache/openrouter_models.json`.
-- `--list-openrouter-models` — List available OpenRouter models from the local cache.
-- `--list-openrouter-models --free-only` — List only free models (overrides OPENROUTER_SHOW_FREE_ONLY config).
-- `--list-openrouter-models --all` — List all models (overrides OPENROUTER_SHOW_FREE_ONLY config).
-- `--select-openrouter-model ID_OR_NAME` — Select an OpenRouter model by 1-based index or name/ID fragment. Automatically sets AI_PROVIDER to "openrouter".
-- `--show-openrouter-selection` — Show the currently selected OpenRouter model details.
-- `--show-openrouter-model-details` — Display detailed metadata for the selected model, including pricing and capabilities.
-- `--enable-image-context` — Enable image context for vision-capable models (auto-detects support).
-- `--set-openrouter-model-pricing` — Show or update model pricing information for selection.
+### OpenRouter Commands
+
+- `openrouter refresh-models [--wait]` — Refresh the OpenRouter models cache (background by default, use `--wait` to block)
+- `openrouter list-models [--free-only] [--all]` — List available models from cache
+- `openrouter select-model <ID_OR_NAME>` — Select a model by index (1-based) or name/ID fragment
+- `openrouter show-selection` — Show currently selected model
+- `openrouter show-model-details` — Display detailed metadata for selected model
+- `openrouter configure-image-context [--model MODEL_ID] [--enable|--disable]` — Configure image context for vision models
 
 ### OpenRouter Model Management Workflow
 
 1. First, refresh the model cache (requires `OPENROUTER_API_KEY` in `.env`):
    ```powershell
-   python run_cli.py --refresh-openrouter-models
+   python run_cli.py openrouter refresh-models
    ```
 
 2. List available models:
    ```powershell
    # List all models (respects OPENROUTER_SHOW_FREE_ONLY config)
-   python run_cli.py --list-openrouter-models
+   python run_cli.py openrouter list-models
    
    # List only free models (overrides config)
-   python run_cli.py --list-openrouter-models --free-only
+   python run_cli.py openrouter list-models --free-only
    
    # List all models regardless of config (overrides config)
-   python run_cli.py --list-openrouter-models --all
+   python run_cli.py openrouter list-models --all
    ```
 
 3. Select a model by index or name:
    ```powershell
    # Select by index (1-based)
-   python run_cli.py --select-openrouter-model 1
+   python run_cli.py openrouter select-model 1
    
    # Or select by name/ID fragment
-   python run_cli.py --select-openrouter-model "gpt-4"
+   python run_cli.py openrouter select-model "gpt-4"
    ```
 
 4. Verify your selection:
    ```powershell
-   python run_cli.py --show-openrouter-selection
+   python run_cli.py openrouter show-selection
+   ```
+
+5. View detailed model information:
+   ```powershell
+   python run_cli.py openrouter show-model-details
+   ```
+
+6. Configure image context for vision models:
+   ```powershell
+   # Enable image context for current model
+   python run_cli.py openrouter configure-image-context --enable
+   
+   # Disable image context
+   python run_cli.py openrouter configure-image-context --disable
+   
+   # Configure for specific model
+   python run_cli.py openrouter configure-image-context --model "gpt-4-vision" --enable
    ```
 
 ### Model Pricing and Warnings
 
 - Free models are marked with `[FREE]` in the listing
 - Paid models will show a warning when selected if `OPENROUTER_NON_FREE_WARNING` is enabled
-- To disable paid model warnings: `python run_cli.py --set-config OPENROUTER_NON_FREE_WARNING=false`
-- To show only free models by default: `python run_cli.py --set-config OPENROUTER_SHOW_FREE_ONLY=true`
+- To disable paid model warnings: `python run_cli.py set-config OPENROUTER_NON_FREE_WARNING=false`
+- To show only free models by default: `python run_cli.py set-config OPENROUTER_SHOW_FREE_ONLY=true`
+
+### Alternative Configuration
+
+You can also configure OpenRouter via config commands:
+- Set the AI provider: `python run_cli.py set-config AI_PROVIDER=openrouter`
+- Set the model: `python run_cli.py set-config DEFAULT_MODEL_TYPE="openai/gpt-4"`
+- Configure API key in `.env`: `OPENROUTER_API_KEY=your_key_here`
 
 # Pre-Crawl Checklist
 

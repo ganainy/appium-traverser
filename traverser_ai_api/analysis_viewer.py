@@ -1,13 +1,13 @@
 # analysis_viewer.py
+import base64
 import json
+import logging
 import os
 import sqlite3
-import logging
-from typing import Optional, List, Dict, Any, Tuple
-from html import escape
-from pathlib import Path 
-import base64 
 from datetime import datetime
+from html import escape
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 if not logger.handlers:

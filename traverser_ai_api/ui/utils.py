@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 # ui/utils.py - Utility functions for the UI controller
 
-import os
 import logging
+import os
 from typing import Optional
+
 from PySide6.QtGui import QPixmap
 
 

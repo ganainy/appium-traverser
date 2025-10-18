@@ -43,15 +43,18 @@ Each adapter implements a common interfa            # Check if model is availabl
 4. Error handling and rate limiting
 """
 
-import os
-import logging
-import time
-import json
-import re
 import io
-from typing import Optional as _Optional
+import json
+import logging
+import os
+import re
+import time
 from abc import ABC, abstractmethod
-from typing import Dict, Any, List, Optional, Tuple, Union
+from typing import Any, Dict, List
+from typing import Optional
+from typing import Optional as _Optional
+from typing import Tuple, Union
+
 from PIL import Image
 
 # ------ Abstract Model Adapter Interface ------
@@ -98,9 +101,9 @@ class GeminiAdapter(ModelAdapter):
         """Initialize the Gemini model."""
         try:
             import google.generativeai as genai
-            from google.generativeai.types import GenerationConfig
             from google.generativeai.generative_models import GenerativeModel
-            
+            from google.generativeai.types import GenerationConfig
+
             # Set API key
             os.environ["GOOGLE_API_KEY"] = self.api_key
             
@@ -252,7 +255,7 @@ class OpenRouterAdapter(ModelAdapter):
             if image:
                 # Get provider capabilities for image settings
                 try:
-                    from .config import AI_PROVIDER_CAPABILITIES
+                    from config import AI_PROVIDER_CAPABILITIES
                 except ImportError:
                     from config import AI_PROVIDER_CAPABILITIES
                 
@@ -313,7 +316,7 @@ class OpenRouterAdapter(ModelAdapter):
                 payload_size = len(payload_str.encode('utf-8'))
                 
                 try:
-                    from .config import AI_PROVIDER_CAPABILITIES
+                    from config import AI_PROVIDER_CAPABILITIES
                 except ImportError:
                     from config import AI_PROVIDER_CAPABILITIES
                 
@@ -440,7 +443,7 @@ class OllamaAdapter(ModelAdapter):
         """
         try:
             import ollama
-            
+
             # Extract base name for feature detection
             base_name = model_name.split(':')[0].lower()
             
@@ -466,7 +469,7 @@ class OllamaAdapter(ModelAdapter):
         try:
             # Try to import ollama
             import ollama
-            
+
             # Set the base URL if provided
             if self.base_url:
                 # Set the base URL using environment variable (Ollama SDK method)
@@ -505,9 +508,10 @@ class OllamaAdapter(ModelAdapter):
                          **kwargs) -> Tuple[str, Dict[str, Any]]:
         """Generate a response from Ollama."""
         try:
-            import ollama
             import base64
             import io
+
+            import ollama
             start_time = time.time()
             
             # Check if model is available before attempting to use it
@@ -565,7 +569,7 @@ class OllamaAdapter(ModelAdapter):
                 try:
                     # Get provider capabilities for image settings
                     try:
-                        from .config import AI_PROVIDER_CAPABILITIES
+                        from config import AI_PROVIDER_CAPABILITIES
                     except ImportError:
                         from config import AI_PROVIDER_CAPABILITIES
                     capabilities = AI_PROVIDER_CAPABILITIES.get('ollama', {})

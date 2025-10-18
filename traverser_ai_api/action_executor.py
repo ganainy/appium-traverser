@@ -1,12 +1,10 @@
 import logging
 import re
-from typing import Any, Optional, Tuple
 import time
-import re
-from typing import Tuple, Optional, Any, Union, TYPE_CHECKING, Dict
+from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple, Union
 
+from selenium.common.exceptions import StaleElementReferenceException  # Added for explicit handling
 from selenium.webdriver.remote.webelement import WebElement
-from selenium.common.exceptions import StaleElementReferenceException # Added for explicit handling
 
 if TYPE_CHECKING:
     from appium_driver import AppiumDriver

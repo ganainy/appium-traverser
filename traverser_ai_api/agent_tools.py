@@ -5,21 +5,21 @@ This module provides a set of tools that can be used by the AI agent to interact
 with the Android app under test. Each tool is implemented as a function that performs
 a specific action and returns a result.
 """
-import logging
-from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 import json
+import logging
 import time
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
-from selenium.webdriver.remote.webelement import WebElement
 from selenium.common.exceptions import StaleElementReferenceException
+from selenium.webdriver.remote.webelement import WebElement
 
 if TYPE_CHECKING:
-    from appium_driver import AppiumDriver
     from action_executor import ActionExecutor
     from action_mapper import ActionMapper
-    from screen_state_manager import ScreenStateManager
     from app_context_manager import AppContextManager
+    from appium_driver import AppiumDriver
     from config import Config
+    from screen_state_manager import ScreenStateManager
 
 
 class AgentTools:

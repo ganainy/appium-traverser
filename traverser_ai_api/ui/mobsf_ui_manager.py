@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 # ui/mobsf_ui_manager.py - MobSF integration UI management
 
-import os
 import logging
-import requests
+import os
 from typing import Optional
-from PySide6.QtCore import QObject, QProcess, Slot, Signal
+
+import requests
+from PySide6.QtCore import QObject, QProcess, Signal, Slot
 
 
 class MobSFUIManager(QObject):

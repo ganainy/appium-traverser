@@ -6,9 +6,9 @@ Device management commands.
 import argparse
 from typing import List
 
-from .base import CommandHandler, CommandGroup, CommandResult
-from ..shared.context import CLIContext
-from ..parser import add_common_arguments
+from traverser_ai_api.cli.commands.base import CommandGroup, CommandHandler, CommandResult
+from traverser_ai_api.cli.parser import add_common_arguments
+from traverser_ai_api.cli.shared.context import CLIContext
 
 
 class ListDevicesCommand(CommandHandler):

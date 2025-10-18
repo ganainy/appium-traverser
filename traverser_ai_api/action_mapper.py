@@ -1,22 +1,23 @@
 # action_mapper.py
 import logging
-import time
 import re
-from typing import Optional, Tuple, Any, List, Dict, TYPE_CHECKING
+import time
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 from appium.webdriver.common.appiumby import AppiumBy
+
 # WebElement is imported via TYPE_CHECKING for AppiumDriver, but if used directly here, ensure it's available.
 # from selenium.webdriver.remote.webelement import WebElement 
-from selenium.common.exceptions import NoSuchElementException, InvalidSelectorException, StaleElementReferenceException
+from selenium.common.exceptions import InvalidSelectorException, NoSuchElementException, StaleElementReferenceException
 
 # Import your main Config class and AppiumDriver
 # Adjust paths based on your project structure
 if TYPE_CHECKING: # For type hinting to avoid circular imports if AppiumDriver imports ActionMapper
     from appium_driver import AppiumDriver 
 try:
-    from traverser_ai_api.config import Config # Assuming Config class is in config.py in the same package
+    from traverser_ai_api.config import Config  # Assuming Config class is in config.py in the same package
 except ImportError:
-    from config import Config # Assuming Config class is in config.py in the same package
+    from config import Config  # Assuming Config class is in config.py in the same package
 
 
 class ActionMapper:

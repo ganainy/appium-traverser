@@ -8,7 +8,7 @@ import logging
 import os
 from typing import Dict, List, Optional
 
-from ..shared.context import CLIContext
+from traverser_ai_api.cli.shared.context import CLIContext
 
 
 class FocusAreaService:
@@ -29,7 +29,7 @@ class FocusAreaService:
             self.logger.error("Config service not available")
             return []
         
-        areas = config_service.get_value("FOCUS_AREAS") or []
+        areas = config_service.get_config_value("FOCUS_AREAS") or []
         return areas if isinstance(areas, list) else []
     
     def list_focus_areas(self) -> bool:
@@ -98,8 +98,8 @@ class FocusAreaService:
         try:
             config_service = self.context.services.get("config")
             if config_service:
-                config_service.set_value("FOCUS_AREAS", areas)
-                config_service.save()
+                config_service.set_config_value("FOCUS_AREAS", json.dumps(areas))
+                config_service.save_all_changes()
                 print(
                     f"Focus area '{areas[idx].get('title', areas[idx].get('name', id_or_name))}' set enabled={enabled}"
                 )
@@ -139,8 +139,8 @@ class FocusAreaService:
         try:
             config_service = self.context.services.get("config")
             if config_service:
-                config_service.set_value("FOCUS_AREAS", areas)
-                config_service.save()
+                config_service.set_config_value("FOCUS_AREAS", json.dumps(areas))
+                config_service.save_all_changes()
                 print(f"Moved focus area to position {to_idx+1}")
                 return True
             else:
@@ -189,8 +189,8 @@ class FocusAreaService:
         try:
             config_service = self.context.services.get("config")
             if config_service:
-                config_service.set_value("FOCUS_AREAS", areas)
-                config_service.save()
+                config_service.set_config_value("FOCUS_AREAS", json.dumps(areas))
+                config_service.save_all_changes()
                 print(f"✅ Successfully added focus area: {title}")
                 return True
             else:
@@ -242,8 +242,8 @@ class FocusAreaService:
         try:
             config_service = self.context.services.get("config")
             if config_service:
-                config_service.set_value("FOCUS_AREAS", areas)
-                config_service.save()
+                config_service.set_config_value("FOCUS_AREAS", json.dumps(areas))
+                config_service.save_all_changes()
                 print(f"✅ Successfully updated focus area: {area.get('title', 'Unknown')}")
                 return True
             else:
@@ -274,8 +274,8 @@ class FocusAreaService:
         try:
             config_service = self.context.services.get("config")
             if config_service:
-                config_service.set_value("FOCUS_AREAS", areas)
-                config_service.save()
+                config_service.set_config_value("FOCUS_AREAS", json.dumps(areas))
+                config_service.save_all_changes()
                 print(f"✅ Successfully removed focus area: {removed_area.get('title', 'Unknown')}")
                 return True
             else:
@@ -331,8 +331,8 @@ class FocusAreaService:
             
             config_service = self.context.services.get("config")
             if config_service:
-                config_service.set_value("FOCUS_AREAS", merged_areas)
-                config_service.save()
+                config_service.set_config_value("FOCUS_AREAS", json.dumps(merged_areas))
+                config_service.save_all_changes()
                 print(f"✅ Successfully imported {len(imported_areas)} focus areas from '{file_path}'")
                 return True
             else:

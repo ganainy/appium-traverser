@@ -69,6 +69,20 @@ def mock_config(temp_dir: Path) -> Mock:
     config.ENABLE_MOBSF_ANALYSIS = False
     config.DEFAULTS_MODULE_PATH = str(temp_dir / "config.py")
     config.USER_CONFIG_JSON_PATH = str(temp_dir / "user_config.json")
+    # Add get_value method for compatibility with config service
+    config.get_value = lambda key, default=None: {
+        "APP_PACKAGE": config.APP_PACKAGE,
+        "APP_ACTIVITY": config.APP_ACTIVITY,
+        "BASE_DIR": config.BASE_DIR,
+        "OUTPUT_DATA_DIR": config.OUTPUT_DATA_DIR,
+        "LOG_DIR": config.LOG_DIR,
+        "SHUTDOWN_FLAG_PATH": config.SHUTDOWN_FLAG_PATH,
+        "PAUSE_FLAG_PATH": config.PAUSE_FLAG_PATH,
+        "AI_PROVIDER": config.AI_PROVIDER,
+        "GEMINI_API_KEY": config.GEMINI_API_KEY,
+        "ENABLE_TRAFFIC_CAPTURE": config.ENABLE_TRAFFIC_CAPTURE,
+        "ENABLE_MOBSF_ANALYSIS": config.ENABLE_MOBSF_ANALYSIS
+    }.get(key, default)
     return config
 
 
@@ -93,6 +107,19 @@ def cli_context(mock_config: Mock, mock_logger_manager: Mock, temp_dir: Path):
     context._logger_manager = mock_logger_manager
     context._services = ServiceRegistry()  # type: ignore
     context._log_level = "WARNING"
+    
+    # Register a mock config service
+    mock_config_service = Mock()
+    mock_config_service.get_config_value = lambda key, default=None: {
+        "BASE_DIR": str(temp_dir),
+        "OUTPUT_DATA_DIR": str(temp_dir / "output"),
+        "LOG_DIR": str(temp_dir / "logs"),
+        "SHUTDOWN_FLAG_PATH": str(temp_dir / "shutdown.flag"),
+        "PAUSE_FLAG_PATH": str(temp_dir / "pause.flag"),
+        "APP_PACKAGE": "com.example.testapp",
+        "APP_ACTIVITY": "com.example.testapp.MainActivity"
+    }.get(key, default)
+    context._services.register("config", mock_config_service)
     
     # Ensure output directories exist
     os.makedirs(mock_config.OUTPUT_DATA_DIR, exist_ok=True)

@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 # ui/logo.py - Logo widget for the Appium Crawler UI
 
-import os
 import logging
-from PySide6.QtWidgets import QLabel
-from PySide6.QtGui import QPixmap, QIcon
+import os
+
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QIcon, QPixmap
+from PySide6.QtWidgets import QLabel
 
 
 class LogoWidget(QLabel):

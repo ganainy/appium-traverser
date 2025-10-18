@@ -6,13 +6,14 @@ to verify dependencies and configuration before starting the crawler.
 """
 
 import logging
-import requests
 import subprocess
 import sys
-from typing import List, Tuple, Dict, Any
+from typing import Any, Dict, List, Tuple
+
+import requests
 
 try:
-    from ..config import Config
+    from traverser_ai_api.config import Config
 except ImportError:
     # Handle direct execution for testing
     from config import Config
@@ -251,7 +252,7 @@ class ValidationService:
             Tuple of (dependencies_installed, error_message)
         """
         try:
-            from ..model_adapters import check_dependencies
+            from traverser_ai_api.model_adapters import check_dependencies
         except ImportError:
             try:
                 from model_adapters import check_dependencies

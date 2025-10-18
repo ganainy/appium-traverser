@@ -1,19 +1,26 @@
 #!/usr/bin/env python3
 # ui/config_manager.py - Configuration management for the UI controller
 
-import os
 import json
 import logging
-from typing import Dict, Any, Optional, List
+import os
+from typing import Any, Dict, List, Optional
+
+from PySide6.QtCore import QObject, Slot
 from PySide6.QtWidgets import (
-    QLineEdit, QSpinBox, QCheckBox, QComboBox, QTextEdit, 
-    QPushButton, QLabel, QGroupBox, QWidget
+    QCheckBox,
+    QComboBox,
+    QGroupBox,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QSpinBox,
+    QTextEdit,
+    QWidget,
 )
-from PySide6.QtCore import Slot
-from PySide6.QtCore import QObject
 
 # Import UIComponents 
-from .components import UIComponents
+from traverser_ai_api.ui.components import UIComponents
 
 
 class ConfigManager(QObject):
