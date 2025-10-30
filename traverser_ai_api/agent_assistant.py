@@ -566,6 +566,8 @@ class AgentAssistant:
             logging.error("Cannot execute action: No action type provided")
             return False
             
+        logging.info(f"Agent Decision: Executing action '{action_type}' with data: {action_data}")
+        
         try:
             success = False
             
@@ -595,8 +597,8 @@ class AgentAssistant:
                                 center_y = max(0, min(center_y, screen_height - 1))
                                 
                                 logging.debug(f"Calculated tap coordinates: ({center_x}, {center_y}) from bbox {bbox}")
-                                result = self.tools.tap_coordinates(center_x, center_y, normalized=False)
-                                success = result.get("success", False)
+                                result = self.tools.driver.tap(None, {"top_left": [center_y, center_x], "bottom_right": [center_y, center_x]})
+                                success = result
                             else:
                                 logging.error("Cannot get screen size for coordinate validation")
                                 return False
@@ -604,8 +606,8 @@ class AgentAssistant:
                         logging.error("Cannot execute click: No target identifier or valid bounding box provided")
                         return False
                 else:
-                    result = self.tools.click_element(target_id)
-                    success = result.get("success", False)
+                    result = self.tools.driver.tap(target_id, None)
+                    success = result
                     
             elif action_type == "input":
                 target_id = action_data.get("target_identifier")
@@ -615,28 +617,28 @@ class AgentAssistant:
                     return False
                 if input_text is None:
                     input_text = ""  # Empty string for clear operations
-                result = self.tools.input_text(target_id, input_text)
-                success = result.get("success", False)
+                result = self.tools.driver.input_text(target_id, input_text)
+                success = result
                 
             elif action_type == "scroll_down":
-                result = self.tools.scroll("down")
-                success = result.get("success", False)
+                result = self.tools.driver.scroll(None, "down")
+                success = result
                 
             elif action_type == "scroll_up":
-                result = self.tools.scroll("up")
-                success = result.get("success", False)
+                result = self.tools.driver.scroll(None, "up")
+                success = result
                 
             elif action_type == "swipe_left":
-                result = self.tools.scroll("left")
-                success = result.get("success", False)
+                result = self.tools.driver.scroll(None, "left")
+                success = result
                 
             elif action_type == "swipe_right":
-                result = self.tools.scroll("right")
-                success = result.get("success", False)
+                result = self.tools.driver.scroll(None, "right")
+                success = result
                 
             elif action_type == "back":
-                result = self.tools.press_back()
-                success = result.get("success", False)
+                result = self.tools.driver.press_back()
+                success = result
             
             elif action_type == "long_press":
                 target_id = action_data.get("target_identifier")
@@ -662,9 +664,10 @@ class AgentAssistant:
                             screen_height = window_size['height']
                             center_x = max(0, min(center_x, screen_width - 1))
                             center_y = max(0, min(center_y, screen_height - 1))
-                            # Use coordinate tap with duration for long press
-                            result = self.tools.tap_coordinates(center_x, center_y, normalized=False, duration_ms=duration_ms)
-                            success = result.get("success", False)
+                            # Use coordinate tap with duration for long press - create bbox
+                            tap_bbox = {"top_left": [center_y, center_x], "bottom_right": [center_y, center_x]}
+                            result = self.tools.driver.tap(None, tap_bbox)
+                            success = result
                         else:
                             logging.error("Cannot get screen size for coordinate validation")
                             return False
@@ -672,9 +675,9 @@ class AgentAssistant:
                         logging.error("Invalid bounding box format for long_press")
                         return False
                 else:
-                    # Prefer element-based long press via tools
-                    result = self.tools.long_press(target_id, bbox, duration_ms)
-                    success = result.get("success", False)
+                    # Prefer element-based long press via driver
+                    result = self.tools.driver.long_press(target_id or "", duration_ms)
+                    success = result
 
             else:
                 logging.error(f"Unknown action type: {action_type}")

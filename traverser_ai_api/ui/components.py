@@ -456,7 +456,7 @@ class UIComponents:
             logging.error(f"Error adding image context warning: {e}")
 
     ADVANCED_FIELDS = {
-        "APPIUM_SERVER_URL": True,  # True means hide in basic mode
+        "MCP_SERVER_URL": True,  # True means hide in basic mode
         "TARGET_DEVICE_UDID": True,  # True means hide in basic mode
         "NEW_COMMAND_TIMEOUT": True,
         "APPIUM_IMPLICIT_WAIT": True,
@@ -861,10 +861,10 @@ class UIComponents:
         appium_group = QGroupBox("Appium Settings")
         appium_layout = QFormLayout(appium_group)
 
-        config_widgets["APPIUM_SERVER_URL"] = QLineEdit()
+        config_widgets["MCP_SERVER_URL"] = QLineEdit()
         label_appium_url = QLabel("Server URL:")
-        label_appium_url.setToolTip(tooltips["APPIUM_SERVER_URL"])
-        appium_layout.addRow(label_appium_url, config_widgets["APPIUM_SERVER_URL"])
+        label_appium_url.setToolTip(tooltips["MCP_SERVER_URL"])
+        appium_layout.addRow(label_appium_url, config_widgets["MCP_SERVER_URL"])
 
         config_widgets["TARGET_DEVICE_UDID"] = QComboBox()
         label_device_udid = QLabel("Target Device UDID:")

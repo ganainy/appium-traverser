@@ -199,7 +199,7 @@ class ConfigService:
         
         # Check optional but recommended configuration
         recommended_keys = [
-            'APPIUM_SERVER_URL',
+            'MCP_SERVER_URL',
             'AI_PROVIDER',
             'DEFAULT_MODEL_TYPE'
         ]

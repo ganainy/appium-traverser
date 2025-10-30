@@ -220,7 +220,7 @@ class CrawlerManager(QObject):
     def _check_appium_server(self) -> bool:
         """Check if Appium server is running and accessible."""
         try:
-            appium_url = getattr(self.config, 'APPIUM_SERVER_URL', 'http://127.0.0.1:4723')
+            appium_url = getattr(self.config, 'MCP_SERVER_URL', 'http://127.0.0.1:4723')
             # Try to connect to Appium status endpoint with shorter timeout
             response = requests.get(f"{appium_url}/status", timeout=3)
             if response.status_code == 200:

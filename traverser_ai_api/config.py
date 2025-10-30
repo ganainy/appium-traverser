@@ -51,7 +51,7 @@ class Config:
         self.APP_LAUNCH_WAIT_TIME: int = 7
         self.NEW_COMMAND_TIMEOUT: int = 300
         self.APPIUM_IMPLICIT_WAIT: int = 1
-        self.APPIUM_SERVER_URL: str = "http://127.0.0.1:4723"
+        self.MCP_SERVER_URL: str = "http://127.0.0.1:8000"
         self.TARGET_DEVICE_UDID: Optional[str] = None
         self.USE_COORDINATE_FALLBACK: bool = True
         self.GEMINI_API_KEY: Optional[str] = None
@@ -671,7 +671,7 @@ class Config:
             "APP_LAUNCH_WAIT_TIME",
             "NEW_COMMAND_TIMEOUT",
             "APPIUM_IMPLICIT_WAIT",
-            "APPIUM_SERVER_URL",
+            "MCP_SERVER_URL",
             "TARGET_DEVICE_UDID",
             "USE_COORDINATE_FALLBACK",
             "AI_PROVIDER",
@@ -989,7 +989,7 @@ APP_LAUNCH_WAIT_TIME = 5
 NEW_COMMAND_TIMEOUT = 300
 APPIUM_IMPLICIT_WAIT = 1
 
-APPIUM_SERVER_URL = "http://127.0.0.1:4723"
+MCP_SERVER_URL = "http://127.0.0.1:8000"
 TARGET_DEVICE_UDID = None
 USE_COORDINATE_FALLBACK = True
 

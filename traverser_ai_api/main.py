@@ -8,15 +8,15 @@ import time
 from typing import Optional
 
 try:
-    from config import Config
+    from traverser_ai_api.config import Config
 except ImportError:
-    from config import Config
+    from traverser_ai_api.config import Config
 
 try:
     try:
-        from utils import SCRIPT_START_TIME, ElapsedTimeFormatter, LoggerManager
+        from traverser_ai_api.utils import SCRIPT_START_TIME, ElapsedTimeFormatter, LoggerManager
     except ImportError:
-        from utils import SCRIPT_START_TIME, ElapsedTimeFormatter, LoggerManager
+        from traverser_ai_api.utils import SCRIPT_START_TIME, ElapsedTimeFormatter, LoggerManager
 except ImportError as e:
     sys.stderr.write(f"Error: Could not import logging utilities from utils.py: {e}\n")
     if 'SCRIPT_START_TIME' not in globals():
@@ -247,9 +247,9 @@ if __name__ == "__main__":
         if _current_script_dir not in sys.path:
             sys.path.insert(0, _current_script_dir) 
         try:
-            from crawler import AppCrawler  
+            from traverser_ai_api.crawler import AppCrawler  
         except ImportError:
-            from crawler import AppCrawler 
+            from traverser_ai_api.crawler import AppCrawler 
         crawler_instance = AppCrawler(app_config=cfg)
         root_logger.info("AppCrawler initialized. Starting crawl...")
         crawler_instance.run() # This internally calls asyncio.run()
@@ -290,9 +290,9 @@ if __name__ == "__main__":
                     # Import model adapters and PIL
                     try:
                         try:
-                            from model_adapters import create_model_adapter
+                            from traverser_ai_api.model_adapters import create_model_adapter
                         except ImportError:
-                            from model_adapters import create_model_adapter
+                            from traverser_ai_api.model_adapters import create_model_adapter
                         import glob
                         import re
 

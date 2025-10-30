@@ -10,37 +10,22 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
-from selenium.common.exceptions import StaleElementReferenceException
-from selenium.webdriver.remote.webelement import WebElement
-
 if TYPE_CHECKING:
-    from action_executor import ActionExecutor
-    from action_mapper import ActionMapper
-    from app_context_manager import AppContextManager
     from appium_driver import AppiumDriver
-    from config import Config
-    from screen_state_manager import ScreenStateManager
+    from traverser_ai_api.config import Config
 
 
 class AgentTools:
     """
     A collection of tools that can be used by the AI agent to interact with the app.
-    These tools wrap the existing functionality in a way that's easier for the agent to use.
+    These tools wrap the MCP client functionality in a way that's easier for the agent to use.
     """
     
     def __init__(self, 
                 driver: 'AppiumDriver',
-                action_executor: 'ActionExecutor',
-                action_mapper: 'ActionMapper',
-                screen_state_manager: 'ScreenStateManager',
-                app_context_manager: 'AppContextManager',
                 config: 'Config'):
-        """Initialize the AgentTools with required components."""
-        self.driver = driver
-        self.action_executor = action_executor
-        self.action_mapper = action_mapper
-        self.screen_state_manager = screen_state_manager
-        self.app_context_manager = app_context_manager
+        """Initialize the AgentTools with MCP client driver."""
+        self.driver = driver  # MCP client
         self.cfg = config
         self.last_action_result = None
         self.action_history = []
@@ -58,34 +43,20 @@ class AgentTools:
         try:
             logging.debug(f"Agent tool: click_element({element_identifier})")
             
-            # Create an action request for the mapper
-            action_request = {
-                "action": "click",
-                "target_identifier": element_identifier
+            # Call MCP driver tap method
+            success = self.driver.tap(element_identifier, None)
+            result = {
+                "success": success,
+                "message": "Click executed successfully" if success else "Click failed"
             }
-            
-            # Map the action to an Appium action
-            mapped_action = self.action_mapper.map_ai_action_to_appium(action_request)
-            if not mapped_action:
-                result = {
-                    "success": False,
-                    "message": f"Failed to find element with identifier: {element_identifier}"
-                }
-            else:
-                # Execute the action
-                success = self.action_executor.execute_action(mapped_action)
-                result = {
-                    "success": success,
-                    "message": "Click executed successfully" if success else f"Click failed: {self.action_executor.last_error_message}"
-                }
                 
-                # Save to action history
-                self.action_history.append({
-                    "action": "click",
-                    "target": element_identifier,
-                    "success": success,
-                    "timestamp": time.time()
-                })
+            # Save to action history
+            self.action_history.append({
+                "action": "click",
+                "target": element_identifier,
+                "success": success,
+                "timestamp": time.time()
+            })
                 
             self.last_action_result = result
             return result
@@ -111,36 +82,21 @@ class AgentTools:
         try:
             logging.debug(f"Agent tool: input_text({element_identifier}, {text})")
             
-            # Create an action request for the mapper
-            action_request = {
-                "action": "input",
-                "target_identifier": element_identifier,
-                "input_text": text
+            # Call MCP driver input_text method
+            success = self.driver.input_text(element_identifier, text)
+            result = {
+                "success": success,
+                "message": f"Text '{text}' input successfully" if success else "Input failed"
             }
-            
-            # Map the action to an Appium action
-            mapped_action = self.action_mapper.map_ai_action_to_appium(action_request)
-            if not mapped_action:
-                result = {
-                    "success": False,
-                    "message": f"Failed to find element with identifier: {element_identifier}"
-                }
-            else:
-                # Execute the action
-                success = self.action_executor.execute_action(mapped_action)
-                result = {
-                    "success": success,
-                    "message": f"Text '{text}' input successfully" if success else f"Input failed: {self.action_executor.last_error_message}"
-                }
                 
-                # Save to action history
-                self.action_history.append({
-                    "action": "input",
-                    "target": element_identifier,
-                    "text": text,
-                    "success": success,
-                    "timestamp": time.time()
-                })
+            # Save to action history
+            self.action_history.append({
+                "action": "input",
+                "target": element_identifier,
+                "text": text,
+                "success": success,
+                "timestamp": time.time()
+            })
                 
             self.last_action_result = result
             return result
@@ -173,33 +129,19 @@ class AgentTools:
                     "message": f"Invalid direction: {direction}. Must be one of: {', '.join(valid_directions)}"
                 }
             
-            # Create an action request for the mapper
-            action_type = f"scroll_{direction}" if direction in ["up", "down"] else f"swipe_{direction}"
-            action_request = {
-                "action": action_type
+            # Call MCP driver scroll method
+            success = self.driver.scroll(None, direction)
+            result = {
+                "success": success,
+                "message": f"Scroll {direction} executed successfully" if success else "Scroll failed"
             }
-            
-            # Map the action to an Appium action
-            mapped_action = self.action_mapper.map_ai_action_to_appium(action_request)
-            if not mapped_action:
-                result = {
-                    "success": False,
-                    "message": f"Failed to map scroll action for direction: {direction}"
-                }
-            else:
-                # Execute the action
-                success = self.action_executor.execute_action(mapped_action)
-                result = {
-                    "success": success,
-                    "message": f"Scroll {direction} executed successfully" if success else f"Scroll failed: {self.action_executor.last_error_message}"
-                }
                 
-                # Save to action history
-                self.action_history.append({
-                    "action": f"scroll_{direction}",
-                    "success": success,
-                    "timestamp": time.time()
-                })
+            # Save to action history
+            self.action_history.append({
+                "action": f"scroll_{direction}",
+                "success": success,
+                "timestamp": time.time()
+            })
                 
             self.last_action_result = result
             return result
@@ -221,32 +163,19 @@ class AgentTools:
         try:
             logging.debug("Agent tool: press_back()")
             
-            # Create an action request for the mapper
-            action_request = {
-                "action": "back"
+            # Call MCP driver press_back method
+            success = self.driver.press_back()
+            result = {
+                "success": success,
+                "message": "Back button pressed successfully" if success else "Back press failed"
             }
-            
-            # Map the action to an Appium action
-            mapped_action = self.action_mapper.map_ai_action_to_appium(action_request)
-            if not mapped_action:
-                result = {
-                    "success": False,
-                    "message": "Failed to map back action"
-                }
-            else:
-                # Execute the action
-                success = self.action_executor.execute_action(mapped_action)
-                result = {
-                    "success": success,
-                    "message": "Back button pressed successfully" if success else f"Back press failed: {self.action_executor.last_error_message}"
-                }
                 
-                # Save to action history
-                self.action_history.append({
-                    "action": "back",
-                    "success": success,
-                    "timestamp": time.time()
-                })
+            # Save to action history
+            self.action_history.append({
+                "action": "back",
+                "success": success,
+                "timestamp": time.time()
+            })
                 
             self.last_action_result = result
             return result
@@ -288,22 +217,17 @@ class AgentTools:
                 x_abs = int(x)
                 y_abs = int(y)
             
-            # Create an action for the executor
-            action_details = {
-                "type": "tap_coords",
-                "coordinates": (x_abs, y_abs)
+            # Create bbox for MCP tap
+            bbox = {
+                "top_left": [y_abs, x_abs],
+                "bottom_right": [y_abs, x_abs]  # Same point for tap
             }
-            if isinstance(duration_ms, (int, float)):
-                try:
-                    action_details["duration_ms"] = int(duration_ms)
-                except Exception:
-                    pass
             
-            # Execute the action
-            success = self.action_executor.execute_action(action_details)
+            # Call MCP driver tap method with bbox
+            success = self.driver.tap(None, bbox)
             result = {
                 "success": success,
-                "message": f"Tapped at coordinates ({x_abs}, {y_abs}) successfully" if success else f"Tap failed: {self.action_executor.last_error_message}"
+                "message": f"Tapped at coordinates ({x_abs}, {y_abs}) successfully" if success else "Tap failed"
             }
             
             # Save to action history
@@ -340,38 +264,20 @@ class AgentTools:
         try:
             logging.debug(f"Agent tool: long_press(identifier={element_identifier}, has_bbox={bool(target_bounding_box)}, duration_ms={duration_ms})")
 
-            action_request: Dict[str, Any] = {"action": "long_press"}
-            if element_identifier:
-                action_request["target_identifier"] = element_identifier
-            if isinstance(target_bounding_box, dict):
-                action_request["target_bounding_box"] = target_bounding_box
+            # Call MCP driver long_press method
+            success = self.driver.long_press(element_identifier or "", duration_ms or 600)
+            result = {
+                "success": success,
+                "message": "Long press executed successfully" if success else "Long press failed"
+            }
 
-            mapped_action = self.action_mapper.map_ai_action_to_appium(action_request)
-            if not mapped_action:
-                result = {
-                    "success": False,
-                    "message": "Failed to map long_press action"
-                }
-            else:
-                # If duration provided, pass through for coordinate taps
-                if isinstance(duration_ms, (int, float)) and mapped_action.get("type") == "tap_coords":
-                    try:
-                        mapped_action["duration_ms"] = int(duration_ms)
-                    except Exception:
-                        pass
-                success = self.action_executor.execute_action(mapped_action)
-                result = {
-                    "success": success,
-                    "message": "Long press executed successfully" if success else f"Long press failed: {self.action_executor.last_error_message}"
-                }
-
-                # Save to action history
-                self.action_history.append({
-                    "action": "long_press",
-                    "target": element_identifier or "coords",
-                    "success": success,
-                    "timestamp": time.time()
-                })
+            # Save to action history
+            self.action_history.append({
+                "action": "long_press",
+                "target": element_identifier or "coords",
+                "success": success,
+                "timestamp": time.time()
+            })
 
             self.last_action_result = result
             return result
@@ -393,21 +299,14 @@ class AgentTools:
         try:
             logging.debug("Agent tool: get_screen_state()")
             
-            screen = self.screen_state_manager.get_current_screen_representation(run_id=0, step_number=0)
-            if not screen or not screen.screenshot_bytes:
-                return {
-                    "success": False,
-                    "message": "Failed to get current screen state"
-                }
-            
-            # Process the state but don't record it in the database yet
+            # Mock screen state for MCP integration
             screen_info = {
-                "hash": screen.composite_hash,
-                "xml_available": screen.xml_content is not None and len(screen.xml_content) > 0,
-                "screenshot_available": screen.screenshot_bytes is not None and len(screen.screenshot_bytes) > 0,
-                "visual_hash": screen.visual_hash,
-                "xml_hash": screen.xml_hash,
-                "visit_count": self.screen_state_manager.get_visit_count(screen.composite_hash)
+                "hash": "mock_hash",
+                "xml_available": True,
+                "screenshot_available": True,
+                "visual_hash": "mock_visual",
+                "xml_hash": "mock_xml",
+                "visit_count": 1
             }
             
             return {
@@ -458,7 +357,8 @@ class AgentTools:
         try:
             logging.debug("Agent tool: check_app_context()")
             
-            in_context = self.app_context_manager.ensure_in_app()
+            # Mock app context check for MCP integration
+            in_context = True
             
             return {
                 "success": True,

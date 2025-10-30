@@ -16,7 +16,7 @@ except ImportError:
 try:
     from traverser_ai_api.config import Config  # Assuming Config class is in config.py in the same package
 except ImportError:
-    from config import Config  # Assuming Config class is in config.py in the same package
+    from traverser_ai_api.config import Config  # Assuming Config class is in config.py in the same package
 
 if TYPE_CHECKING:
     from appium_driver import AppiumDriver

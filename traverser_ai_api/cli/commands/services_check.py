@@ -92,7 +92,7 @@ class PrecheckCommand(CommandHandler):
     def _check_appium_server(self, config) -> Dict[str, str]:
         """Check Appium server status."""
         try:
-            appium_url = getattr(config, "APPIUM_SERVER_URL", "http://127.0.0.1:4723")
+            appium_url = getattr(config, "MCP_SERVER_URL", "http://127.0.0.1:4723")
             response = requests.get(f"{appium_url}/status", timeout=3)
             if response.status_code == 200:
                 status_data = response.json()

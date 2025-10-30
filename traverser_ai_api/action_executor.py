@@ -1,65 +1,126 @@
-import logging
-import re
-import time
+# action_executor.py - MCP versionimport logging
+
+import loggingimport re
+
+from typing import Any, Dict, Optionalimport time
+
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple, Union
 
-from selenium.common.exceptions import StaleElementReferenceException  # Added for explicit handling
-from selenium.webdriver.remote.webelement import WebElement
-
-if TYPE_CHECKING:
-    from appium_driver import AppiumDriver
 try:
-    from traverser_ai_api.config import Config
-except ImportError:
+
+    from traverser_ai_api.config import Configfrom selenium.common.exceptions import StaleElementReferenceException  # Added for explicit handling
+
+except ImportError:from selenium.webdriver.remote.webelement import WebElement
+
     from config import Config
 
-class ActionExecutor:
+if TYPE_CHECKING:
+
+class ActionExecutor:    from appium_driver import AppiumDriver
+
+    def __init__(self, driver, app_config: Config):try:
+
+        self.driver = driver    from traverser_ai_api.config import Config
+
+        self.cfg = app_configexcept ImportError:
+
+        self.consecutive_exec_failures = 0    from config import Config
+
+        self.last_error_message: Optional[str] = None
+
+        logging.debug("ActionExecutor (MCP) initialized.")class ActionExecutor:
+
     def __init__(self, driver: 'AppiumDriver', app_config: Config):
-        self.driver = driver
-        self.cfg = app_config
 
-        if not hasattr(self.cfg, 'MAX_CONSECUTIVE_EXEC_FAILURES') or self.cfg.MAX_CONSECUTIVE_EXEC_FAILURES is None:
+    def reset_consecutive_failures(self):        self.driver = driver
+
+        """Resets the consecutive execution failure counter."""        self.cfg = app_config
+
+        self.consecutive_exec_failures = 0
+
+        self.last_error_message = None        if not hasattr(self.cfg, 'MAX_CONSECUTIVE_EXEC_FAILURES') or self.cfg.MAX_CONSECUTIVE_EXEC_FAILURES is None:
+
             logging.warning("MAX_CONSECUTIVE_EXEC_FAILURES not in config, defaulting to 3.")
-            self.max_exec_failures = 3
-        else:
-            self.max_exec_failures = int(self.cfg.MAX_CONSECUTIVE_EXEC_FAILURES)
 
-        use_adb_input_fallback = getattr(self.cfg, 'USE_ADB_INPUT_FALLBACK', None)
-        if use_adb_input_fallback is None:
-            logging.warning("USE_ADB_INPUT_FALLBACK not in config, defaulting to True.")
+    def execute_action(self, action_details: Dict[str, Any]) -> bool:            self.max_exec_failures = 3
+
+        """Execute action via MCP driver."""        else:
+
+        try:            self.max_exec_failures = int(self.cfg.MAX_CONSECUTIVE_EXEC_FAILURES)
+
+            action = action_details.get('action')
+
+            target_identifier = action_details.get('target_identifier')        use_adb_input_fallback = getattr(self.cfg, 'USE_ADB_INPUT_FALLBACK', None)
+
+            input_text = action_details.get('input_text')        if use_adb_input_fallback is None:
+
+            bbox = action_details.get('target_bounding_box')            logging.warning("USE_ADB_INPUT_FALLBACK not in config, defaulting to True.")
+
             self.use_adb_input_fallback = True
-        else:
-            self.use_adb_input_fallback = bool(use_adb_input_fallback)
 
-        self.consecutive_exec_failures = 0
-        self.last_error_message: Optional[str] = None # Added attribute
-        logging.debug(f"ActionExecutor initialized. Max exec failures: {self.max_exec_failures}. ADB input fallback: {self.use_adb_input_fallback}")
+            if action == 'tap':        else:
 
-    def reset_consecutive_failures(self): # Added method
-        """Resets the consecutive execution failure counter."""
-        if self.consecutive_exec_failures > 0: # Only log if there were failures
-            logging.debug(f"Resetting consecutive execution failures from {self.consecutive_exec_failures} to 0.")
-        self.consecutive_exec_failures = 0
-        self.last_error_message = None
+                success = self.driver.tap(target_identifier, bbox)            self.use_adb_input_fallback = bool(use_adb_input_fallback)
 
-    def execute_action(self, action_details: Dict[str, Any]) -> bool:
-        # Avoid interacting under transient overlays (e.g., Toast). Wait briefly if detected.
-        try:
+            elif action == 'input_text':
+
+                success = self.driver.input_text(target_identifier, input_text)        self.consecutive_exec_failures = 0
+
+            elif action == 'scroll':        self.last_error_message: Optional[str] = None # Added attribute
+
+                direction = action_details.get('direction', 'down')        logging.debug(f"ActionExecutor initialized. Max exec failures: {self.max_exec_failures}. ADB input fallback: {self.use_adb_input_fallback}")
+
+                success = self.driver.scroll(target_identifier, direction)
+
+            elif action == 'long_press':    def reset_consecutive_failures(self): # Added method
+
+                duration = action_details.get('duration', 1000)        """Resets the consecutive execution failure counter."""
+
+                success = self.driver.long_press(target_identifier, duration)        if self.consecutive_exec_failures > 0: # Only log if there were failures
+
+            elif action == 'press_back':            logging.debug(f"Resetting consecutive execution failures from {self.consecutive_exec_failures} to 0.")
+
+                success = self.driver.press_back()        self.consecutive_exec_failures = 0
+
+            elif action == 'press_home':        self.last_error_message = None
+
+                success = self.driver.press_home()
+
+            else:    def execute_action(self, action_details: Dict[str, Any]) -> bool:
+
+                logging.error(f"Unknown action: {action}")        # Avoid interacting under transient overlays (e.g., Toast). Wait briefly if detected.
+
+                success = False        try:
+
             if self.driver:
-                self.driver.wait_for_toast_to_dismiss(getattr(self.cfg, 'TOAST_DISMISS_WAIT_MS', 1200))
-        except Exception:
-            # Non-fatal; proceed even if toast detection fails
-            pass
 
-        # Hide software keyboard before non-input actions to reduce overlay-related no-ops
+            if success:                self.driver.wait_for_toast_to_dismiss(getattr(self.cfg, 'TOAST_DISMISS_WAIT_MS', 1200))
+
+                self.consecutive_exec_failures = 0        except Exception:
+
+                self.last_error_message = None            # Non-fatal; proceed even if toast detection fails
+
+            else:            pass
+
+                self.consecutive_exec_failures += 1
+
+                self.last_error_message = f"Failed to execute {action}"        # Hide software keyboard before non-input actions to reduce overlay-related no-ops
+
         try:
-            if bool(getattr(self.cfg, 'AUTO_HIDE_KEYBOARD_BEFORE_NON_INPUT', True)):
+
+            return success            if bool(getattr(self.cfg, 'AUTO_HIDE_KEYBOARD_BEFORE_NON_INPUT', True)):
+
                 action_type_preview = action_details.get('type') if isinstance(action_details, dict) else None
-                # Only hide keyboard if we're not about to input text
-                if action_type_preview not in ["input"] and self.driver and self.driver.is_keyboard_shown():
-                    logging.debug("Software keyboard is shown before non-input action. Hiding keyboard.")
-                    self.driver.hide_keyboard()
-                    time.sleep(0.2)
+
+        except Exception as e:                # Only hide keyboard if we're not about to input text
+
+            logging.error(f"Error executing action: {e}")                if action_type_preview not in ["input"] and self.driver and self.driver.is_keyboard_shown():
+
+            self.consecutive_exec_failures += 1                    logging.debug("Software keyboard is shown before non-input action. Hiding keyboard.")
+
+            self.last_error_message = str(e)                    self.driver.hide_keyboard()
+
+            return False                    time.sleep(0.2)
         except Exception:
             # Non-fatal; proceed even if keyboard detection/hide fails
             pass

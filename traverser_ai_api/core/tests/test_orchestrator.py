@@ -19,7 +19,7 @@ try:
     from traverser_ai_api.core.validation import ValidationService
 except ImportError:
     # Fallback for direct execution
-    from config import Config
+    from traverser_ai_api.config import Config
     from core.adapters import SubprocessBackend
     from core.controller import CrawlerLaunchPlan, CrawlerOrchestrator, FlagController
     from core.validation import ValidationService

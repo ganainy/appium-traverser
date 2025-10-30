@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 try:
     from traverser_ai_api.config import Config
 except ImportError:
-    from config import Config
+    from traverser_ai_api.config import Config
 try:
     from traverser_ai_api import utils
 except ImportError:

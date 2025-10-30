@@ -8,7 +8,7 @@ import subprocess
 import sys
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
-from config import Config
+from traverser_ai_api.config import Config
 from PySide6.QtCore import QProcess, Qt, QThread, QTimer, Signal
 from PySide6.QtCore import Slot as slot
 from PySide6.QtGui import QColor, QGuiApplication, QIcon, QImage, QPixmap, QTextCursor
@@ -34,21 +34,21 @@ from PySide6.QtWidgets import (
 )
 
 try:
-    from analysis_viewer import XHTML2PDF_AVAILABLE, RunAnalyzer
+    from traverser_ai_api.analysis_viewer import XHTML2PDF_AVAILABLE, RunAnalyzer
 except Exception:
     try:
-        from analysis_viewer import XHTML2PDF_AVAILABLE, RunAnalyzer
+        from traverser_ai_api.analysis_viewer import XHTML2PDF_AVAILABLE, RunAnalyzer
     except Exception:
         RunAnalyzer = None
         XHTML2PDF_AVAILABLE = False
-from ui.components import UIComponents
-from ui.config_manager import ConfigManager
-from ui.crawler_manager import CrawlerManager
-from ui.custom_widgets import BusyDialog
-from ui.health_app_scanner import HealthAppScanner
-from ui.logo import LogoWidget
-from ui.mobsf_ui_manager import MobSFUIManager
-from ui.utils import update_screenshot
+from traverser_ai_api.ui.components import UIComponents
+from traverser_ai_api.ui.config_manager import ConfigManager
+from traverser_ai_api.ui.crawler_manager import CrawlerManager
+from traverser_ai_api.ui.custom_widgets import BusyDialog
+from traverser_ai_api.ui.health_app_scanner import HealthAppScanner
+from traverser_ai_api.ui.logo import LogoWidget
+from traverser_ai_api.ui.mobsf_ui_manager import MobSFUIManager
+from traverser_ai_api.ui.utils import update_screenshot
 
 
 class CrawlerControllerWindow(QMainWindow):
@@ -263,7 +263,7 @@ class CrawlerControllerWindow(QMainWindow):
     def _create_tooltips(self) -> Dict[str, str]:
         """Create tooltips for UI elements."""
         return {
-            "APPIUM_SERVER_URL": "URL of the running Appium server (e.g., http://127.0.0.1:4723).",
+            "MCP_SERVER_URL": "URL of the running MCP server (e.g., http://127.0.0.1:8000).",
             "TARGET_DEVICE_UDID": "Unique Device Identifier (UDID) of the target Android device or emulator. Optional.",
             "NEW_COMMAND_TIMEOUT": "Seconds Appium waits for a new command before quitting the session. 0 means no timeout.",
             "APPIUM_IMPLICIT_WAIT": "Seconds Appium driver waits when trying to find elements before failing. Affects element finding strategies.",
@@ -1077,9 +1077,9 @@ class CrawlerControllerWindow(QMainWindow):
 if __name__ == "__main__":
     # Import LoggerManager for proper logging setup
     try:
-        from utils import LoggerManager
+        from traverser_ai_api.utils import LoggerManager
     except ImportError:
-        from utils import LoggerManager
+        from traverser_ai_api.utils import LoggerManager
 
     app = QApplication(sys.argv)
     window = CrawlerControllerWindow()

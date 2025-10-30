@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional, Tuple
 try:
     from traverser_ai_api.config import Config
 except ImportError:
-    from config import Config
+    from traverser_ai_api.config import Config
 try:
     from traverser_ai_api import utils
 except ImportError:
@@ -58,7 +58,6 @@ try:
 except ImportError:
     from screenshot_annotator import ScreenshotAnnotator
 
-from appium.webdriver.common.appiumby import AppiumBy
 from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.remote.webelement import WebElement
 
@@ -76,7 +75,7 @@ class AppCrawler:
         logging.debug(f"AppCrawler initializing with App Package: {self.cfg.APP_PACKAGE}")
 
         required_attrs_for_crawler = [
-            'APPIUM_SERVER_URL', 'NEW_COMMAND_TIMEOUT', 'APPIUM_IMPLICIT_WAIT',
+            'MCP_SERVER_URL', 'NEW_COMMAND_TIMEOUT', 'APPIUM_IMPLICIT_WAIT',
             'GEMINI_API_KEY', 'DEFAULT_MODEL_TYPE', 'AI_SAFETY_SETTINGS',
             'DB_NAME', 'APP_PACKAGE', 'APP_ACTIVITY', 'SHUTDOWN_FLAG_PATH',
             'PAUSE_FLAG_PATH',
@@ -108,17 +107,17 @@ class AppCrawler:
         # 4) Class contains (allowed even when DISABLE_EXPENSIVE_XPATH is True)
         # Heavier XPath heuristics (xpath contains, flexible) remain gated by DISABLE_EXPENSIVE_XPATH.
         self.element_finding_strategies: List[Tuple[str, Optional[str], str]] = [
-            ('id', AppiumBy.ID, "ID"),
-            ('acc_id', AppiumBy.ACCESSIBILITY_ID, "Accessibility ID"),
-            ('text_case_insensitive', AppiumBy.XPATH, "Text Case Insensitive"),
-            ('content_desc_case_insensitive', AppiumBy.XPATH, "Content-Desc Case Insensitive"),
-            ('class_contains', AppiumBy.XPATH, "Class Contains Match"),
+            ('id', 'ID', "ID"),
+            ('acc_id', 'ACCESSIBILITY_ID', "Accessibility ID"),
+            ('text_case_insensitive', 'XPATH', "Text Case Insensitive"),
+            ('content_desc_case_insensitive', 'XPATH', "Content-Desc Case Insensitive"),
+            ('class_contains', 'XPATH', "Class Contains Match"),
         ]
         # Add heavier XPath heuristics only if not disabled
         if not getattr(self.cfg, 'DISABLE_EXPENSIVE_XPATH', False):
             self.element_finding_strategies.extend([
-                ('xpath_contains', AppiumBy.XPATH, "XPath Contains Match"),
-                ('xpath_flexible', AppiumBy.XPATH, "XPath Flexible Match")
+                ('xpath_contains', 'XPATH', "XPath Contains Match"),
+                ('xpath_flexible', 'XPATH', "XPath Flexible Match")
             ])
         self.action_mapper = ActionMapper(driver=self.driver, element_finding_strategies=self.element_finding_strategies, app_config=self.cfg)
         self.traffic_capture_manager = TrafficCaptureManager(driver=self.driver, app_config=self.cfg)

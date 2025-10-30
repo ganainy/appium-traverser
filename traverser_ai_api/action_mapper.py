@@ -1,49 +1,94 @@
-# action_mapper.py
-import logging
-import re
-import time
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+# action_mapper.py - MCP version# action_mapper.py
 
-from appium.webdriver.common.appiumby import AppiumBy
+import loggingimport logging
+
+from typing import Any, Dict, List, Optional, Tupleimport re
+
+import time
+
+try:from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+
+    from traverser_ai_api.config import Config
+
+except ImportError:from appium.webdriver.common.appiumby import AppiumBy
+
+    from config import Config
 
 # WebElement is imported via TYPE_CHECKING for AppiumDriver, but if used directly here, ensure it's available.
-# from selenium.webdriver.remote.webelement import WebElement 
-from selenium.common.exceptions import InvalidSelectorException, NoSuchElementException, StaleElementReferenceException
 
-# Import your main Config class and AppiumDriver
+class ActionMapper:# from selenium.webdriver.remote.webelement import WebElement 
+
+    def __init__(self, driver, element_finding_strategies: List[Tuple[str, Optional[str], str]], app_config: Config):from selenium.common.exceptions import InvalidSelectorException, NoSuchElementException, StaleElementReferenceException
+
+        """
+
+        Initialize the ActionMapper for MCP routing.# Import your main Config class and AppiumDriver
+
 # Adjust paths based on your project structure
-if TYPE_CHECKING: # For type hinting to avoid circular imports if AppiumDriver imports ActionMapper
-    from appium_driver import AppiumDriver 
-try:
-    from traverser_ai_api.config import Config  # Assuming Config class is in config.py in the same package
-except ImportError:
-    from config import Config  # Assuming Config class is in config.py in the same package
+
+        Since MCP handles element finding and execution, this mapper primarily validatesif TYPE_CHECKING: # For type hinting to avoid circular imports if AppiumDriver imports ActionMapper
+
+        and passes through AI action suggestions.    from appium_driver import AppiumDriver 
+
+        """try:
+
+        self.driver = driver    from traverser_ai_api.config import Config  # Assuming Config class is in config.py in the same package
+
+        self.element_finding_strategies = element_finding_strategiesexcept ImportError:
+
+        self.cfg = app_config    from traverser_ai_api.config import Config  # Assuming Config class is in config.py in the same package
 
 
-class ActionMapper:
-    def __init__(self, driver: 'AppiumDriver', element_finding_strategies: List[Tuple[str, Optional[str], str]], app_config: Config):
+
+    def map_ai_action_to_appium(self, ai_suggestion: Dict[str, Any], xml_content: Optional[str] = None) -> Optional[Dict[str, Any]]:
+
+        """class ActionMapper:
+
+        Map AI action suggestion to executable action details for MCP.    def __init__(self, driver: 'AppiumDriver', element_finding_strategies: List[Tuple[str, Optional[str], str]], app_config: Config):
+
         """
-        Initialize the ActionMapper.
 
-        Args:
-            driver (AppiumDriver): An instance of the refactored AppiumDriver.
-            element_finding_strategies (List[Tuple[str, Optional[str], str]]): 
-                List of strategies to find elements. Example: [('id', AppiumBy.ID, "ID"), ...].
+        Since MCP server handles element finding using target_identifier,        Initialize the ActionMapper.
+
+        this method primarily validates the suggestion and returns it as action_details.
+
+        """        Args:
+
+        if not ai_suggestion or not isinstance(ai_suggestion, dict):            driver (AppiumDriver): An instance of the refactored AppiumDriver.
+
+            logging.error("Invalid AI suggestion provided to ActionMapper.")            element_finding_strategies (List[Tuple[str, Optional[str], str]]): 
+
+            return None                List of strategies to find elements. Example: [('id', AppiumBy.ID, "ID"), ...].
+
                 The AppiumBy string itself is passed, not the direct AppiumBy member for flexibility if strategies evolve.
-            app_config (Config): The main application Config object instance.
-        """
+
+        action = ai_suggestion.get('action')            app_config (Config): The main application Config object instance.
+
+        target_identifier = ai_suggestion.get('target_identifier')        """
+
         self.driver = driver
-        self.element_finding_strategies = element_finding_strategies # Store as is
-        self.cfg = app_config # Store the Config object instance
+
+        if not action:        self.element_finding_strategies = element_finding_strategies # Store as is
+
+            logging.error("AI suggestion missing 'action' field.")        self.cfg = app_config # Store the Config object instance
+
+            return None
 
         # Validate required configuration values from self.cfg
-        if not hasattr(self.cfg, 'USE_COORDINATE_FALLBACK') or self.cfg.USE_COORDINATE_FALLBACK is None:
-            # Defaulting if not explicitly set, but better to ensure it's in Config class
-            logging.warning("USE_COORDINATE_FALLBACK not explicitly in config, defaulting to True for ActionMapper.")
-            self.use_coordinate_fallback = True 
-        else:
-            self.use_coordinate_fallback = bool(self.cfg.USE_COORDINATE_FALLBACK)
 
+        # For actions that need a target, ensure target_identifier is present        if not hasattr(self.cfg, 'USE_COORDINATE_FALLBACK') or self.cfg.USE_COORDINATE_FALLBACK is None:
+
+        if action in ['tap', 'input_text', 'long_press', 'scroll'] and not target_identifier:            # Defaulting if not explicitly set, but better to ensure it's in Config class
+
+            logging.error(f"Action '{action}' requires target_identifier, but none provided.")            logging.warning("USE_COORDINATE_FALLBACK not explicitly in config, defaulting to True for ActionMapper.")
+
+            return None            self.use_coordinate_fallback = True 
+
+        else:
+
+        # Return the AI suggestion as action_details, since MCP uses the same format            self.use_coordinate_fallback = bool(self.cfg.USE_COORDINATE_FALLBACK)
+
+        return ai_suggestion
     def _wait_for_element_ready(self, element: Any, timeout_s: float = 1.5, poll_s: float = 0.1) -> bool:
         """
         Wait briefly until the element reports displayed and enabled to reduce transient failures.

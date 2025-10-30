@@ -21,7 +21,7 @@
   - [Common Configuration Options (via CLI)](#common-configuration-options-via-cli)
   - [Configuration Files](#configuration-files)
 - [Troubleshooting](#troubleshooting)
-  - [Appium Issues](#appium-issues)
+  - [MCP Server Issues](#mcp-server-issues)
   - [Device Connection Issues (adb)](#device-connection-issues-adb)
   - [Python/Environment Issues](#pythonenvironment-issues)
   - [Common Error Solutions](#common-error-solutions)
@@ -30,7 +30,7 @@
 - [Comprehensive Prerequisites Installation Guide](#comprehensive-prerequisites-installation-guide)
   - [1) System Requirements](#1-system-requirements)
   - [2) Android SDK and ADB](#2-android-sdk-and-adb)
-  - [3) Appium Server](#3-appium-server)
+  - [3) MCP Server](#3-mcp-server)
   - [4) MobSF (Mobile Security Framework)](#4-mobsf-mobile-security-framework)
   - [5) PCAPDroid (Optional: Traffic Capture)](#5-pcapdroid-optional-traffic-capture)
   - [6) Project Setup](#6-project-setup)
@@ -59,7 +59,7 @@ Available Interfaces:
 
 Required Software:
 *   [Python 3.8+](https://www.python.org/downloads/) (ensure it's added to PATH)
-*   [Node.js & npm](https://nodejs.org/) -(for using Appium)
+*   [Node.js & npm](https://nodejs.org/) -(for MCP server dependencies)
 *   [Android SDK](https://developer.android.com/studio) - Usually comes with Android Studio if you have it installed
 
 ### Required Environment Variables
@@ -94,7 +94,7 @@ Refer to the documentation for each service to obtain your API keys and set up a
 
 ### 2. Quick Installation
 
-**1. Install Appium and drivers**
+**1. Install MCP server dependencies**
 ```bash
 npm install -g appium
 appium driver install uiautomator2
@@ -132,10 +132,10 @@ adb devices
 
 ### 3. Start Crawling (CLI Method)
 
-#### Terminal 1: Start Appium
+#### Terminal 1: Start MCP Server
 
 ```bash
-appium --relaxed-security
+python -m traverser_ai_api.mcp_server --relaxed-security
 ```
 
 #### Terminal 2: Use CLI Controller (ensure .venv is active)
@@ -151,10 +151,10 @@ python run_cli.py crawler start --annotate-offline-after-run  # starts crawler a
 
 ### 4. Start Crawling (UI Method)
 
-#### Terminal 1: Start Appium (same as CLI method)
+#### Terminal 1: Start MCP Server (same as CLI method)
 
 ```bash
-appium --relaxed-security
+python -m traverser_ai_api.mcp_server --relaxed-security
 ```
 
 #### Terminal 2: Launch UI Controller (ensure .venv is active)
@@ -199,15 +199,15 @@ The UI provides the same functionality as the CLI with a more interactive experi
 *   Critical: Check "Add Python to PATH" during installation.
 *   Verify: `python --version`
 
-**Node.js & Appium:**
-Install Node.js from nodejs.org, then:
+**Node.js & MCP Server:**
+Install Node.js from nodejs.org, then install MCP server dependencies:
 ```bash
 npm install -g appium
 appium driver install uiautomator2
 ```
 Verify installation:
 ```bash
-appium --version
+python -m traverser_ai_api.mcp_server --version
 appium driver list --installed
 ```
 
@@ -500,28 +500,28 @@ python run_cli.py --set-config CONTINUE_EXISTING_RUN=true # or false
 
 ## Troubleshooting
 
-### Appium Issues
-Check if Appium is running on the default port (4723):
+### MCP Server Issues
+Check if MCP server is running on the default port (8001):
 *Windows:*
 ```powershell
-netstat -an | findstr ":4723"
+netstat -an | findstr ":8001"
 ```
 *macOS/Linux:*
 ```bash
-lsof -i :4723
+lsof -i :8001
 ```
-If Appium is stuck or misbehaving, kill Node.js processes:
+If MCP server is stuck or misbehaving, kill Python processes:
 *Windows:*
 ```powershell
-taskkill /F /IM node.exe
+taskkill /F /IM python.exe
 ```
 *macOS/Linux (be cautious with pkill):*
 ```bash
-pkill -f appium
+pkill -f "mcp_server"
 ```
-Consider resetting Appium's session handling if issues persist:
+Consider resetting MCP server if issues persist:
 ```bash
-appium --session-override # Start Appium with this flag
+python -m traverser_ai_api.mcp_server --reset
 ```
 
 ### Device Connection Issues (adb)
@@ -557,11 +557,11 @@ pip install -r requirements.txt --force-reinstall
 ```
 
 ### Common Error Solutions
-*   **"Could not connect to Appium server"**
-    *   Ensure Appium is running: `appium --relaxed-security`.
-    *   Verify the `APPIUM_SERVER_URL` in your configuration matches where Appium is listening.
-    *   Check firewall settings; ensure port 4723 (or your configured port) is not blocked.
-*   **"No devices found" by ADB or Appium**
+*   **"Could not connect to MCP server"**
+    *   Ensure MCP server is running: `python -m traverser_ai_api.mcp_server --relaxed-security`.
+    *   Verify the `MCP_SERVER_URL` in your configuration matches where MCP server is listening.
+    *   Check firewall settings; ensure port 8001 (or your configured port) is not blocked.
+*   **"No devices found" by ADB or MCP server**
     *   Run `adb devices` to confirm ADB sees your device.
     *   Ensure USB debugging is enabled on the physical device and authorized.
     *   Try a different USB cable or port.
@@ -570,7 +570,7 @@ pip install -r requirements.txt --force-reinstall
     *   Verify the app is actually installed on the target device.
     *   Ensure the device is unlocked and on the home screen (or any neutral state) before starting.
 *   **Permission denied errors (file access, etc.)**
-    *   If Appium needs to install APKs or access certain device features, make sure you are running it with `--relaxed-security` flag.
+    *   If MCP server needs to install APKs or access certain device features, make sure you are running it with `--relaxed-security` flag.
     *   Check file/folder permissions for your project directory and `output_data` subdirectories.
     *   Ensure Android SDK environment variables (`ANDROID_HOME`) are correctly set and pointing to a valid SDK installation.
 
@@ -668,12 +668,12 @@ The AppTransverser supports integration with MobSF (Mobile Security Framework) f
 
 # Comprehensive Prerequisites Installation Guide
 
-This section consolidates installing and configuring the required services and tools: Appium, Android SDK/ADB, MobSF, and PCAPDroid. Optional local AI via Ollama is also covered.
+This section consolidates installing and configuring the required services and tools: MCP Server, Android SDK/ADB, MobSF, and PCAPDroid. Optional local AI via Ollama is also covered.
 
 ## 1) System Requirements
 - Windows 10/11 (PowerShell) or macOS/Linux
 - Python 3.8+ (recommend 3.10+)
-- Node.js 18+ (for Appium)
+- Node.js 18+ (for MCP server dependencies)
 - Docker (optional, recommended for MobSF)
 
 ## 2) Android SDK and ADB
@@ -687,18 +687,18 @@ This section consolidates installing and configuring the required services and t
    ```
    Your device should appear as “device”.
 
-## 3) Appium Server
+## 3) MCP Server
 1. Install Node.js: https://nodejs.org/
-2. Install Appium and Android driver:
+2. Install MCP server dependencies:
    ```powershell
    npm install -g appium
    appium driver install uiautomator2
    ```
-3. Start Appium server:
+3. Start MCP server:
    ```powershell
-   appium --relaxed-security
+   python -m traverser_ai_api.mcp_server --relaxed-security
    ```
-4. Optional: Set APPIUM_SERVER_URL in your `.env` or `user_config.json` (default is `http://127.0.0.1:4723`).
+4. Optional: Set MCP_SERVER_URL in your `.env` or `user_config.json` (default is `http://127.0.0.1:8001`).
 
 ## 4) MobSF (Mobile Security Framework)
 Recommended via Docker.
@@ -790,8 +790,8 @@ pip install -r requirements.txt
 Copy-Item .env.example .env
 # Edit .env to add GEMINI_API_KEY / OPENROUTER_API_KEY / OLLAMA_BASE_URL / PCAPDROID_API_KEY / MOBSF_API_KEY
 
-# Start Appium in another terminal
-appium --relaxed-security
+# Start MCP server in another terminal
+python -m traverser_ai_api.mcp_server --relaxed-security
 ```
 
 ## 7) Optional: Ollama (Local AI)
@@ -942,7 +942,7 @@ Use the CLI to validate setup before starting:
 ```powershell
 python run_cli.py --precheck-services
 ```
-You should see green checks for Appium, provider services (e.g., Ollama), required API keys, and a selected target app.
+You should see green checks for MCP server, provider services (e.g., Ollama), required API keys, and a selected target app.
 
 ## CLI Testing
 

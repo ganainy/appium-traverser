@@ -10,7 +10,7 @@ if TYPE_CHECKING:
 try:
     from traverser_ai_api.config import Config  # Assuming Config class is in config.py in the same package
 except ImportError:
-    from config import Config  # Assuming Config class is in config.py in the same package
+    from traverser_ai_api.config import Config  # Assuming Config class is in config.py in the same package
 
 class AppContextManager:
     """Manages the application context, including launching and ensuring the app is in focus,

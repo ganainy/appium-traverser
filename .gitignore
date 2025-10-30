@@ -1,3 +1,7 @@
+.kilocode/
+.specify/
+.github/
+removed_appium_code/
 .env
 traverser_ai_api/.env
 traverser_ai_api/screenshots/
@@ -9,8 +13,10 @@ script_setup_manual_config
 output_data/
 old-runs/
 
-# Python virtual environment
-.venv/
+# Python
+*.pyc
+dist/
+*.egg-info/
 
 /traverser_ai_api/user_config.json
 /traverser_ai_api/crawler.pid
@@ -59,3 +65,4 @@ node_modules/
 
 # Taskmaster project management
 .taskmaster/
+

@@ -37,7 +37,7 @@ if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
 try:
-    from config import Config
+    from traverser_ai_api.config import Config
 except ImportError as e:
     sys.stderr.write(f"FATAL: Could not import 'Config' class from config.py: {e}\n")
     sys.stderr.write(
@@ -569,7 +569,7 @@ class CLIController:
     # === Service Pre-checks (parity with UI "Pre-Check Services") ===
     def _check_appium_server(self) -> bool:
         try:
-            appium_url = getattr(self.cfg, "APPIUM_SERVER_URL", "http://127.0.0.1:4723")
+            appium_url = getattr(self.cfg, "MCP_SERVER_URL", "http://127.0.0.1:4723")
             response = requests.get(f"{appium_url}/status", timeout=3)
             if response.status_code == 200:
                 status_data = response.json()
@@ -659,7 +659,7 @@ class CLIController:
 
         # Appium
         appium_running = self._check_appium_server()
-        appium_url = getattr(self.cfg, "APPIUM_SERVER_URL", "http://127.0.0.1:4723")
+        appium_url = getattr(self.cfg, "MCP_SERVER_URL", "http://127.0.0.1:4723")
         print(
             ("✅" if appium_running else "❌")
             + f" Appium server at {appium_url}"

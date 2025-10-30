@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 try:
     from traverser_ai_api.config import Config  # Adjust path as necessary
 except ImportError:
-    from config import Config  # Adjust path as necessary
+    from traverser_ai_api.config import Config  # Adjust path as necessary
 
 class TrafficCaptureManager:
     def __init__(self, driver: 'AppiumDriver', app_config: Config):

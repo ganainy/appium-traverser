@@ -8,7 +8,7 @@ from typing import Any, List, Optional, Tuple, Union
 try:
     from traverser_ai_api.config import Config
 except ImportError:
-    from config import Config
+    from traverser_ai_api.config import Config
 
 class DatabaseManager:
     SCREENS_TABLE = "screens"

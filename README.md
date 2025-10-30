@@ -26,6 +26,7 @@ This project implements an automated crawler for Android applications driven by 
 
 ```powershell
 # 1. Install prerequisites
+# Install Appium dependencies (UiAutomator2 driver)
 npm install -g appium
 appium driver install uiautomator2
 
@@ -37,7 +38,8 @@ py -3 -m venv .venv
 python -m pip install -r requirements.txt
 
 # 3. Start crawling
-appium --relaxed-security  # Terminal 1
+# Start MCP server (Terminal 1)
+python -m traverser_ai_api.mcp_server --relaxed-security
 
 # CLI Controller (Terminal 2, venv active)
 # Scan installed health apps (or use --scan-all-apps)
@@ -255,7 +257,7 @@ python demo_agent.py --api-key "your-api-key" --screenshot "path/to/screenshot.p
 
 ## Additional Resources
 
-For full installation instructions, advanced configuration, service prerequisites (Appium, MobSF, PCAPdroid, Ollama), and the complete CLI command reference, please see:
+For full installation instructions, advanced configuration, service prerequisites (MCP Server, MobSF, PCAPdroid, Ollama), and the complete CLI command reference, please see:
 
 - docs/INSTALLATION_AND_CLI_GUIDE.md
 
@@ -299,6 +301,8 @@ Notes
 - **`agent_assistant.py`** - Core agent orchestrating AI-driven actions
 - **`ai_assistant.py` & `model_adapters.py`** - Unified AI integration via provider adapters (Gemini, Ollama, OpenRouter)
 - **`agent_tools.py`** - Tools for the agent to interact with the app
+- **`mcp_server.py`** - MCP server exposing device actions as tools
+- **`appium_driver.py`** - MCP client wrapper for device interactions
 - **`cli/`** - Modular command-line interface
 - **`ui_controller.py`** - Graphical user interface
 - **`screen_state_manager.py`** - Screen state and transition management
@@ -311,6 +315,7 @@ Environment variables (create a .env file in the project root):
 GEMINI_API_KEY=your_gemini_api_key        # Required if using provider "gemini"
 OPENROUTER_API_KEY=your_openrouter_key    # Required if using provider "openrouter"
 OLLAMA_BASE_URL=http://localhost:11434    # Required if using provider "ollama"
+MCP_SERVER_URL=http://localhost:8001      # MCP server endpoint
 # Optional service keys
 # PCAPDROID_API_KEY=...
 # MOBSF_API_KEY=...

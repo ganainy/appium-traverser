@@ -28,12 +28,15 @@ import sys
 import time
 import traceback
 
+# Add the parent directory to sys.path to make traverser_ai_api importable
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+
 # Provider-agnostic model adapters
 try:
-    from model_adapters import check_dependencies, create_model_adapter
+    from traverser_ai_api.model_adapters import check_dependencies, create_model_adapter
 except ImportError:
     try:
-        from model_adapters import check_dependencies, create_model_adapter
+        from traverser_ai_api.model_adapters import check_dependencies, create_model_adapter
     except ImportError as e:
         sys.stderr.write(
             f"FATAL: Could not import 'model_adapters'. Ensure the module is accessible. Error: {e}\n"
@@ -56,11 +59,11 @@ USER_CONFIG_JSON_PATH_FOR_FIND_APP = os.path.join(
 # This import path assumes config.py is in the same directory as find_app_info.py
 # or traverser_ai_api is in PYTHONPATH. Adjust if find_app_info.py is outside this structure.
 try:
-    from config import Config
+    from traverser_ai_api.config import Config
 except ImportError as e:
     # Try relative import if it's part of a package and config.py is in the same package
     try:
-        from config import Config
+        from traverser_ai_api.config import Config
     except ImportError:
         sys.stderr.write(
             f"FATAL: Could not import 'Config' class. Ensure config.py is accessible and there are no circular imports. Error: {e}\n"

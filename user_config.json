@@ -19,7 +19,7 @@
     "APP_LAUNCH_WAIT_TIME": 3,
     "NEW_COMMAND_TIMEOUT": 300,
     "APPIUM_IMPLICIT_WAIT": 1,
-    "APPIUM_SERVER_URL": "http://127.0.0.1:4723",
+    "MCP_SERVER_URL": "http://127.0.0.1:8000",
     "TARGET_DEVICE_UDID": "279cb9b1",
     "USE_COORDINATE_FALLBACK": true,
     "AI_PROVIDER": "openrouter",
@@ -48,7 +48,7 @@
     "DEVICE_PCAP_DIR": "/sdcard/Download/PCAPdroid",
     "CLEANUP_DEVICE_PCAP_FILE": true,
     "ENABLE_VIDEO_RECORDING": true,
-    "CURRENT_HEALTH_APP_LIST_FILE": "output_data\\app_info\\279cb9b1\\device_279cb9b1_all_apps.json",
+    "CURRENT_HEALTH_APP_LIST_FILE": "output_data\\app_info\\279cb9b1\\device_279cb9b1_filtered_health_apps.json",
     "LAST_SELECTED_APP": {
         "package_name": "de.gesund.app",
         "activity_name": "de.gesund.app.MainActivity",

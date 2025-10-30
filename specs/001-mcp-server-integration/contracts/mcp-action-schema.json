@@ -1,0 +1,67 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "MCP Action Protocol",
+    "description": "JSON schema for actions sent from agent to MCP server",
+    "type": "object",
+    "properties": {
+        "action": {
+            "type": "string",
+            "enum": [
+                "tap",
+                "input",
+                "scroll",
+                "long_press",
+                "back",
+                "home"
+            ]
+        },
+        "target_identifier": {
+            "type": "string",
+            "description": "Single raw attribute value: resource-id, content-desc, or visible text"
+        },
+        "target_bounding_box": {
+            "type": "object",
+            "properties": {
+                "top_left": {
+                    "type": "array",
+                    "items": {
+                        "type": "number"
+                    },
+                    "minItems": 2,
+                    "maxItems": 2
+                },
+                "bottom_right": {
+                    "type": "array",
+                    "items": {
+                        "type": "number"
+                    },
+                    "minItems": 2,
+                    "maxItems": 2
+                }
+            },
+            "required": [
+                "top_left",
+                "bottom_right"
+            ]
+        },
+        "input_text": {
+            "type": "string"
+        },
+        "reasoning": {
+            "type": "string"
+        },
+        "focus_influence": {
+            "type": "array",
+            "items": {
+                "type": "string"
+            }
+        }
+    },
+    "required": [
+        "action",
+        "target_identifier",
+        "target_bounding_box",
+        "reasoning",
+        "focus_influence"
+    ]
+}

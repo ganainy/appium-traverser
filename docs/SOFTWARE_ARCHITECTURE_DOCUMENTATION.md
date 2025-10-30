@@ -31,7 +31,7 @@ The AI-Driven Android App Crawler is an automated testing and exploration tool t
 
 ### Technology Stack
 - **Language**: Python 3.8+
-- **Mobile Automation**: Appium with UIAutomator2
+- **Mobile Automation**: MCP Server with Appium backend and UIAutomator2
 - **AI Models**: Pluggable provider adapters (Gemini, Ollama, OpenRouter)
 - **Database**: SQLite
 - **Image Processing**: Pillow, ImageHash
@@ -77,7 +77,7 @@ This section provides a concise overview of the project's structure and where to
 │                      Component Layer                            │
 ├─────────────────┬───────────────┬───────────────┬───────────────┤
 │  Agent Assistant │  State Mgmt   │  Action Exec  │  App Context  │
-│  (Adapters: Gemini/OpenRouter/Ollama) │  (Hashing)    │  (Appium)     │  (Lifecycle)  │
+│  (Adapters: Gemini/OpenRouter/Ollama) │  (Hashing)    │  (MCP Client) │  (Lifecycle)  │
 ├─────────────────┼───────────────┼───────────────┼───────────────┤
 │   Screenshot    │  Traffic      │  Action       │  Database     │
 │   Annotator     │  Capture      │  Mapper       │  Manager      │
@@ -87,7 +87,7 @@ This section provides a concise overview of the project's structure and where to
 ┌─────────────────────────────────────────────────────────────────┐
 │                      Infrastructure Layer                       │
 ├─────────────────────────────────────────────────────────────────┤
-│  Appium Driver  │  Android Device  │  SQLite DB  │  File System │
+│  MCP Server    │  Android Device  │  SQLite DB  │  File System │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -101,9 +101,16 @@ This section provides a concise overview of the project's structure and where to
                                             │                    │
                                             ▼                    ▼
 ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
-│ Database    │◀───│ State       │◀───│ Screenshot  │◀───│ Appium      │
-│ Manager     │    │ Manager     │    │ Capture     │    │ Driver      │
+│ Database    │◀───│ State       │◀───│ Screenshot  │◀───│ MCP         │
+│ Manager     │    │ Manager     │    │ Capture     │    │ Client      │
 └─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘
+                                                               │
+                                                               ▼
+                                                     ┌─────────────┐
+                                                     │ MCP Server   │
+                                                     │ (Appium      │
+                                                     │ Backend)     │
+                                                     └─────────────┘
                                                                │
                                                                ▼
                                                      ┌─────────────┐
@@ -186,7 +193,7 @@ The Shared Orchestration Layer provides common functionality used by both CLI an
 
 **ValidationService** (`core/validation.py`)
 - Provides shared validation utilities for pre-flight checks
-- Validates Appium, MobSF, Ollama, and API key configurations
+- Validates MCP server, MobSF, Ollama, and API key configurations
 
 #### Benefits
 
@@ -288,35 +295,25 @@ class ScreenRepresentation:
     timestamp: float
 ```
 
-### 5. Appium Driver (`appium_driver.py`)
-**Purpose**: Abstraction layer over Appium WebDriver for Android automation.
+### 5. MCP Client (`appium_driver.py`)
+**Purpose**: MCP client wrapper that routes device actions through MCP server tools.
 
 **Key Responsibilities**:
-- Manage Appium session lifecycle
-- Provide high-level action methods
-- Handle device-specific configurations
-- Implement coordinate fallback for actions
+- Connect to MCP server via HTTP/WebSocket
+- Route action requests to MCP tools (tap, input_text, scroll, etc.)
+- Handle MCP protocol communication
+- Provide high-level action methods compatible with existing code
 
-**Capabilities Configuration**:
+**MCP Server Connection**:
 ```python
-capabilities = {
-    'platformName': 'Android',
-    'appium:automationName': 'UiAutomator2',
-    'appium:appPackage': app_package,
-    'appium:appActivity': app_activity,
-    'appium:noReset': True,
-    'appium:autoGrantPermissions': True,
-    'appium:newCommandTimeout': timeout,
-    'appium:ensureWebviewsHavePages': True,
-    'appium:nativeWebScreenshot': True,
-    'appium:connectHardwareKeyboard': True
-}
+# MCP client connects to server running Appium backend
+mcp_client = MCPClient(server_url="http://localhost:8001")
 ```
 
 ### 6. Action Components
 
 #### Action Mapper (`action_mapper.py`)
-**Purpose**: Map AI suggestions to executable Appium actions.
+**Purpose**: Map AI suggestions to executable MCP tool calls.
 
 **Finding Strategies** (Priority Order):
 1. **ID** (resource-id): prefers full resource-id; falls back to contains(@resource-id, ...) XPath if needed
@@ -328,14 +325,14 @@ capabilities = {
 Heavier XPath heuristics like "XPath Contains" and "XPath Flexible" are only enabled when `DISABLE_EXPENSIVE_XPATH` is False in configuration.
 
 #### Action Executor (`action_executor.py`)
-**Purpose**: Execute mapped actions with error handling and fallbacks.
+**Purpose**: Execute mapped actions via MCP tool calls with error handling and fallbacks.
 
 **Supported Actions**:
-- `click`: Tap on UI elements
-- `input`: Text input with keyboard handling
-- `scroll_down/up`: Vertical scrolling
-- `swipe_left/right`: Horizontal swiping
-- `back`: Android back button
+- `click`: Tap on UI elements via MCP tap tool
+- `input`: Text input via MCP input_text tool
+- `scroll_down/up`: Vertical scrolling via MCP scroll tool
+- `swipe_left/right`: Horizontal swiping via MCP swipe tool
+- `back`: Android back button via MCP back tool
 
 ### 7. Database Manager (`database.py`)
 **Purpose**: Manage SQLite database for crawl data persistence.
@@ -386,9 +383,9 @@ Heavier XPath heuristics like "XPath Contains" and "XPath Flexible" are only ena
    └─ Parse action recommendation
 
 4. Action Execution
-   ├─ Map AI suggestion to Appium action
-   ├─ Find target UI element (if applicable)
-   ├─ Execute action with error handling
+   ├─ Map AI suggestion to MCP tool call
+   ├─ Send request to MCP server
+   ├─ Execute action via Appium backend
    └─ Apply coordinate fallback if needed
 
 5. State Update
@@ -426,7 +423,7 @@ class Config:
     # Core Application Settings
     APP_PACKAGE: str = "com.example.app"
     APP_ACTIVITY: str = "com.example.MainActivity"
-    APPIUM_SERVER_URL: str = "http://127.0.0.1:4723"
+    MCP_SERVER_URL: str = "http://127.0.0.1:8001"
     
     # AI Configuration (provider-agnostic)
     GEMINI_API_KEY: str = ""  # From environment or .env

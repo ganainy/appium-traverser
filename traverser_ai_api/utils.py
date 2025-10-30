@@ -7,9 +7,9 @@ import sys
 import time
 
 try:
-    from config import Config
+    from traverser_ai_api.config import Config
 except ImportError:
-    from config import Config
+    from traverser_ai_api.config import Config
 
 import hashlib
 import shutil
