@@ -277,6 +277,7 @@ class CrawlerControllerWindow(QMainWindow):
     def _create_tooltips(self) -> Dict[str, str]:
         """Create tooltips for UI elements."""
         return {
+            "APPIUM_SERVER_URL": "URL of the Appium server (e.g., http://127.0.0.1:4723). This is the server that handles mobile automation.",
             "MCP_SERVER_URL": "URL of the running MCP server (e.g., http://127.0.0.1:3000).",
             "TARGET_DEVICE_UDID": "Unique Device Identifier (UDID) of the target Android device or emulator. Optional.",
             "NEW_COMMAND_TIMEOUT": "Seconds Appium waits for a new command before quitting the session. 0 means no timeout.",

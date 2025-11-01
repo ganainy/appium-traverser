@@ -53,88 +53,7 @@
     "UI_MODE": "Expert",
     "MOBSF_API_URL": "http://localhost:8000/api/v1",
     "ENABLE_MOBSF_ANALYSIS": true,
-    "FOCUS_AREAS": [
-        {
-            "id": "privacy_policy",
-            "name": "Privacy Policies & Terms",
-            "description": "Prioritize exploring privacy policies, terms of service, and data usage disclosures",
-            "prompt_modifier": "PRIVACY: Find and open Privacy Policy, Terms, and data usage disclosures.",
-            "enabled": true,
-            "priority": 0
-        },
-        {
-            "id": "permissions",
-            "name": "App Permissions",
-            "description": "Focus on permission requests and privacy settings",
-            "prompt_modifier": "PRIVACY: Review permission prompts; try deny/allow and check settings.",
-            "enabled": true,
-            "priority": 1
-        },
-        {
-            "id": "data_collection",
-            "name": "Data Collection Forms",
-            "description": "Prioritize forms that collect personal information",
-            "prompt_modifier": "PRIVACY: Inspect forms collecting personal/health data; note disclosures.",
-            "enabled": true,
-            "priority": 2
-        },
-        {
-            "id": "third_party",
-            "name": "Third-Party Integrations",
-            "description": "Identify and analyze third-party services and trackers",
-            "prompt_modifier": "PRIVACY: Identify analytics/ads/social integrations; note data sharing.",
-            "enabled": true,
-            "priority": 3
-        },
-        {
-            "id": "network_requests",
-            "name": "Network Communications",
-            "description": "Monitor and analyze app's network requests and data transmission",
-            "prompt_modifier": "PRIVACY: Observe network/API calls; record data sent and destinations.",
-            "enabled": true,
-            "priority": 4
-        },
-        {
-            "id": "account_privacy",
-            "name": "Account & Profile Privacy",
-            "description": "Focus on account creation, profile data, and privacy controls",
-            "prompt_modifier": "PRIVACY: Check account/profile data and privacy controls; test deletion.",
-            "enabled": false,
-            "priority": 5
-        },
-        {
-            "id": "advertising_tracking",
-            "name": "Advertising & Tracking",
-            "description": "Identify advertising networks and tracking mechanisms",
-            "prompt_modifier": "PRIVACY: Find ads/tracking; verify opt-out and consent controls.",
-            "enabled": false,
-            "priority": 6
-        },
-        {
-            "id": "data_rights",
-            "name": "Data Subject Rights",
-            "description": "Focus on GDPR/CCPA compliance and user data rights",
-            "prompt_modifier": "PRIVACY: Locate data export/deletion and consent management features.",
-            "enabled": false,
-            "priority": 7
-        },
-        {
-            "id": "security_features",
-            "name": "Security & Authentication",
-            "description": "Analyze security measures and authentication methods",
-            "prompt_modifier": "**PRIVACY FOCUS: Security Measures** - Examine authentication methods, encryption indicators, security settings, and data protection measures. Look for secure data transmission (HTTPS) and proper credential handling.",
-            "enabled": false,
-            "priority": 8
-        },
-        {
-            "id": "location_tracking",
-            "name": "Location & Device Data",
-            "description": "Focus on location services and device data collection",
-            "prompt_modifier": "**PRIVACY FOCUS: Location & Device Data** - Pay attention to location services, device identifiers, sensor data collection, and background tracking. Test location permission handling and data retention policies.",
-            "enabled": false,
-            "priority": 9
-        }
-    ],
+    "FOCUS_AREAS": [],
     "FOCUS_MAX_ACTIVE": 2,
     "MAX_SAME_ACTION_REPEAT": 2,
     "DISABLE_EXPENSIVE_XPATH": false,
@@ -150,5 +69,8 @@
     "IMAGE_CROP_TOP_PERCENT": 0,
     "IMAGE_CROP_BOTTOM_PERCENT": 0,
     "OUTPUT_DATA_DIR": "output_data",
-    "MCP_SERVER_URL": "http://localhost:3000/mcp"
+    "MCP_SERVER_URL": "http://localhost:3000/mcp",
+    "MCP_CONNECTION_TIMEOUT": 5.0,
+    "MCP_REQUEST_TIMEOUT": 30.0,
+    "MCP_MAX_RETRIES": 3
 }

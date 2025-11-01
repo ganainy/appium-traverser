@@ -233,8 +233,7 @@ class CrawlerManager(QObject):
     def _check_appium_server(self) -> bool:
         """Check if Appium server is running and accessible."""
         try:
-            appium_url = getattr(self.config, 'MCP_SERVER_URL', 'http://127.0.0.1:4723')
-            # Try to connect to Appium status endpoint with shorter timeout
+            appium_url = getattr(self.config, 'APPIUM_SERVER_URL', 'http://127.0.0.1:4723')
             response = requests.get(f"{appium_url}/status", timeout=3)
             if response.status_code == 200:
                 status_data = response.json()
@@ -243,7 +242,6 @@ class CrawlerManager(QObject):
                     return True
         except Exception as e:
             logging.debug(f"Appium server check failed: {e}")
-        
         return False
     
     def _check_mobsf_server(self) -> bool:
@@ -437,8 +435,8 @@ class CrawlerManager(QObject):
             self.main_controller.log_message("=" * 50, 'blue')
             
             for service_name, details in status_details.items():
-                if service_name == 'mobsf':
-                    # Special handling for MobSF - use warning icon for non-required service
+                if service_name in ['mobsf', 'mcp']:
+                    # Special handling for optional services - use warning icon when not running
                     if details.get('running', False):
                         status_icon = "✅"
                         color = 'green'

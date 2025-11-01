@@ -8,15 +8,85 @@ from PySide6.QtCore import QMimeData, Qt, Signal
 from PySide6.QtGui import QColor, QDrag, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
+    QDialog,
+    QDialogButtonBox,
     QFrame,
     QGridLayout,
     QHBoxLayout,
     QLabel,
     QPushButton,
     QScrollArea,
+    QSpinBox,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
+    QLineEdit,
 )
+
+
+class HelpIcon(QLabel):
+    """A clickable help icon that shows tooltip on hover."""
+    
+    def __init__(self, help_text: str, parent=None):
+        super().__init__("?", parent)
+        self.help_text = help_text
+        self.setToolTip(help_text)
+        self.setStyleSheet("""
+            QLabel {
+                color: #ffffff;
+                font-weight: bold;
+                font-size: 11px;
+                padding: 1px 5px;
+                border-radius: 50%;
+                background-color: #6b7280;
+                text-align: center;
+                min-width: 18px;
+                max-width: 18px;
+                min-height: 18px;
+                max-height: 18px;
+            }
+        """)
+        self.setFixedSize(18, 18)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    
+    def enterEvent(self, event):
+        """Handle mouse enter event."""
+        self.setStyleSheet("""
+            QLabel {
+                color: #ffffff;
+                font-weight: bold;
+                font-size: 11px;
+                padding: 1px 5px;
+                border-radius: 50%;
+                background-color: #3b82f6;
+                text-align: center;
+                min-width: 18px;
+                max-width: 18px;
+                min-height: 18px;
+                max-height: 18px;
+            }
+        """)
+        super().enterEvent(event)
+    
+    def leaveEvent(self, event):
+        """Handle mouse leave event."""
+        self.setStyleSheet("""
+            QLabel {
+                color: #ffffff;
+                font-weight: bold;
+                font-size: 11px;
+                padding: 1px 5px;
+                border-radius: 50%;
+                background-color: #6b7280;
+                text-align: center;
+                min-width: 18px;
+                max-width: 18px;
+                min-height: 18px;
+                max-height: 18px;
+            }
+        """)
+        super().leaveEvent(event)
 
 
 @dataclass
@@ -30,79 +100,18 @@ class FocusArea:
     priority: int = 0
 
 
-# Default privacy-focused focus areas
-DEFAULT_PRIVACY_FOCUS_AREAS = [
-    FocusArea(
-        id="privacy_policy",
-        name="Privacy Policies & Terms",
-        description="Prioritize exploring privacy policies, terms of service, and data usage disclosures",
-        prompt_modifier="**PRIVACY FOCUS: Policy Documents** - Actively seek out and thoroughly explore privacy policies, terms of service, data processing agreements, and any legal documents. Read and analyze all privacy-related content for data collection practices, third-party sharing, and user rights."
-    ),
-    FocusArea(
-        id="permissions",
-        name="App Permissions",
-        description="Focus on permission requests and privacy settings",
-        prompt_modifier="**PRIVACY FOCUS: Permissions** - Pay special attention to permission requests (location, camera, microphone, contacts, storage, phone). Test how the app handles permission denials and privacy settings. Look for granular permission controls."
-    ),
-    FocusArea(
-        id="data_collection",
-        name="Data Collection Forms",
-        description="Prioritize forms that collect personal information",
-        prompt_modifier="**PRIVACY FOCUS: Data Collection** - Focus on forms and input fields that collect personal data (name, email, phone, address, payment info, health data). Test data validation, storage indications, and sharing disclosures. Look for data minimization practices."
-    ),
-    FocusArea(
-        id="third_party",
-        name="Third-Party Integrations",
-        description="Identify and analyze third-party services and trackers",
-        prompt_modifier="**PRIVACY FOCUS: Third-Party Services** - Look for integrations with analytics services, advertising networks, social media platforms, and other third-party services. Note any data sharing with external companies and tracking mechanisms."
-    ),
-    FocusArea(
-        id="network_requests",
-        name="Network Communications",
-        description="Monitor and analyze app's network requests and data transmission",
-        prompt_modifier="**PRIVACY FOCUS: Network Activity** - Be alert to network requests and data transmissions. Look for API calls, data uploads, and server communications. Identify what data is being sent to which servers and for what purposes."
-    ),
-    FocusArea(
-        id="account_privacy",
-        name="Account & Profile Privacy",
-        description="Focus on account creation, profile data, and privacy controls",
-        prompt_modifier="**PRIVACY FOCUS: Account Privacy** - Examine account creation processes, profile data collection, and privacy control options. Test data sharing settings, account deletion processes, and privacy dashboard features."
-    ),
-    FocusArea(
-        id="advertising_tracking",
-        name="Advertising & Tracking",
-        description="Identify advertising networks and tracking mechanisms",
-        prompt_modifier="**PRIVACY FOCUS: Advertising & Tracking** - Look for advertising networks, tracking pixels, and behavioral data collection. Find opt-out mechanisms, ad personalization controls, and tracking consent options."
-    ),
-    FocusArea(
-        id="data_rights",
-        name="Data Subject Rights",
-        description="Focus on GDPR/CCPA compliance and user data rights",
-        prompt_modifier="**PRIVACY FOCUS: Data Rights** - Search for data export options, account deletion features, data portability tools, and consent management. Test compliance with data protection regulations and user rights."
-    ),
-    FocusArea(
-        id="security_features",
-        name="Security & Authentication",
-        description="Analyze security measures and authentication methods",
-        prompt_modifier="**PRIVACY FOCUS: Security Measures** - Examine authentication methods, encryption indicators, security settings, and data protection measures. Look for secure data transmission (HTTPS) and proper credential handling."
-    ),
-    FocusArea(
-        id="location_tracking",
-        name="Location & Device Data",
-        description="Focus on location services and device data collection",
-        prompt_modifier="**PRIVACY FOCUS: Location & Device Data** - Pay attention to location services, device identifiers, sensor data collection, and background tracking. Test location permission handling and data retention policies."
-    )
-]
-
 
 class FocusAreaItem(QWidget):
     """Draggable item representing a single focus area."""
+    
+    delete_requested = Signal(str)  # Emitted when delete button is clicked with area ID
 
     def __init__(self, area: FocusArea, parent=None):
         super().__init__(parent)
         self.area = area
         self.checkbox = None
         self.drag_handle = None
+        self.delete_button = None
         self.setup_ui()
 
     def setup_ui(self):
@@ -187,6 +196,31 @@ class FocusAreaItem(QWidget):
 
         layout.addWidget(content_widget, 1)
 
+        # Delete button
+        self.delete_button = QPushButton("Delete")
+        self.delete_button.setStyleSheet("""
+            QPushButton {
+                color: #ef4444;
+                background-color: transparent;
+                border: 1px solid #ef4444;
+                border-radius: 4px;
+                padding: 4px 12px;
+                font-size: 11px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                color: #ffffff;
+                background-color: #ef4444;
+            }
+            QPushButton:pressed {
+                background-color: #dc2626;
+                border-color: #dc2626;
+            }
+        """)
+        self.delete_button.setToolTip("Delete this focus area")
+        self.delete_button.clicked.connect(self.on_delete_clicked)
+        layout.addWidget(self.delete_button)
+
         # Styling
         self.setStyleSheet("""
             FocusAreaItem {
@@ -203,6 +237,10 @@ class FocusAreaItem(QWidget):
 
         # Make draggable
         self.setAcceptDrops(True)
+
+    def on_delete_clicked(self):
+        """Handle delete button click."""
+        self.delete_requested.emit(self.area.id)
 
     def mousePressEvent(self, event):
         """Handle mouse press for drag initiation."""
@@ -275,13 +313,200 @@ class FocusAreaItem(QWidget):
             event.accept()
 
 
+class AddFocusAreaDialog(QDialog):
+    """Dialog for adding a new focus area."""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Add Focus Area")
+        self.setModal(True)
+        self.setMinimumWidth(450)
+        self.setup_ui()
+    
+    def setup_ui(self):
+        """Setup the dialog UI."""
+        layout = QVBoxLayout(self)
+        
+        # Name field (mandatory)
+        name_layout = QHBoxLayout()
+        name_label = QLabel("Name:")
+        name_label.setMinimumWidth(100)
+        
+        # Add mandatory indicator and help icon
+        name_header_layout = QHBoxLayout()
+        name_title = QLabel("Name:")
+        name_title.setMinimumWidth(80)
+        mandatory_label = QLabel("*")
+        mandatory_label.setStyleSheet("color: #ef4444; font-weight: bold;")
+        name_header_layout.addWidget(name_title)
+        name_header_layout.addWidget(mandatory_label)
+        name_header_layout.addStretch()
+        
+        help_icon = HelpIcon("Unique display name for this focus area (e.g., 'Privacy Policy', 'Permission Requests')")
+        name_header_layout.addWidget(help_icon)
+        
+        name_header_widget = QWidget()
+        name_header_widget.setLayout(name_header_layout)
+        
+        name_layout.addWidget(name_header_widget)
+        self.name_input = QLineEdit()
+        self.name_input.setPlaceholderText("e.g., Privacy Policy")
+        self.name_input.textChanged.connect(self.on_name_changed)
+        self.name_input.textChanged.connect(self.validate_form)
+        name_layout.addWidget(self.name_input)
+        layout.addLayout(name_layout)
+        
+        # Description field (mandatory)
+        desc_layout = QVBoxLayout()
+        desc_header_layout = QHBoxLayout()
+        desc_title = QLabel("Description:")
+        desc_mandatory = QLabel("*")
+        desc_mandatory.setStyleSheet("color: #ef4444; font-weight: bold;")
+        desc_header_layout.addWidget(desc_title)
+        desc_header_layout.addWidget(desc_mandatory)
+        desc_header_layout.addStretch()
+        
+        desc_help_icon = HelpIcon(
+            "Describe what UI elements or behaviors this focus area should target. "
+            "This will be used to generate AI instructions."
+        )
+        desc_header_layout.addWidget(desc_help_icon)
+        
+        desc_header_widget = QWidget()
+        desc_header_widget.setLayout(desc_header_layout)
+        desc_layout.addWidget(desc_header_widget)
+        
+        self.desc_input = QTextEdit()
+        self.desc_input.setPlaceholderText(
+            "e.g., Check for privacy-related UI elements such as privacy policies, "
+            "data collection notices, permission requests, consent toggles, "
+            "or privacy settings that the app uses to collect user information."
+        )
+        self.desc_input.setMaximumHeight(80)
+        self.desc_input.textChanged.connect(self.on_description_changed)
+        self.desc_input.textChanged.connect(self.validate_form)
+        desc_layout.addWidget(self.desc_input)
+        layout.addLayout(desc_layout)
+        
+        # Prompt Modifier field (optional)
+        prompt_layout = QVBoxLayout()
+        prompt_header_layout = QHBoxLayout()
+        prompt_title = QLabel("Prompt Modifier:")
+        prompt_header_layout.addWidget(prompt_title)
+        prompt_header_layout.addStretch()
+        
+        prompt_help_icon = HelpIcon(
+            "Custom AI instructions for this focus area. "
+            "Auto-generated from name and description, but you can customize it."
+        )
+        prompt_header_layout.addWidget(prompt_help_icon)
+        
+        prompt_header_widget = QWidget()
+        prompt_header_widget.setLayout(prompt_header_layout)
+        prompt_layout.addWidget(prompt_header_widget)
+        
+        self.prompt_input = QTextEdit()
+        self.prompt_input.setPlaceholderText("(Auto-generated from description - edit if needed)")
+        self.prompt_input.setMaximumHeight(100)
+        self.prompt_input.setReadOnly(False)
+        prompt_layout.addWidget(self.prompt_input)
+        layout.addLayout(prompt_layout)
+        
+        # Priority field (optional)
+        priority_layout = QHBoxLayout()
+        priority_header_layout = QHBoxLayout()
+        priority_title = QLabel("Priority:")
+        priority_title.setMinimumWidth(80)
+        priority_header_layout.addWidget(priority_title)
+        priority_header_layout.addStretch()
+        
+        priority_help_icon = HelpIcon("Lower numbers appear first in the list. Default: 999")
+        priority_header_layout.addWidget(priority_help_icon)
+        
+        priority_header_widget = QWidget()
+        priority_header_widget.setLayout(priority_header_layout)
+        
+        priority_layout.addWidget(priority_header_widget)
+        self.priority_input = QSpinBox()
+        self.priority_input.setMinimum(0)
+        self.priority_input.setMaximum(9999)
+        self.priority_input.setValue(999)
+        priority_layout.addWidget(self.priority_input)
+        priority_layout.addStretch()
+        layout.addLayout(priority_layout)
+        
+        # Dialog buttons
+        button_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        # Change button text from "OK" to "Add"
+        ok_button = button_box.button(QDialogButtonBox.StandardButton.Ok)
+        if ok_button:
+            ok_button.setText("Add")
+        
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+        
+        # Store reference to OK button for enabling/disabling
+        self.ok_button = ok_button
+        
+        # Initial validation
+        self.validate_form()
+    
+    def get_data(self) -> Dict[str, Any]:
+        """Get the entered focus area data. ID is auto-generated from name."""
+        name = self.name_input.text().strip()
+        # Auto-generate ID from name: lowercase, replace spaces with underscores
+        auto_id = name.lower().replace(" ", "_").replace("-", "_")
+        
+        return {
+            "id": auto_id,
+            "name": name,
+            "description": self.desc_input.toPlainText().strip(),
+            "prompt_modifier": self.prompt_input.toPlainText().strip(),
+            "priority": self.priority_input.value(),
+        }
+    
+    def on_name_changed(self):
+        """Handle name field changes to update prompt modifier."""
+        # This is called when name changes, but we don't auto-update prompt here
+        pass
+    
+    def on_description_changed(self):
+        """Handle description field changes to auto-generate prompt modifier."""
+        description = self.desc_input.toPlainText().strip()
+        
+        # Only auto-generate if description has content and prompt is empty
+        if description and not self.prompt_input.toPlainText().strip():
+            name = self.name_input.text().strip()
+            if name:
+                # Auto-generate prompt modifier from name and description
+                auto_prompt = f"**FOCUS: {name}** - {description}"
+                self.prompt_input.setText(auto_prompt)
+    
+    def validate_form(self):
+        """Validate form and enable/disable OK button based on required fields."""
+        name = self.name_input.text().strip()
+        description = self.desc_input.toPlainText().strip()
+        
+        # Both Name and Description are required
+        is_valid = bool(name and description)
+        
+        # Enable/disable OK button
+        if self.ok_button:
+            self.ok_button.setEnabled(is_valid)
+
+
 class FocusAreasWidget(QWidget):
     """Widget for managing focus areas with drag-and-drop reordering."""
 
     focus_areas_changed = Signal(list)  # Emitted when focus areas change
+    add_focus_area_requested = Signal()  # Emitted when user wants to add a focus area
 
-    def __init__(self, focus_areas_data=None, parent=None):
+    def __init__(self, focus_areas_data=None, parent=None, focus_service=None):
         super().__init__(parent)
+        self.focus_service = focus_service
         # Convert data to FocusArea objects if needed
         if focus_areas_data:
             self.focus_areas = []
@@ -303,7 +528,9 @@ class FocusAreasWidget(QWidget):
                 else:
                     logging.warning(f"Invalid focus area data type: {type(item)}")
         else:
-            self.focus_areas = DEFAULT_PRIVACY_FOCUS_AREAS.copy()
+            # No data provided - use empty list
+            # Database-backed focus areas should be loaded by caller and passed in
+            self.focus_areas = []
         
         self.focus_items = []
         self.setup_ui()
@@ -328,7 +555,13 @@ class FocusAreasWidget(QWidget):
 
         header_layout.addStretch()
 
-        # Quick action buttons
+        # Add button
+        add_btn = QPushButton("+ Add Focus Area")
+        add_btn.setStyleSheet("font-size: 10px; padding: 3px 8px;")
+        add_btn.clicked.connect(self.show_add_dialog)
+        header_layout.addWidget(add_btn)
+
+        # Enable All button
         enable_all_btn = QPushButton("Enable All")
         enable_all_btn.setStyleSheet("font-size: 10px; padding: 3px 8px;")
         enable_all_btn.clicked.connect(self.enable_all_focus_areas)
@@ -354,6 +587,7 @@ class FocusAreasWidget(QWidget):
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll_area.setMinimumHeight(300)  
         scroll_area.setStyleSheet("""
             QScrollArea {
                 border: 1px solid #374151;
@@ -389,10 +623,11 @@ class FocusAreasWidget(QWidget):
 
     def create_focus_items(self):
         """Create focus area items and add them to the layout."""
-        # Clear existing items
-        for item in self.focus_items:
-            self.items_layout.removeWidget(item)
-            item.hide()
+        # Clear existing items and stretch
+        while self.items_layout.count() > 0:
+            item = self.items_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
         self.focus_items.clear()
 
         # Sort by priority
@@ -403,14 +638,23 @@ class FocusAreasWidget(QWidget):
             item = FocusAreaItem(area)
             if item.checkbox:  # Safety check
                 item.checkbox.stateChanged.connect(self.on_focus_area_toggled)
+            # Connect delete signal
+            item.delete_requested.connect(self.on_delete_focus_area)
             self.focus_items.append(item)
             self.items_layout.addWidget(item)
 
+        # If no focus areas, show empty state
+        if not self.focus_items:
+            empty_label = QLabel("No focus areas added yet.\nClick '+ Add Focus Area' to get started.")
+            empty_label.setStyleSheet("color: #9ca3af; font-size: 11px; text-align: center;")
+            empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.items_layout.addWidget(empty_label)
+        else:
+            # Add stretch at bottom only if there are items
+            self.items_layout.addStretch()
+
         # Update priority labels
         self.update_priority_labels()
-
-        # Add stretch at bottom
-        self.items_layout.addStretch()
 
     def update_priority_labels(self):
         """Update priority number labels for all items."""
@@ -430,6 +674,26 @@ class FocusAreasWidget(QWidget):
                         area.enabled = item.checkbox.isChecked()
                         break
 
+        self.update_stats()
+        self.focus_areas_changed.emit(self.focus_areas.copy())
+
+    def on_delete_focus_area(self, area_id: str):
+        """Handle focus area deletion."""
+        # Remove from local list
+        self.focus_areas = [area for area in self.focus_areas if area.id != area_id]
+        
+        # Remove from service if available
+        if self.focus_service:
+            try:
+                success = self.focus_service.remove_focus_area(area_id)
+                if not success:
+                    logging.error(f"Failed to delete focus area {area_id} from service")
+            except Exception as e:
+                logging.error(f"Error deleting focus area {area_id}: {e}")
+        
+        # Refresh UI
+        self.update_priorities()
+        self.create_focus_items()
         self.update_stats()
         self.focus_areas_changed.emit(self.focus_areas.copy())
 
@@ -525,6 +789,77 @@ class FocusAreasWidget(QWidget):
     def get_enabled_focus_areas(self) -> List[FocusArea]:
         """Get list of enabled focus areas."""
         return [area for area in self.focus_areas if area.enabled]
+
+    def show_add_dialog(self):
+        """Show dialog to add a new focus area."""
+        dialog = AddFocusAreaDialog(self)
+        
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            data = dialog.get_data()
+            
+            # Validate required fields (only Name is user-provided, ID is auto-generated)
+            if not data['name']:
+                logging.warning("Name is required")
+                return
+            
+            # Add to service if available
+            if self.focus_service:
+                try:
+                    success = self.focus_service.add_focus_area(
+                        id_or_name=data['id'],
+                        title=data['name'],
+                        description=data['description'],
+                        prompt_modifier=data['prompt_modifier'],
+                        priority=data['priority'],
+                        enabled=True
+                    )
+                    if success:
+                        # Reload focus areas from service
+                        self.reload_focus_areas()
+                    else:
+                        logging.error("Failed to add focus area via service")
+                except Exception as e:
+                    logging.error(f"Error adding focus area: {e}")
+            else:
+                # Add directly if no service (for backward compatibility)
+                new_area = FocusArea(
+                    id=data['id'],
+                    name=data['name'],
+                    description=data['description'],
+                    prompt_modifier=data['prompt_modifier'],
+                    enabled=True,
+                    priority=data['priority']
+                )
+                self.focus_areas.append(new_area)
+                self.update_priorities()
+                self.create_focus_items()
+                self.focus_areas_changed.emit(self.focus_areas.copy())
+    
+    def reload_focus_areas(self):
+        """Reload focus areas from service."""
+        if self.focus_service:
+            try:
+                areas_data = self.focus_service.get_focus_areas()
+                self.focus_areas = []
+                for item in areas_data:
+                    if isinstance(item, dict):
+                        area = FocusArea(
+                            id=item.get('id', ''),
+                            name=item.get('name', ''),
+                            description=item.get('description', ''),
+                            prompt_modifier=item.get('prompt_modifier', ''),
+                            enabled=item.get('enabled', True),
+                            priority=item.get('priority', 0)
+                        )
+                        self.focus_areas.append(area)
+                    elif isinstance(item, FocusArea):
+                        self.focus_areas.append(item)
+                
+                self.update_priorities()
+                self.create_focus_items()
+                self.focus_areas_changed.emit(self.focus_areas.copy())
+            except Exception as e:
+                logging.error(f"Error reloading focus areas: {e}")
 
     def get_focus_area_by_id(self, area_id: str) -> Optional[FocusArea]:
         """Get focus area by ID."""

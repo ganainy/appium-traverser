@@ -569,7 +569,7 @@ class CLIController:
     # === Service Pre-checks (parity with UI "Pre-Check Services") ===
     def _check_appium_server(self) -> bool:
         try:
-            appium_url = getattr(self.cfg, "MCP_SERVER_URL", "http://127.0.0.1:4723")
+            appium_url = getattr(self.cfg, "APPIUM_SERVER_URL", "http://127.0.0.1:4723")
             response = requests.get(f"{appium_url}/status", timeout=3)
             if response.status_code == 200:
                 status_data = response.json()

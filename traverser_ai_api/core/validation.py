@@ -18,6 +18,8 @@ except ImportError:
     # Handle direct execution for testing
     from traverser_ai_api.config import Config
 
+from traverser_ai_api.cli.commands.services_check import PrecheckCommand
+
 
 class ValidationService:
     """Service for validating crawler dependencies and configuration."""
@@ -75,7 +77,7 @@ class ValidationService:
         
         # Appium status
         appium_running = self._check_appium_server()
-        appium_url = getattr(self.config, 'MCP_SERVER_URL', 'http://127.0.0.1:4723')
+        appium_url = getattr(self.config, 'APPIUM_SERVER_URL', 'http://127.0.0.1:4723')
         details['appium'] = {
             'running': appium_running,
             'url': appium_url,
@@ -124,12 +126,28 @@ class ValidationService:
             'message': f"Target app: {app_package}" if app_package else "Target app: Not selected ❌"
         }
         
+        # MCP status
+        cmd = PrecheckCommand()
+        mcp_status = cmd._check_mcp_server_health(self.config)
+        mcp_running = mcp_status['status'] == 'running'
+        mcp_url = getattr(self.config, 'MCP_SERVER_URL', 'http://localhost:3000/mcp')
+        if mcp_running:
+            message = f"MCP server at {mcp_url} is running ✅"
+        else:
+            message = f"MCP server at {mcp_url} is not accessible ⚠️"
+        details['mcp'] = {
+            'running': mcp_running,
+            'url': mcp_url,
+            'required': False,
+            'message': message
+        }
+        
         return details
     
     def _check_appium_server(self) -> bool:
         """Check if Appium server is running and accessible."""
         try:
-            appium_url = getattr(self.config, 'MCP_SERVER_URL', 'http://127.0.0.1:4723')
+            appium_url = getattr(self.config, 'APPIUM_SERVER_URL', 'http://127.0.0.1:4723')
             # Try to connect to Appium status endpoint with shorter timeout
             response = requests.get(f"{appium_url}/status", timeout=3)
             if response.status_code == 200:

@@ -79,6 +79,7 @@ class Config:
         self.MCP_CONNECTION_TIMEOUT: float = 5.0
         self.MCP_REQUEST_TIMEOUT: float = 30.0
         self.MCP_MAX_RETRIES: int = 3
+        self.APPIUM_SERVER_URL: str = "http://127.0.0.1:4723"
         self.TARGET_DEVICE_UDID: Optional[str] = None
         self.USE_COORDINATE_FALLBACK: bool = True
         self.GEMINI_API_KEY: Optional[str] = None

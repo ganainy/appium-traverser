@@ -861,10 +861,10 @@ class UIComponents:
         appium_group = QGroupBox("Appium Settings")
         appium_layout = QFormLayout(appium_group)
 
-        config_widgets["MCP_SERVER_URL"] = QLineEdit()
+        config_widgets["APPIUM_SERVER_URL"] = QLineEdit()
         label_appium_url = QLabel("Server URL:")
-        label_appium_url.setToolTip(tooltips["MCP_SERVER_URL"])
-        appium_layout.addRow(label_appium_url, config_widgets["MCP_SERVER_URL"])
+        label_appium_url.setToolTip(tooltips.get("APPIUM_SERVER_URL", "Appium server URL (e.g., http://127.0.0.1:4723)"))
+        appium_layout.addRow(label_appium_url, config_widgets["APPIUM_SERVER_URL"])
 
         config_widgets["TARGET_DEVICE_UDID"] = QComboBox()
         label_device_udid = QLabel("Target Device UDID:")
@@ -1406,33 +1406,29 @@ class UIComponents:
         except ImportError:
             from focus_areas_widget import FocusAreasWidget
 
-        # Load focus areas from config or use defaults
+        # Try to get focus service from main controller
+        focus_service = None
+        try:
+            if hasattr(config_handler, 'main_controller'):
+                main_controller = config_handler.main_controller
+                if hasattr(main_controller, 'focus_service'):
+                    focus_service = main_controller.focus_service
+        except Exception as e:
+            logging.warning(f"Could not get focus_service from main_controller: {e}")
+
+        # Load focus areas from config
         focus_areas_data = getattr(config_handler.config, "FOCUS_AREAS", None)
 
-        # Check if focus areas have been loaded from user config
-        # If FOCUS_AREAS is None or empty list, use defaults
-        if focus_areas_data is None or len(focus_areas_data) == 0:
-            # Import defaults if not set or empty
-            try:
-                from traverser_ai_api.ui.focus_areas_widget import DEFAULT_PRIVACY_FOCUS_AREAS
-            except ImportError:
-                from focus_areas_widget import DEFAULT_PRIVACY_FOCUS_AREAS
-            focus_areas_data = DEFAULT_PRIVACY_FOCUS_AREAS
-            # Convert dataclass objects to dictionaries for consistency
-            focus_areas_data = [
-                {
-                    "id": area.id,
-                    "name": area.name,
-                    "description": area.description,
-                    "prompt_modifier": area.prompt_modifier,
-                    "enabled": area.enabled,
-                    "priority": area.priority,
-                }
-                for area in focus_areas_data
-            ]
+        # Start with empty list - users must add focus areas through CRUD operations
+        # If config has saved focus areas, load them
+        if focus_areas_data:
+            # Convert to proper format if needed
+            pass
+        else:
+            focus_areas_data = []
 
         # Create the focus areas widget
-        focus_widget = FocusAreasWidget(focus_areas_data)
+        focus_widget = FocusAreasWidget(focus_areas_data, parent=None, focus_service=focus_service)
         focus_layout.addWidget(focus_widget)
 
         # Connect to config changes
