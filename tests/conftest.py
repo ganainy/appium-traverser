@@ -17,18 +17,15 @@ project_root = Path(__file__).resolve().parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-# Try to import from traverser_ai_api package first
+
+# Try to import from traverser_ai_api package first, but delay Config import to fixture
 try:
     from traverser_ai_api.cli.shared.context import CLIContext, ServiceRegistry
-    from traverser_ai_api.config import Config
     from traverser_ai_api.utils import LoggerManager
-    
     CLI_AVAILABLE = True
 except ImportError:
-    # Fallback: mark as unavailable for tests that need CLI
     CLIContext = None  # type: ignore
     ServiceRegistry = None  # type: ignore
-    Config = None  # type: ignore
     LoggerManager = None  # type: ignore
     CLI_AVAILABLE = False
 
@@ -54,6 +51,7 @@ def temp_dir() -> Generator[Path, None, None]:
 @pytest.fixture
 def mock_config(temp_dir: Path) -> Mock:
     """Create a mock configuration object."""
+    from traverser_ai_api.config import Config
     config = Mock(spec=Config)
     config.APP_PACKAGE = "com.example.testapp"
     config.APP_ACTIVITY = "com.example.testapp.MainActivity"

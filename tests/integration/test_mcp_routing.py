@@ -10,7 +10,7 @@ from unittest.mock import Mock, patch
 
 from traverser_ai_api.agent_assistant import AgentAssistant
 from traverser_ai_api.appium_driver import AppiumDriver
-from traverser_ai_api.config import Config
+
 
 
 class TestMCPRouting:
@@ -19,6 +19,7 @@ class TestMCPRouting:
     @pytest.fixture
     def mock_config(self):
         """Create a mock config for testing."""
+        from traverser_ai_api.config import Config
         config = Mock(spec=Config)
         config.AI_PROVIDER = "gemini"
         config.GEMINI_API_KEY = "test_key"

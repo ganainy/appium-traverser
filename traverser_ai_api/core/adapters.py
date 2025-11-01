@@ -13,12 +13,14 @@ import sys
 import threading
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Optional, TYPE_CHECKING
 
-from traverser_ai_api.core.controller import CrawlerLaunchPlan, OutputParser, ProcessBackend
+if TYPE_CHECKING:
+    from traverser_ai_api.core.controller import CrawlerLaunchPlan, OutputParser, ProcessBackend
 
 
-class SubprocessBackend(ProcessBackend):
+class SubprocessBackend:
+    from .controller import ProcessBackend
     """Process backend using subprocess for CLI environments."""
     
     def __init__(self):
@@ -27,7 +29,7 @@ class SubprocessBackend(ProcessBackend):
         self._output_thread = None
         self._output_parser = None
     
-    def start_process(self, plan: CrawlerLaunchPlan) -> bool:
+    def start_process(self, plan: "CrawlerLaunchPlan") -> bool:
         """Start a process using subprocess."""
         try:
             self.process = subprocess.Popen(
@@ -83,7 +85,7 @@ class SubprocessBackend(ProcessBackend):
         """Get the subprocess PID."""
         return self.process.pid if self.process else None
     
-    def start_output_monitoring(self, output_parser: OutputParser):
+    def start_output_monitoring(self, output_parser: "OutputParser"):
         """Start monitoring the subprocess output."""
         if not self.process or not self.process.stdout:
             return
@@ -112,7 +114,8 @@ class SubprocessBackend(ProcessBackend):
             self.logger.error(f"Error monitoring subprocess (PID {pid}): {e}")
 
 
-class QtProcessBackend(ProcessBackend):
+class QtProcessBackend:
+    from .controller import ProcessBackend
     """Process backend using QProcess for UI environments."""
     
     def __init__(self):
@@ -146,7 +149,7 @@ class QtProcessBackend(ProcessBackend):
         
         self.signals = ProcessSignals()
     
-    def start_process(self, plan: CrawlerLaunchPlan) -> bool:
+    def start_process(self, plan: "CrawlerLaunchPlan") -> bool:
         """Start a process using QProcess."""
         if not self.qt_available:
             self.logger.error("Qt not available, cannot start QProcess")
@@ -213,7 +216,7 @@ class QtProcessBackend(ProcessBackend):
         """Get the QProcess PID."""
         return self.process.processId() if self.process else None
     
-    def start_output_monitoring(self, output_parser: OutputParser):
+    def start_output_monitoring(self, output_parser: "OutputParser"):
         """Start monitoring the QProcess output."""
         if not self.process or not self.qt_available:
             return
@@ -272,7 +275,7 @@ class QtProcessBackend(ProcessBackend):
 
 
 # Factory function to create appropriate backend
-def create_process_backend(use_qt: bool = False) -> ProcessBackend:
+def create_process_backend(use_qt: bool = False) -> "ProcessBackend":
     """
     Create a process backend based on the environment.
     

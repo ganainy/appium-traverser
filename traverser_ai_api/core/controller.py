@@ -14,9 +14,10 @@ import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union, TYPE_CHECKING
 
-from traverser_ai_api.config import Config
+if TYPE_CHECKING:
+    from traverser_ai_api.config import Config
 
 
 @dataclass
@@ -228,7 +229,7 @@ class OutputParser:
 class CrawlerOrchestrator:
     """Main orchestrator for crawler lifecycle management."""
     
-    def __init__(self, config: Config, backend: ProcessBackend):
+    def __init__(self, config: "Config", backend: ProcessBackend):
         self.config = config
         self.backend = backend
         self.logger = logging.getLogger(__name__)

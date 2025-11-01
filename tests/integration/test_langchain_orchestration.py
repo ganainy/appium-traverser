@@ -11,7 +11,7 @@ from typing import Dict, Any, Optional
 
 from traverser_ai_api.agent_assistant import AgentAssistant
 from traverser_ai_api.mcp_client import MCPClient
-from traverser_ai_api.config import Config
+
 
 
 class TestLangChainOrchestrationIntegration:
@@ -20,6 +20,7 @@ class TestLangChainOrchestrationIntegration:
     @pytest.fixture
     def real_config(self):
         """Create a real config object for integration testing."""
+        from traverser_ai_api.config import Config
         config = Mock(spec=Config)
         config.AI_PROVIDER = "gemini"
         config.GEMINI_API_KEY = "test_key"

@@ -6,8 +6,10 @@ import threading  # Added for thread identification
 from typing import Any, List, Optional, Tuple, Union
 
 try:
+    # Import Config only when needed to avoid circular import
     from traverser_ai_api.config import Config
 except ImportError:
+    # Import Config only when needed to avoid circular import
     from traverser_ai_api.config import Config
 
 class DatabaseManager:

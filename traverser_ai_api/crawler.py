@@ -13,8 +13,10 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 try:
+    # Import Config only when needed to avoid circular import
     from traverser_ai_api.config import Config
 except ImportError:
+    # Import Config only when needed to avoid circular import
     from traverser_ai_api.config import Config
 try:
     from traverser_ai_api import utils

@@ -8,7 +8,7 @@ import subprocess
 import sys
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
-from traverser_ai_api.config import Config
+
 from PySide6.QtCore import QProcess, Qt, QThread, QTimer, Signal
 from PySide6.QtCore import Slot as slot
 from PySide6.QtGui import QColor, QGuiApplication, QIcon, QImage, QPixmap, QTextCursor
@@ -96,30 +96,25 @@ class CrawlerControllerWindow(QMainWindow):
         self.api_dir = os.path.dirname(__file__)  # Directory containing this script
         self.project_root = os.path.dirname(self.api_dir)  # Parent directory of api_dir
 
-        # Initialize Config instance
-        defaults_module_path = os.path.join(self.api_dir, "config.py")
-        user_config_json_path = os.path.join(self.project_root, "user_config.json")
-        self.config = Config(defaults_module_path, user_config_json_path)
-        self.config.load_user_config()
+    # Initialize Config instance
+    from traverser_ai_api.config import Config
+    self.config: "Config" = Config()
 
         # Set default UI_MODE if not already in config
-        # This is done after load_user_config to not overwrite existing setting
+        # This is done after config instantiation to not overwrite existing setting
         if not hasattr(self.config, "UI_MODE"):
-            # Use update_setting_and_save which handles attribute creation
-            logging.debug(
-                f"Setting default UI_MODE to Expert in config file: {user_config_json_path}"
-            )
-            self.config.update_setting_and_save(
-                "UI_MODE", "Expert", self._sync_user_config_files
-            )
-
+            logging.debug("Setting default UI_MODE to Expert in config.")
+            if hasattr(self.config, "update_setting_and_save"):
+                self.config.update_setting_and_save(
+                    "UI_MODE", "Expert", getattr(self, "_sync_user_config_files", None)
+                )
         # Log current UI_MODE setting
         ui_mode = getattr(self.config, "UI_MODE", "Unknown")
         logging.debug(f"Current UI_MODE setting: {ui_mode}")
 
         # Initialize instance variables
         self.config_widgets = {}
-        self.current_health_app_list_file = self.config.CURRENT_HEALTH_APP_LIST_FILE
+        self.current_health_app_list_file = getattr(self.config, "CURRENT_HEALTH_APP_LIST_FILE", None)
         self.health_apps_data = []
         # Initialize last_selected_app as an empty dictionary instead of None
         self.last_selected_app = {}

@@ -12,10 +12,8 @@ from typing import Any, Dict, List, Tuple
 
 import requests
 
-try:
-    from traverser_ai_api.config import Config
-except ImportError:
-    # Handle direct execution for testing
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
     from traverser_ai_api.config import Config
 
 from traverser_ai_api.cli.commands.services_check import PrecheckCommand
@@ -24,7 +22,7 @@ from traverser_ai_api.cli.commands.services_check import PrecheckCommand
 class ValidationService:
     """Service for validating crawler dependencies and configuration."""
     
-    def __init__(self, config: Config):
+    def __init__(self, config: "Config"):
         self.config = config
         self.logger = logging.getLogger(__name__)
     

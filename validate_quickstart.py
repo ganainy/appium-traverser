@@ -15,17 +15,17 @@ def test_config_defaults():
             f.write('{}')
 
         try:
-            cfg = Config(defaults_module_path='traverser_ai_api/config.py', user_config_json_path=config_file)
+            cfg = Config(user_config_json_path=config_file)
 
             # Check MCP defaults
-            assert cfg.MCP_SERVER_URL == "http://localhost:3000/mcp", f"MCP_SERVER_URL mismatch: {cfg.MCP_SERVER_URL}"
-            assert cfg.MCP_CONNECTION_TIMEOUT == 5.0, f"MCP_CONNECTION_TIMEOUT mismatch: {cfg.MCP_CONNECTION_TIMEOUT}"
-            assert cfg.MCP_REQUEST_TIMEOUT == 30.0, f"MCP_REQUEST_TIMEOUT mismatch: {cfg.MCP_REQUEST_TIMEOUT}"
-            assert cfg.MCP_MAX_RETRIES == 3, f"MCP_MAX_RETRIES mismatch: {cfg.MCP_MAX_RETRIES}"
-
+            assert cfg.get("MCP_SERVER_URL") == "http://localhost:3000/mcp", f"MCP_SERVER_URL mismatch: {cfg.get('MCP_SERVER_URL')}"
+            assert cfg.get("MCP_CONNECTION_TIMEOUT") == 5.0, f"MCP_CONNECTION_TIMEOUT mismatch: {cfg.get('MCP_CONNECTION_TIMEOUT')}"
+            assert cfg.get("MCP_REQUEST_TIMEOUT") == 30.0, f"MCP_REQUEST_TIMEOUT mismatch: {cfg.get('MCP_REQUEST_TIMEOUT')}"
+            assert cfg.get("MCP_MAX_RETRIES") == 3, f"MCP_MAX_RETRIES mismatch: {cfg.get('MCP_MAX_RETRIES')}"
+            
             # Check AI provider defaults
-            assert cfg.AI_PROVIDER == "gemini", f"AI_PROVIDER mismatch: {cfg.AI_PROVIDER}"
-            assert cfg.DEFAULT_MODEL_TYPE == "gemini-2.5-flash-image", f"DEFAULT_MODEL_TYPE mismatch: {cfg.DEFAULT_MODEL_TYPE}"
+            assert cfg.get("AI_PROVIDER") == "gemini", f"AI_PROVIDER mismatch: {cfg.get('AI_PROVIDER')}"
+            assert cfg.get("DEFAULT_MODEL_TYPE") == "gemini-2.5-flash-image", f"DEFAULT_MODEL_TYPE mismatch: {cfg.get('DEFAULT_MODEL_TYPE')}"
 
             print("SUCCESS: All config defaults match quickstart documentation")
             return True

@@ -15,12 +15,30 @@
 
 ## Overview
 
+
 This project implements an automated crawler for Android applications driven by pluggable AI model adapters (Gemini, Ollama, OpenRouter). It intelligently explores app screens by analyzing visual layout and structural information, deciding the next best action to discover new states and interactions.
+
+**Configuration Storage Update (2025):**
+
+- User preferences and configuration are now stored in a local SQLite database for reliability and structure.
+- The legacy `user_config.json` is still supported for migration only.
+- Use the provided migration script to convert your existing JSON config to SQLite (see below).
 
 **Available Interfaces:**
 
 - **CLI Controller** - Command-line interface for automation and scripting
 - **UI Controller** - Graphical user interface for interactive use
+
+
+## Migrating Existing Config
+
+If you have an existing `user_config.json`, migrate it to the new SQLite format:
+
+```powershell
+python -m traverser_ai_api.migrations.migrate_to_sqlite
+```
+
+This will back up your old JSON and import all supported settings into the new database.
 
 ## Quick Start
 
@@ -398,17 +416,16 @@ MCP_SERVER_URL=http://localhost:3000      # MCP server endpoint
 # MOBSF_API_KEY=...
 ```
 
-Provider and model selection (user_config.json):
 
-```json
-{
-  "AI_PROVIDER": "gemini",            
-  "DEFAULT_MODEL_TYPE": "gemini-2.5-flash",  
-  "ENABLE_IMAGE_CONTEXT": true,
-  "OPENROUTER_SHOW_FREE_ONLY": false,
-  "OUTPUT_DATA_DIR": "output_data"
-}
-```
+## Configuration Management
+
+All user preferences are now stored in a local SQLite database (`config.db`).
+
+- Use the app's UI or CLI to update preferences.
+- Advanced users can use the migration script to import from `user_config.json`.
+- The config system uses a four-layer precedence: runtime cache > SQLite > environment variables > Pydantic defaults.
+
+**Legacy JSON config is only used for migration.**
 
 Notes
 - Set only the API key(s) needed for your selected provider.
@@ -452,16 +469,27 @@ Session-based output structure (per device/app run):
 - Extracted APK: `<session_dir>/extracted_apk/`
 
 
+
 ### Recent Updates
 
 **Device Management**
 - New commands: `--list-devices`, `--select-device UDID`, `--auto-select-device` for easier ADB device selection.
+
+
+**Config Storage & Migration**
+- Preferences now use SQLite for robust, structured storage.
+- Migration script provided for seamless upgrade from JSON.
 
 **Focus Areas CRUD**
 - Manage focus areas with: `--add-focus-area`, `--edit-focus-area`, `--remove-focus-area`, `--import-focus-areas`, `--export-focus-areas`, plus description and priority options.
 
 **OpenRouter Features**
 - View model details, configure image context, toggle image context, and improved model selection with pricing info.
+
+
+**Testing & Coverage**
+- New unit and integration tests for config schema, user storage, migration, and full config lifecycle.
+- See `tests/` for examples and coverage.
 
 **Docs**
 - CLI reference and workflow examples updated for all new commands and features.

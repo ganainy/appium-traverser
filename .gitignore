@@ -18,6 +18,10 @@ old-runs/
 dist/
 *.egg-info/
 
+.venv/
+venv/
+
+
 /traverser_ai_api/user_config.json
 /traverser_ai_api/crawler.pid
 *.pid
@@ -55,6 +59,11 @@ node_modules/
 *.sw?
 # OS specific
 .DS_Store
+
+Thumbs.db
+*.tmp
+*.swp
+.vscode/
 
 # Task files
 # tasks.json

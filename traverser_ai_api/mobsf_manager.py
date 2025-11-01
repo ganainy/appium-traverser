@@ -11,7 +11,7 @@ import time
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import requests
-from traverser_ai_api.config import Config
+
 
 
 class MobSFManager:

@@ -4,7 +4,10 @@
 import json
 import logging
 import os
-from typing import Any, Dict, List, Optional
+
+
+
+from typing import Any, Dict, Optional
 
 from PySide6.QtCore import QObject, Slot
 from PySide6.QtWidgets import (
@@ -45,11 +48,8 @@ class ConfigManager(QObject):
         super().__init__()
         self.config = config
         self.main_controller = main_controller  # This is a reference to CrawlerControllerWindow
-        self.user_config = {}
-        
-        # Use the USER_CONFIG_FILE_PATH from the config object which should be set to the root config file
-        self.config_file_path = self.config.USER_CONFIG_FILE_PATH
-        logging.debug(f"ConfigManager initialized with config file path: {self.config_file_path}")
+    # self.user_config = {}  # Removed: not needed
+    logging.debug("ConfigManager initialized with new Config interface (SQLite-backed)")
     
     def _apply_defaults_from_config_to_widgets(self):
         """Apply default values from the config module to UI widgets."""
@@ -58,11 +58,11 @@ class ConfigManager(QObject):
             if key in ['IMAGE_CONTEXT_WARNING']:
                 continue
                 
-            if not hasattr(self.config, key):
-                logging.warning(f"Config key '{key}' not found in config module.")
+            try:
+                value = self.config.get(key)
+            except Exception:
+                logging.warning(f"Config key '{key}' not found in config.")
                 continue
-                
-            value = getattr(self.config, key)
             if value is None:
                 logging.debug(f"Config key '{key}' has None value.")
                 continue
@@ -95,11 +95,11 @@ class ConfigManager(QObject):
             if key in ['IMAGE_CONTEXT_WARNING']:
                 continue
                 
-            if not hasattr(self.config, key):
-                missing_configs.append(f"{key}: Not found in config module.")
+            try:
+                value = self.config.get(key)
+            except Exception:
+                missing_configs.append(f"{key}: Not found in config.")
                 continue
-
-            value = getattr(self.config, key)
             if value is None:
                 missing_configs.append(f"{key}: Has None value in config module.")
                 continue
@@ -189,14 +189,11 @@ class ConfigManager(QObject):
                     'app_name': selected_data.get('app_name', '')
                 }
         
-        # Update the config object with the new data
+        # Update the config object and persist to SQLite
         for k, value in config_data.items():
-            self.config.update_setting_and_save(k, value, self.main_controller._sync_user_config_files)
+            self.config.set(k, value)
 
-        # Synchronize the changes to the API config file
-        # Note: Synchronization is now handled automatically by the callback in update_setting_and_save
-
-        self.main_controller.log_message("Configuration auto-saved successfully.", 'green')
+        self.main_controller.log_message("Configuration auto-saved to SQLite successfully.", 'green')
 
     def _get_widget_value(self, key: str, widget: QWidget) -> Any:
         """Extracts the value from a given widget."""
@@ -217,88 +214,60 @@ class ConfigManager(QObject):
         return None
     
     def load_config(self):
-        """Load configuration from the user config file."""
-        if not os.path.exists(self.config_file_path):
-            self._load_defaults_from_config()
-            return
-
-        try:
-            with open(self.config_file_path, 'r', encoding='utf-8') as f:
-                self.user_config = json.load(f)
-            
-            # Log important config values for debugging
-            if 'ENABLE_MOBSF_ANALYSIS' in self.user_config:
-                logging.debug(f"Loading ENABLE_MOBSF_ANALYSIS state: {self.user_config['ENABLE_MOBSF_ANALYSIS']}")
-            
-            if 'UI_MODE' in self.user_config:
-                logging.debug(f"Loading UI_MODE from user_config.json: {self.user_config['UI_MODE']}")
-                # Update the config object with UI_MODE
-                if hasattr(self.config, 'UI_MODE'):
-                    self.config.UI_MODE = self.user_config['UI_MODE']
-
-
-            
-            for key, value in self.user_config.items():
-                if key in self.main_controller.config_widgets:
-                    # Skip UI indicator widgets that aren't actual config settings
-                    if key in ['IMAGE_CONTEXT_WARNING']:
-                        continue
-                        
-                    widget = self.main_controller.config_widgets[key]
-                    try:
-                        if isinstance(widget, QLineEdit):
-                            widget.setText(str(value))
-                        elif isinstance(widget, QSpinBox):
-                            widget.setValue(int(value))
-                        elif isinstance(widget, QCheckBox):
-                            widget.setChecked(bool(value))
-                            if key == 'ENABLE_MOBSF_ANALYSIS':
-                                logging.debug(f"Set ENABLE_MOBSF_ANALYSIS checkbox to: {bool(value)}")
-                        elif isinstance(widget, QComboBox):
-                            if isinstance(value, str):
-                                index = widget.findText(value)
-                                if index >= 0:
-                                    widget.setCurrentIndex(index)
-                                    # If this is the AI_PROVIDER combobox, update the model types
-                                    if key == 'AI_PROVIDER':
-                                        UIComponents._update_model_types(value, self.main_controller.config_widgets)
-                        elif isinstance(widget, QTextEdit):
-                            if isinstance(value, list):
-                                widget.setPlainText('\n'.join(value))
-                            else:
-                                widget.setPlainText(str(value))
-                    except (ValueError, TypeError) as e:
-                        logging.warning(f"Error loading config for '{key}': {e}")
-                elif key == 'CURRENT_HEALTH_APP_LIST_FILE':
-                    self.main_controller.current_health_app_list_file = value
-                elif key == 'LAST_SELECTED_APP':
-                    # Store for later use when populating health app dropdown
-                    # Ensure it's a dictionary, not None
-                    if value is None:
-                        self.main_controller.last_selected_app = {}
-                    else:
-                        self.main_controller.last_selected_app = value
-            
-            # Apply specific config settings that aren't directly tied to widgets
-            if 'UI_MODE' in self.user_config and hasattr(self, 'ui_mode_dropdown'):
-                mode = self.user_config['UI_MODE']
-                logging.debug(f"Setting ui_mode_dropdown to {mode} based on user_config")
-                index = self.ui_mode_dropdown.findText(mode)
-                if index >= 0:
-                    self.ui_mode_dropdown.setCurrentIndex(index)
-                    # Call toggle_ui_complexity directly to ensure UI is updated
-                    UIComponents.toggle_ui_complexity(mode, self)
-            
-            # Update model types based on loaded AI_PROVIDER
-            if 'AI_PROVIDER' in self.user_config:
-                provider = self.user_config['AI_PROVIDER']
-                logging.debug(f"Updating model types for loaded AI_PROVIDER: {provider}")
-                UIComponents._update_model_types(provider, self.main_controller.config_widgets)
-            
-            self._update_crawl_mode_inputs_state()
-            self.main_controller.log_message("Configuration loaded successfully.", 'green')
-        except Exception as e:
-            self.main_controller.log_message(f"Error loading configuration: {e}", 'red')
+        """Load configuration from the SQLite user config store."""
+        # Try to load all config keys from Config (which uses SQLite and env)
+        loaded_any = False
+        for key, widget in self.main_controller.config_widgets.items():
+            if key in ['IMAGE_CONTEXT_WARNING']:
+                continue
+            value = self.config.get(key, None)
+            if value is not None:
+                loaded_any = True
+                try:
+                    if isinstance(widget, QLineEdit):
+                        widget.setText(str(value))
+                    elif isinstance(widget, QSpinBox):
+                        widget.setValue(int(value))
+                    elif isinstance(widget, QCheckBox):
+                        widget.setChecked(bool(value))
+                        if key == 'ENABLE_MOBSF_ANALYSIS':
+                            logging.debug(f"Set ENABLE_MOBSF_ANALYSIS checkbox to: {bool(value)}")
+                    elif isinstance(widget, QComboBox):
+                        if isinstance(value, str):
+                            index = widget.findText(value)
+                            if index >= 0:
+                                widget.setCurrentIndex(index)
+                                if key == 'AI_PROVIDER':
+                                    UIComponents._update_model_types(value, self.main_controller.config_widgets)
+                    elif isinstance(widget, QTextEdit):
+                        if isinstance(value, list):
+                            widget.setPlainText('\n'.join(value))
+                        else:
+                            widget.setPlainText(str(value))
+                except (ValueError, TypeError) as e:
+                    logging.warning(f"Error loading config for '{key}': {e}")
+        # Load special keys not tied to widgets
+        current_health_file = self.config.get('CURRENT_HEALTH_APP_LIST_FILE', None)
+        if current_health_file:
+            self.main_controller.current_health_app_list_file = current_health_file
+        last_selected_app = self.config.get('LAST_SELECTED_APP', None)
+        if last_selected_app is not None:
+            self.main_controller.last_selected_app = last_selected_app or {}
+        # UI_MODE
+        ui_mode = self.config.get('UI_MODE', None)
+        if ui_mode and hasattr(self, 'ui_mode_dropdown'):
+            index = self.ui_mode_dropdown.findText(ui_mode)
+            if index >= 0:
+                self.ui_mode_dropdown.setCurrentIndex(index)
+                UIComponents.toggle_ui_complexity(ui_mode, self)
+        # AI_PROVIDER
+        ai_provider = self.config.get('AI_PROVIDER', None)
+        if ai_provider:
+            UIComponents._update_model_types(ai_provider, self.main_controller.config_widgets)
+        self._update_crawl_mode_inputs_state()
+        if loaded_any:
+            self.main_controller.log_message("Configuration loaded from SQLite successfully.", 'green')
+        else:
             self._load_defaults_from_config()
     
     @Slot(int)
@@ -398,12 +367,11 @@ class ConfigManager(QObject):
         logging.debug("Connected widgets for auto-saving.")
     
     def update_focus_areas(self, focus_areas):
-        """Update focus areas configuration and save to user config."""
-        # Convert FocusArea objects to dictionaries for JSON serialization
+        """Update focus areas configuration and save via config interface."""
+        # Convert FocusArea objects to dictionaries for storage
         focus_areas_dict = []
         for area in focus_areas:
             if hasattr(area, '__dict__'):
-                # It's a FocusArea object
                 focus_areas_dict.append({
                     'id': area.id,
                     'name': area.name,
@@ -413,7 +381,6 @@ class ConfigManager(QObject):
                     'priority': int(area.priority)
                 })
             else:
-                # It's already a dict
                 focus_areas_dict.append(area)
 
         # Basic schema validation and unique ID enforcement
@@ -427,7 +394,6 @@ class ConfigManager(QObject):
                 desc = str(area.get('description', ''))
                 prompt = str(area.get('prompt_modifier', ''))
                 enabled = bool(area.get('enabled', True))
-                # priority may be string; coerce to int
                 try:
                     priority = int(area.get('priority', 0))
                 except (TypeError, ValueError):
@@ -442,7 +408,6 @@ class ConfigManager(QObject):
                 if not name:
                     errors.append(f"Focus area '{aid}' has empty 'name'")
                     continue
-                # Limit overly long prompt modifiers to avoid excessive prompt size
                 if len(prompt) > 1000:
                     errors.append(f"Focus area '{aid}' prompt_modifier too long ({len(prompt)} > 1000)")
                     continue
@@ -460,7 +425,6 @@ class ConfigManager(QObject):
                 errors.append(f"Error validating focus area at index {idx}: {e}")
 
         if errors:
-            # Do not save invalid configuration; inform the user
             err_text = "; ".join(errors)
             logging.warning(f"Focus areas validation failed: {err_text}")
             try:
@@ -469,10 +433,6 @@ class ConfigManager(QObject):
                 pass
             return
 
-        # Update the config object
-        self.config.FOCUS_AREAS = validated_dicts
-
-        # Save to user config
-        self.config.update_setting_and_save('FOCUS_AREAS', validated_dicts, self.main_controller._sync_user_config_files)
-
+        # Save to config using set()
+        self.config.set('FOCUS_AREAS', validated_dicts)
         logging.debug(f"Updated focus areas configuration with {len(validated_dicts)} areas")

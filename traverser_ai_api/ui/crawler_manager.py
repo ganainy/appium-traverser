@@ -14,9 +14,7 @@ from PySide6.QtWidgets import QApplication
 
 # Import shared orchestrator components
 try:
-    from traverser_ai_api.core.adapters import create_process_backend
-    from traverser_ai_api.core.controller import CrawlerOrchestrator
-    from traverser_ai_api.core.validation import ValidationService
+    from traverser_ai_api.core import get_process_backend, get_crawler_orchestrator, get_validation_service
 except ImportError:
     # Use the new core interface
     from traverser_ai_api.interfaces.gui import GUICrawlerInterface, create_gui_interface
@@ -338,7 +336,7 @@ class CrawlerManager(QObject):
         """
         # Use the shared validation service if orchestrator available
         if self.orchestrator:
-            validation_service = ValidationService(self.config)
+            validation_service = get_validation_service(self.config)
             return validation_service.get_service_status_details()
         else:
             # Fallback to basic validation using GUI interface

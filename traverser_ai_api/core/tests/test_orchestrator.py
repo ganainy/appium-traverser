@@ -12,14 +12,12 @@ from unittest.mock import MagicMock, Mock, patch
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
+
 try:
-    from traverser_ai_api.config import Config
     from traverser_ai_api.core.adapters import SubprocessBackend
     from traverser_ai_api.core.controller import CrawlerLaunchPlan, CrawlerOrchestrator, FlagController
     from traverser_ai_api.core.validation import ValidationService
 except ImportError:
-    # Fallback for direct execution
-    from traverser_ai_api.config import Config
     from core.adapters import SubprocessBackend
     from core.controller import CrawlerLaunchPlan, CrawlerOrchestrator, FlagController
     from core.validation import ValidationService
@@ -30,6 +28,7 @@ class TestCrawlerOrchestrator(unittest.TestCase):
     
     def setUp(self):
         """Set up test fixtures."""
+        from traverser_ai_api.config import Config
         # Create a mock config
         self.mock_config = Mock(spec=Config)
         self.mock_config.APP_PACKAGE = "com.example.app"
@@ -40,14 +39,12 @@ class TestCrawlerOrchestrator(unittest.TestCase):
         self.mock_config.LOG_FILE_NAME = "test.log"
         self.mock_config.SHUTDOWN_FLAG_PATH = "/tmp/test/shutdown.flag"
         self.mock_config.PAUSE_FLAG_PATH = "/tmp/test/pause.flag"
-        
         # Create a mock backend
         self.mock_backend = Mock()
         self.mock_backend.start_process.return_value = True
         self.mock_backend.stop_process.return_value = True
         self.mock_backend.is_process_running.return_value = False
         self.mock_backend.get_process_id.return_value = 12345
-        
         # Create the orchestrator
         self.orchestrator = CrawlerOrchestrator(self.mock_config, self.mock_backend)
     
@@ -165,10 +162,9 @@ class TestFlagController(unittest.TestCase):
         """Set up test fixtures."""
         self.temp_dir = "/tmp/test_flags"
         os.makedirs(self.temp_dir, exist_ok=True)
-        
         self.shutdown_flag_path = os.path.join(self.temp_dir, "shutdown.flag")
         self.pause_flag_path = os.path.join(self.temp_dir, "pause.flag")
-        
+        from traverser_ai_api.core.controller import FlagController
         self.flag_controller = FlagController(self.shutdown_flag_path, self.pause_flag_path)
     
     def tearDown(self):
@@ -227,12 +223,13 @@ class TestValidationService(unittest.TestCase):
     
     def setUp(self):
         """Set up test fixtures."""
+        from traverser_ai_api.config import Config
         self.mock_config = Mock(spec=Config)
         self.mock_config.APP_PACKAGE = "com.example.app"
         self.mock_config.AI_PROVIDER = "gemini"
         self.mock_config.ENABLE_TRAFFIC_CAPTURE = False
         self.mock_config.ENABLE_MOBSF_ANALYSIS = False
-        
+        from traverser_ai_api.core.validation import ValidationService
         self.validation_service = ValidationService(self.mock_config)
     
     @patch('traverser_ai_api.core.validation.requests.get')
