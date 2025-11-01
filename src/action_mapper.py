@@ -1,0 +1,590 @@
+# action_mapper.py
+import logging
+import re
+import time
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+
+from appium.webdriver.common.appiumby import AppiumBy
+
+# WebElement is imported via TYPE_CHECKING for AppiumDriver, but if used directly here, ensure it's available.
+# from selenium.webdriver.remote.webelement import WebElement 
+from selenium.common.exceptions import InvalidSelectorException, NoSuchElementException, StaleElementReferenceException
+
+# Import your main Config class and AppiumDriver
+# Adjust paths based on your project structure
+if TYPE_CHECKING: # For type hinting to avoid circular imports if AppiumDriver imports ActionMapper
+    from appium_driver import AppiumDriver 
+try:
+    from traverser_ai_api.config import Config  # Assuming Config class is in config.py in the same package
+except ImportError:
+    from config import Config  # Assuming Config class is in config.py in the same package
+
+
+class ActionMapper:
+    def __init__(self, driver: 'AppiumDriver', element_finding_strategies: List[Tuple[str, Optional[str], str]], app_config: Config):
+        """
+        Initialize the ActionMapper.
+
+        Args:
+            driver (AppiumDriver): An instance of the refactored AppiumDriver.
+            element_finding_strategies (List[Tuple[str, Optional[str], str]]): 
+                List of strategies to find elements. Example: [('id', AppiumBy.ID, "ID"), ...].
+                The AppiumBy string itself is passed, not the direct AppiumBy member for flexibility if strategies evolve.
+            app_config (Config): The main application Config object instance.
+        """
+        self.driver = driver
+        self.element_finding_strategies = element_finding_strategies # Store as is
+        self.cfg = app_config # Store the Config object instance
+
+        # Validate required configuration values from self.cfg
+        if not hasattr(self.cfg, 'USE_COORDINATE_FALLBACK') or self.cfg.USE_COORDINATE_FALLBACK is None:
+            # Defaulting if not explicitly set, but better to ensure it's in Config class
+            logging.warning("USE_COORDINATE_FALLBACK not explicitly in config, defaulting to True for ActionMapper.")
+            self.use_coordinate_fallback = True 
+        else:
+            self.use_coordinate_fallback = bool(self.cfg.USE_COORDINATE_FALLBACK)
+
+    def _wait_for_element_ready(self, element: Any, timeout_s: float = 1.5, poll_s: float = 0.1) -> bool:
+        """
+        Wait briefly until the element reports displayed and enabled to reduce transient failures.
+        """
+        end_time = time.monotonic() + float(timeout_s)
+        while time.monotonic() < end_time:
+            try:
+                if element.is_displayed() and element.is_enabled():
+                    return True
+            except Exception:
+                pass
+            time.sleep(float(poll_s))
+        return False
+
+        if not hasattr(self.cfg, 'MAX_CONSECUTIVE_MAP_FAILURES') or self.cfg.MAX_CONSECUTIVE_MAP_FAILURES is None:
+            logging.warning("MAX_CONSECUTIVE_MAP_FAILURES not explicitly in config, defaulting to 3 for ActionMapper.")
+            self.max_map_failures = 3
+        else:
+            self.max_map_failures = int(self.cfg.MAX_CONSECUTIVE_MAP_FAILURES)
+            
+        self.consecutive_map_failures = 0
+        
+        logging.info(
+            f"ActionMapper initialized. Coordinate fallback: {'ENABLED' if self.use_coordinate_fallback else 'DISABLED'}. "
+            f"Max map failures: {self.max_map_failures}"
+        )
+
+    def _escape_xpath_literal(self, s: str) -> str:
+        """Safely escape a string for use as an XPath literal.
+        Handles cases where the string contains both single and double quotes
+        by using concat().
+        """
+        if s is None:
+            return "''"
+        if "'" in s and '"' in s:
+            parts = []
+            for i, part in enumerate(s.split("'")):
+                if '"' in part:
+                    parts.append(f"'{part}'")
+                elif part:
+                    parts.append(f'"{part}"')
+                if i < len(s.split("'")) - 1:
+                    parts.append("\"'\"")
+            return f"concat({','.join(filter(None, parts))})"
+        elif "'" in s:
+            return f'"{s}"'
+        else:
+            return f"'{s}'"
+
+    def _is_full_resource_id(self, identifier: str) -> bool:
+        """Return True if identifier looks like a full Android resource-id, e.g., 'com.pkg:id/view_id'."""
+        try:
+            return isinstance(identifier, str) and ":id/" in identifier and len(identifier.split(":id/")) == 2
+        except Exception:
+            return False
+
+    def _build_full_resource_id(self, simple_id: str) -> Optional[str]:
+        """Build full resource-id using configured app package if available."""
+        package = getattr(self.cfg, 'APP_PACKAGE', None)
+        if package and isinstance(simple_id, str) and simple_id:
+            return f"{package}:id/{simple_id}"
+        return None
+
+    def _find_element_by_ai_identifier(self, identifier: str) -> Optional[Any]: # Return type Any for WebElement
+        """
+        Attempts to find a WebElement using the identifier provided by the AI,
+        trying different strategies and retrying on stale elements.
+        """
+        if not identifier or not self.driver or not self.driver.driver:
+            logging.warning("Cannot find element: Invalid identifier or driver not available.")
+            return None
+
+        max_retries = 2
+        # Strategy attempts cap (0 or less disables capping)
+        attempts_cap = 0
+        try:
+            attempts_cap = int(getattr(self.cfg, 'ELEMENT_STRATEGY_MAX_ATTEMPTS', 0))
+        except Exception:
+            attempts_cap = 0
+        exempt_full_id = self._is_full_resource_id(identifier)
+        for retry in range(max_retries + 1):
+            try:
+                logging.debug(f"Attempting to find element '{identifier}' (Attempt {retry + 1}/{max_retries + 1})")
+                total_start_time = time.perf_counter()
+
+                attempts_count = 0
+                for index, (strategy_key, appium_by_strategy_str, log_name) in enumerate(self.element_finding_strategies):
+                    # Enforce attempts cap unless identifier is a full resource-id
+                    attempts_count += 1
+                    if attempts_cap > 0 and not exempt_full_id and attempts_count > attempts_cap:
+                        logging.debug(
+                            f"Capping element-finding strategy attempts at {attempts_cap} for identifier '{identifier}'."
+                        )
+                        break
+                    element: Optional[Any] = None
+                    start_time = time.perf_counter()
+                    duration = 0.0
+                    xpath_generated = ""
+
+                    try:
+                        actual_appium_by: Optional[str] = None
+                        if appium_by_strategy_str:
+                            actual_appium_by = appium_by_strategy_str
+
+                        if strategy_key in ['id', 'acc_id'] and actual_appium_by:
+                            # Normalize resource-id handling for 'id'
+                            if strategy_key == 'id':
+                                # Try full resource-id directly
+                                if self._is_full_resource_id(identifier):
+                                    element = self.driver.find_element(by=actual_appium_by, value=identifier)
+                                else:
+                                    # Try building full id with package
+                                    full_id = self._build_full_resource_id(identifier)
+                                    if full_id:
+                                        try:
+                                            element = self.driver.find_element(by=actual_appium_by, value=full_id)
+                                        except (NoSuchElementException, InvalidSelectorException):
+                                            element = None
+                                    # If still not found and identifier lacks package prefix, try XPath contains on resource-id
+                                    if not element:
+                                        safe = self._escape_xpath_literal(identifier)
+                                        xpath_generated = f"//*[@resource-id and contains(@resource-id,{safe})]"
+                                        element = self.driver.find_element(by=AppiumBy.XPATH, value=xpath_generated)
+                            else:
+                                # Accessibility ID straightforward
+                                element = self.driver.find_element(by=actual_appium_by, value=identifier)
+                        elif strategy_key == 'content_desc_case_insensitive':
+                            # Case-insensitive content-desc contains using translate()
+                            safe_lowerable = self._escape_xpath_literal(identifier)
+                            xpath_generated = (
+                                "//*[contains("
+                                "translate(@content-desc,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'), "
+                                f"translate({safe_lowerable},'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'))]"
+                            )
+                            element = self.driver.find_element(by=AppiumBy.XPATH, value=xpath_generated)
+                        elif strategy_key == 'xpath_exact':
+                            if "'" in identifier and '"' in identifier:
+                                parts = []
+                                split_by_single = identifier.split("'")
+                                for i, part in enumerate(split_by_single):
+                                    if '"' in part: parts.append(f"'{part}'")
+                                    elif part: parts.append(f'"{part}"')
+                                    if i < len(split_by_single) - 1: parts.append("\"'\"")
+                                xpath_text_expression = f"concat({','.join(filter(None, parts))})"
+                            elif "'" in identifier: xpath_text_expression = f'"{identifier}"'
+                            elif '"' in identifier: xpath_text_expression = f"'{identifier}'"
+                            else: xpath_text_expression = f"'{identifier}'"
+                            xpath_generated = f"//*[@text={xpath_text_expression} or @content-desc={xpath_text_expression} or @resource-id='{identifier}']"
+                            element = self.driver.find_element(by=AppiumBy.XPATH, value=xpath_generated)
+                        elif strategy_key == 'xpath_contains':
+                            safe = self._escape_xpath_literal(identifier)
+                            # Use normalize-space for text/content-desc to be more tolerant of newlines/spaces
+                            xpath_generated = (
+                                f"//*[contains(@resource-id,{safe}) "
+                                f"or contains(normalize-space(@text), normalize-space({safe})) "
+                                f"or contains(normalize-space(@content-desc), normalize-space({safe}))]"
+                            )
+                            element = self.driver.find_element(by=AppiumBy.XPATH, value=xpath_generated)
+                        elif strategy_key == 'id_partial':
+                            safe = self._escape_xpath_literal(identifier)
+                            xpath_generated = f"//*[@resource-id and contains(@resource-id,{safe})]"
+                            element = self.driver.find_element(by=AppiumBy.XPATH, value=xpath_generated)
+                        elif strategy_key == 'text_case_insensitive':
+                            # Case-insensitive text contains using translate()
+                            safe_lowerable = self._escape_xpath_literal(identifier)
+                            xpath_generated = (
+                                "//*[contains("
+                                "translate(@text,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'), "
+                                f"translate({safe_lowerable},'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'))]"
+                            )
+                            element = self.driver.find_element(by=AppiumBy.XPATH, value=xpath_generated)
+                        elif strategy_key == 'class_contains':
+                            safe = self._escape_xpath_literal(identifier)
+                            xpath_generated = f"//*[contains(@class,{safe})]"
+                            element = self.driver.find_element(by=AppiumBy.XPATH, value=xpath_generated)
+                        elif strategy_key == 'xpath_flexible':
+                            safe = self._escape_xpath_literal(identifier)
+                            xpath_generated = (
+                                f"//*[(starts-with(@resource-id,{safe}) or contains(@resource-id,{safe})) "
+                                f"or (starts-with(normalize-space(@text), normalize-space({safe})) or contains(normalize-space(@text), normalize-space({safe}))) "
+                                f"or (starts-with(normalize-space(@content-desc), normalize-space({safe})) or contains(normalize-space(@content-desc), normalize-space({safe})))]"
+                            )
+                            element = self.driver.find_element(by=AppiumBy.XPATH, value=xpath_generated)
+                        # ... (other strategies can be added here)
+
+                        if element:
+                            is_displayed = element.is_displayed()
+                            is_enabled = element.is_enabled()
+                            if is_displayed and is_enabled:
+                                # Brief stabilization then re-verify readiness
+                                try:
+                                    time.sleep(0.1)
+                                    if not (element.is_displayed() and element.is_enabled()):
+                                        element = None
+                                    else:
+                                        duration = time.perf_counter() - start_time
+                                        logging.info(f"Found suitable element by {log_name}: '{identifier}' (took {duration:.4f}s)")
+                                        if index > 0:
+                                            promoted_strategy = self.element_finding_strategies.pop(index)
+                                            self.element_finding_strategies.insert(0, promoted_strategy)
+                                            logging.info(f"Promoted strategy '{log_name}'.")
+                                        return element
+                                except Exception:
+                                    element = None
+                            else:
+                                element = None
+
+                    except (NoSuchElementException, InvalidSelectorException, StaleElementReferenceException) as e:
+                        duration = time.perf_counter() - start_time
+                        if isinstance(e, StaleElementReferenceException):
+                            logging.debug(f"Stale element detected with {log_name}. Re-raising to trigger retry.")
+                            raise
+                        elif isinstance(e, NoSuchElementException):
+                            logging.debug(f"Not found by {log_name} (took {duration:.4f}s).")
+                        else:
+                            logging.warning(f"Error with {log_name} (XPath: {xpath_generated}): {e} (took {duration:.4f}s)")
+
+                total_duration = time.perf_counter() - total_start_time
+                logging.warning(f"Could not find suitable element for identifier '{identifier}' in this attempt. Total time: {total_duration:.4f}s.")
+                return None
+
+            except StaleElementReferenceException:
+                if retry < max_retries:
+                    logging.debug(f"StaleElementReferenceException caught, retrying... ({retry + 1}/{max_retries})")
+                    time.sleep(0.5)
+                    continue
+                else:
+                    logging.warning(f"Element finding failed for '{identifier}' after {max_retries + 1} attempts due to stale elements.")
+                    return None
+        return None
+    
+    def _track_map_failure(self, reason: str):
+        """Helper method to track and log mapping failures."""
+        self.consecutive_map_failures += 1
+        logging.warning(
+            f"Action mapping failed: {reason}. Consecutive failures: "
+            f"{self.consecutive_map_failures}/{self.max_map_failures}"
+        )
+        # Termination due to max failures is handled by AppCrawler's _should_terminate()
+
+    def _extract_coordinates_from_bbox(self, target_bounding_box: Any) -> Optional[Tuple[int, int]]:
+        try:
+            # Accept either a dict with top_left/bottom_right in normalized or absolute coordinates
+            # OR a string in Android bounds format: "[x1,y1][x2,y2]"
+            if isinstance(target_bounding_box, str):
+                m = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", target_bounding_box.strip())
+                if not m:
+                    logging.warning(f"Invalid bounds string format: {target_bounding_box}")
+                    return None
+                x1 = int(m.group(1)); y1 = int(m.group(2)); x2 = int(m.group(3)); y2 = int(m.group(4))
+                window_size = self.driver.get_window_size()
+                if not window_size:
+                    logging.error("Failed to get window size for coordinate calculation.")
+                    return None
+                screen_width, screen_height = window_size['width'], window_size['height']
+                # Clamp to screen bounds
+                x1 = max(0, min(x1, screen_width - 1)); x2 = max(0, min(x2, screen_width - 1))
+                y1 = max(0, min(y1, screen_height - 1)); y2 = max(0, min(y2, screen_height - 1))
+                if x1 > x2: x1, x2 = x2, x1
+                if y1 > y2: y1, y2 = y2, y1
+                center_x = int((x1 + x2) / 2)
+                center_y = int((y1 + y2) / 2)
+                logging.debug(f"Calculated tap coordinates ({center_x}, {center_y}) from bounds string {target_bounding_box}")
+                return center_x, center_y
+
+            top_left = target_bounding_box.get('top_left')
+            bottom_right = target_bounding_box.get('bottom_right')
+
+            if not (isinstance(top_left, list) and len(top_left) == 2 and
+                    isinstance(bottom_right, list) and len(bottom_right) == 2):
+                logging.warning(f"Invalid format for bounding box: {target_bounding_box}")
+                return None
+
+            window_size = self.driver.get_window_size()
+            if not window_size:
+                logging.error("Failed to get window size for coordinate calculation.")
+                return None
+            
+            screen_width, screen_height = window_size['width'], window_size['height']
+            y1_norm, x1_norm = top_left
+            y2_norm, x2_norm = bottom_right
+
+            if not all(isinstance(coord, (int, float)) for coord in [y1_norm, x1_norm, y2_norm, x2_norm]):
+                logging.warning(f"Non-numeric coordinates: {target_bounding_box}")
+                return None
+            
+            # FIX: Check if coordinates are already absolute vs normalized
+            if all(coord <= 1.0 for coord in [y1_norm, x1_norm, y2_norm, x2_norm]):
+                # Normalized coordinates (0-1 range)
+                x1 = int(float(x1_norm) * screen_width)
+                y1 = int(float(y1_norm) * screen_height)
+                x2 = int(float(x2_norm) * screen_width)
+                y2 = int(float(y2_norm) * screen_height)
+            else:
+                # Already absolute coordinates
+                x1, y1, x2, y2 = int(x1_norm), int(y1_norm), int(x2_norm), int(y2_norm)
+
+            # Ensure coordinates are within screen bounds
+            x1 = max(0, min(x1, screen_width - 1))
+            y1 = max(0, min(y1, screen_height - 1))
+            x2 = max(0, min(x2, screen_width - 1))
+            y2 = max(0, min(y2, screen_height - 1))
+
+            if x1 > x2: x1, x2 = x2, x1
+            if y1 > y2: y1, y2 = y2, y1
+
+            center_x = int((x1 + x2) / 2)
+            center_y = int((y1 + y2) / 2)
+            
+            logging.debug(f"Calculated tap coordinates ({center_x}, {center_y}) from bbox {target_bounding_box}")
+            return center_x, center_y
+            
+        except Exception as e:
+            logging.error(f"Error processing bounding box: {e}", exc_info=True)
+            return None
+
+
+    def _normalize_ai_identifier(self, identifier: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
+        """Return (normalized_identifier, bounds_str_if_any). Extract resource-id/content-desc/text values, strip wrappers.
+        If multiple fields are present, prefer resource-id, then content-desc, then text.
+        Also extract bounds if included as bounds="[x1,y1][x2,y2]".
+        """
+        if not identifier:
+            return None, None
+        s = str(identifier).strip()
+        # Remove leading strange prefixes like '*/**'
+        s = re.sub(r"^\*/\*\*", "", s)
+
+        # Extract bounds if present
+        bounds_match = re.search(r"bounds\s*=\s*\"(\[\d+,\d+\]\[\d+,\d+\])\"", s)
+        bounds_str = bounds_match.group(1) if bounds_match else None
+
+        # Try resource-id
+        rid_match = re.search(r"resource-id\s*=\s*([\w.:-]+)\b", s)
+        if rid_match:
+            rid_val = rid_match.group(1)
+            return rid_val.strip(), bounds_str
+        # Try content-desc
+        cd_match = re.search(r"content-desc\s*=\s*\"(.+?)\"", s)
+        if cd_match:
+            cd_val = cd_match.group(1)
+            return cd_val.strip(), bounds_str
+        # Try text="..."
+        text_match = re.search(r"text\s*=\s*\"(.+?)\"", s)
+        if text_match:
+            txt_val = text_match.group(1)
+            return txt_val.strip(), bounds_str
+        # Handle pipe-separated combined forms: try split and recurse
+        if '|' in s:
+            parts = [p.strip() for p in s.split('|') if p.strip()]
+            for p in parts:
+                norm, b = self._normalize_ai_identifier(p)
+                if norm:
+                    return norm, bounds_str or b
+        # As a last resort, strip surrounding quotes
+        s = s.strip('"').strip("'")
+        return s if s else None, bounds_str
+
+    def map_ai_action_to_appium(self, ai_response: Dict[str, Any], current_xml_string: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        action_type = ai_response.get("action")
+        raw_target_identifier = ai_response.get("target_identifier")
+        # Normalize identifier and extract bounds if present within the identifier string
+        normalized_identifier, bounds_in_identifier = self._normalize_ai_identifier(raw_target_identifier)
+        target_identifier = normalized_identifier
+        input_text = ai_response.get("input_text")
+        target_bounding_box = ai_response.get("target_bounding_box") or bounds_in_identifier
+
+        logging.info(
+            f"Mapping AI suggestion: Action='{action_type}', Identifier='{target_identifier}', "
+            f"Input='{input_text}', BBox='{target_bounding_box is not None}'"
+        )
+
+        if not action_type or action_type not in self.cfg.AVAILABLE_ACTIONS:
+            self._track_map_failure(f"Unknown or unavailable action type from AI: {action_type}")
+            return None
+
+        action_details: Dict[str, Any] = {"type": action_type}
+
+        if action_type in ["scroll_down", "scroll_up", "swipe_left", "swipe_right"]:
+            # Support targeted element swipes/scrolls when identifier or bbox is provided
+            self.consecutive_map_failures = 0
+            action_details["direction"] = action_type.split('_')[1]
+
+            target_element: Optional[Any] = None
+            element_info: Dict[str, Any] = {}
+
+            if target_identifier:
+                target_element = self._find_element_by_ai_identifier(str(target_identifier))
+                if target_element:
+                    element_info["method"] = "identifier"
+                    element_info["identifier_used"] = str(target_identifier)
+                    try:
+                        element_info["id"] = target_element.id
+                        element_info["class"] = target_element.get_attribute('class')
+                        element_info["text"] = target_element.text
+                        element_info["content-desc"] = target_element.get_attribute('content-desc')
+                        element_info["bounds"] = target_element.get_attribute('bounds')
+                    except StaleElementReferenceException:
+                        logging.warning(
+                            f"Element found by '{target_identifier}' became stale when fetching attributes for targeted swipe/scroll."
+                        )
+                        target_element = None
+                    except Exception as e_attr:
+                        logging.warning(
+                            f"Error fetching attributes for element found by '{target_identifier}' (targeted swipe/scroll): {e_attr}"
+                        )
+
+            # Carry through any provided bbox so executor can perform coordinate-based swipe within region
+            if target_bounding_box and isinstance(target_bounding_box, (dict, str)):
+                action_details["original_bbox"] = target_bounding_box
+
+            if target_element:
+                action_details["element"] = target_element
+                action_details["element_info"] = element_info
+                logging.info(
+                    f"Mapped targeted {action_type} to element (ID: {element_info.get('id', 'N/A')}) using identifier."
+                )
+            else:
+                if target_identifier:
+                    logging.info(
+                        f"Targeted {action_type} requested but element not found by identifier '{target_identifier}'. Will use bbox fallback if available or full-screen gesture."
+                    )
+                elif target_bounding_box:
+                    logging.info(
+                        f"Targeted {action_type} requested with bbox only. Executor will attempt region-based gesture."
+                    )
+                else:
+                    logging.info(
+                        f"Non-targeted {action_type} will be performed as a full-screen gesture."
+                    )
+
+            return action_details
+        
+        if action_type == "back":
+            self.consecutive_map_failures = 0
+            return action_details
+
+        target_element: Optional[Any] = None
+        element_info: Dict[str, Any] = {}
+
+        if target_identifier:
+            target_element = self._find_element_by_ai_identifier(str(target_identifier))
+            # Brief retry if first attempt fails
+            if not target_element:
+                try:
+                    time.sleep(0.3)
+                    target_element = self._find_element_by_ai_identifier(str(target_identifier))
+                except Exception:
+                    target_element = None
+            if target_element:
+                element_info["method"] = "identifier"
+                element_info["identifier_used"] = str(target_identifier)
+                try:
+                    element_info["id"] = target_element.id
+                    element_info["class"] = target_element.get_attribute('class')
+                    element_info["text"] = target_element.text
+                    element_info["content-desc"] = target_element.get_attribute('content-desc')
+                    element_info["bounds"] = target_element.get_attribute('bounds')
+                except StaleElementReferenceException:
+                     logging.warning(f"Element found by '{target_identifier}' became stale when fetching attributes.")
+                     target_element = None
+                except Exception as e_attr:
+                    logging.warning(f"Error fetching attributes for element found by '{target_identifier}': {e_attr}")
+
+            # Ensure element is ready before mapping
+            if target_element and not self._wait_for_element_ready(target_element, timeout_s=getattr(self.cfg, 'WAIT_ELEMENT_READY_TIMEOUT_S', 1.5)):
+                target_element = None
+
+
+        if target_element:
+            action_details["element"] = target_element
+            action_details["element_info"] = element_info
+            # Carry through any provided bbox for potential execution-time fallback
+            if isinstance(target_bounding_box, dict):
+                action_details["original_bbox"] = target_bounding_box
+            if action_type == "input":
+                if input_text is None:
+                    logging.warning(f"AI suggested 'input' for '{target_identifier}' but 'input_text' is null. Will attempt to clear or input empty.")
+                    action_details["text"] = "" 
+                else:
+                    action_details["text"] = str(input_text)
+            elif action_type == "long_press":
+                # For long_press on element, compute center from element rect and map to coordinate tap with duration
+                try:
+                    rect = getattr(target_element, 'rect', None)
+                    if rect and all(k in rect for k in ('x', 'y', 'width', 'height')):
+                        center_x = int(rect['x'] + rect['width'] / 2)
+                        center_y = int(rect['y'] + rect['height'] / 2)
+                        action_details = {
+                            "type": "tap_coords",
+                            "coordinates": (center_x, center_y),
+                            "element_info": element_info
+                        }
+                        # Duration from config for long press
+                        try:
+                            lp_ms = int(getattr(self.cfg, 'LONG_PRESS_MIN_DURATION_MS', 600))
+                        except Exception:
+                            lp_ms = 600
+                        action_details["duration_ms"] = lp_ms
+                        self.consecutive_map_failures = 0
+                        logging.info(f"Mapped long_press to coordinate tap at ({center_x},{center_y}) with duration {lp_ms}ms.")
+                        return action_details
+                except Exception as e:
+                    logging.warning(f"Failed to compute center for long_press element mapping: {e}")
+            self.consecutive_map_failures = 0
+            logging.info(f"Successfully mapped action '{action_type}' to element (ID: {element_info.get('id', 'N/A')}) found by identifier.")
+            return action_details
+        
+        logging.info(f"Element not found by identifier '{target_identifier}'. Checking coordinate fallback (Enabled: {self.use_coordinate_fallback}).")
+        if self.use_coordinate_fallback and target_bounding_box and isinstance(target_bounding_box, dict):
+            coordinates = self._extract_coordinates_from_bbox(target_bounding_box)
+            if coordinates:
+                center_x, center_y = coordinates
+                action_details["type"] = "tap_coords"
+                action_details["coordinates"] = (center_x, center_y)
+                action_details["original_bbox"] = target_bounding_box
+                if action_type == "input" and input_text is not None:
+                    action_details["intended_input_text"] = str(input_text)
+                    logging.info(f"Coordinate fallback for INPUT action: will tap at ({center_x},{center_y}), then try to input text.")
+                elif action_type == "long_press":
+                    try:
+                        lp_ms = int(getattr(self.cfg, 'LONG_PRESS_MIN_DURATION_MS', 600))
+                    except Exception:
+                        lp_ms = 600
+                    action_details["duration_ms"] = lp_ms
+                    logging.info(f"Coordinate fallback for LONG_PRESS: will tap+hold at ({center_x},{center_y}) for {lp_ms}ms.")
+                else:
+                     logging.info(f"Coordinate fallback for {action_type}: will tap at ({center_x},{center_y}).")
+                
+                self.consecutive_map_failures = 0
+                return action_details
+            else:
+                logging.warning(f"Bounding box provided but could not extract valid coordinates: {target_bounding_box}")
+        
+        log_msg = f"Failed to map AI action. Element for identifier '{target_identifier}' not found."
+        if self.use_coordinate_fallback:
+            log_msg += " Coordinate fallback also failed or BBox not suitable."
+        else:
+            log_msg += " Coordinate fallback disabled."
+        if not target_identifier and not target_bounding_box:
+            log_msg = "Failed to map AI action: No target_identifier or target_bounding_box provided."
+            
+        self._track_map_failure(log_msg)
+        return None
