@@ -577,16 +577,30 @@ def draw_rectangle_on_image(
         logging.error(f"🔴 Error in draw_rectangle_on_image with box {box_coords}: {e}", exc_info=True)
         return None
 
-def are_visual_hashes_valid(hash1: Optional[str], hash2: Optional[str]) -> bool:
-    """
-    Checks if two visual hash strings are valid for comparison (i.e., not error strings).
-    """
-    if not hash1 or not hash2:
+def create_jsonrpc_request(method: str, params: Optional[Dict[str, Any]] = None, request_id: Optional[str] = None) -> Dict[str, Any]:
+    """Create a JSON-RPC 2.0 request dictionary."""
+    request = {
+        "jsonrpc": "2.0",
+        "method": method,
+        "id": request_id or str(int(time.time() * 1000))
+    }
+    if params:
+        request["params"] = params
+    return request
+
+
+def validate_jsonrpc_response(response: Dict[str, Any]) -> bool:
+    """Validate that a response conforms to JSON-RPC 2.0 format."""
+    if not isinstance(response, dict):
         return False
-    error_strings = ["no_image", "hash_error"]
-    if hash1 in error_strings or hash2 in error_strings:
+    if response.get("jsonrpc") != "2.0":
         return False
-    return True
+    if "id" not in response:
+        return False
+    # Either result or error must be present, but not both
+    has_result = "result" in response
+    has_error = "error" in response
+    return (has_result or has_error) and not (has_result and has_error)
 
 if __name__ == '__main__':
     # Example usage or tests for utils can go here

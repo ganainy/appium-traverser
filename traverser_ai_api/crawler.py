@@ -126,13 +126,9 @@ class AppCrawler:
         self.screenshot_annotator = ScreenshotAnnotator(driver=self.driver, app_config=self.cfg)
         
         # Create the agent tools
-        from agent_tools import AgentTools
+        from .agent_tools import AgentTools
         self.agent_tools = AgentTools(
             driver=self.driver,
-            action_executor=self.action_executor,
-            action_mapper=self.action_mapper,
-            screen_state_manager=self.screen_state_manager,
-            app_context_manager=self.app_context_manager,
             config=self.cfg
         )
         

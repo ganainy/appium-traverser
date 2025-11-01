@@ -307,7 +307,7 @@ class ScreenRepresentation:
 **MCP Server Connection**:
 ```python
 # MCP client connects to server running Appium backend
-mcp_client = MCPClient(server_url="http://localhost:8001")
+mcp_client = MCPClient(server_url="http://localhost:3000")
 ```
 
 ### 6. Action Components
@@ -423,7 +423,7 @@ class Config:
     # Core Application Settings
     APP_PACKAGE: str = "com.example.app"
     APP_ACTIVITY: str = "com.example.MainActivity"
-    MCP_SERVER_URL: str = "http://127.0.0.1:8001"
+    MCP_SERVER_URL: str = "http://127.0.0.1:3000"
     
     # AI Configuration (provider-agnostic)
     GEMINI_API_KEY: str = ""  # From environment or .env

@@ -1,5 +1,4 @@
-﻿
----
+﻿---
 
 ### Copilot Code Editing Guidelines
 
@@ -39,7 +38,7 @@ Use these concrete rules when editing this repo so changes align with the crawle
 - Keep stdout prefixes stable: `UI_STATUS:`, `UI_STEP:`, `UI_ACTION:`, `UI_SCREENSHOT:`, `UI_ANNOTATED_SCREENSHOT:`, `UI_FOCUS:`, `UI_END:`. Do not rename or reformat; external UIs parse these.
 - AI JSON output contract (see `traverser_ai_api/agent_assistant.py`):
    - Keys: `action`, `target_identifier`, `target_bounding_box`, `input_text`, `reasoning`, `focus_influence`.
-   - `target_identifier` must be a single raw attribute value only: either resource-id like `com.pkg:id/name`, or content-desc, or visible text. Do not include `id=`/`content-desc=` prefixes and never combine with `|`.
+   - `target_identifier` must be a single raw attribute value only: either resource-id like `com.pkg:id/name`, or content-desc, or visible text. Do not include `id=`/`content-desc=` prefixes and never combine with `|` .
    - `target_bounding_box` must be an object: `{ "top_left": [y, x], "bottom_right": [y, x] }` using absolute pixels or normalized 0..1. Do not use string formats like `[x,y][x2,y2]`. Use null if not applicable.
    - Example (valid):
       ```json
@@ -63,11 +62,37 @@ Use these concrete rules when editing this repo so changes align with the crawle
    - After `MAX_CONSECUTIVE_NO_OP_FAILURES`, select next from `FALLBACK_ACTIONS_SEQUENCE`.
    - Limit repeats per screen via `MAX_SAME_ACTION_REPEAT`; set `last_action_feedback_for_ai` to force different actions.
 - Provider/image/XML settings (see `config.py`):
-   - `ENABLE_IMAGE_CONTEXT` may be auto-toggled based on `AI_PROVIDER_CAPABILITIES`; don’t hardcode image-on assumptions.
+   - `ENABLE_IMAGE_CONTEXT` may be auto-toggled based on `AI_PROVIDER_CAPABILITIES`; don't hardcode image-on assumptions.
    - `XML_SNIPPET_MAX_LEN` auto-adjusts by provider; use `utils.simplify_xml_for_ai(...)` and per-screen cache keyed by hash/provider/limit.
    - Screenshot preprocessing uses `IMAGE_MAX_WIDTH`, `IMAGE_FORMAT`, `IMAGE_QUALITY`, and optional top/bottom bar cropping; adapters handle final encoding.
-- Do not break path templates or persistence: `Config` resolves and persists paths (session dirs, `OUTPUT_DATA_DIR` template, app_info cache). When adding settings, wire them into `Config._get_user_savable_config()` if they’re user-facing.
+- Do not break path templates or persistence: `Config` resolves and persists paths (session dirs, `OUTPUT_DATA_DIR` template, app_info cache). When adding settings, wire them into `Config._get_user_savable_config()` if they are user-facing.
 - Maintain adapter boundaries: implement model-specific logic inside `model_adapters.py`; keep `AgentAssistant` provider-agnostic.
 - Tests/docs: when changing public behavior, add a brief note in README or docs and, if feasible, a minimal test harness under `tests/` replicating the JSON contract and mapping edge cases.
+
+---
+
+### External MCP Client Integration (001-external-mcp-client)
+
+**Technology Stack Additions:**
+- Python 3.8+ with HTTP client (requests library)
+- External MCP server communication (JSON-RPC 2.0 over HTTP)
+- AppiumDriver compatibility adapter pattern
+
+**Key Integration Points:**
+- `traverser_ai_api/mcp_client.py`: HTTP-based MCP client for external server communication
+- `traverser_ai_api/mcp_appium_adapter.py`: AppiumDriver-compatible interface using MCP client
+- Configuration: `MCP_SERVER_URL`, `MCP_CONNECTION_TIMEOUT`, `MCP_REQUEST_TIMEOUT`, `MCP_MAX_RETRIES`
+
+**Architecture Changes:**
+- Removed internal MCP server (`mcp_server.py`)
+- All mobile automation now routes through external MCP server
+- Maintains backward compatibility with existing AppiumDriver interface
+- HTTP-based communication replaces direct MCP SDK usage
+
+**Development Guidelines:**
+- Use MCP client for all mobile automation operations
+- Handle connection failures gracefully with retry logic
+- Maintain JSON-RPC 2.0 protocol compliance
+- Test against external MCP server for integration validation
 
 

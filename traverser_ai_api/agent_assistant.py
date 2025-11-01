@@ -1,21 +1,27 @@
+import os
 import io
+import uuid
+import time
 import json
 import logging
-import os
 import re
-import time
-from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
-
+from datetime import datetime, timezone
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from PIL import Image
 
-# Try both relative and absolute imports to support different execution contexts
-try:
-    # When running as a module within the traverser_ai_api package
-    from traverser_ai_api.model_adapters import create_model_adapter
-except ImportError:
-    # When running directly from the traverser_ai_api directory
-    from model_adapters import create_model_adapter
+# LangChain imports for orchestration
+from langchain_core.prompts import ChatPromptTemplate, SystemMessagePromptTemplate, HumanMessagePromptTemplate
+from langchain_core.output_parsers import JsonOutputParser
+from langchain_core.runnables import RunnablePassthrough, RunnableLambda
+from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
+from langchain_core.language_models import BaseLanguageModel
+from langchain_core.tools import BaseTool
+from langchain.agents import AgentExecutor, create_openai_tools_agent
+from langchain.chains import LLMChain
+from langchain.memory import ConversationBufferWindowMemory
+
+# Always use absolute import for model_adapters
+from traverser_ai_api.model_adapters import create_model_adapter, Session
 
 class AgentAssistant:
     """
@@ -31,11 +37,13 @@ class AgentAssistant:
                 model_alias_override: Optional[str] = None,
                 safety_settings_override: Optional[Dict] = None,
                 agent_tools=None,
-                ui_callback=None):
+                ui_callback=None,
+                mcp_client=None):
         self.cfg = app_config
         self.response_cache: Dict[str, Tuple[Dict[str, Any], float, int]] = {}
         self.tools = agent_tools  # May be None initially and set later
         self.ui_callback = ui_callback  # Callback for UI updates
+        self.mcp_client = mcp_client  # MCP client for external server communication
         logging.debug("AI response cache initialized.")
 
         # Determine which AI provider to use
@@ -84,6 +92,12 @@ class AgentAssistant:
 
         # Initialize model using the adapter
         self._initialize_model(model_config_from_file, safety_settings_override)
+
+        # Initialize provider-agnostic session
+        self._init_session(user_id=None)
+        
+        # Initialize LangChain components for orchestration
+        self._init_langchain_components()
         
         # Cache and history settings
         self.use_chat = self.cfg.USE_CHAT_MEMORY
@@ -104,11 +118,201 @@ class AgentAssistant:
 
         self.ai_interaction_readable_logger = None
 
+    def _init_session(self, user_id: Optional[str] = None):
+        """Initialize a new provider-agnostic session."""
+        now = time.time()
+        model = self.actual_model_name if hasattr(self, 'actual_model_name') else (self.model_alias if hasattr(self, 'model_alias') else getattr(self.cfg, 'DEFAULT_MODEL_TYPE', 'gemini/gemini-pro'))
+        self.session = Session(
+            session_id=str(uuid.uuid4()),
+            provider=self.ai_provider,
+            model=str(model),
+            created_at=now,
+            last_active=now,
+            metadata={
+                'user_id': user_id,
+                'initialized_at': now
+            }
+        )
+        logging.debug(f"Session initialized: {self.session}")
+
+    def _create_langchain_llm_wrapper(self):
+        """Create a LangChain-compatible LLM wrapper around the existing model adapter."""
+        def _llm_call(prompt_input) -> str:
+            """Call the model adapter and return response text."""
+            # Handle different input types from LangChain
+            if hasattr(prompt_input, 'messages'):
+                # ChatPromptValue - extract text from messages
+                prompt_text = ""
+                for message in prompt_input.messages:
+                    if hasattr(message, 'content'):
+                        prompt_text += str(message.content) + "\n"
+            elif hasattr(prompt_input, 'content'):
+                # Single message
+                prompt_text = str(prompt_input.content)
+            else:
+                # Plain string
+                prompt_text = str(prompt_input)
+
+            try:
+                response_text, metadata = self.model_adapter.generate_response(
+                    prompt=prompt_text,
+                    image=None,
+                    image_format=getattr(self.cfg, 'IMAGE_FORMAT', None),
+                    image_quality=getattr(self.cfg, 'IMAGE_QUALITY', None)
+                )
+                return response_text
+            except Exception as e:
+                logging.error(f"Error in LangChain LLM wrapper: {e}")
+                return ""
+
+        return RunnableLambda(_llm_call)
+
+    def _create_action_decision_chain(self):
+        """Create the LangChain chain for action decision making."""
+        # Create the LLM wrapper
+        llm = self._create_langchain_llm_wrapper()
+
+        # System prompt for action decision
+        system_prompt = """
+        You are an expert Android app tester using LangChain orchestration.
+        Your goal is to determine the BEST SINGLE action to perform based on the current app state.
+
+        Analyze the provided context and decide on the most appropriate action from:
+        - click: Select an interactive element
+        - input: Enter text into a field
+        - scroll_down: Scroll content downward
+        - scroll_up: Scroll content upward
+        - swipe_left: Swipe content left (carousels)
+        - swipe_right: Swipe content right
+        - back: Navigate back using system back button
+
+        Consider:
+        1. Current screen context and visit history
+        2. Previous actions and their outcomes
+        3. Loop detection and avoidance
+        4. Focus areas and testing priorities
+        5. Authentication flow preferences (prefer non-auth paths first)
+
+        Return a JSON object with:
+        {{
+            "action": "action_type",
+            "target_identifier": "element_identifier_or_null",
+            "target_bounding_box": {{"top_left": [y,x], "bottom_right": [y,x]}} or null,
+            "input_text": "text_to_input_or_null",
+            "reasoning": "brief_explanation",
+            "focus_influence": ["focus_area_ids"]
+        }}
+        """
+
+        # Create the prompt template
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", system_prompt),
+            ("human", """
+CONTEXT:
+Screen Hash: {screen_hash}
+Visit Count: {visit_count}
+Previous Actions: {previous_actions}
+XML CONTEXT: {xml_context}
+Last Feedback: {last_feedback}
+
+TASK: Choose the best action to take next.
+            """)
+        ])
+
+        # Create the chain
+        chain = (
+            RunnablePassthrough.assign(
+                # Add any preprocessing here if needed
+            )
+            | prompt
+            | llm
+            | JsonOutputParser()
+        )
+
+        return chain
+
+    def _create_context_analysis_chain(self):
+        """Create the LangChain chain for context analysis."""
+        # Create the LLM wrapper
+        llm = self._create_langchain_llm_wrapper()
+
+        # System prompt for context analysis
+        system_prompt = """
+        You are a context analysis expert for Android app testing.
+        Analyze the current screen state and provide insights for better testing decisions.
+
+        Focus on:
+        1. Screen state assessment
+        2. Element interaction opportunities
+        3. Navigation path suggestions
+        4. Loop detection and avoidance strategies
+        5. Focus area alignment
+
+        Provide structured analysis to help the action decision chain.
+        """
+
+        # Create the prompt template
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", system_prompt),
+            ("human", """
+CURRENT STATE ANALYSIS:
+
+Screen Hash: {screen_hash}
+Visit Count: {visit_count}
+Previous Actions: {previous_actions}
+XML Context: {xml_context}
+
+Analyze this screen state and provide insights for optimal testing progression.
+            """)
+        ])
+
+        # Create the chain
+        chain = (
+            RunnablePassthrough.assign(
+                # Add any preprocessing here if needed
+            )
+            | prompt
+            | llm
+            | JsonOutputParser()
+        )
+
+        return chain
+
+    def _init_langchain_components(self):
+        """Initialize LangChain components for orchestration."""
+        try:
+            logging.info("Initializing LangChain components for AI orchestration")
+
+            # Create the LLM wrapper
+            self.langchain_llm = self._create_langchain_llm_wrapper()
+
+            # Create the action decision chain
+            self.action_decision_chain = self._create_action_decision_chain()
+
+            # Create the context analysis chain
+            self.context_analysis_chain = self._create_context_analysis_chain()
+
+            # Initialize memory for cross-request context
+            self.langchain_memory = ConversationBufferWindowMemory(
+                k=getattr(self.cfg, 'LANGCHAIN_MEMORY_K', 10),
+                return_messages=True
+            )
+
+            logging.info("LangChain components initialized successfully")
+
+        except Exception as e:
+            logging.error(f"Failed to initialize LangChain components: {e}", exc_info=True)
+            # Set to None so the system can fall back to direct model calls
+            self.langchain_llm = None
+            self.action_decision_chain = None
+            self.context_analysis_chain = None
+            self.langchain_memory = None
+
     def _initialize_model(self, model_config, safety_settings_override):
         """Initialize the AI model with appropriate settings using the adapter."""
         try:
             # Check if the required dependencies are installed for the chosen provider
-            from model_adapters import check_dependencies
+            from traverser_ai_api.model_adapters import check_dependencies
             adapter_provider = self._adapter_provider_override or self.ai_provider
             deps_installed, error_msg = check_dependencies(adapter_provider)
             
@@ -471,15 +675,70 @@ class AgentAssistant:
                         last_action_feedback: Optional[str] = None
                         ) -> Optional[Tuple[Dict[str, Any], float, int]]:
         """
-        Uses the agent-based approach with the configured AI model to determine the next action to take.
+        Uses LangChain orchestration or direct AI model approach to determine the next action to take.
         Returns the action data, processing time, and token count.
         """
         try:
             start_time = time.time()
-            
+
+            # Check if LangChain components are available and should be used
+            use_langchain = (
+                hasattr(self, 'action_decision_chain') and
+                self.action_decision_chain is not None and
+                getattr(self.cfg, 'USE_LANGCHAIN_ORCHESTRATION', True)
+            )
+
+            if use_langchain:
+                logging.debug("Using LangChain orchestration for action decision")
+                return self._get_next_action_langchain(
+                    screenshot_bytes, xml_context, previous_actions,
+                    current_screen_visit_count, current_composite_hash, last_action_feedback
+                )
+            else:
+                logging.debug("Using direct model approach for action decision")
+                return self._get_next_action_direct(
+                    screenshot_bytes, xml_context, previous_actions,
+                    current_screen_visit_count, current_composite_hash, last_action_feedback
+                )
+
+        except Exception as e:
+            logging.error(f"Error in get_next_action: {e}", exc_info=True)
+            return None
+
+    def _get_next_action_langchain(self,
+                                   screenshot_bytes: Optional[bytes],
+                                   xml_context: str,
+                                   previous_actions: List[str],
+                                   current_screen_visit_count: int,
+                                   current_composite_hash: str,
+                                   last_action_feedback: Optional[str] = None
+                                   ) -> Optional[Tuple[Dict[str, Any], float, int]]:
+        """Use LangChain orchestration to determine the next action."""
+        try:
+            start_time = time.time()
+
+            # Check MCP connection status before proceeding with LangChain
+            mcp_status = self.check_mcp_connection_status()
+            if not mcp_status.get("connected", False):
+                logging.warning(f"MCP server unavailable for LangChain call: {mcp_status.get('reason', 'Unknown error')}")
+                logging.info("Falling back to direct model approach due to MCP server unavailability")
+                
+                # Log error recovery event
+                self.log_error_recovery_event("mcp_fallback", {
+                    "fallback_from": "langchain_orchestration",
+                    "fallback_to": "direct_model",
+                    "reason": mcp_status.get('reason', 'MCP server unavailable'),
+                    "circuit_breaker_state": mcp_status.get('circuit_breaker', {}).get('state', 'unknown')
+                })
+                
+                return self._get_next_action_direct(
+                    screenshot_bytes, xml_context, previous_actions,
+                    current_screen_visit_count, current_composite_hash, last_action_feedback
+                )
+
             # Check if image context is enabled
             enable_image_context = getattr(self.cfg, 'ENABLE_IMAGE_CONTEXT', True)
-            
+
             processed_image = None
             if enable_image_context:
                 # Prepare image
@@ -489,7 +748,129 @@ class AgentAssistant:
                     return None
             else:
                 logging.debug("Image context disabled, using text-only analysis")
+
+            # Prepare context for LangChain chain
+            chain_input = {
+                "screen_hash": current_composite_hash,
+                "visit_count": current_screen_visit_count,
+                "previous_actions": "\n".join(previous_actions) if previous_actions else "None",
+                "xml_context": xml_context if xml_context else "No XML context provided",
+                "last_feedback": last_action_feedback if last_action_feedback else ""
+            }
+
+            # Run the action decision chain
+            try:
+                if self.action_decision_chain is None:
+                    raise ValueError("Action decision chain is not initialized")
+
+                chain_result = self.action_decision_chain.invoke(chain_input)
+                elapsed_time = time.time() - start_time
+
+                # Extract action data from chain result
+                if isinstance(chain_result, dict):
+                    action_data = chain_result
+                else:
+                    # Try to parse as JSON string
+                    action_data = self._clean_and_parse_json(str(chain_result))
+
+                if not action_data:
+                    logging.error("Failed to parse action data from LangChain chain result")
+                    return None
+
+                # Validate and clean the action data
+                action_data = self._validate_and_clean_action_data(action_data)
+
+                # Estimate token count (rough approximation)
+                token_count = len(str(chain_input)) // 4
+
+                # Log AI interaction
+                try:
+                    self._setup_ai_interaction_logger()
+                    if self.ai_interaction_readable_logger:
+                        readable_entry = (
+                            f"=== LangChain Action Decision @ {datetime.now(timezone.utc).isoformat()}Z ===\n"
+                            f"Model: {self.model_alias}\n"
+                            f"Tokens: {token_count}\n"
+                            f"Chain Input: {json.dumps(chain_input, ensure_ascii=False, indent=2)}\n\n"
+                            f"Chain Result: {json.dumps(action_data, ensure_ascii=False, indent=2)}\n"
+                            f"----------------------------------------\n"
+                        )
+                        self.ai_interaction_readable_logger.info(readable_entry)
+                except Exception as log_err:
+                    logging.error(f"Failed to log LangChain interaction: {log_err}")
+
+                return {"action_to_perform": action_data}, elapsed_time, token_count
+
+            except Exception as e:
+                logging.error(f"Error running LangChain action decision chain: {e}", exc_info=True)
+                # Check if this is an MCP-related error and log it
+                error_str = str(e).lower()
+                if any(keyword in error_str for keyword in ['connection', 'timeout', 'circuit', 'mcp', 'server']):
+                    logging.warning(f"MCP-related error in LangChain call, attempting fallback: {e}")
+                    
+                    # Log error recovery event
+                    self.log_error_recovery_event("mcp_fallback", {
+                        "fallback_from": "langchain_orchestration",
+                        "fallback_to": "direct_model",
+                        "reason": f"MCP error during execution: {str(e)}",
+                        "original_error": str(e)
+                    })
+                    
+                    # Fall back to direct approach
+                    logging.info("Falling back to direct model approach due to LangChain MCP error")
+                    return self._get_next_action_direct(
+                        screenshot_bytes, xml_context, previous_actions,
+                        current_screen_visit_count, current_composite_hash, last_action_feedback
+                    )
+                else:
+                    # Re-raise non-MCP errors
+                    raise
+
+        except Exception as e:
+            logging.error(f"Error in LangChain action decision: {e}", exc_info=True)
+            return None
+
+    def _get_next_action_direct(self,
+                                screenshot_bytes: Optional[bytes],
+                                xml_context: str,
+                                previous_actions: List[str],
+                                current_screen_visit_count: int,
+                                current_composite_hash: str,
+                                last_action_feedback: Optional[str] = None
+                                ) -> Optional[Tuple[Dict[str, Any], float, int]]:
+        """Use direct model approach to determine the next action (fallback method)."""
+        try:
+            start_time = time.time()
+
+            # Check MCP connection status before proceeding with direct model call
+            mcp_status = self.check_mcp_connection_status()
+            if not mcp_status.get("connected", False):
+                logging.warning(f"MCP server unavailable for direct model call: {mcp_status.get('reason', 'Unknown error')}")
+                logging.error("Cannot proceed with AI action decision - MCP server is unavailable and no fallback available")
                 
+                # Log error recovery event (no recovery possible)
+                self.log_error_recovery_event("mcp_unavailable", {
+                    "context": "direct_model_call",
+                    "reason": mcp_status.get('reason', 'MCP server unavailable'),
+                    "circuit_breaker_state": mcp_status.get('circuit_breaker', {}).get('state', 'unknown'),
+                    "recovery_possible": False
+                })
+                
+                return None
+
+            # Check if image context is enabled
+            enable_image_context = getattr(self.cfg, 'ENABLE_IMAGE_CONTEXT', True)
+
+            processed_image = None
+            if enable_image_context:
+                # Prepare image
+                processed_image = self._prepare_image_part(screenshot_bytes)
+                if not processed_image:
+                    logging.error("Failed to process screenshot for AI analysis")
+                    return None
+            else:
+                logging.debug("Image context disabled, using text-only analysis")
+
             # Build the system prompt
             available_actions = getattr(self.cfg, 'AVAILABLE_ACTIONS', [])
             prompt = self._build_system_prompt(
@@ -500,7 +881,7 @@ class AgentAssistant:
                 current_composite_hash,
                 last_action_feedback
             )
-            
+
             # Generate response from the model
             try:
                 # Pass config-driven image encoding preferences to the adapter so UI controls take effect
@@ -516,8 +897,22 @@ class AgentAssistant:
                 token_count = metadata.get("token_count", {}).get("total", len(prompt) // 4)
             except Exception as e:
                 logging.error(f"Error generating AI response: {e}", exc_info=True)
+                # Check if this is an MCP-related error
+                error_str = str(e).lower()
+                if any(keyword in error_str for keyword in ['connection', 'timeout', 'circuit', 'mcp', 'server']):
+                    logging.error(f"MCP-related error in direct model call: {e}")
+                    
+                    # Log error recovery event (no recovery possible from direct model)
+                    self.log_error_recovery_event("mcp_error", {
+                        "context": "direct_model_call",
+                        "reason": f"MCP error during execution: {str(e)}",
+                        "original_error": str(e),
+                        "recovery_possible": False
+                    })
+                    
+                    logging.error("Cannot recover from MCP server failure in direct model approach")
                 return None
-                
+
             # Parse the action from the response
             action_data = self._parse_action_from_response(response_text)
             if not action_data:
@@ -529,7 +924,7 @@ class AgentAssistant:
                 self._setup_ai_interaction_logger()
                 if self.ai_interaction_readable_logger:
                     readable_entry = (
-                        f"=== AI Interaction @ {datetime.utcnow().isoformat()}Z ===\n"
+                        f"=== AI Interaction @ {datetime.now(timezone.utc).isoformat()}Z ===\n"
                         f"Model: {self.model_alias}\n"
                         f"Tokens: {token_count}\n\n"
                         f"Prompt:\n{prompt}\n\n"
@@ -542,9 +937,9 @@ class AgentAssistant:
             # --- End log AI interaction ---
 
             return {"action_to_perform": action_data}, elapsed_time, token_count
-            
+
         except Exception as e:
-            logging.error(f"Error in get_next_action: {e}", exc_info=True)
+            logging.error(f"Error in direct action decision: {e}", exc_info=True)
             return None
             
     def execute_action(self, action_data: Dict[str, Any]) -> bool:
@@ -978,7 +1373,7 @@ class AgentAssistant:
             
             RULES:
             - target_identifier MUST be a single raw value for ONE attribute only (choose one of: resource-id like com.pkg:id/name, content-desc, or visible text). Do NOT include prefixes like 'id=' or 'content-desc=' and do NOT combine multiple attributes with '|'.
-            - target_bounding_box MUST be an object {top_left:[y,x], bottom_right:[y,x]} using absolute pixels or normalized 0..1. Do NOT use string formats like '[x,y][x2,y2]'.
+            - target_bounding_box MUST be an object {"top_left":[y,x], "bottom_right":[y,x]} using absolute pixels or normalized 0..1. Do NOT use string formats like '[x,y][x2,y2]'.
             - Use null for scroll/back if bbox/identifier are not applicable.
             
             Respond ONLY with a valid JSON object containing these fields, nothing else.
@@ -1135,8 +1530,11 @@ class AgentAssistant:
                         br = [br.get("y"), br.get("x")]
                     if isinstance(tl, (list, tuple)) and isinstance(br, (list, tuple)) and len(tl) == 2 and len(br) == 2:
                         try:
-                            y1, x1 = float(tl[0]), float(tl[1])
-                            y2, x2 = float(br[0]), float(br[1])
+                            # Defensive: only convert to float if not None
+                            y1 = float(tl[0]) if tl and tl[0] is not None else 0.0
+                            x1 = float(tl[1]) if tl and len(tl) > 1 and tl[1] is not None else 0.0
+                            y2 = float(br[0]) if br and br[0] is not None else 0.0
+                            x2 = float(br[1]) if br and len(br) > 1 and br[1] is not None else 0.0
                             return {"top_left": [y1, x1], "bottom_right": [y2, x2]}
                         except Exception:
                             logging.warning(f"Non-numeric bbox coordinates: {raw}")
@@ -1204,3 +1602,161 @@ class AgentAssistant:
             base_name = model_name
             
         return base_name
+
+    def check_mcp_connection_status(self) -> Dict[str, Any]:
+        """
+        Check the current MCP connection status and return detailed information.
+        
+        Returns:
+            Dictionary containing connection status, last check time, and any error details
+        """
+        if not self.mcp_client:
+            return {
+                "connected": False,
+                "reason": "MCP client not initialized",
+                "last_check": None,
+                "error_details": None
+            }
+        
+        try:
+            # First check the circuit breaker state
+            circuit_breaker_state = self.mcp_client.get_circuit_breaker_state()
+            
+            # If circuit breaker is OPEN, consider MCP unavailable
+            if circuit_breaker_state.get("state") == "open":
+                recovery_time = circuit_breaker_state.get("recovery_time", 0)
+                return {
+                    "connected": False,
+                    "reason": f"Circuit breaker is OPEN - MCP server unavailable until {recovery_time}",
+                    "last_check": datetime.now(timezone.utc).isoformat() + "Z",
+                    "error_details": f"Circuit breaker open, recovery at {recovery_time}",
+                    "circuit_breaker": circuit_breaker_state
+                }
+            
+            # If circuit breaker is HALF_OPEN, we can try but with caution
+            if circuit_breaker_state.get("state") == "half_open":
+                logging.debug("Circuit breaker is HALF_OPEN - attempting MCP connection")
+            
+            # Attempt a simple health check by calling a lightweight MCP method
+            start_time = time.time()
+            result = self.mcp_client.get_screen_state()
+            response_time = time.time() - start_time
+            
+            return {
+                "connected": True,
+                "last_check": datetime.now(timezone.utc).isoformat() + "Z",
+                "response_time_ms": round(response_time * 1000, 2),
+                "error_details": None,
+                "circuit_breaker": circuit_breaker_state
+            }
+            
+        except Exception as e:
+            logging.warning(f"MCP connection check failed: {e}")
+            
+            # Try to get circuit breaker state even on failure
+            try:
+                circuit_breaker_state = self.mcp_client.get_circuit_breaker_state()
+            except:
+                circuit_breaker_state = {"state": "UNKNOWN", "failure_count": 0}
+            
+            return {
+                "connected": False,
+                "reason": f"Connection failed: {str(e)}",
+                "last_check": datetime.now(timezone.utc).isoformat() + "Z",
+                "error_details": str(e),
+                "circuit_breaker": circuit_breaker_state
+            }
+
+    def log_mcp_connection_status(self, force_check: bool = False) -> None:
+        """
+        Log the current MCP connection status to the configured logger.
+        
+        Args:
+            force_check: If True, perform a fresh connection check instead of using cached status
+        """
+        try:
+            status = self.check_mcp_connection_status()
+            
+            # Create a structured log entry
+            circuit_breaker_info = status.get("circuit_breaker", {})
+            log_entry = {
+                "timestamp": status.get("last_check", datetime.now(timezone.utc).isoformat() + "Z"),
+                "mcp_connection": {
+                    "status": "connected" if status["connected"] else "disconnected",
+                    "response_time_ms": status.get("response_time_ms"),
+                    "reason": status.get("reason"),
+                    "server_url": getattr(self.cfg, 'MCP_SERVER_URL', 'unknown') if hasattr(self, 'cfg') else 'unknown',
+                    "circuit_breaker": {
+                        "state": circuit_breaker_info.get("state", "unknown"),
+                        "failure_count": circuit_breaker_info.get("failure_count", 0),
+                        "failure_threshold": circuit_breaker_info.get("failure_threshold", 0),
+                        "recovery_timeout": circuit_breaker_info.get("recovery_timeout", 0),
+                        "last_failure_time": circuit_breaker_info.get("last_failure_time"),
+                        "recovery_time": circuit_breaker_info.get("recovery_time"),
+                        "can_attempt_reset": circuit_breaker_info.get("can_attempt_reset", False)
+                    }
+                }
+            }
+            
+            # Log to the main logger with appropriate level
+            if status["connected"]:
+                logging.info(f"MCP connection healthy - Response time: {status.get('response_time_ms', 'N/A')}ms")
+                if circuit_breaker_info.get("state") == "half_open":
+                    logging.info("MCP circuit breaker in HALF_OPEN state - testing recovery")
+            else:
+                # Log disconnection with appropriate severity based on circuit breaker state
+                circuit_state = circuit_breaker_info.get("state", "unknown")
+                if circuit_state == "open":
+                    logging.error(f"MCP connection unavailable - Circuit breaker OPEN: {status.get('reason', 'Unknown error')}")
+                elif circuit_state == "half_open":
+                    logging.warning(f"MCP connection testing recovery - Circuit breaker HALF_OPEN: {status.get('reason', 'Unknown error')}")
+                else:
+                    logging.warning(f"MCP connection issue: {status.get('reason', 'Unknown error')}")
+                
+                # Log additional error details if available
+                if status.get("error_details"):
+                    logging.debug(f"MCP connection error details: {status['error_details']}")
+                
+                # Log circuit breaker details for debugging
+                if circuit_breaker_info:
+                    failure_count = circuit_breaker_info.get("failure_count", 0)
+                    threshold = circuit_breaker_info.get("failure_threshold", 0)
+                    logging.debug(f"Circuit breaker state: {circuit_state}, failures: {failure_count}/{threshold}")
+            
+            # Also log structured data for monitoring systems
+            logging.info(f"MCP_STATUS: {json.dumps(log_entry, ensure_ascii=False)}")
+            
+        except Exception as e:
+            logging.error(f"Failed to log MCP connection status: {e}", exc_info=True)
+
+    def log_error_recovery_event(self, event_type: str, details: Dict[str, Any]) -> None:
+        """
+        Log error recovery events for monitoring and debugging.
+        
+        Args:
+            event_type: Type of recovery event (e.g., 'mcp_fallback', 'circuit_breaker_recovery')
+            details: Additional details about the recovery event
+        """
+        try:
+            log_entry = {
+                "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
+                "event_type": event_type,
+                "details": details,
+                "mcp_server_url": getattr(self.cfg, 'MCP_SERVER_URL', 'unknown') if hasattr(self, 'cfg') else 'unknown'
+            }
+            
+            # Log with appropriate level based on event type
+            if event_type == "mcp_fallback":
+                logging.warning(f"Error recovery: Falling back due to MCP unavailability - {details.get('reason', 'Unknown')}")
+            elif event_type == "circuit_breaker_recovery":
+                logging.info(f"Error recovery: Circuit breaker recovery initiated - {details.get('reason', 'Testing connection')}")
+            elif event_type == "mcp_recovery":
+                logging.info(f"Error recovery: MCP connection restored - {details.get('reason', 'Connection healthy')}")
+            else:
+                logging.info(f"Error recovery event: {event_type} - {details}")
+            
+            # Log structured data for monitoring
+            logging.info(f"ERROR_RECOVERY: {json.dumps(log_entry, ensure_ascii=False)}")
+            
+        except Exception as e:
+            logging.error(f"Failed to log error recovery event: {e}", exc_info=True)

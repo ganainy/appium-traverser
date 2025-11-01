@@ -132,11 +132,9 @@ adb devices
 
 ### 3. Start Crawling (CLI Method)
 
-#### Terminal 1: Start MCP Server
+#### Terminal 1: Start External MCP Server
 
-```bash
-python -m traverser_ai_api.mcp_server --relaxed-security
-```
+**Note**: The MCP server is an external component. Ensure your MCP server is running and accessible before starting the crawler.
 
 #### Terminal 2: Use CLI Controller (ensure .venv is active)
 
@@ -151,11 +149,9 @@ python run_cli.py crawler start --annotate-offline-after-run  # starts crawler a
 
 ### 4. Start Crawling (UI Method)
 
-#### Terminal 1: Start MCP Server (same as CLI method)
+#### Terminal 1: Start External MCP Server (same as CLI method)
 
-```bash
-python -m traverser_ai_api.mcp_server --relaxed-security
-```
+**Note**: The MCP server is an external component. Ensure your MCP server is running and accessible before starting the crawler.
 
 #### Terminal 2: Launch UI Controller (ensure .venv is active)
 
@@ -205,11 +201,7 @@ Install Node.js from nodejs.org, then install MCP server dependencies:
 npm install -g appium
 appium driver install uiautomator2
 ```
-Verify installation:
-```bash
-python -m traverser_ai_api.mcp_server --version
-appium driver list --installed
-```
+**Note: The MCP server itself is an external component that must be obtained and configured separately. This codebase connects to an external MCP server, it does not include one.**
 
 **Android SDK Setup:**
 *   Install Android Studio or standalone SDK tools.
@@ -501,28 +493,21 @@ python run_cli.py --set-config CONTINUE_EXISTING_RUN=true # or false
 ## Troubleshooting
 
 ### MCP Server Issues
-Check if MCP server is running on the default port (8001):
+Check if your external MCP server is running and accessible:
 *Windows:*
 ```powershell
-netstat -an | findstr ":8001"
+# Check if your MCP server process is running (replace with your server command)
+# Example: netstat -an | findstr ":3000"
 ```
 *macOS/Linux:*
 ```bash
-lsof -i :8001
+# Check if your MCP server process is running (replace with your server command)
+# Example: lsof -i :3000
 ```
-If MCP server is stuck or misbehaving, kill Python processes:
-*Windows:*
-```powershell
-taskkill /F /IM python.exe
-```
-*macOS/Linux (be cautious with pkill):*
-```bash
-pkill -f "mcp_server"
-```
-Consider resetting MCP server if issues persist:
-```bash
-python -m traverser_ai_api.mcp_server --reset
-```
+If MCP server connection issues persist:
+- Verify the `MCP_SERVER_URL` in your configuration matches your external MCP server URL
+- Check firewall settings and ensure the configured port is accessible
+- Confirm your external MCP server implements the required mobile automation tools
 
 ### Device Connection Issues (adb)
 Restart ADB server:
@@ -556,11 +541,10 @@ Reinstall dependencies if corruption is suspected:
 pip install -r requirements.txt --force-reinstall
 ```
 
-### Common Error Solutions
 *   **"Could not connect to MCP server"**
-    *   Ensure MCP server is running: `python -m traverser_ai_api.mcp_server --relaxed-security`.
-    *   Verify the `MCP_SERVER_URL` in your configuration matches where MCP server is listening.
-    *   Check firewall settings; ensure port 8001 (or your configured port) is not blocked.
+    *   Ensure your external MCP server is running and accessible.
+    *   Verify the `MCP_SERVER_URL` in your configuration matches where your MCP server is listening.
+    *   Check firewall settings; ensure the configured port is not blocked.
 *   **"No devices found" by ADB or MCP server**
     *   Run `adb devices` to confirm ADB sees your device.
     *   Ensure USB debugging is enabled on the physical device and authorized.
@@ -570,7 +554,6 @@ pip install -r requirements.txt --force-reinstall
     *   Verify the app is actually installed on the target device.
     *   Ensure the device is unlocked and on the home screen (or any neutral state) before starting.
 *   **Permission denied errors (file access, etc.)**
-    *   If MCP server needs to install APKs or access certain device features, make sure you are running it with `--relaxed-security` flag.
     *   Check file/folder permissions for your project directory and `output_data` subdirectories.
     *   Ensure Android SDK environment variables (`ANDROID_HOME`) are correctly set and pointing to a valid SDK installation.
 
@@ -694,11 +677,13 @@ This section consolidates installing and configuring the required services and t
    npm install -g appium
    appium driver install uiautomator2
    ```
-3. Start MCP server:
-   ```powershell
-   python -m traverser_ai_api.mcp_server --relaxed-security
-   ```
-4. Optional: Set MCP_SERVER_URL in your `.env` or `user_config.json` (default is `http://127.0.0.1:8001`).
+3. **MCP Server Setup (External Component)**:
+   
+   **Important**: The MCP server is an external component, not included in this codebase. You need to set up a separate MCP server that implements the required mobile automation tools.
+   
+   - Default MCP server URL: `http://localhost:3000/mcp`
+   - Configure via `MCP_SERVER_URL` in `.env` or `user_config.json`
+   - The MCP client will connect to this external server for mobile automation operations
 
 ## 4) MobSF (Mobile Security Framework)
 Recommended via Docker.
@@ -790,8 +775,8 @@ pip install -r requirements.txt
 Copy-Item .env.example .env
 # Edit .env to add GEMINI_API_KEY / OPENROUTER_API_KEY / OLLAMA_BASE_URL / PCAPDROID_API_KEY / MOBSF_API_KEY
 
-# Start MCP server in another terminal
-python -m traverser_ai_api.mcp_server --relaxed-security
+# Note: MCP server is an external component - ensure it's running separately
+# Default URL: http://localhost:3000/mcp (configure via MCP_SERVER_URL if different)
 ```
 
 ## 7) Optional: Ollama (Local AI)

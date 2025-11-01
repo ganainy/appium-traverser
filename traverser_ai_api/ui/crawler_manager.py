@@ -76,6 +76,7 @@ class CrawlerManager(QObject):
         self.step_count = 0
         self.last_action = "None"
         self.current_screenshot = None
+        self.crawler_process = None
         self._shutdown_flag_file_path = self.config.SHUTDOWN_FLAG_PATH
         self.shutdown_timer = QTimer(self)
         self.shutdown_timer.setSingleShot(True)
@@ -537,12 +538,17 @@ class CrawlerManager(QObject):
             
             # Use the same Python executable that's running this script
             python_exe = sys.executable
-            script_path = os.path.join(self.config.BASE_DIR, "main.py")
+            # Run main.py as a module so Python can properly import traverser_ai_api
+            module_name = "traverser_ai_api.main"
+            
+            # Set working directory to project root
+            project_root = os.path.dirname(self.config.BASE_DIR)
+            self.crawler_process.setWorkingDirectory(project_root)
             
             # Start the process
-            self.main_controller.log_message(f"Starting crawler with: {python_exe} {script_path}", 'blue')
+            self.main_controller.log_message(f"Starting crawler with: {python_exe} -m {module_name}", 'blue')
             # Start Python in unbuffered mode to stream stdout in real-time
-            self.crawler_process.start(python_exe, ["-u", script_path])
+            self.crawler_process.start(python_exe, ["-u", "-m", module_name])
             self.update_progress()
         else:
             self.main_controller.log_message("Crawler is already running.", 'orange')

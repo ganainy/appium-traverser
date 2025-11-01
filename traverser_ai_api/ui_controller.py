@@ -58,6 +58,9 @@ class CrawlerControllerWindow(QMainWindow):
         super().__init__(parent)
         self.setWindowTitle("Appium Crawler Controller")
 
+        # AgentAssistant instance (initialized after config load)
+        self.agent_assistant = None
+
         # Initialize UI elements that will be created later
         self.health_app_dropdown = None
         self.refresh_apps_btn = None
@@ -142,9 +145,16 @@ class CrawlerControllerWindow(QMainWindow):
         self.tooltips = self._create_tooltips()
 
         # Create left (config) and right (output) panels
+
         left_panel = UIComponents.create_left_panel(
             self.config_widgets, self.tooltips, self.config_manager, self
         )
+
+        # Assign refresh_devices_btn if set by UIComponents (it assigns to controls_handler, which is self)
+        if hasattr(self, "refresh_devices_btn"):
+            pass  # Already set by UIComponents
+        else:
+            self.refresh_devices_btn = None
 
         # Copy UI references from config_manager to self for direct access
         if hasattr(self.config_manager, "health_app_dropdown"):
@@ -168,6 +178,9 @@ class CrawlerControllerWindow(QMainWindow):
         # Load configuration
         self.config_manager.load_config()
 
+        # Initialize AgentAssistant after config is loaded
+        self._init_agent_assistant()
+
         # Attempt to load cached health apps
         self._attempt_load_cached_health_apps()
 
@@ -190,7 +203,7 @@ class CrawlerControllerWindow(QMainWindow):
             logging.debug(log_message)
 
         # Busy overlay dialog (initialized lazily)
-        self._busy_dialog: Optional[BusyDialog] = None
+        self._busy_dialog = None
 
     def show_busy(self, message: str = "Working...") -> None:
         """Show a modal busy overlay with the given message."""
@@ -251,19 +264,20 @@ class CrawlerControllerWindow(QMainWindow):
 
         # Fallback: use Qt beep
         try:
+            from PySide6.QtWidgets import QApplication
             if kind == "error":
-                QGuiApplication.beep()
+                QApplication.beep()
                 # Schedule a second beep shortly after; use lambda to ensure call
-                QTimer.singleShot(250, lambda: QGuiApplication.beep())
+                QTimer.singleShot(250, lambda: QApplication.beep())
             else:
-                QGuiApplication.beep()
+                QApplication.beep()
         except Exception as e:
             logging.debug(f"Audio alert failed: {e}")
 
     def _create_tooltips(self) -> Dict[str, str]:
         """Create tooltips for UI elements."""
         return {
-            "MCP_SERVER_URL": "URL of the running MCP server (e.g., http://127.0.0.1:8000).",
+            "MCP_SERVER_URL": "URL of the running MCP server (e.g., http://127.0.0.1:3000).",
             "TARGET_DEVICE_UDID": "Unique Device Identifier (UDID) of the target Android device or emulator. Optional.",
             "NEW_COMMAND_TIMEOUT": "Seconds Appium waits for a new command before quitting the session. 0 means no timeout.",
             "APPIUM_IMPLICIT_WAIT": "Seconds Appium driver waits when trying to find elements before failing. Affects element finding strategies.",
@@ -304,6 +318,14 @@ class CrawlerControllerWindow(QMainWindow):
     def _connect_signals(self):
         """Connect signals to slots safely."""
         try:
+            # Connect AI provider/model change to agent reload
+            ai_provider_widget = self.config_widgets.get("AI_PROVIDER")
+            model_type_widget = self.config_widgets.get("DEFAULT_MODEL_TYPE")
+            if ai_provider_widget:
+                ai_provider_widget.currentTextChanged.connect(self._on_provider_or_model_changed)
+            if model_type_widget:
+                model_type_widget.currentTextChanged.connect(self._on_provider_or_model_changed)
+
             # Connect the health app dropdown change signal
             if self.health_app_dropdown and hasattr(
                 self.health_app_dropdown, "currentIndexChanged"
@@ -375,6 +397,35 @@ class CrawlerControllerWindow(QMainWindow):
 
         except Exception as e:
             logging.error(f"Error connecting signals: {e}")
+
+    def _on_provider_or_model_changed(self, _=None):
+        """Handle runtime provider/model change: update config, reload AgentAssistant, and log."""
+        try:
+            provider = self.config_widgets["AI_PROVIDER"].currentText()
+            model = self.config_widgets["DEFAULT_MODEL_TYPE"].currentText()
+            # Update config
+            self.config.update_setting_and_save("AI_PROVIDER", provider, self._sync_user_config_files)
+            self.config.update_setting_and_save("DEFAULT_MODEL_TYPE", model, self._sync_user_config_files)
+            # Re-initialize AgentAssistant
+            self._init_agent_assistant()
+            self.log_message(f"AI provider switched to '{provider}', model '{model}'. AgentAssistant reloaded.", "blue")
+        except Exception as e:
+            self.log_message(f"Error switching provider/model: {e}", "red")
+
+    def _init_agent_assistant(self):
+        """(Re)initialize the AgentAssistant with current config and model."""
+        try:
+            from traverser_ai_api.agent_assistant import AgentAssistant
+            provider = getattr(self.config, "AI_PROVIDER", None)
+            model = getattr(self.config, "DEFAULT_MODEL_TYPE", None)
+            if not provider or not model or str(model).strip() in ["", "No model selected"]:
+                self.agent_assistant = None
+                self.log_message("AgentAssistant not initialized: provider or model not set.", "orange")
+                return
+            self.agent_assistant = AgentAssistant(self.config, model_alias_override=model)
+        except Exception as e:
+            self.agent_assistant = None
+            self.log_message(f"Failed to initialize AgentAssistant: {e}", "red")
 
     @slot()
     def clear_logs(self):

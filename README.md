@@ -37,25 +37,22 @@ py -3 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
 
-# 3. Start crawling
-# Start MCP server (Terminal 1)
-python -m traverser_ai_api.mcp_server --relaxed-security
+# 3. Configure environment variables
+# Create .env file with your API keys
+# GEMINI_API_KEY=your_gemini_api_key
+# OPENROUTER_API_KEY=your_openrouter_api_key
+# OLLAMA_BASE_URL=http://localhost:11434
 
-# CLI Controller (Terminal 2, venv active)
-# Scan installed health apps (or use --scan-all-apps)
-python run_cli.py --scan-health-apps --force-rescan
-# List scanned health apps (or use --list-all-apps)
-python run_cli.py --list-health-apps
-# Select target app by index or package name
-python run_cli.py --select-app 1 --verbose
-# View currently selected app information
-python run_cli.py --show-selected-app
-# Start crawler (optional: annotate screenshots after run)
-python run_cli.py --start --annotate-offline-after-run
+# 4. Start external MCP server (separate process)
+# Note: MCP server is an external component that must be set up separately
+# Example: python -m external_mcp_server --host localhost --port 3000
 
-# UI Controller (Terminal 2, venv active)
-python run_ui.py 
+# 5. Start crawling (CLI examples)
+python run_cli.py --show-config
+python run_cli.py --precheck-services
 
+# UI Controller (alternative interface)
+python run_ui.py
 ```
 
 ## Features
@@ -151,6 +148,86 @@ You can easily switch between providers by updating your `user_config.json`:
 ```
 
 For cloud providers, make sure to set the appropriate API keys in your environment variables or `.env` file.
+
+## MCP Integration
+
+This project includes comprehensive MCP (Model Context Protocol) integration for enhanced AI-driven mobile app testing. The MCP server provides a standardized interface for AI models to interact with mobile devices through HTTP JSON-RPC.
+
+### MCP Architecture
+
+The MCP integration consists of three main components:
+
+1. **MCP Server** (`mcp_server.py`) - Exposes mobile device actions as standardized tools
+2. **MCP Client** (`mcp_client.py`) - HTTP JSON-RPC client for communicating with the MCP server
+3. **LangChain Orchestration** - Uses LangChain chains to coordinate complex AI interactions through MCP
+
+### Key MCP Features
+
+- **Circuit Breaker Pattern** - Automatic failure detection and recovery for MCP server connections
+- **Exponential Backoff Retry** - Intelligent retry logic with configurable parameters
+- **LangChain Integration** - Orchestrates complex AI decision chains through MCP server
+- **Error Recovery** - Graceful handling of MCP communication failures with fallback mechanisms
+- **Connection Monitoring** - Real-time monitoring of MCP server health and connection status
+
+### MCP Configuration
+
+Configure MCP settings in your `user_config.json`:
+
+```json
+{
+  "MCP_SERVER_URL": "http://127.0.0.1:3000",
+  "MCP_CONNECTION_TIMEOUT": 5.0,
+  "MCP_REQUEST_TIMEOUT": 30.0,
+  "MCP_MAX_RETRIES": 3,
+  "USE_LANGCHAIN_ORCHESTRATION": true
+}
+```
+
+### Starting MCP Server
+
+```powershell
+# Note: The MCP server is an external component that must be set up separately
+# This is NOT included in this codebase - you need to obtain and configure
+# an MCP server that exposes mobile device actions as tools
+
+# Example external MCP server startup (hypothetical):
+# python -m external_mcp_server --host localhost --port 3000 --relaxed-security
+```
+
+### MCP Server Capabilities
+
+The system expects the external MCP server to expose the following tools for AI agents:
+
+- `appium.initialize_session` - Initialize a new testing session
+- `appium.execute_action` - Execute mobile actions (click, input, scroll, etc.)
+- `appium.get_screen_state` - Retrieve current screen information
+
+### LangChain Orchestration
+
+When enabled, the system uses LangChain to orchestrate complex AI interactions:
+
+- **Action Decision Chains** - Determines optimal next actions based on screen analysis
+- **Context Analysis Chains** - Analyzes screen state and provides insights for testing strategy
+- **Memory Management** - Maintains conversation context across multiple AI requests
+- **Fallback Mechanisms** - Automatically falls back to direct AI calls if MCP fails
+
+### MCP Error Handling
+
+The system includes robust error handling for MCP communications:
+
+- **Connection Failures** - Automatic retry with exponential backoff
+- **Circuit Breaker** - Prevents cascading failures when MCP server is unavailable
+- **Graceful Degradation** - Falls back to direct AI model calls when MCP is unavailable
+- **Comprehensive Logging** - Detailed logging of all MCP interactions and errors
+
+### MCP Health Monitoring
+
+Monitor MCP server health through the UI or logs:
+
+- Connection status and response times
+- Circuit breaker state (CLOSED/OPEN/HALF_OPEN)
+- Failure counts and recovery attempts
+- Detailed error logging with timestamps
 
 ### How It Works
 
@@ -315,7 +392,7 @@ Environment variables (create a .env file in the project root):
 GEMINI_API_KEY=your_gemini_api_key        # Required if using provider "gemini"
 OPENROUTER_API_KEY=your_openrouter_key    # Required if using provider "openrouter"
 OLLAMA_BASE_URL=http://localhost:11434    # Required if using provider "ollama"
-MCP_SERVER_URL=http://localhost:8001      # MCP server endpoint
+MCP_SERVER_URL=http://localhost:3000      # MCP server endpoint
 # Optional service keys
 # PCAPDROID_API_KEY=...
 # MOBSF_API_KEY=...

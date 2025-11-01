@@ -1,3 +1,4 @@
+
 import json
 import logging
 import os
@@ -5,11 +6,34 @@ import sys
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Union, get_type_hints
 
+# Load environment variables from .env file at project root
 from dotenv import load_dotenv
+load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env'))
 
 
 # --- Centralized Configuration Class ---
 class Config:
+    # --- LiteLLM Unified Provider Configuration Example ---
+    LITELLM_CONFIG = {
+        "providers": {
+            "gemini": {
+                "api_key": os.getenv("GEMINI_API_KEY", "<your-gemini-api-key-here>"),
+                "models": ["gemini/gemini-pro", "gemini/gemini-1.5-flash"]
+            },
+            "openrouter": {
+                "api_key": os.getenv("OPENROUTER_API_KEY", "<your-openrouter-api-key-here>"),
+                "models": ["openrouter/mixtral-8x7b", "openrouter/llama-3"]
+            },
+            "ollama": {
+                "base_url": os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
+                "models": ["ollama/llama2", "ollama/mistral"]
+            }
+        },
+        "default_provider": "gemini",
+        "default_model": "gemini/gemini-pro",
+        "mcp_first": True,  # context7: always route through MCP
+        "use_openai_format": True  # context7: enforce OpenAI-compatible API for all calls
+    }
     def __init__(self, defaults_module_path: str, user_config_json_path: str):
         self.DEFAULTS_MODULE_PATH = os.path.abspath(defaults_module_path)
         self.USER_CONFIG_FILE_PATH = os.path.abspath(user_config_json_path)
@@ -51,7 +75,10 @@ class Config:
         self.APP_LAUNCH_WAIT_TIME: int = 7
         self.NEW_COMMAND_TIMEOUT: int = 300
         self.APPIUM_IMPLICIT_WAIT: int = 1
-        self.MCP_SERVER_URL: str = "http://127.0.0.1:8000"
+        self.MCP_SERVER_URL: str = "http://localhost:3000/mcp"
+        self.MCP_CONNECTION_TIMEOUT: float = 5.0
+        self.MCP_REQUEST_TIMEOUT: float = 30.0
+        self.MCP_MAX_RETRIES: int = 3
         self.TARGET_DEVICE_UDID: Optional[str] = None
         self.USE_COORDINATE_FALLBACK: bool = True
         self.GEMINI_API_KEY: Optional[str] = None
@@ -172,7 +199,8 @@ class Config:
         self.load_user_config()
 
     def _load_from_defaults_module(self):
-        defaults_vars = {"os": os}
+        # Provide __file__ so exec-ed code can resolve relative paths
+        defaults_vars = {"os": os, "__file__": self.DEFAULTS_MODULE_PATH}
         try:
             with open(self.DEFAULTS_MODULE_PATH, "r", encoding="utf-8") as f:
                 exec(f.read(), defaults_vars)
@@ -672,6 +700,9 @@ class Config:
             "NEW_COMMAND_TIMEOUT",
             "APPIUM_IMPLICIT_WAIT",
             "MCP_SERVER_URL",
+            "MCP_CONNECTION_TIMEOUT",
+            "MCP_REQUEST_TIMEOUT",
+            "MCP_MAX_RETRIES",
             "TARGET_DEVICE_UDID",
             "USE_COORDINATE_FALLBACK",
             "AI_PROVIDER",
@@ -989,7 +1020,10 @@ APP_LAUNCH_WAIT_TIME = 5
 NEW_COMMAND_TIMEOUT = 300
 APPIUM_IMPLICIT_WAIT = 1
 
-MCP_SERVER_URL = "http://127.0.0.1:8000"
+MCP_SERVER_URL = "http://localhost:3000/mcp"
+MCP_CONNECTION_TIMEOUT = 5.0
+MCP_REQUEST_TIMEOUT = 30.0
+MCP_MAX_RETRIES = 3
 TARGET_DEVICE_UDID = None
 USE_COORDINATE_FALLBACK = True
 

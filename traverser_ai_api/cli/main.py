@@ -98,14 +98,16 @@ def _register_commands(registry: CommandRegistry) -> None:
             focus,
             openrouter,
             services_check,
+            switch_provider
         )
-        
+
         logging.debug("Registering standalone commands...")
         # Register standalone commands
         registry.add_standalone_command(config.ShowConfigCommand())
         registry.add_standalone_command(config.SetConfigCommand())
         registry.add_standalone_command(services_check.PrecheckCommand())
-        
+        registry.add_standalone_command(switch_provider.SwitchProviderCommand())
+
         logging.debug("Registering command groups...")
         # Register command groups
         device_group = device.DeviceCommandGroup()
@@ -114,7 +116,7 @@ def _register_commands(registry: CommandRegistry) -> None:
         focus_group = focus.FocusCommandGroup()
         openrouter_group = openrouter.OpenRouterCommandGroup()
         analysis_group = analysis.AnalysisCommandGroup()
-        
+
         # Register groups instead of individual commands
         registry.add_group(device_group)
         registry.add_group(apps_group)
@@ -122,10 +124,9 @@ def _register_commands(registry: CommandRegistry) -> None:
         registry.add_group(focus_group)
         registry.add_group(openrouter_group)
         registry.add_group(analysis_group)
-        
+
         logging.debug(f"Registered {len(registry.groups)} groups and {len(registry.standalone_commands)} standalone commands.")
-        
-        
+
     except ImportError as e:
         logging.error(f"Failed to import command modules: {e}")
         sys.exit(1)

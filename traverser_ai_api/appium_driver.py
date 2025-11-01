@@ -1,7 +1,7 @@
 # appium_driver.py - MCP Client version
 import asyncio
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 try:
     from traverser_ai_api.config import Config
@@ -105,3 +105,37 @@ class AppiumDriver:
     def save_video_recording(self, data, path):
         """Save video recording."""
         pass
+
+    def get_current_package(self) -> Optional[str]:
+        """Get current package via MCP."""
+        # Call MCP get_current_package tool
+        # For now, return mock
+        return "com.example.mock"
+
+    def get_current_activity(self) -> Optional[str]:
+        """Get current activity via MCP."""
+        # Call MCP get_current_activity tool
+        # For now, return mock
+        return "com.example.mock.MainActivity"
+
+    def get_current_app_context(self) -> Optional[Tuple[Optional[str], Optional[str]]]:
+        """Get current app context via MCP."""
+        package = self.get_current_package()
+        activity = self.get_current_activity()
+        return package, activity
+
+    def terminate_app(self, package_name: str) -> bool:
+        """Terminate app via MCP."""
+        # Call MCP terminate_app tool
+        logging.info(f"MCP Action: terminate_app({package_name})")
+        return True
+
+    def launch_app(self) -> bool:
+        """Launch app via MCP."""
+        # Call MCP launch_app tool
+        logging.info("MCP Action: launch_app()")
+        return True
+
+    def press_back_button(self) -> bool:
+        """Press back button via MCP."""
+        return self.press_back()

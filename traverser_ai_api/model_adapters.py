@@ -1,3 +1,29 @@
+from dataclasses import dataclass, field
+from typing import Optional, Dict, Any, List
+
+# ------ Provider-Agnostic Entities ------
+
+@dataclass
+class AIProvider:
+    """Represents a supported AI provider and its metadata."""
+    name: str
+    display_name: str
+    models: List[str] = field(default_factory=list)
+    capabilities: Dict[str, Any] = field(default_factory=dict)
+    is_online: bool = True
+    extra: Dict[str, Any] = field(default_factory=dict)
+
+@dataclass
+class Session:
+    """Represents a provider-agnostic AI session."""
+    session_id: str
+    provider: str
+    model: str
+    created_at: float
+    last_active: float
+    user_id: Optional[str] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
 """
 ==========================================================================
 AI Model Adapters
@@ -7,36 +33,7 @@ This module provides abstract interfaces and concrete implementations
 for different AI model providers, allowing the app crawler to use
 multiple model providers such as Google Gemini, OpenRouter and Ollama.
 
-Each adapter implements a common interfa            # Check if model is available before attempting to use it
-            try:
-                available_models = ollama.list()
-                model_names = []
-                
-                # Safely extract model names with better error handling
-                if 'models' in available_models and isinstance(available_models['models'], list):
-                    for model in available_models['models']:
-                        if isinstance(model, dict):
-                            # Try both 'name' and 'model' keys
-                            model_name = model.get('name') or model.get('model', '')
-                            if model_name:
-                                model_names.append(model_name)
-                                # Also add base name without tag
-                                if ':' in model_name:
-                                    base_name = model_name.split(':')[0]
-                                    if base_name and base_name not in model_names:
-                                        model_names.append(base_name)
-                
-                # Check if our model is in the list (with or without tag)
-                base_model_name = self.model_name.split(':')[0] if ':' in self.model_name else self.model_name
-                if self.model_name not in model_names and base_model_name not in model_names:
-                    available_str = ", ".join(model_names) if model_names else "None"
-                    error_msg = f"🔴 Model '{self.model_name}' not found. Available models: {available_str}. Please run: ollama pull {self.model_name}"
-                    logging.error(error_msg)
-                    raise ValueError(error_msg)
-                else:
-                    logging.debug(f"✅ Verified model '{self.model_name}' is available in Ollama")
-            except Exception as list_error:
-                logging.warning(f"⚠️ Could not verify model availability: {list_error}. Proceeding anyway.")
+Each adapter implements a common interface for:
 1. Model initialization and configuration
 2. Image processing and prompting
 3. Response parsing and formatting
@@ -50,10 +47,7 @@ import os
 import re
 import time
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List
-from typing import Optional
-from typing import Optional as _Optional
-from typing import Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from PIL import Image
 

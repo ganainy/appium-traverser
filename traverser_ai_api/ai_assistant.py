@@ -5,7 +5,7 @@ import os
 import re
 import time
 from collections import OrderedDict
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 import google.generativeai as genai
@@ -707,7 +707,7 @@ Based on this feedback, you MUST choose a different action to avoid getting stuc
                         if self.ai_interaction_readable_logger:
                             # Human-readable multi-line entry
                             readable_entry = (
-                                f"=== AI Interaction @ {datetime.utcnow().isoformat()}Z ===\n"
+                                f"=== AI Interaction @ {datetime.now(timezone.utc).isoformat()}Z ===\n"
                                 f"Model: {self.model_alias}\n"
                                 f"Tokens: {total_tokens}\n\n"
                                 f"Prompt:\n{prompt_text}\n\n"

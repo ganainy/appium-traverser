@@ -61,6 +61,10 @@ class PrecheckCommand(CommandHandler):
         appium_status = self._check_appium_server(config)
         services['Appium Server'] = appium_status
         
+        # Check MCP server health
+        mcp_status = self._check_mcp_server_health(config)
+        services['MCP Server'] = mcp_status
+        
         # Check MobSF server
         mobsf_status = self._check_mobsf_server(config)
         services['MobSF Server'] = mobsf_status
@@ -92,7 +96,7 @@ class PrecheckCommand(CommandHandler):
     def _check_appium_server(self, config) -> Dict[str, str]:
         """Check Appium server status."""
         try:
-            appium_url = getattr(config, "MCP_SERVER_URL", "http://127.0.0.1:4723")
+            appium_url = getattr(config, "APPIUM_SERVER_URL", "http://127.0.0.1:4723").rstrip('/')
             response = requests.get(f"{appium_url}/status", timeout=3)
             if response.status_code == 200:
                 status_data = response.json()
@@ -108,6 +112,47 @@ class PrecheckCommand(CommandHandler):
                 return {'status': 'error', 'message': f'HTTP {response.status_code} at {appium_url}'}
         except Exception as e:
             return {'status': 'error', 'message': f'Connection failed: {str(e)}'}
+    
+    def _check_mcp_server_health(self, config) -> Dict[str, str]:
+        """Check MCP server health status using /health and /ready endpoints."""
+        try:
+            mcp_url = getattr(config, "MCP_SERVER_URL", "http://localhost:3000/mcp")
+            # Health endpoints are at the root level, not under /mcp
+            base_url = mcp_url.rstrip('/mcp').rstrip('/')
+            
+            # First check /ready endpoint for readiness
+            try:
+                response = requests.get(f"{base_url}/ready", timeout=3)
+                if response.status_code == 200:
+                    ready_data = response.json()
+                    uptime_ms = ready_data.get("uptimeMs", 0)
+                    registered_tools = ready_data.get("registeredTools", 0)
+                    active_invocations = ready_data.get("activeInvocations", 0)
+                    return {
+                        'status': 'running',
+                        'message': f'Ready at {base_url} (tools: {registered_tools}, active: {active_invocations}, uptime: {uptime_ms}ms)'
+                    }
+                elif response.status_code == 503:
+                    return {'status': 'warning', 'message': f'Not ready at {base_url} (service unavailable)'}
+                else:
+                    return {'status': 'error', 'message': f'HTTP {response.status_code} at {base_url}/ready'}
+            except requests.exceptions.Timeout:
+                # Fall back to /health for liveness check if /ready times out
+                try:
+                    response = requests.get(f"{base_url}/health", timeout=3)
+                    if response.status_code == 200:
+                        health_data = response.json()
+                        uptime_ms = health_data.get("uptimeMs", 0)
+                        return {
+                            'status': 'warning',
+                            'message': f'Alive but not ready at {base_url} (uptime: {uptime_ms}ms)'
+                        }
+                    else:
+                        return {'status': 'error', 'message': f'HTTP {response.status_code} from /health endpoint'}
+                except Exception as health_error:
+                    return {'status': 'error', 'message': f'Health check failed: {str(health_error)}'}
+        except Exception as e:
+            return {'status': 'error', 'message': f'MCP server check failed: {str(e)}'}
     
     def _check_mobsf_server(self, config) -> Dict[str, str]:
         """Check MobSF server status."""
