@@ -10,9 +10,13 @@ import logging
 import os
 from typing import Dict, Any, Optional
 
+
 from traverser_ai_api.core.config import Configuration
 from traverser_ai_api.core.crawler import Crawler, CrawlerSession
 from traverser_ai_api.core.storage import Storage
+from traverser_ai_api.core.focus_area_crud import (
+    add_focus_area, remove_focus_area, update_focus_area, list_focus_areas
+)
 
 logger = logging.getLogger(__name__)
 
@@ -282,6 +286,44 @@ class CLICrawlerInterface:
             logger.warning(f"Error during cleanup: {e}")
 
         logger.info("CLI Crawler Interface cleaned up")
+
+
+    # --- Focus Area CRUD CLI methods ---
+    def cli_add_focus_area(self, name: str, description: str = ""):
+        try:
+            result = add_focus_area(name, description)
+            print(f"UI_STATUS: Focus area added: {result}")
+            return result
+        except Exception as e:
+            print(f"UI_STATUS: Failed to add focus area: {e}")
+            return None
+
+    def cli_remove_focus_area(self, id: int):
+        try:
+            remove_focus_area(id)
+            print(f"UI_STATUS: Focus area removed: {id}")
+            return True
+        except Exception as e:
+            print(f"UI_STATUS: Failed to remove focus area: {e}")
+            return False
+
+    def cli_update_focus_area(self, id: int, name: Optional[str] = None, description: Optional[str] = None):
+        try:
+            result = update_focus_area(id, name, description)
+            print(f"UI_STATUS: Focus area updated: {result}")
+            return result
+        except Exception as e:
+            print(f"UI_STATUS: Failed to update focus area: {e}")
+            return None
+
+    def cli_list_focus_areas(self):
+        try:
+            result = list_focus_areas()
+            print(f"UI_STATUS: Focus areas: {result}")
+            return result
+        except Exception as e:
+            print(f"UI_STATUS: Failed to list focus areas: {e}")
+            return []
 
 
 # Convenience functions for CLI usage

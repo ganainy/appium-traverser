@@ -11,6 +11,9 @@ from typing import Any, Dict, List, Optional
 from ..core.config import Configuration
 from ..core.storage import Storage
 from ..core.crawler import Crawler, CrawlerSession
+from ..core.focus_area_crud import (
+    add_focus_area, remove_focus_area, update_focus_area, list_focus_areas
+)
 
 logger = logging.getLogger(__name__)
 
@@ -263,6 +266,44 @@ class GUICrawlerInterface:
             logger.warning(f"Error during cleanup: {e}")
 
         logger.info("GUI Crawler Interface cleaned up")
+
+
+    # --- Focus Area CRUD GUI methods ---
+    def gui_add_focus_area(self, name: str, description: str = ""):
+        try:
+            result = add_focus_area(name, description)
+            logger.info(f"Focus area added: {result}")
+            return result
+        except Exception as e:
+            logger.error(f"Failed to add focus area: {e}")
+            return None
+
+    def gui_remove_focus_area(self, id: int):
+        try:
+            remove_focus_area(id)
+            logger.info(f"Focus area removed: {id}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to remove focus area: {e}")
+            return False
+
+    def gui_update_focus_area(self, id: int, name: Optional[str] = None, description: Optional[str] = None):
+        try:
+            result = update_focus_area(id, name, description)
+            logger.info(f"Focus area updated: {result}")
+            return result
+        except Exception as e:
+            logger.error(f"Failed to update focus area: {e}")
+            return None
+
+    def gui_list_focus_areas(self):
+        try:
+            result = list_focus_areas()
+            logger.info(f"Focus areas: {result}")
+            return result
+        except Exception as e:
+            logger.error(f"Failed to list focus areas: {e}")
+            return []
 
 
 # Convenience functions for GUI usage
