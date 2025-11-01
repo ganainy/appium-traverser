@@ -18,10 +18,8 @@ try:
     from traverser_ai_api.core.controller import CrawlerOrchestrator
     from traverser_ai_api.core.validation import ValidationService
 except ImportError:
-    # Fallback for direct execution
-    from traverser_ai_api.core.adapters import create_process_backend
-    from traverser_ai_api.core.controller import CrawlerOrchestrator
-    from traverser_ai_api.core.validation import ValidationService
+    # Use the new core interface
+    from traverser_ai_api.interfaces.gui import GUICrawlerInterface, create_gui_interface
 
 
 class ValidationWorker(QRunnable):
@@ -83,8 +81,22 @@ class CrawlerManager(QObject):
         self.shutdown_timer.timeout.connect(self.force_stop_crawler_on_timeout)
         
         # Initialize shared orchestrator
-        backend = create_process_backend(use_qt=True)  # UI uses Qt backend
-        self.orchestrator = CrawlerOrchestrator(self.config, backend)
+        try:
+            backend = create_process_backend(use_qt=True)  # UI uses Qt backend
+            self.orchestrator = CrawlerOrchestrator(self.config, backend)
+        except (ImportError, NameError):
+            # Use the new GUI interface for core operations
+            config_dict = {
+                "name": "GUI Crawler Config",
+                "settings": {
+                    "max_depth": getattr(self.config, 'MAX_DEPTH', 10),
+                    "timeout": getattr(self.config, 'TIMEOUT', 300),
+                    "platform": getattr(self.config, 'PLATFORM', 'android')
+                }
+            }
+            self.gui_interface = create_gui_interface(config_dict)
+            self.orchestrator = None  # Not available
+            logging.info("GUI Crawler Interface initialized for core operations")
         
         # Initialize thread pool for async validation
         self.thread_pool = QThreadPool()
@@ -326,9 +338,18 @@ class CrawlerManager(QObject):
         Returns:
             Dictionary with service status details
         """
-        # Use the shared validation service
-        validation_service = ValidationService(self.config)
-        return validation_service.get_service_status_details()
+        # Use the shared validation service if orchestrator available
+        if self.orchestrator:
+            validation_service = ValidationService(self.config)
+            return validation_service.get_service_status_details()
+        else:
+            # Fallback to basic validation using GUI interface
+            return {
+                "appium": {"running": False, "message": "Appium server status unknown", "required": True},
+                "ollama": {"running": False, "message": "Ollama service status unknown", "required": False},
+                "api_keys": {"running": False, "message": "API keys status unknown", "required": True},
+                "app_selected": {"running": bool(getattr(self.config, 'APP_PACKAGE', None)), "message": f"App selected: {getattr(self.config, 'APP_PACKAGE', 'None')}", "required": True}
+            }
     
     def update_progress(self):
         """Update the progress bar based on the current step count."""
