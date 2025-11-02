@@ -464,8 +464,6 @@ class UIComponents:
     ADVANCED_FIELDS = {
         "MCP_SERVER_URL": True,  # True means hide in basic mode
         "TARGET_DEVICE_UDID": True,  # True means hide in basic mode
-        "NEW_COMMAND_TIMEOUT": True,
-        "APPIUM_IMPLICIT_WAIT": True,
         "DEFAULT_MODEL_TYPE": False,
         "XML_SNIPPET_MAX_LEN": True,
         "STABILITY_WAIT": True,
@@ -871,7 +869,7 @@ class UIComponents:
         appium_group = QGroupBox("Appium Settings")
         appium_layout = QFormLayout(appium_group)
 
-        config_widgets["APPIUM_SERVER_URL"] = QLineEdit()
+        config_widgets["APPIUM_SERVER_URL"] = QLabel()
         label_appium_url = QLabel("Server URL:")
         label_appium_url.setToolTip(tooltips.get("APPIUM_SERVER_URL", "Appium server URL (e.g., http://127.0.0.1:4723)"))
         appium_layout.addRow(label_appium_url, config_widgets["APPIUM_SERVER_URL"])
@@ -886,22 +884,6 @@ class UIComponents:
         controls_handler.refresh_devices_btn = refresh_devices_btn
         device_layout.addWidget(refresh_devices_btn)
         appium_layout.addRow(label_device_udid, device_layout)
-
-        config_widgets["NEW_COMMAND_TIMEOUT"] = QSpinBox()
-        config_widgets["NEW_COMMAND_TIMEOUT"].setRange(0, 3600)
-        label_new_command_timeout = QLabel("New Command Timeout (s):")
-        label_new_command_timeout.setToolTip(tooltips["NEW_COMMAND_TIMEOUT"])
-        appium_layout.addRow(
-            label_new_command_timeout, config_widgets["NEW_COMMAND_TIMEOUT"]
-        )
-
-        config_widgets["APPIUM_IMPLICIT_WAIT"] = QSpinBox()
-        config_widgets["APPIUM_IMPLICIT_WAIT"].setRange(0, 300)
-        label_implicit_wait = QLabel("Implicit Wait (s):")
-        label_implicit_wait.setToolTip(tooltips["APPIUM_IMPLICIT_WAIT"])
-        appium_layout.addRow(
-            label_implicit_wait, config_widgets["APPIUM_IMPLICIT_WAIT"]
-        )
 
         layout.addRow(appium_group)
         return appium_group

@@ -70,6 +70,8 @@ class ConfigManager(QObject):
             try:
                 if isinstance(widget, QLineEdit):
                     widget.setText(str(value))
+                elif isinstance(widget, QLabel):
+                    widget.setText(str(value))
                 elif isinstance(widget, QSpinBox):
                     widget.setValue(int(value))
                 elif isinstance(widget, QCheckBox):
@@ -106,6 +108,8 @@ class ConfigManager(QObject):
 
             try:
                 if isinstance(widget, QLineEdit):
+                    widget.setText(str(value))
+                elif isinstance(widget, QLabel):
                     widget.setText(str(value))
                 elif isinstance(widget, QSpinBox):
                     widget.setValue(int(value))
@@ -160,14 +164,18 @@ class ConfigManager(QObject):
         if key and key in self.main_controller.config_widgets:
             # Save only the specific key that triggered the change
             widget = self.main_controller.config_widgets[key]
-            config_data[key] = self._get_widget_value(key, widget)
+            value = self._get_widget_value(key, widget)
+            if value is not None:  # Skip None values (e.g., read-only QLabel widgets)
+                config_data[key] = value
         else:
             # Fallback to saving all widgets if no key is provided
             for k, widget in self.main_controller.config_widgets.items():
                 # Skip UI indicator widgets that aren't actual config settings
                 if k in ['IMAGE_CONTEXT_WARNING']:
                     continue
-                config_data[k] = self._get_widget_value(k, widget)
+                value = self._get_widget_value(k, widget)
+                if value is not None:  # Skip None values (e.g., read-only QLabel widgets)
+                    config_data[k] = value
 
         # --- Always save these non-widget settings ---
         # Save UI mode setting
@@ -199,6 +207,9 @@ class ConfigManager(QObject):
         """Extracts the value from a given widget."""
         if isinstance(widget, QLineEdit):
             return widget.text()
+        elif isinstance(widget, QLabel):
+            # QLabel widgets are read-only (display-only), don't save them
+            return None
         elif isinstance(widget, QSpinBox):
             return widget.value()
         elif isinstance(widget, QCheckBox):
@@ -225,6 +236,8 @@ class ConfigManager(QObject):
                 loaded_any = True
                 try:
                     if isinstance(widget, QLineEdit):
+                        widget.setText(str(value))
+                    elif isinstance(widget, QLabel):
                         widget.setText(str(value))
                     elif isinstance(widget, QSpinBox):
                         widget.setValue(int(value))

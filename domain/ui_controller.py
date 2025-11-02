@@ -280,8 +280,6 @@ class CrawlerControllerWindow(QMainWindow):
             "APPIUM_SERVER_URL": "URL of the Appium server (e.g., http://127.0.0.1:4723). This is the server that handles mobile automation.",
             "MCP_SERVER_URL": "URL of the running MCP server (e.g., http://127.0.0.1:3000).",
             "TARGET_DEVICE_UDID": "Unique Device Identifier (UDID) of the target Android device or emulator. Optional.",
-            "NEW_COMMAND_TIMEOUT": "Seconds Appium waits for a new command before quitting the session. 0 means no timeout.",
-            "APPIUM_IMPLICIT_WAIT": "Seconds Appium driver waits when trying to find elements before failing. Affects element finding strategies.",
             "DEFAULT_MODEL_TYPE": "The default Gemini model to use for AI operations.",
             "XML_SNIPPET_MAX_LEN": "Maximum characters of the XML page source to send to the AI for context. Minimum 5000 characters to ensure AI has sufficient UI structure information. The system automatically adjusts this limit based on the selected AI provider's payload size constraints to prevent API errors.",
             "CRAWL_MODE": "'steps': Crawl for a fixed number of actions. 'time': Crawl for a fixed duration.",

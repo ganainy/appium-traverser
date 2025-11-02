@@ -44,7 +44,7 @@ class Config:
             return self._cache[key]
         # 2. Check user storage (SQLite)
         val = self._user_store.get(key)
-        if val is not None:
+        if val is not None and val != "":  # Skip empty strings to allow fallback to defaults
             self._cache[key] = val
             return val
         # 3. Check environment variables
@@ -220,8 +220,7 @@ DB_BUSY_TIMEOUT = 5000
 WAIT_AFTER_ACTION = 2.0
 STABILITY_WAIT = 1.0
 APP_LAUNCH_WAIT_TIME = 5
-NEW_COMMAND_TIMEOUT = 300
-APPIUM_IMPLICIT_WAIT = 1
+APPIUM_SERVER_URL = "http://127.0.0.1:4723"
 
 MCP_SERVER_URL = "http://localhost:3000/mcp"
 MCP_CONNECTION_TIMEOUT = 5.0
