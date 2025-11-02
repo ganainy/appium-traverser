@@ -96,10 +96,10 @@ class AppScanService:
     
     def load_apps_from_file(self, file_path: str) -> Tuple[bool, List[Dict]]:
         """Load apps from a cache file.
-        
+
         Args:
             file_path: Path to cache file
-            
+
         Returns:
             Tuple of (success, apps_list)
         """
@@ -107,9 +107,17 @@ class AppScanService:
         try:
             with open(file_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            
+
+            # Handle merged format (new) - contains both all_apps and health_apps
+            if isinstance(data, dict) and "all_apps" in data and "health_apps" in data:
+                if isinstance(data["all_apps"], list) and isinstance(data["health_apps"], list):
+                    # For backward compatibility, return health_apps by default
+                    # CLI can specify which type to load if needed
+                    apps = data.get("health_apps", [])
+                else:
+                    apps = []
             # Unified schema: require 'health_apps'; accept raw list format if provided
-            if isinstance(data, dict):
+            elif isinstance(data, dict):
                 if isinstance(data.get("health_apps"), list):
                     apps = data.get("health_apps", [])
                 else:
@@ -119,20 +127,20 @@ class AppScanService:
                 apps = data
             else:
                 apps = []
-                
+
             self.logger.debug(f"Loaded {len(apps)} apps from {file_path}")
             return True, apps
-            
+
         except Exception as e:
             self.logger.error(f"Error loading apps from {file_path}: {e}", exc_info=True)
             return False, []
     
-    def resolve_latest_cache_file(self, suffix: str) -> Optional[str]:
+    def resolve_latest_cache_file(self, app_type: str) -> Optional[str]:
         """Find the most recent device-specific app info cache.
-        
+
         Args:
-            suffix: Cache suffix ('all' or 'health_filtered')
-            
+            app_type: App type ('all' or 'health')
+
         Returns:
             Path to latest cache file or None
         """
@@ -140,31 +148,26 @@ class AppScanService:
             config_service = self.context.services.get("config")
             if not config_service:
                 return None
-                
+
             out_dir = config_service.get_config_value("APP_INFO_OUTPUT_DIR") or os.path.join(
                 self.api_dir, "..", "..", "output_data", "app_info"
             )
-            
-            if suffix == "all":
-                pattern = os.path.join(out_dir, "device_*_all_apps.json")
-            elif suffix == "health_filtered":
-                pattern = os.path.join(out_dir, "device_*_filtered_health_apps.json")
-            else:
-                self.logger.debug(f"Unsupported suffix '{suffix}' for cache resolution")
-                return None
-            
+
+            # Use new merged file pattern
+            pattern = os.path.join(out_dir, "device_*_app_info.json")
+
             import glob
             candidates = glob.glob(pattern)
             if not candidates:
                 self.logger.debug(f"No cache files found for pattern: {pattern}")
                 return None
-                
+
             latest = max(candidates, key=lambda p: os.path.getmtime(p))
-            self.logger.debug(f"Resolved latest cache file for '{suffix}': {latest}")
+            self.logger.debug(f"Resolved latest cache file for '{app_type}': {latest}")
             return latest
-            
+
         except Exception as e:
-            self.logger.error(f"Failed to resolve latest cache file for '{suffix}': {e}", exc_info=True)
+            self.logger.error(f"Failed to resolve latest cache file for '{app_type}': {e}", exc_info=True)
             return None
     
     def get_current_health_apps(self) -> List[Dict]:

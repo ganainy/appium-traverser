@@ -12,6 +12,22 @@ from typing import Any, Dict, List, Optional
 
 from PySide6.QtCore import QObject, QProcess, Signal, Slot
 
+# Shared app discovery utilities
+try:
+    from domain.app_discovery_utils import (
+        get_device_id,
+        get_app_cache_path,
+        heuristic_health_filter,
+    )
+except ImportError as e:
+    sys.stderr.write(
+        f"WARNING: Could not import app discovery utilities. Error: {e}\n"
+    )
+    # These will be used later; allow graceful degradation
+    get_device_id = None
+    get_app_cache_path = None
+    heuristic_health_filter = None
+
 
 class HealthAppScanner(QObject):
     """Manages health app discovery for the Appium Crawler Controller."""
@@ -30,135 +46,42 @@ class HealthAppScanner(QObject):
         super().__init__()
         self.main_controller = main_controller
         self.config = main_controller.config
-        self.api_dir = self.config.BASE_DIR
-        self.find_app_info_script_path = os.path.join(self.api_dir, "..", "domain", "find_app_info.py")
+        self.api_dir = os.path.abspath(os.path.join(self.config.BASE_DIR, ".."))
+        self.find_app_info_script_path = os.path.join(self.api_dir, "domain", "find_app_info.py")
         self.find_apps_process: Optional[QProcess] = None
         self.find_apps_stdout_buffer: str = ""
         self.health_apps_data: List[Dict[str, Any]] = []
 
-    def _heuristic_filter_health_apps(
-        self, apps: List[Dict[str, Any]]
-    ) -> List[Dict[str, Any]]:
-        """Fallback keyword-based filter when AI is unavailable.
-        Filters apps whose name or package contains health-related keywords.
-        """
-        if not apps:
-            return []
-        keywords = [
-            "health",
-            "fitness",
-            "fit",
-            "wellness",
-            "med",
-            "medical",
-            "care",
-            "doctor",
-            "patient",
-            "pill",
-            "medication",
-            "pharma",
-            "drug",
-            "clinic",
-            "hosp",
-            "hospital",
-            "therapy",
-            "mental",
-            "mind",
-            "sleep",
-            "diet",
-            "calorie",
-            "nutrition",
-            "run",
-            "workout",
-            "yoga",
-            "step",
-            "heart",
-            "bp",
-            "blood",
-            "sugar",
-            "diabetes",
-        ]
-        filtered = []
-        for app in apps:
-            name = (app.get("app_name") or "").lower()
-            pkg = (app.get("package_name") or "").lower()
-            text = name + " " + pkg
-            if any(kw in text for kw in keywords):
-                filtered.append(app)
-        return filtered
-
-    def _get_current_device_id(self):
-        """Get the ID of the currently connected device."""
-        try:
-            result = subprocess.run(
-                ["adb", "get-serialno"], capture_output=True, text=True, timeout=5
-            )
-            if (
-                result.returncode == 0
-                and result.stdout.strip()
-                and result.stdout.strip() != "unknown"
-            ):
-                device_id = result.stdout.strip()
-                # Clean the device ID to make it safe for filenames
-                safe_device_id = re.sub(r"[^\w\-.]", "_", device_id)
-                return safe_device_id
-
-            # Fallback to devices command if get-serialno fails
-            devices_result = subprocess.run(
-                ["adb", "devices"], capture_output=True, text=True, timeout=5
-            )
-            if devices_result.returncode == 0:
-                lines = devices_result.stdout.strip().splitlines()
-                device_lines = [
-                    line for line in lines[1:] if line.strip() and "\tdevice" in line
-                ]
-                if device_lines:
-                    device_id = device_lines[0].split("\t")[0].strip()
-                    # Clean the device ID to make it safe for filenames
-                    safe_device_id = re.sub(r"[^\w\-.]", "_", device_id)
-                    return safe_device_id
-
+    def _get_current_device_id(self) -> str:
+        """Wrapper around shared get_device_id utility."""
+        if get_device_id is None:
+            # Fallback if import failed
+            logging.warning("get_device_id not available from shared utilities, using direct implementation")
             return "unknown_device"
-        except Exception as e:
-            logging.error(f"Error getting device ID: {e}")
-            return "unknown_device"
+        return get_device_id()
 
-    def _get_device_health_app_file_path(
-        self, device_id=None, suffix: Optional[str] = None
-    ):
-        """Get the device-specific app info cache path for the current or specified device.
-
-        Caching: maintain separate caches per device based on filtering mode using device-specific filenames.
-        - suffix='all'             -> device_<device_id>_all_apps.json
-        - suffix='health_filtered' -> device_<device_id>_filtered_health_apps.json
-        - suffix=None              -> defaults to 'all'
-        """
+    def _get_device_health_app_file_path(self, device_id: Optional[str] = None) -> str:
+        """Get the device-specific merged app info cache path using shared utility."""
         if not device_id:
             device_id = self._get_current_device_id()
-
-        # Ensure device_id is not None or empty
+        
         if not device_id:
             device_id = "unknown_device"
-
-        # Create app_info/device_id directory if it doesn't exist
-        app_info_dir = os.path.join(
-            self.api_dir,
-            getattr(self.config, "OUTPUT_DATA_DIR", "output_data"),
-            "app_info",
-            device_id,
-        )
-        os.makedirs(app_info_dir, exist_ok=True)
-        # Determine device-specific filename by suffix
-        suffix = (suffix or "all").strip()
-        if suffix not in ("all", "health_filtered"):
-            suffix = "all"
-        filename = (
-            f"device_{device_id}_all_apps.json"
-            if suffix == "all"
-            else f"device_{device_id}_filtered_health_apps.json"
-        )
-        device_json_path = os.path.join(app_info_dir, filename)
-        return device_json_path
+        
+        if get_app_cache_path is None:
+            # Fallback if import failed
+            logging.warning("get_app_cache_path not available from shared utilities, using direct implementation")
+            app_info_dir = os.path.join(
+                self.api_dir,
+                getattr(self.config, "OUTPUT_DATA_DIR", "output_data"),
+                "app_info",
+                device_id,
+            )
+            os.makedirs(app_info_dir, exist_ok=True)
+            filename = f"device_{device_id}_app_info.json"
+            return os.path.join(app_info_dir, filename)
+        
+        return get_app_cache_path(device_id, self.config, self.api_dir)
 
     def trigger_scan_for_health_apps(self):
         """Starts the process of scanning for health apps, forcing a rescan."""
@@ -171,13 +94,8 @@ class HealthAppScanner(QObject):
         device_id = self._get_current_device_id()
         self.main_controller.log_message(f"DEBUG: Got device ID: {device_id}", "blue")
 
-        use_ai_filter = bool(
-            getattr(self.config, "USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY", False)
-        )
-        preferred_suffix = "health_filtered" if use_ai_filter else "all"
-        device_file_path = self._get_device_health_app_file_path(
-            device_id, suffix=preferred_suffix
-        )
+        # Now use single merged file for all device data
+        device_file_path = self._get_device_health_app_file_path(device_id)
         self.main_controller.log_message(
             f"DEBUG: File path: {device_file_path}", "blue"
         )
@@ -199,19 +117,26 @@ class HealthAppScanner(QObject):
 
     @Slot()
     def on_filter_toggle_state_changed(self) -> None:
-        """Handle toggle of the health-only filter checkbox with cache-first behavior.
+        """Handle toggle of the health-only filter checkbox.
 
-        When the user enables or disables the AI health-only filter, prefer loading
-        an existing cached file for the current device that matches the selected mode
-        (health_filtered vs all). If no cache exists, perform a scan to generate it.
+        When the user enables or disables the health-only filter, switch between
+        showing all apps vs health apps from the merged data file.
         """
         try:
             self.main_controller.log_message(
-                "Discovery Filter toggled. Checking for cached file first...",
+                "Discovery Filter toggled. Switching between all apps and health apps...",
                 "blue",
             )
-            # Use cache-first execution; will load if file exists, otherwise scan
-            self._execute_scan_for_health_apps(force_rescan=False)
+            # Get the merged file path and load appropriate data
+            device_id = self._get_current_device_id()
+            device_file_path = self._get_device_health_app_file_path(device_id)
+
+            if os.path.exists(device_file_path):
+                self._load_health_apps_from_file(device_file_path)
+            else:
+                self.main_controller.log_message(
+                    "No cached app data found. Please scan first.", "orange"
+                )
         except Exception as e:
             logging.error(f"Error handling filter toggle: {e}", exc_info=True)
             self.main_controller.log_message(
@@ -231,13 +156,8 @@ class HealthAppScanner(QObject):
             f"DEBUG: Got device ID in execute: {device_id}", "blue"
         )
 
-        use_ai_filter = bool(
-            getattr(self.config, "USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY", False)
-        )
-        preferred_suffix = "health_filtered" if use_ai_filter else "all"
-        device_file_path = self._get_device_health_app_file_path(
-            device_id, suffix=preferred_suffix
-        )
+        # Use merged file path for all device data
+        device_file_path = self._get_device_health_app_file_path(device_id)
         self.main_controller.log_message(
             f"DEBUG: File path in execute: {device_file_path}", "blue"
         )
@@ -527,19 +447,43 @@ class HealthAppScanner(QObject):
 
         try:
             # Look for JSON after "SUMMARY_JSON:" marker
-            summary_json_match = re.search(
-                r"SUMMARY_JSON:\s*(\{.*?\})", self.find_apps_stdout_buffer
-            )
+            # Use a more robust approach to handle nested braces in the JSON
+            json_str = ""  # Initialize for use in error messages
+            summary_json_match = False
+            summary_json_start = self.find_apps_stdout_buffer.find("SUMMARY_JSON:")
+            if summary_json_start != -1:
+                # Find the opening brace after SUMMARY_JSON:
+                brace_start = self.find_apps_stdout_buffer.find("{", summary_json_start)
+                if brace_start != -1:
+                    # Find matching closing brace by counting braces
+                    brace_count = 0
+                    brace_end = -1
+                    for idx in range(brace_start, len(self.find_apps_stdout_buffer)):
+                        char = self.find_apps_stdout_buffer[idx]
+                        if char == "{":
+                            brace_count += 1
+                        elif char == "}":
+                            brace_count -= 1
+                            if brace_count == 0:
+                                brace_end = idx + 1
+                                break
+                    
+                    if brace_end != -1:
+                        json_str = self.find_apps_stdout_buffer[brace_start:brace_end]
+                        summary_json_match = True
+                
             if summary_json_match:
                 self.main_controller.log_message(
                     "Found SUMMARY_JSON marker in output, using that for parsing",
                     "green",
                 )
-                json_str = summary_json_match.group(1)
+                self.main_controller.log_message(
+                    f"SUMMARY_JSON raw string (first 150 chars): {json_str[:150]}", "blue"
+                )
                 try:
                     summary_data = json.loads(json_str)
                     self.main_controller.log_message(
-                        f"Successfully parsed SUMMARY_JSON: {summary_data}", "green"
+                        f"Successfully parsed SUMMARY_JSON with keys: {list(summary_data.keys())}", "green"
                     )
 
                     # Extract the file path from the summary
@@ -577,8 +521,16 @@ class HealthAppScanner(QObject):
                         result_data = None
                 except json.JSONDecodeError as e:
                     self.main_controller.log_message(
-                        f"Error parsing SUMMARY_JSON: {e}. JSON snippet: {json_str[:100]}...",
-                        "red",
+                        f"Error parsing SUMMARY_JSON: {e}", "red",
+                    )
+                    self.main_controller.log_message(
+                        f"  JSON Error Details - Line: {e.lineno}, Col: {e.colno}, Msg: {e.msg}", "red"
+                    )
+                    self.main_controller.log_message(
+                        f"  Raw JSON snippet (first 200 chars): {json_str[:200]}", "orange"
+                    )
+                    self.main_controller.log_message(
+                        f"  Full JSON length: {len(json_str)} characters", "orange"
                     )
                     result_data = None
             else:
@@ -713,26 +665,41 @@ class HealthAppScanner(QObject):
                         "orange",
                     )
                     original_count = len(result_data["health_apps"])
-                    filtered = self._heuristic_filter_health_apps(
-                        result_data["health_apps"]
-                    )
+                    if heuristic_health_filter is not None:
+                        filtered = heuristic_health_filter(
+                            result_data["health_apps"]
+                        )
+                    else:
+                        # Fallback if shared utility not available
+                        filtered = result_data["health_apps"]
                     result_data["health_apps"] = filtered
                     result_data["heuristic_filtered"] = True
                     self.main_controller.log_message(
                         f"Heuristic filter kept {len(filtered)} apps out of {original_count}.",
                         "orange",
                     )
-                self.health_apps_data = result_data["health_apps"]
+                # Filter out any non-dict items to prevent errors
+                raw_apps = result_data["health_apps"]
+                if not isinstance(raw_apps, list):
+                    self.main_controller.log_message(
+                        f"Warning: health_apps is not a list, type: {type(raw_apps)}. Clearing data.",
+                        "red"
+                    )
+                    self.health_apps_data = []
+                else:
+                    self.health_apps_data = [app for app in raw_apps if isinstance(app, dict)]
+                    skipped_count = len(raw_apps) - len(self.health_apps_data)
+                    if skipped_count > 0:
+                        self.main_controller.log_message(
+                            f"Warning: Skipped {skipped_count} non-dict items in health_apps data.",
+                            "orange"
+                        )
 
                 # Get current device ID to use in the filename
                 device_id = result_data.get("device_id", self._get_current_device_id())
 
-                # Get the device-specific health app file path
-                # Choose cache file name based on effective filtering state
-                save_suffix = "health_filtered" if ai_filtered_effective else "all"
-                output_file = self._get_device_health_app_file_path(
-                    device_id, suffix=save_suffix
-                )
+                # Get the device-specific merged health app file path
+                output_file = self._get_device_health_app_file_path(device_id)
 
                 # Ensure the directory exists
                 os.makedirs(os.path.dirname(output_file), exist_ok=True)
@@ -796,7 +763,15 @@ class HealthAppScanner(QObject):
                         if "health_apps" in cached_data and isinstance(
                             cached_data["health_apps"], list
                         ):
-                            self.health_apps_data = cached_data["health_apps"]
+                            # Filter to ensure all items are dictionaries
+                            raw_apps = cached_data["health_apps"]
+                            self.health_apps_data = [app for app in raw_apps if isinstance(app, dict)]
+                            skipped_count = len(raw_apps) - len(self.health_apps_data)
+                            if skipped_count > 0:
+                                self.main_controller.log_message(
+                                    f"Warning: Skipped {skipped_count} non-dict items in health_apps data.",
+                                    "orange"
+                                )
                             self.main_controller.current_health_app_list_file = (
                                 fallback_path
                             )
@@ -868,7 +843,7 @@ class HealthAppScanner(QObject):
             self.main_controller.app_scan_status_label.setText("App Scan: Error")
 
     def _load_health_apps_from_file(self, file_path: str):
-        """Load health apps data from a JSON file."""
+        """Load health apps data from a JSON file with merged format support."""
         try:
             if not os.path.exists(file_path):
                 self.main_controller.log_message(
@@ -883,20 +858,82 @@ class HealthAppScanner(QObject):
             with open(file_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
 
-            # Handle both old and new format
+            # Handle merged format (new) - contains both all_apps and health_apps
             if (
+                isinstance(data, dict)
+                and "all_apps" in data
+                and "health_apps" in data
+                and isinstance(data["all_apps"], list)
+                and isinstance(data["health_apps"], list)
+            ):
+                # Determine which app list to show based on filter toggle
+                show_health_only = bool(
+                    getattr(self.config, "USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY", False)
+                )
+
+                if show_health_only:
+                    raw_apps = data["health_apps"]
+                    app_type = "health apps"
+                else:
+                    raw_apps = data["all_apps"]
+                    app_type = "all apps"
+
+                # Log raw data info
+                self.main_controller.log_message(
+                    f"Raw {app_type} list has {len(raw_apps)} items", "blue"
+                )
+                
+                # Check first item type for debugging
+                if raw_apps and len(raw_apps) > 0:
+                    first_item_type = type(raw_apps[0]).__name__
+                    self.main_controller.log_message(
+                        f"First item type: {first_item_type}", "blue"
+                    )
+                    if not isinstance(raw_apps[0], dict):
+                        self.main_controller.log_message(
+                            f"WARNING: First item is not a dict! Value: {str(raw_apps[0])[:100]}", "orange"
+                        )
+
+                # Filter to ensure all items are dictionaries
+                self.health_apps_data = [app for app in raw_apps if isinstance(app, dict)]
+                skipped_count = len(raw_apps) - len(self.health_apps_data)
+                if skipped_count > 0:
+                    self.main_controller.log_message(
+                        f"Warning: Skipped {skipped_count} non-dict items in {app_type} data.",
+                        "orange"
+                    )
+                
+                self.main_controller.log_message(
+                    f"After filtering: {len(self.health_apps_data)} valid dict items", "green"
+                )
+
+                timestamp = data.get("timestamp", "unknown")
+                ai_filtered = data.get("ai_filtered", False)
+                self.main_controller.log_message(
+                    f"Loaded {app_type} data from timestamp: {timestamp} (AI filtered: {ai_filtered})", "blue"
+                )
+            # Handle old format for backward compatibility
+            elif (
                 isinstance(data, dict)
                 and "health_apps" in data
                 and isinstance(data["health_apps"], list)
             ):
-                # New format - nested under 'health_apps' key
-                self.health_apps_data = data["health_apps"]
+                # Legacy format - nested under 'health_apps' key
+                # Filter to ensure all items are dictionaries
+                raw_apps = data["health_apps"]
+                self.health_apps_data = [app for app in raw_apps if isinstance(app, dict)]
+                skipped_count = len(raw_apps) - len(self.health_apps_data)
+                if skipped_count > 0:
+                    self.main_controller.log_message(
+                        f"Warning: Skipped {skipped_count} non-dict items in health_apps data.",
+                        "orange"
+                    )
                 timestamp = data.get("timestamp", "unknown")
                 self.main_controller.log_message(
-                    f"Loaded health apps data from timestamp: {timestamp}", "blue"
+                    f"Loaded health apps data from legacy format, timestamp: {timestamp}", "orange"
                 )
             elif isinstance(data, list):
-                # Old format - direct list
+                # Oldest format - direct list (assume health apps)
                 self.main_controller.log_message(
                     "Loaded health apps data from legacy format file", "orange"
                 )
@@ -911,6 +948,8 @@ class HealthAppScanner(QObject):
                         f"Dictionary keys: {list(data.keys())}", "red"
                     )
                 self.health_apps_data = []
+                self._reset_ui_after_load_error()
+                return
 
             # Make sure UI components are available before trying to update them
             if (
@@ -921,7 +960,7 @@ class HealthAppScanner(QObject):
 
                 if not self.health_apps_data:
                     self.main_controller.log_message(
-                        "No health apps found in the cached file.", "orange"
+                        "No apps found in the cached file.", "orange"
                     )
                     if (
                         hasattr(self.main_controller, "app_scan_status_label")
@@ -937,12 +976,20 @@ class HealthAppScanner(QObject):
                     hasattr(self.main_controller, "app_scan_status_label")
                     and self.main_controller.app_scan_status_label
                 ):
+                    show_health_only = bool(
+                        getattr(self.config, "USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY", False)
+                    )
+                    app_type_display = "Health Apps" if show_health_only else "All Apps"
                     self.main_controller.app_scan_status_label.setText(
-                        f"App Scan: Loaded {len(self.health_apps_data)} apps"
+                        f"App Scan: Loaded {len(self.health_apps_data)} {app_type_display.lower()}"
                     )
 
+                show_health_only = bool(
+                    getattr(self.config, "USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY", False)
+                )
+                app_type = "health apps" if show_health_only else "all apps"
                 self.main_controller.log_message(
-                    f"Successfully loaded {len(self.health_apps_data)} health apps from {file_path}",
+                    f"Successfully loaded {len(self.health_apps_data)} {app_type} from {file_path}",
                     "green",
                 )
             else:
@@ -1034,35 +1081,89 @@ class HealthAppScanner(QObject):
                 )
                 return
 
+            self.main_controller.log_message(
+                f"Starting dropdown population with {len(self.health_apps_data)} apps", "blue"
+            )
+
             # Try to restore last selected app if it exists
             last_selected_app = getattr(self.main_controller, "last_selected_app", {})
-            # Ensure last_selected_app is a dictionary, not None
-            if last_selected_app is None:
+            # Ensure last_selected_app is a dictionary - it might be None, string, or other type
+            if not isinstance(last_selected_app, dict):
+                self.main_controller.log_message(
+                    f"Warning: last_selected_app is {type(last_selected_app).__name__}, resetting to empty dict", "orange"
+                )
                 last_selected_app = {}
 
             last_selected_package = last_selected_app.get("package_name", "")
             selected_index = 0  # Default to 0 (Select target app...)
+            
+            invalid_items_count = 0
+            valid_items_count = 0
 
             for i, app_info in enumerate(self.health_apps_data, start=1):
-                app_name = app_info.get("app_name", "Unknown App")
-                package_name = app_info.get("package_name", "")
-                app_category = (
-                    app_info.get("app_category") or app_info.get("category") or ""
-                )
-                # Include category in display if available
-                if isinstance(app_category, str) and app_category.strip():
-                    display_name = f"{app_name} [{app_category}] ({package_name})"
-                else:
-                    display_name = f"{app_name} ({package_name})"
-                self.main_controller.health_app_dropdown.addItem(display_name, app_info)
+                if not isinstance(app_info, dict):
+                    invalid_items_count += 1
+                    app_type = type(app_info).__name__
+                    app_value = str(app_info)[:80] if not isinstance(app_info, str) else app_info[:80]
+                    self.main_controller.log_message(
+                        f"[Item {i}] Skipping invalid app_info: type={app_type}, value='{app_value}'",
+                        "orange"
+                    )
+                    continue
+                    
+                try:
+                    app_name = app_info.get("app_name", "Unknown App")
+                    package_name = app_info.get("package_name", "")
+                    app_category = (
+                        app_info.get("app_category") or app_info.get("category") or ""
+                    )
+                    # Include category in display if available
+                    if isinstance(app_category, str) and app_category.strip():
+                        display_name = f"{app_name} [{app_category}] ({package_name})"
+                    else:
+                        display_name = f"{app_name} ({package_name})"
+                    self.main_controller.health_app_dropdown.addItem(display_name, app_info)
+                    valid_items_count += 1
 
-                # Check if this matches the last selected app
-                if package_name == last_selected_package:
-                    selected_index = i
+                    # Check if this matches the last selected app
+                    if package_name == last_selected_package:
+                        selected_index = i
+                except Exception as item_error:
+                    invalid_items_count += 1
+                    self.main_controller.log_message(
+                        f"[Item {i}] Error processing app_info: {item_error}. Data: {app_info}",
+                        "orange"
+                    )
+                    continue
 
             # Set the current index to restore last selection
             self.main_controller.health_app_dropdown.setCurrentIndex(selected_index)
+            
+            self.main_controller.log_message(
+                f"Dropdown population complete: {valid_items_count} valid items, {invalid_items_count} skipped",
+                "green"
+            )
         except Exception as e:
+            import traceback
             self.main_controller.log_message(
                 f"Error populating app dropdown: {e}", "red"
+            )
+            self.main_controller.log_message(
+                f"  Exception type: {type(e).__name__}", "red"
+            )
+            self.main_controller.log_message(
+                f"  health_apps_data type: {type(self.health_apps_data)}", "red"
+            )
+            self.main_controller.log_message(
+                f"  health_apps_data length: {len(self.health_apps_data) if isinstance(self.health_apps_data, (list, dict)) else 'N/A'}", "red"
+            )
+            if isinstance(self.health_apps_data, list) and len(self.health_apps_data) > 0:
+                self.main_controller.log_message(
+                    f"  First item type: {type(self.health_apps_data[0])}", "red"
+                )
+                self.main_controller.log_message(
+                    f"  First item value: {str(self.health_apps_data[0])[:100]}", "red"
+                )
+            self.main_controller.log_message(
+                f"  Stack trace:\n{traceback.format_exc()}", "red"
             )

@@ -907,7 +907,7 @@ class UIComponents:
         app_group = QGroupBox("App Settings")
         app_layout = QFormLayout(app_group)
 
-        # Health App Selector
+        # Health App Selector with Discovery Filter checkbox
         config_handler.health_app_dropdown = QComboBox()
         config_handler.health_app_dropdown.addItem(
             "Select target app (Scan first)", None
@@ -915,11 +915,24 @@ class UIComponents:
         config_handler.health_app_dropdown.currentIndexChanged.connect(
             config_handler._on_health_app_selected
         )
-        app_layout.addRow(
-            QLabel("Target Health App:"), config_handler.health_app_dropdown
-        )
         config_handler.health_app_dropdown.setToolTip(
             "Select a health-related app discovered on the device. Use button below to scan."
+        )
+
+        # Create a horizontal layout for dropdown and discovery filter checkbox
+        health_app_layout = QHBoxLayout()
+        health_app_layout.addWidget(config_handler.health_app_dropdown)
+        
+        # Health-only filter toggle (AI)
+        # This controls whether the discovery script applies AI filtering to only show health-related apps
+        config_widgets["USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY"] = QCheckBox("Health-only filter (AI)")
+        config_widgets["USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY"].setToolTip(
+            "If enabled, the scanner uses AI to keep only health-related apps (fitness, wellness, medical, medication, mental health)."
+        )
+        health_app_layout.addWidget(config_widgets["USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY"])
+        
+        app_layout.addRow(
+            QLabel("Target Health App:"), health_app_layout
         )
 
         config_handler.refresh_apps_btn = QPushButton("Scan/Refresh Health Apps List")
@@ -930,27 +943,6 @@ class UIComponents:
 
         config_handler.app_scan_status_label = QLabel("App Scan: Idle")
         app_layout.addRow(QLabel("Scan Status:"), config_handler.app_scan_status_label)
-
-        # Health-only filter toggle (AI)
-        # This controls whether the discovery script applies AI filtering to only show health-related apps
-        config_widgets["USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY"] = QCheckBox("Health-only filter (AI)")
-        config_widgets["USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY"].setToolTip(
-            "If enabled, the scanner uses AI to keep only health-related apps (fitness, wellness, medical, medication, mental health)."
-        )
-        app_layout.addRow(QLabel("Discovery Filter:"), config_widgets["USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY"])        
-
-        # App package and activity (auto-filled)
-        config_widgets["APP_PACKAGE"] = QLineEdit()
-        config_widgets["APP_PACKAGE"].setReadOnly(True)
-        label_app_package = QLabel("Package Name (Auto-filled):")
-        label_app_package.setToolTip(tooltips["APP_PACKAGE"])
-        app_layout.addRow(label_app_package, config_widgets["APP_PACKAGE"])
-
-        config_widgets["APP_ACTIVITY"] = QLineEdit()
-        config_widgets["APP_ACTIVITY"].setReadOnly(True)
-        label_app_activity = QLabel("Activity (Auto-filled):")
-        label_app_activity.setToolTip(tooltips["APP_ACTIVITY"])
-        app_layout.addRow(label_app_activity, config_widgets["APP_ACTIVITY"])
 
         layout.addRow(app_group)
         return app_group

@@ -277,8 +277,6 @@ class CrawlerControllerWindow(QMainWindow):
             "TARGET_DEVICE_UDID": "Unique Device Identifier (UDID) of the target Android device or emulator. Optional.",
             "NEW_COMMAND_TIMEOUT": "Seconds Appium waits for a new command before quitting the session. 0 means no timeout.",
             "APPIUM_IMPLICIT_WAIT": "Seconds Appium driver waits when trying to find elements before failing. Affects element finding strategies.",
-            "APP_PACKAGE": "Package name of the target application (e.g., com.example.app). Auto-filled by Health App Selector.",
-            "APP_ACTIVITY": "Launch activity of the target application (e.g., .MainActivity). Auto-filled by Health App Selector.",
             "DEFAULT_MODEL_TYPE": "The default Gemini model to use for AI operations.",
             "USE_CHAT_MEMORY": "Enable to allow the AI to remember previous interactions in the current session for better context.",
             "MAX_CHAT_HISTORY": "Maximum number of previous interactions to keep in AI's memory if chat memory is enabled.",

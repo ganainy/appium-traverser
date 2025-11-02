@@ -17,6 +17,16 @@ class Config:
         self._user_store = UserConfigStore()
         self._cache: Dict[str, Any] = {}
         self._env = os.environ
+        # Load .env file if it exists
+        try:
+            from dotenv import load_dotenv
+            dotenv_path = os.path.join(os.getcwd(), '.env')
+            load_dotenv(dotenv_path)
+            self._env = os.environ  # Refresh after loading
+        except ImportError:
+            logging.warning("python-dotenv not available, skipping .env loading")
+        except Exception as e:
+            logging.warning(f"Error loading .env: {e}")
         self._secrets = {"OPENROUTER_API_KEY", "GEMINI_API_KEY", "OLLAMA_BASE_URL", "MOBSF_API_KEY"}
         self._init_paths()
 
@@ -76,9 +86,7 @@ class Config:
     def XML_SNIPPET_MAX_LEN(self):
         return self.get("xml_snippet_max_len")
 
-    @property
-    def DEFAULT_MODEL_TYPE(self):
-        return self.get("default_model_type")
+    # No property for DEFAULT_MODEL_TYPE - it conflicts with the module constant
 
     @property
     def LOG_LEVEL(self):
@@ -86,7 +94,7 @@ class Config:
 
     @property
     def AI_PROVIDER(self):
-        return self.get("ai_provider")
+        return self.get("AI_PROVIDER")
 
     @property
     def USER_CONFIG_FILE_PATH(self):
@@ -100,6 +108,42 @@ class Config:
         if focus_areas:
             return [fa["area"] for fa in focus_areas if fa["enabled"]]
         return self.get("focus_areas")
+
+    @property
+    def MAX_APPS_TO_SEND_TO_AI(self):
+        return self.get("MAX_APPS_TO_SEND_TO_AI")
+
+    @property
+    def THIRD_PARTY_APPS_ONLY(self):
+        return self.get("THIRD_PARTY_APPS_ONLY")
+
+    @property
+    def USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY(self):
+        return self.get("USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY")
+
+    @property
+    def GEMINI_API_KEY(self):
+        return self.get("GEMINI_API_KEY")
+
+    @property
+    def OPENROUTER_API_KEY(self):
+        return self.get("OPENROUTER_API_KEY")
+
+    @property
+    def OLLAMA_BASE_URL(self):
+        return self.get("OLLAMA_BASE_URL")
+
+    @property
+    def DEFAULT_MODEL_TYPE(self):
+        return self.get("DEFAULT_MODEL_TYPE")
+
+    @property
+    def GEMINI_MODELS(self):
+        return self.get("GEMINI_MODELS")
+
+    @property
+    def OLLAMA_MODELS(self):
+        return self.get("OLLAMA_MODELS")
 
     def update_setting_and_save(self, key: str, value: Any, callback: Optional[Callable] = None) -> None:
         """
@@ -156,7 +200,7 @@ ALLOWED_EXTERNAL_PACKAGES = [
 
 OUTPUT_DATA_DIR = "output_data"  # This is a template name, Config class makes it a path
 SESSION_DIR = f"{{{OUTPUT_DATA_DIR_KEY}}}/{{device_id}}_{{app_package}}_{{timestamp}}"
-APP_INFO_OUTPUT_DIR = f"{{{OUTPUT_DATA_DIR_KEY}}}/app_info/{{device_id}}"
+APP_INFO_OUTPUT_DIR = f"{{{OUTPUT_DATA_DIR_KEY}}}/app_info"
 SCREENSHOTS_DIR = "{session_dir}/screenshots"
 ANNOTATED_SCREENSHOTS_DIR = "{session_dir}/annotated_screenshots"
 TRAFFIC_CAPTURE_OUTPUT_DIR = "{session_dir}/traffic_captures"

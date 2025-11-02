@@ -43,6 +43,19 @@ except ImportError:
         )
         sys.exit(1)
 
+# Shared app discovery utilities
+try:
+    from domain.app_discovery_utils import (
+        get_device_id,
+        get_app_cache_path,
+        heuristic_health_filter,
+    )
+except ImportError as e:
+    sys.stderr.write(
+        f"FATAL: Could not import app discovery utilities. Error: {e}\n"
+    )
+    sys.exit(1)
+
 # --- Try importing AI Libraries (handled via adapters) ---
 
 
@@ -98,12 +111,17 @@ DEFAULT_AI_MODEL_NAME = None
 AI_MODEL_SAFETY_SETTINGS = None
 PROVIDER_API_KEY_OR_URL = None
 
-APP_INFO_DIR = cfg.get('APP_INFO_OUTPUT_DIR') or os.path.join(
-    os.getcwd(), "app_info"
-)  # Default if None
-if not isinstance(APP_INFO_DIR, str):
-    APP_INFO_DIR = os.path.join(os.getcwd(), "app_info")  # Fallback if invalid type
-os.makedirs(APP_INFO_DIR, exist_ok=True)  # Ensure it exists
+# Build cache path same way as health_app_scanner.py for consistency
+# Note: cfg.BASE_DIR points to the config directory, api_dir is its parent (project root)
+api_dir = os.path.abspath(os.path.join(cfg.BASE_DIR, ".."))
+APP_INFO_DIR_BASE = os.path.join(
+    api_dir,
+    getattr(cfg, "OUTPUT_DATA_DIR", "output_data"),
+    "app_info"
+)
+os.makedirs(APP_INFO_DIR_BASE, exist_ok=True)  # Ensure base directory exists
+# Note: Individual device cache paths are created by get_app_cache_path()
+
 
 print("Validating AI prerequisites for filtering (using Config instance)...")
 
@@ -121,19 +139,19 @@ if not deps_ok:
 
 if CAN_ENABLE_AI_FILTERING_GLOBALLY:
     # Select models dict and required credentials per provider
-    model_type = getattr(cfg, "DEFAULT_MODEL_TYPE", None)
+    model_type = cfg.get("DEFAULT_MODEL_TYPE")
     selected_models = None
     if AI_PROVIDER == "gemini":
-        PROVIDER_API_KEY_OR_URL = getattr(cfg, "GEMINI_API_KEY", None)
-        selected_models = getattr(cfg, "GEMINI_MODELS", None)
+        PROVIDER_API_KEY_OR_URL = cfg.get("GEMINI_API_KEY")
+        selected_models = cfg.get("GEMINI_MODELS")
     elif AI_PROVIDER == "openrouter":
-        PROVIDER_API_KEY_OR_URL = getattr(cfg, "OPENROUTER_API_KEY", None)
+        PROVIDER_API_KEY_OR_URL = cfg.get("OPENROUTER_API_KEY")
         # Aliases are deprecated for OpenRouter; use DEFAULT_MODEL_TYPE as the exact model id
         selected_models = None
     elif AI_PROVIDER == "ollama":
         # For Ollama, "api_key" arg is actually the base URL
-        PROVIDER_API_KEY_OR_URL = getattr(cfg, "OLLAMA_BASE_URL", None)
-        selected_models = getattr(cfg, "OLLAMA_MODELS", None)
+        PROVIDER_API_KEY_OR_URL = cfg.get("OLLAMA_BASE_URL")
+        selected_models = cfg.get("OLLAMA_MODELS")
     else:
         print(f"Error: Unsupported AI provider: {AI_PROVIDER}.", file=sys.stderr)
         CAN_ENABLE_AI_FILTERING_GLOBALLY = False
@@ -273,73 +291,7 @@ def run_adb_command(command_list):
         return None
 
 
-def get_device_serial():
-    """Gets a unique device identifier.
 
-    Order of attempts:
-    - Use configured `TARGET_DEVICE_UDID` if present in Config
-    - Try `adb get-serialno` (fast path)
-    - Fallback to `adb devices` parsing
-    - On timeout, reattempt `adb devices` with a slightly longer timeout
-    """
-    # 1) Use configured UDID if available
-    try:
-        udid = getattr(cfg, "TARGET_DEVICE_UDID", None)
-        if isinstance(udid, str):
-            candidate = udid.strip()
-            if candidate and candidate.lower() not in ("unknown", "unknown_device", "no devices found"):
-                return re.sub(r"[^\w\-.]", "_", candidate)
-    except Exception:
-        # Ignore config lookup issues, proceed to ADB-based detection
-        pass
-
-    # 2) Try get-serialno (fast path)
-    try:
-        result = subprocess.run(
-            ["adb", "get-serialno"], capture_output=True, text=True, timeout=5
-        )
-        if (
-            result.returncode == 0
-            and result.stdout.strip()
-            and result.stdout.strip() != "unknown"
-        ):
-            device_id = result.stdout.strip()
-            return re.sub(r"[^\w\-.]", "_", device_id)
-
-        # 3) Fallback to `adb devices`
-        devices_result = subprocess.run(
-            ["adb", "devices"], capture_output=True, text=True, timeout=6
-        )
-        if devices_result.returncode == 0:
-            lines = devices_result.stdout.strip().splitlines()
-            device_lines = [
-                line for line in lines[1:] if line.strip() and "\tdevice" in line
-            ]
-            if device_lines:
-                device_id = device_lines[0].split("\t")[0].strip()
-                return re.sub(r"[^\w\-.]", "_", device_id)
-        return "unknown_device"
-    except subprocess.TimeoutExpired as e:
-        # 4) On timeout, try `adb devices` with a slightly longer timeout
-        try:
-            devices_result = subprocess.run(
-                ["adb", "devices"], capture_output=True, text=True, timeout=10
-            )
-            if devices_result.returncode == 0:
-                lines = devices_result.stdout.strip().splitlines()
-                device_lines = [
-                    line for line in lines[1:] if line.strip() and "\tdevice" in line
-                ]
-                if device_lines:
-                    device_id = device_lines[0].split("\t")[0].strip()
-                    return re.sub(r"[^\w\-.]", "_", device_id)
-        except Exception as inner_e:
-            print(f"Error getting device ID after timeout: {inner_e}", file=sys.stderr)
-        print(f"Error getting device ID: {e}", file=sys.stderr)
-        return "unknown_device"
-    except Exception as e:
-        print(f"Error getting device ID: {e}", file=sys.stderr)
-        return "unknown_device"
 
 
 def get_installed_packages(
@@ -365,74 +317,110 @@ def get_installed_packages(
 
 
 def get_app_label(package_name):
-    """Retrieves the user-facing application label (name) for a given package."""
+    """Retrieves the user-facing application label (name) for a given package.
+    
+    Tries multiple methods with fallbacks:
+    1. dumpsys package with specific patterns
+    2. pm dump for app metadata
+    3. aapt for APK metadata
+    4. PackageManager info
+    5. Fallback to package name parsing
+    """
     if not package_name:
         return None
-    path_output = run_adb_command(["shell", "pm", "path", package_name])
-    apk_path = None
-    if path_output:
-        # Find the line starting with 'package:' which contains the base APK path
-        base_apk_line = next(
-            (line for line in path_output.splitlines() if line.startswith("package:")),
-            None,
-        )
-        if base_apk_line:
-            apk_path = base_apk_line.split(":", 1)[1]
-    if apk_path:
-        aapt_command = ["shell", "aapt", "dump", "badging", apk_path]
-        aapt_output = run_adb_command(aapt_command)
-        if aapt_output:
-            label_match = re.search(
-                r"application-label(?:-[a-zA-Z_]+)*:['\"]([^'\"]+)['\"]", aapt_output
-            )
+    
+    # Method 1: Try dumpsys package first (fastest and most reliable)
+    try:
+        dumpsys_command = ["shell", "dumpsys", "package", package_name]
+        dumpsys_output = run_adb_command(dumpsys_command)
+        if dumpsys_output:
+            # Try specific patterns for application label
+            patterns = [
+                # Pattern 1: "Application label: AppName"
+                (r"^\s*Application label(?:-[a-zA-Z_]+)*:\s*(.+?)$", re.MULTILINE),
+                # Pattern 2: "label=AppName" with quotes
+                (r"label=['\"]([^'\"]+)['\"]", re.MULTILINE | re.IGNORECASE),
+                # Pattern 3: label= without quotes (be more flexible)
+                (r"label=([^\s;]+)", re.MULTILINE),
+            ]
+            
+            for pattern, flags in patterns:
+                label_match = re.search(pattern, dumpsys_output, flags)
+                if label_match:
+                    label = label_match.group(1).strip()
+                    # Filter out resource IDs (like 0x7f0a01b2)
+                    if label and not (label.startswith("0x") and len(label) > 5):
+                        return label
+    except Exception as e:
+        pass  # Continue to next method
+    
+    # Method 2: Try using pm command to get application info
+    try:
+        pm_command = ["shell", "cmd", "package", "list", "packages", "-3", "--show-versioncode"]
+        # This might not work on all devices, so use a simpler approach
+        pm_dump_command = ["shell", "pm", "dump", package_name]
+        pm_output = run_adb_command(pm_dump_command)
+        if pm_output:
+            # Look for label in pm dump output
+            label_match = re.search(r"label=([^\s;]+)", pm_output, re.IGNORECASE)
             if label_match:
-                return label_match.group(1).strip()
-            # Alternative common pattern for app label in aapt output
-            label_match_alt = re.search(
-                r"application:\s*.*?label=['\"]([^'\"]+)['\"].*?", aapt_output
+                label = label_match.group(1).strip().strip("'\"")
+                if label and not (label.startswith("0x") and len(label) > 5):
+                    return label
+    except Exception as e:
+        pass  # Continue to next method
+    
+    # Method 3: Try aapt for APK metadata (slower, only if others fail)
+    try:
+        path_output = run_adb_command(["shell", "pm", "path", package_name])
+        apk_path = None
+        if path_output:
+            # Find the line starting with 'package:' which contains the base APK path
+            base_apk_line = next(
+                (line for line in path_output.splitlines() if line.startswith("package:")),
+                None,
             )
-            if label_match_alt:
-                return label_match_alt.group(1).strip()
-
-    # Fallback to dumpsys if aapt fails or doesn't yield label
-    dumpsys_command = ["shell", "dumpsys", "package", package_name]
-    dumpsys_output = run_adb_command(dumpsys_command)
-    if dumpsys_output:
-        # More specific patterns first
-        label_match_dumpsys_specific = re.search(
-            r"^\s*Application label(?:-[a-zA-Z_]+)*:\s*(.+)$",
-            dumpsys_output,
-            re.MULTILINE | re.IGNORECASE,
-        )
-        if label_match_dumpsys_specific:
-            label = label_match_dumpsys_specific.group(1).strip()
-            if not (label.startswith("0x") and len(label) > 5):
-                return label  # Avoid raw resource IDs
-
-        label_match_dumpsys_quoted = re.search(
-            r"^\s*label=['\"]([^'\"]+)['\"]", dumpsys_output, re.MULTILINE
-        )
-        if label_match_dumpsys_quoted:
-            label = label_match_dumpsys_quoted.group(1).strip()
-            if not (label.startswith("0x") and len(label) > 5):
-                return label
-
-        # General pattern within ApplicationInfo block
-        app_info_match = re.search(
-            r"ApplicationInfo\{.*?label=([^}\s,]+).*?\}", dumpsys_output, re.DOTALL
-        )
-        if app_info_match:
-            label = app_info_match.group(1).strip()
-            if not (label.startswith("0x") and len(label) > 5):
-                return label
-
-        label_match_dumpsys_simple = re.search(
-            r"^\s*label=([^\s]+)$", dumpsys_output, re.MULTILINE
-        )
-        if label_match_dumpsys_simple:
-            label = label_match_dumpsys_simple.group(1).strip()
-            if not (label.startswith("0x") and len(label) > 5):
-                return label
+            if base_apk_line:
+                apk_path = base_apk_line.split(":", 1)[1]
+        
+        if apk_path:
+            aapt_command = ["shell", "aapt", "dump", "badging", apk_path]
+            aapt_output = run_adb_command(aapt_command)
+            if aapt_output:
+                label_match = re.search(
+                    r"application-label(?:-[a-zA-Z_]+)*:['\"]([^'\"]+)['\"]", aapt_output
+                )
+                if label_match:
+                    return label_match.group(1).strip()
+    except Exception as e:
+        pass  # Continue to next method
+    
+    # Method 4: Fallback - try to infer from package name
+    # Convert package name to a reasonable app name
+    # e.g., com.google.android.apps.fitness -> Google Fitness
+    # e.g., com.myfitnesspal.android -> MyFitnessPal
+    try:
+        parts = package_name.split('.')
+        # Remove common prefixes
+        if len(parts) > 1:
+            # Get the meaningful parts (skip 'com', 'android', 'apps', 'google', etc.)
+            meaningful_parts = []
+            skip_prefixes = {'com', 'org', 'net', 'android', 'apps', 'google', 'mozilla', 'apache'}
+            
+            for part in parts:
+                if part.lower() not in skip_prefixes and part:
+                    meaningful_parts.append(part)
+            
+            if meaningful_parts:
+                # Take the last meaningful part or join them
+                inferred_name = meaningful_parts[-1] if len(meaningful_parts) == 1 else ' '.join(meaningful_parts)
+                # Capitalize each word
+                inferred_name = ' '.join(word.capitalize() for word in inferred_name.split('_'))
+                if inferred_name:
+                    return inferred_name
+    except Exception as e:
+        pass
+    
     return None
 
 
@@ -630,12 +618,16 @@ Input JSON:
 
 def generate_app_info_cache(perform_ai_filtering_on_this_call: bool = False):
     """
-    Discovers app information, optionally filters it, and saves it.
-    Returns the path to the cache file and the list of app_info.
+    Discovers app information, always attempts AI filtering, and saves merged results.
+    Returns the path to the cache file and the app info data structure.
     """
     print(
-        f"--- Generating App Info Cache (AI filter specifically requested for this call: {perform_ai_filtering_on_this_call}) ---"
+        f"--- Generating App Info Cache (Merged all apps + AI health filtering) ---"
     )
+
+    # Always attempt AI filtering regardless of the parameter
+    perform_ai_filtering_on_this_call = True
+
     if perform_ai_filtering_on_this_call:
         # Check if the computed AI model name is available; use local DEFAULT_AI_MODEL_NAME
         # This value is resolved above based on provider and model type (including raw alias fallback).
@@ -706,7 +698,7 @@ def generate_app_info_cache(perform_ai_filtering_on_this_call: bool = False):
             # Fall back to generating the cache without AI filtering rather than failing outright
             perform_ai_filtering_on_this_call = False
 
-    device_id = get_device_serial()
+    device_id = get_device_id()
     if not device_id or device_id == "unknown_device":
         print(
             "Warning: Could not obtain a valid device ID quickly. Proceeding with ADB-based discovery attempts.",
@@ -748,49 +740,60 @@ def generate_app_info_cache(perform_ai_filtering_on_this_call: bool = False):
         if (i + 1) % 20 == 0 or (i + 1) == len(packages):  # Progress update
             print(f"  Processed {i+1}/{len(packages)} packages...")
     print(
-        f"\n--- Retrieved info for {len(all_apps_info)} apps before any explicit AI filtering for this call ---"
+        f"\n--- Retrieved info for {len(all_apps_info)} apps ---"
     )
 
-    apps_to_save = list(all_apps_info)  # Default to all apps
+    # Always store all apps
+    all_apps_data = list(all_apps_info)
+
+    # Always attempt AI filtering
+    health_apps_data = []
     ai_filter_was_effectively_applied = False
 
     if perform_ai_filtering_on_this_call:
         if not CAN_ENABLE_AI_FILTERING_GLOBALLY:
             print(
-                "Warning: AI Filtering requested for this cache generation, but it's globally unavailable (prerequisites failed). Skipping.",
+                "Warning: AI Filtering is globally unavailable (prerequisites failed). Applying heuristic filter.",
                 file=sys.stderr,
             )
+            health_apps_data = heuristic_health_filter(list(all_apps_info))
         else:
             print(
-                "Attempting AI filtering for this cache generation as requested and globally available..."
+                "Attempting AI filtering to identify health apps..."
             )
             filtered_apps_from_ai = filter_apps_with_ai(
                 list(all_apps_info)
             )  # Pass a copy
 
             if filtered_apps_from_ai is not None:
-                apps_to_save = filtered_apps_from_ai
+                health_apps_data = filtered_apps_from_ai
                 # Check if the list actually changed due to filtering
-                if len(apps_to_save) < len(all_apps_info) or (
-                    len(apps_to_save) == len(all_apps_info)
-                    and apps_to_save != all_apps_info
-                ):  # Content check if lengths are same
+                if len(health_apps_data) < len(all_apps_info):
                     ai_filter_was_effectively_applied = True
+                elif len(health_apps_data) == len(all_apps_info):
+                    # Check if content is different (e.g., names were populated)
+                    if health_apps_data != all_apps_info:
+                        ai_filter_was_effectively_applied = True
+                    else:
+                        # No effective filtering, use heuristic fallback
+                        print(
+                            "AI filtering did not reduce app list. Applying heuristic filter.",
+                            file=sys.stderr,
+                        )
+                        health_apps_data = heuristic_health_filter(list(all_apps_info))
                 print(
-                    f"AI filtering for cache resulted in {len(apps_to_save)} apps. Filter effectively applied: {ai_filter_was_effectively_applied}"
+                    f"AI filtering identified {len(health_apps_data)} health apps."
                 )
             else:  # filter_apps_with_ai might return original list on some errors, or None if very problematic
                 print(
-                    "AI filtering process returned None or an unchanged list. Using all discovered apps for safety.",
+                    "AI filtering process failed. Applying heuristic filter.",
                     file=sys.stderr,
                 )
-                apps_to_save = list(
-                    all_apps_info
-                )  # Ensure we use the original if AI func returns None
+                health_apps_data = heuristic_health_filter(list(all_apps_info))
     else:
-        print(
-            "AI Filtering not specifically requested for this cache generation call. Using all discovered apps."
-        )
+        # This should not happen anymore since we always attempt filtering
+        health_apps_data = list(all_apps_info)
+        health_apps_data = list(all_apps_info)
 
     # Add timestamp to the output
     import datetime
@@ -799,33 +802,31 @@ def generate_app_info_cache(perform_ai_filtering_on_this_call: bool = False):
     result_data = {
         "timestamp": timestamp,
         "device_id": device_id,
-        "ai_filtered": perform_ai_filtering_on_this_call
-        and ai_filter_was_effectively_applied,
-        "health_apps": apps_to_save,
+        "ai_filtered": ai_filter_was_effectively_applied,
+        "all_apps": all_apps_data,
+        "health_apps": health_apps_data,
     }
 
-    # APP_INFO_DIR is an absolute path from cfg and directory is already created
-    file_suffix = (
-        "health_filtered"
-        if perform_ai_filtering_on_this_call and ai_filter_was_effectively_applied
-        else "all"
-    )
+    # Create device-specific directory
+    APP_INFO_DIR = os.path.join(APP_INFO_DIR_BASE, device_id)
+    os.makedirs(APP_INFO_DIR, exist_ok=True)
 
-    # Use device-specific file path (declarative naming)
-    if file_suffix == "all":
-        output_filename = f"device_{device_id}_all_apps.json"
-    else:
-        output_filename = f"device_{device_id}_filtered_health_apps.json"
+    # Use merged file name for all devices
+    output_filename = f"device_{device_id}_app_info.json"
     output_path = os.path.join(APP_INFO_DIR, output_filename)
 
     print(
-        f"\n--- Saving app info to: {output_path} (Suffix based on effective filtering: {file_suffix}) ---"
+        f"\n--- Saving merged app info to: {output_path} ---"
     )
+    print(f"  - All apps: {len(all_apps_data)}")
+    print(f"  - Health apps: {len(health_apps_data)}")
+    print(f"  - AI filtering applied: {ai_filter_was_effectively_applied}")
+
     try:
-        # Save to device-specific path
+        # Save merged data to device-specific path
         with open(output_path, "w", encoding="utf-8") as f:
             json.dump(result_data, f, indent=4, ensure_ascii=False)
-        print(f"Successfully saved {len(apps_to_save)} app(s) to {output_path}")
+        print(f"Successfully saved merged app data to {output_path}")
     except IOError as e:
         print(f"Error writing to file {output_path}: {e}", file=sys.stderr)
         traceback.print_exc()
@@ -889,6 +890,18 @@ def filter_existing_app_info_file(input_filepath: str):
     else:
         new_suffix = "health_filtered"
         output_base = base  # Use original base if no known suffix
+
+    # Extract device_id from input file path if possible, otherwise get from device
+    device_id = get_device_id()
+    if not device_id or device_id == "unknown_device":
+        # Try to extract from filename pattern like device_<device_id>_...
+        match = re.search(r'device_([^_]+)_', os.path.basename(input_filepath))
+        if match:
+            device_id = match.group(1)
+
+    # Create device-specific directory for filter_existing output
+    APP_INFO_DIR = os.path.join(APP_INFO_DIR_BASE, device_id)
+    os.makedirs(APP_INFO_DIR, exist_ok=True)
 
     output_filename = f"{output_base}_{new_suffix}{ext}"
     output_filepath = os.path.join(

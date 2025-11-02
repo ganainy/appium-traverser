@@ -11,18 +11,18 @@ from cli.shared.context import CLIContext
 
 
 class ScanAllAppsCommand(CommandHandler):
-    """Scan device and cache ALL installed apps."""
-    
+    """Scan device and cache ALL installed apps with AI health filtering."""
+
     @property
     def name(self) -> str:
         """Get command name."""
         return "scan-all"
-    
+
     @property
     def description(self) -> str:
         """Get command description."""
-        return "Scan device and cache ALL installed apps (no AI filtering)"
-    
+        return "Scan device and cache ALL installed apps with AI health filtering (merged file)"
+
     def register(self, subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
         """Register the command with the argument parser."""
         parser = subparsers.add_parser(
@@ -37,7 +37,7 @@ class ScanAllAppsCommand(CommandHandler):
             help="Force rescan even if cache exists"
         )
         return parser
-    
+
     def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
         """Execute the command."""
         app_service = context.services.get("app_scan")
@@ -47,13 +47,14 @@ class ScanAllAppsCommand(CommandHandler):
                 message="App scan service not available",
                 exit_code=1
             )
-        
+
+        # Now scan_all_apps actually performs AI filtering too (merged approach)
         success, cache_path = app_service.scan_all_apps(force_rescan=args.force_rescan)
-        
+
         if success:
             return CommandResult(
                 success=True,
-                message=f"Successfully scanned all apps. Cache at: {cache_path}"
+                message=f"Successfully scanned and cached apps with AI filtering. Cache at: {cache_path}"
             )
         else:
             return CommandResult(
@@ -64,18 +65,18 @@ class ScanAllAppsCommand(CommandHandler):
 
 
 class ScanHealthAppsCommand(CommandHandler):
-    """Scan device and cache AI-filtered health apps."""
-    
+    """Scan device and cache apps with AI health filtering (alias for scan-all)."""
+
     @property
     def name(self) -> str:
         """Get command name."""
         return "scan-health"
-    
+
     @property
     def description(self) -> str:
         """Get command description."""
-        return "Scan device and cache AI-filtered health apps"
-    
+        return "Scan device and cache apps with AI health filtering (same as scan-all)"
+
     def register(self, subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
         """Register the command with the argument parser."""
         parser = subparsers.add_parser(
@@ -90,7 +91,7 @@ class ScanHealthAppsCommand(CommandHandler):
             help="Force rescan even if cache exists"
         )
         return parser
-    
+
     def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
         """Execute the command."""
         app_service = context.services.get("app_scan")
@@ -100,35 +101,36 @@ class ScanHealthAppsCommand(CommandHandler):
                 message="App scan service not available",
                 exit_code=1
             )
-        
+
+        # Use the same scan method as scan-all (both perform AI filtering now)
         success, cache_path = app_service.scan_health_apps(force_rescan=args.force_rescan)
-        
+
         if success:
             return CommandResult(
                 success=True,
-                message=f"Successfully scanned health apps. Cache at: {cache_path}"
+                message=f"Successfully scanned apps with AI health filtering. Cache at: {cache_path}"
             )
         else:
             return CommandResult(
                 success=False,
-                message="Failed to scan health apps",
+                message="Failed to scan apps",
                 exit_code=1
             )
 
 
 class ListAllAppsCommand(CommandHandler):
-    """List ALL apps from the latest cache."""
-    
+    """List ALL apps from the latest merged cache."""
+
     @property
     def name(self) -> str:
         """Get command name."""
         return "list-all"
-    
+
     @property
     def description(self) -> str:
         """Get command description."""
-        return "List ALL apps from the latest cache"
-    
+        return "List ALL apps from the latest merged cache"
+
     def register(self, subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
         """Register the command with the argument parser."""
         parser = subparsers.add_parser(
@@ -138,7 +140,7 @@ class ListAllAppsCommand(CommandHandler):
         )
         self.add_common_arguments(parser)
         return parser
-    
+
     def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
         """Execute the command."""
         app_service = context.services.get("app_scan")
@@ -148,35 +150,52 @@ class ListAllAppsCommand(CommandHandler):
                 message="App scan service not available",
                 exit_code=1
             )
-        
+
+        # Get the latest merged cache file
         cache_path = app_service.resolve_latest_cache_file("all")
         if not cache_path:
-            print("No all-apps cache found. Run 'apps scan-all' first.")
+            print("No app cache found. Run 'apps scan-all' or 'apps scan-health' first.")
             return CommandResult(
                 success=False,
-                message="No all-apps cache found",
+                message="No app cache found",
                 exit_code=1
             )
-        
-        success, apps = app_service.load_apps_from_file(cache_path)
-        if not success:
+
+        # Load all_apps from the merged file by directly reading it
+        import json
+        try:
+            with open(cache_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            if isinstance(data, dict) and "all_apps" in data and isinstance(data["all_apps"], list):
+                apps = data["all_apps"]
+            else:
+                # Fallback to default loading (health_apps)
+                success, apps = app_service.load_apps_from_file(cache_path)
+                if not success:
+                    return CommandResult(
+                        success=False,
+                        message="Failed to load apps from cache",
+                        exit_code=1
+                    )
+        except Exception as e:
             return CommandResult(
                 success=False,
-                message="Failed to load apps from cache",
+                message=f"Failed to load apps from cache: {e}",
                 exit_code=1
             )
-        
+
         if not apps:
             print("No apps found in cache.")
             return CommandResult(success=True, message="No apps found")
-        
+
         print(f"\n=== All Apps ({len(apps)}) ===")
         for i, app in enumerate(apps):
             name = app.get("app_name", "Unknown")
             package = app.get("package_name", "Unknown")
             print(f"{i+1:2d}. {name} ({package})")
         print("========================")
-        
+
         return CommandResult(
             success=True,
             message=f"Listed {len(apps)} apps"
@@ -216,23 +235,51 @@ class ListHealthAppsCommand(CommandHandler):
                 exit_code=1
             )
         
-        apps = app_service.get_current_health_apps()
-        
-        if not apps:
-            print("No health apps found. Run 'apps scan-health' first.")
+        # Get health apps from the merged cache file
+        cache_path = app_service.resolve_latest_cache_file("health")
+        if not cache_path:
+            print("No app cache found. Run 'apps scan-all' or 'apps scan-health' first.")
             return CommandResult(
                 success=False,
-                message="No health apps found",
+                message="No app cache found",
                 exit_code=1
             )
-        
+
+        # Load health_apps from the merged file by directly reading it
+        import json
+        try:
+            with open(cache_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            if isinstance(data, dict) and "health_apps" in data and isinstance(data["health_apps"], list):
+                apps = data["health_apps"]
+            else:
+                # Fallback to default loading
+                success, apps = app_service.load_apps_from_file(cache_path)
+                if not success:
+                    return CommandResult(
+                        success=False,
+                        message="Failed to load apps from cache",
+                        exit_code=1
+                    )
+        except Exception as e:
+            return CommandResult(
+                success=False,
+                message=f"Failed to load apps from cache: {e}",
+                exit_code=1
+            )
+
+        if not apps:
+            print("No health apps found in cache.")
+            return CommandResult(success=True, message="No health apps found")
+
         print(f"\n=== Health Apps ({len(apps)}) ===")
         for i, app in enumerate(apps):
             name = app.get("app_name", "Unknown")
             package = app.get("package_name", "Unknown")
             print(f"{i+1:2d}. {name} ({package})")
         print("==========================")
-        
+
         return CommandResult(
             success=True,
             message=f"Listed {len(apps)} health apps"
