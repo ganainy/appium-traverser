@@ -1,5 +1,7 @@
 import sqlite3
 import os
+import json
+import logging
 from typing import Any, List, Dict, Optional
 from platformdirs import user_config_dir
 
@@ -16,11 +18,52 @@ class UserConfigStore:
     def _init_db(self):
         conn = self._conn
         conn.execute("PRAGMA journal_mode=WAL;")
+        
+        # Check if the table exists and has the old CHECK constraint
+        try:
+            cur = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='user_preferences'"
+            )
+            existing_table_sql = cur.fetchone()
+            
+            if existing_table_sql and "CHECK" in existing_table_sql[0]:
+                # Old schema with CHECK constraint detected - need to recreate the table
+                try:
+                    # Backup existing data
+                    conn.execute(
+                        "CREATE TABLE user_preferences_backup AS SELECT * FROM user_preferences"
+                    )
+                    # Drop old table
+                    conn.execute("DROP TABLE user_preferences")
+                    # Create new table without CHECK constraint
+                    conn.execute("""
+                        CREATE TABLE user_preferences (
+                            key TEXT PRIMARY KEY,
+                            value TEXT NOT NULL,
+                            type TEXT NOT NULL,
+                            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        );
+                    """)
+                    # Restore data from backup
+                    conn.execute(
+                        "INSERT INTO user_preferences SELECT * FROM user_preferences_backup"
+                    )
+                    # Clean up backup
+                    conn.execute("DROP TABLE user_preferences_backup")
+                    conn.commit()
+                    logging.info("Successfully migrated user_preferences table schema")
+                except Exception as e:
+                    logging.error(f"Error migrating schema: {e}")
+                    conn.rollback()
+        except Exception as e:
+            logging.debug(f"Could not check for schema migration: {e}")
+        
+        # Create table if it doesn't exist (for fresh databases)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS user_preferences (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL,
-                type TEXT NOT NULL CHECK (type IN ('str', 'int', 'float', 'bool')),
+                type TEXT NOT NULL,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         """)
@@ -82,6 +125,11 @@ class UserConfigStore:
             return float(value)
         elif type_ == 'bool':
             return value.lower() == 'true'
+        elif type_ == 'json':
+            try:
+                return json.loads(value)
+            except (json.JSONDecodeError, ValueError):
+                return value
         return value
 
     def _infer_type(self, value: Any) -> str:
@@ -91,11 +139,15 @@ class UserConfigStore:
             return 'int'
         elif isinstance(value, float):
             return 'float'
+        elif isinstance(value, (dict, list)):
+            return 'json'
         return 'str'
 
     def _to_storage_str(self, value: Any, type_: str) -> str:
         if type_ == 'bool':
             return 'true' if value else 'false'
+        elif type_ == 'json':
+            return json.dumps(value)
         return str(value)
     
     
