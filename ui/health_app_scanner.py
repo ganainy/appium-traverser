@@ -1139,6 +1139,21 @@ class HealthAppScanner(QObject):
             # Set the current index to restore last selection
             self.main_controller.health_app_dropdown.setCurrentIndex(selected_index)
             
+            # If a last selected app was restored (selected_index > 0), trigger the selection callback
+            # to ensure APP_PACKAGE and APP_ACTIVITY are populated in the config
+            if selected_index > 0:
+                try:
+                    self.main_controller.config_manager._on_health_app_selected(selected_index)
+                    self.main_controller.log_message(
+                        f"Restored last selected app at index {selected_index}",
+                        "blue"
+                    )
+                except Exception as e:
+                    self.main_controller.log_message(
+                        f"Error restoring last selected app: {e}",
+                        "orange"
+                    )
+            
             self.main_controller.log_message(
                 f"Dropdown population complete: {valid_items_count} valid items, {invalid_items_count} skipped",
                 "green"

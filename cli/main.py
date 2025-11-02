@@ -97,6 +97,7 @@ def _register_commands(registry: CommandRegistry) -> None:
             device,
             focus,
             openrouter,
+            packages,
             services_check,
             switch_provider
         )
@@ -116,6 +117,7 @@ def _register_commands(registry: CommandRegistry) -> None:
         focus_group = focus.FocusCommandGroup()
         openrouter_group = openrouter.OpenRouterCommandGroup()
         analysis_group = analysis.AnalysisCommandGroup()
+        packages_group = packages.PackagesCommandGroup()
 
         # Register groups instead of individual commands
         registry.add_group(device_group)
@@ -124,6 +126,7 @@ def _register_commands(registry: CommandRegistry) -> None:
         registry.add_group(focus_group)
         registry.add_group(openrouter_group)
         registry.add_group(analysis_group)
+        registry.add_group(packages_group)
 
         logging.debug(f"Registered {len(registry.groups)} groups and {len(registry.standalone_commands)} standalone commands.")
 

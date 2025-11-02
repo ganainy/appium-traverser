@@ -205,6 +205,14 @@ class ConfigManager(QObject):
 
     def _get_widget_value(self, key: str, widget: QWidget) -> Any:
         """Extracts the value from a given widget."""
+        # Handle AllowedPackagesWidget
+        try:
+            from ui.allowed_packages_widget import AllowedPackagesWidget
+            if isinstance(widget, AllowedPackagesWidget):
+                return widget.get_packages()
+        except ImportError:
+            pass
+        
         if isinstance(widget, QLineEdit):
             return widget.text()
         elif isinstance(widget, QLabel):
@@ -229,12 +237,26 @@ class ConfigManager(QObject):
         # Try to load all config keys from Config (which uses SQLite and env)
         loaded_any = False
         for key, widget in self.main_controller.config_widgets.items():
-            if key in ['IMAGE_CONTEXT_WARNING']:
+            if key in ['IMAGE_CONTEXT_WARNING', 'ALLOWED_EXTERNAL_PACKAGES_WIDGET']:
                 continue
             value = self.config.get(key, None)
             if value is not None:
                 loaded_any = True
                 try:
+                    # Handle AllowedPackagesWidget
+                    try:
+                        from ui.allowed_packages_widget import AllowedPackagesWidget
+                        if isinstance(widget, AllowedPackagesWidget):
+                            if isinstance(value, list):
+                                # Clean corrupted entries before setting
+                                cleaned = [v for v in value if isinstance(v, str) and not (v.strip().startswith('[') or v.strip().startswith('{'))]
+                                if cleaned != value:
+                                    logging.warning(f"Cleaned corrupted packages data: removed {len(value) - len(cleaned)} items")
+                                widget.set_packages(cleaned if cleaned else value)
+                            continue
+                    except ImportError:
+                        pass
+                    
                     if isinstance(widget, QLineEdit):
                         widget.setText(str(value))
                     elif isinstance(widget, QLabel):
@@ -347,8 +369,18 @@ class ConfigManager(QObject):
         """Connect all config widgets to auto-save on change."""
         for key, widget in self.main_controller.config_widgets.items():
             # Skip UI indicator widgets that aren't actual config settings
-            if key in ['IMAGE_CONTEXT_WARNING']:
+            if key in ['IMAGE_CONTEXT_WARNING', 'ALLOWED_EXTERNAL_PACKAGES_WIDGET']:
                 continue
+            
+            # Skip AllowedPackagesWidget - it has its own signal-based save mechanism
+            try:
+                from ui.allowed_packages_widget import AllowedPackagesWidget
+                if isinstance(widget, AllowedPackagesWidget):
+                    # Connect the widget's packages_changed signal to save
+                    widget.packages_changed.connect(lambda packages: self.save_config(key='ALLOWED_EXTERNAL_PACKAGES'))
+                    continue
+            except ImportError:
+                pass
                 
             # Create a lambda that captures the current key
             save_lambda = lambda *args, k=key: self.save_config(key=k)

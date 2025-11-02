@@ -1474,21 +1474,14 @@ class UIComponents:
             label_visual_similarity, config_widgets["VISUAL_SIMILARITY_THRESHOLD"]
         )
 
-        # Allowed External Packages
-        config_widgets["ALLOWED_EXTERNAL_PACKAGES"] = QTextEdit()
-        config_widgets["ALLOWED_EXTERNAL_PACKAGES"].setPlaceholderText(
-            "com.example.package1\\ncom.example.package2"
-        )
-        config_widgets["ALLOWED_EXTERNAL_PACKAGES"].setFixedHeight(80)
-        label_allowed_external_packages = QLabel(
-            "Allowed External Packages (one per line): "
-        )
-        label_allowed_external_packages.setToolTip(
-            tooltips["ALLOWED_EXTERNAL_PACKAGES"]
-        )
-        crawler_layout.addRow(
-            label_allowed_external_packages, config_widgets["ALLOWED_EXTERNAL_PACKAGES"]
-        )
+        # Allowed External Packages - Use dedicated widget with CRUD support
+        from ui.allowed_packages_widget import AllowedPackagesWidget
+        from config.config import Config
+        config = Config()
+        config_widgets["ALLOWED_EXTERNAL_PACKAGES_WIDGET"] = AllowedPackagesWidget(config)
+        # Store a reference to the widget for compatibility with config manager
+        config_widgets["ALLOWED_EXTERNAL_PACKAGES"] = config_widgets["ALLOWED_EXTERNAL_PACKAGES_WIDGET"]
+        crawler_layout.addRow(config_widgets["ALLOWED_EXTERNAL_PACKAGES_WIDGET"])
 
         layout.addRow(crawler_group)
         return crawler_group

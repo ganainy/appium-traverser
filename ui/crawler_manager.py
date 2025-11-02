@@ -221,7 +221,7 @@ class CrawlerManager(QObject):
             issues.append("❌ Appium server is not running or not accessible")
         
         # 2. Check Ollama (if selected as AI provider)
-        ai_provider = getattr(self.config, 'AI_PROVIDER', 'gemini').lower()
+        ai_provider = self.config.get('AI_PROVIDER', 'gemini').lower()
         if ai_provider == 'ollama':
             if not self._check_ollama_service():
                 issues.append("❌ Ollama service is not running")
@@ -232,7 +232,7 @@ class CrawlerManager(QObject):
         warnings.extend(api_warnings)
         
         # 4. Check target app is selected
-        if not getattr(self.config, 'APP_PACKAGE', None):
+        if not self.config.get('APP_PACKAGE', None):
             issues.append("❌ No target app selected")
         
         # Combine issues and warnings for display
@@ -243,7 +243,7 @@ class CrawlerManager(QObject):
     def _check_appium_server(self) -> bool:
         """Check if Appium server is running and accessible."""
         try:
-            appium_url = getattr(self.config, 'APPIUM_SERVER_URL', 'http://127.0.0.1:4723')
+            appium_url = self.config.get('APPIUM_SERVER_URL', 'http://127.0.0.1:4723')
             response = requests.get(f"{appium_url}/status", timeout=3)
             if response.status_code == 200:
                 status_data = response.json()
@@ -257,7 +257,7 @@ class CrawlerManager(QObject):
     def _check_mobsf_server(self) -> bool:
         """Check if MobSF server is running and accessible."""
         try:
-            mobsf_url = getattr(self.config, 'MOBSF_API_URL', 'http://localhost:8000/api/v1')
+            mobsf_url = self.config.get('MOBSF_API_URL', 'http://localhost:8000/api/v1')
             # Try to connect to MobSF API with shorter timeout
             response = requests.get(f"{mobsf_url}/server_status", timeout=3)
             if response.status_code == 200:
@@ -270,7 +270,7 @@ class CrawlerManager(QObject):
     def _check_ollama_service(self) -> bool:
         """Check if Ollama service is running using HTTP API first, then subprocess fallback."""
         # First try HTTP API check (fast and non-blocking)
-        ollama_url = getattr(self.config, 'OLLAMA_BASE_URL', 'http://localhost:11434')
+        ollama_url = self.config.get('OLLAMA_BASE_URL', 'http://localhost:11434')
         
         try:
             # Try to connect to Ollama API endpoint with shorter timeout
@@ -313,28 +313,28 @@ class CrawlerManager(QObject):
         """
         issues = []
         warnings = []
-        ai_provider = getattr(self.config, 'AI_PROVIDER', 'gemini').lower()
+        ai_provider = self.config.get('AI_PROVIDER', 'gemini').lower()
         
         if ai_provider == 'gemini':
-            if not getattr(self.config, 'GEMINI_API_KEY', None):
+            if not self.config.get('GEMINI_API_KEY', None):
                 issues.append("❌ Gemini API key is not set (check GEMINI_API_KEY in .env file)")
         
         elif ai_provider == 'openrouter':
-            if not getattr(self.config, 'OPENROUTER_API_KEY', None):
+            if not self.config.get('OPENROUTER_API_KEY', None):
                 issues.append("❌ OpenRouter API key is not set (check OPENROUTER_API_KEY in .env file)")
         
         elif ai_provider == 'ollama':
-            if not getattr(self.config, 'OLLAMA_BASE_URL', None):
+            if not self.config.get('OLLAMA_BASE_URL', None):
                 warnings.append("⚠️ Ollama base URL not set (using default localhost:11434)")
         
         # Check PCAPdroid API key if traffic capture is enabled
-        if getattr(self.config, 'ENABLE_TRAFFIC_CAPTURE', False):
-            if not getattr(self.config, 'PCAPDROID_API_KEY', None):
+        if self.config.get('ENABLE_TRAFFIC_CAPTURE', False):
+            if not self.config.get('PCAPDROID_API_KEY', None):
                 issues.append("❌ PCAPdroid API key is not set (check PCAPDROID_API_KEY in .env file)")
         
         # Check MobSF API key if MobSF analysis is enabled
-        if getattr(self.config, 'ENABLE_MOBSF_ANALYSIS', False):
-            if not getattr(self.config, 'MOBSF_API_KEY', None):
+        if self.config.get('ENABLE_MOBSF_ANALYSIS', False):
+            if not self.config.get('MOBSF_API_KEY', None):
                 issues.append("❌ MobSF API key is not set (check MOBSF_API_KEY in .env file)")
         
         return issues, warnings
@@ -359,7 +359,7 @@ class CrawlerManager(QObject):
             "appium": {"running": False, "message": "Appium server status unknown", "required": True},
             "ollama": {"running": False, "message": "Ollama service status unknown", "required": False},
             "api_keys": {"running": False, "message": "API keys status unknown", "required": True},
-            "app_selected": {"running": bool(getattr(self.config, 'APP_PACKAGE', None)), "message": f"App selected: {getattr(self.config, 'APP_PACKAGE', 'None')}", "required": True}
+            "app_selected": {"running": bool(self.config.get('APP_PACKAGE', None)), "message": f"App selected: {self.config.get('APP_PACKAGE', 'None')}", "required": True}
         }
     
     def update_progress(self):
@@ -379,7 +379,7 @@ class CrawlerManager(QObject):
         self.main_controller.log_message("🚀 Starting crawler...", 'blue')
 
         # Check if app package is selected
-        app_package = getattr(self.config, 'APP_PACKAGE', None)
+        app_package = self.config.get('APP_PACKAGE', None)
         if not app_package:
             self.main_controller.log_message(
                 "ERROR: No target app selected. Please scan for and select a health app before starting the crawler.",
@@ -510,7 +510,7 @@ class CrawlerManager(QObject):
                 )
                 return
                 
-        ai_provider = getattr(self.config, 'AI_PROVIDER', 'gemini').lower()
+        ai_provider = self.config.get('AI_PROVIDER', 'gemini').lower()
         deps_installed, error_msg = check_dependencies(ai_provider)
         
         if not deps_installed:
@@ -523,7 +523,10 @@ class CrawlerManager(QObject):
         # Continue with the rest of the start_crawler logic
         # Ensure output session directories are created just-in-time for this run
         try:
-            self.config._resolve_all_paths(create_session_dirs=True)
+            output_dir = self.config.get('OUTPUT_DATA_DIR', 'output_data')
+            if output_dir and not os.path.exists(output_dir):
+                os.makedirs(output_dir, exist_ok=True)
+                self.main_controller.log_message(f"Created output directory: {output_dir}", 'blue')
         except Exception as e:
             self.main_controller.log_message(f"ERROR: Failed to prepare output directories: {e}", 'red')
             return

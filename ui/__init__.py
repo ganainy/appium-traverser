@@ -7,6 +7,7 @@ from ui.crawler_manager import CrawlerManager
 from ui.health_app_scanner import HealthAppScanner
 from ui.mobsf_ui_manager import MobSFUIManager
 from ui.utils import update_screenshot
+from ui.allowed_packages_widget import AllowedPackagesWidget
 
 __all__ = [
     'UIComponents',
@@ -14,5 +15,6 @@ __all__ = [
     'CrawlerManager',
     'HealthAppScanner',
     'MobSFUIManager',
-    'update_screenshot'
+    'update_screenshot',
+    'AllowedPackagesWidget'
 ]
