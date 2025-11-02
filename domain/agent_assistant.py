@@ -98,23 +98,6 @@ class AgentAssistant:
         
         # Initialize LangChain components for orchestration
         self._init_langchain_components()
-        
-        # Cache and history settings
-        self.use_chat = self.cfg.USE_CHAT_MEMORY
-        if self.use_chat is None:
-            logging.warning("USE_CHAT_MEMORY not in app_config, defaulting to False.")
-            self.use_chat = False
-        
-        if self.use_chat:
-            self.max_history = self.cfg.MAX_CHAT_HISTORY
-            if self.max_history is None:
-                logging.warning("MAX_CHAT_HISTORY not in app_config, defaulting to 10.")
-                self.max_history = 10
-            logging.debug(f"Chat memory enabled (max history: {self.max_history} exchanges)")
-            # Initialize chat history
-            self.chat_history = {}
-        else:
-            logging.debug("Chat memory is disabled.")
 
         self.ai_interaction_readable_logger = None
 

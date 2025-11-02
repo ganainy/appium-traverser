@@ -24,8 +24,6 @@ class TestMCPRouting:
         config.AI_PROVIDER = "gemini"
         config.GEMINI_API_KEY = "test_key"
         config.DEFAULT_MODEL_TYPE = "gemini-2.5-flash-image"
-        config.USE_CHAT_MEMORY = False
-        config.MAX_CHAT_HISTORY = 10
         config.LONG_PRESS_MIN_DURATION_MS = 600
         config.FOCUS_AREAS = []
         return config

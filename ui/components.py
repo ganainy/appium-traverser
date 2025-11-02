@@ -467,8 +467,6 @@ class UIComponents:
         "NEW_COMMAND_TIMEOUT": True,
         "APPIUM_IMPLICIT_WAIT": True,
         "DEFAULT_MODEL_TYPE": False,
-        "USE_CHAT_MEMORY": True,
-        "MAX_CHAT_HISTORY": True,
         "XML_SNIPPET_MAX_LEN": True,
         "STABILITY_WAIT": True,
         "VISUAL_SIMILARITY_THRESHOLD": True,
@@ -1073,17 +1071,6 @@ class UIComponents:
         image_context_layout.addWidget(config_widgets["IMAGE_CONTEXT_WARNING"])
         image_context_layout.addStretch()
         ai_layout.addRow(image_context_layout)
-
-        config_widgets["USE_CHAT_MEMORY"] = QCheckBox()
-        label_use_chat_memory = QLabel("Use Chat Memory: ")
-        label_use_chat_memory.setToolTip(tooltips["USE_CHAT_MEMORY"])
-        ai_layout.addRow(label_use_chat_memory, config_widgets["USE_CHAT_MEMORY"])
-
-        config_widgets["MAX_CHAT_HISTORY"] = QSpinBox()
-        config_widgets["MAX_CHAT_HISTORY"].setRange(0, 100)
-        label_max_chat_history = QLabel("Max Chat History: ")
-        label_max_chat_history.setToolTip(tooltips["MAX_CHAT_HISTORY"])
-        ai_layout.addRow(label_max_chat_history, config_widgets["MAX_CHAT_HISTORY"])
 
         config_widgets["XML_SNIPPET_MAX_LEN"] = QSpinBox()
         config_widgets["XML_SNIPPET_MAX_LEN"].setRange(5000, 500000)

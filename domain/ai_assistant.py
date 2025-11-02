@@ -215,25 +215,7 @@ class AIAssistant:
             if self.processed_safety_settings:
                 logging.debug(f"Applied safety settings: {self.processed_safety_settings}")
 
-            self.use_chat = self.cfg.USE_CHAT_MEMORY
-            if self.use_chat is None:
-                logging.warning("USE_CHAT_MEMORY not in app_config, defaulting to False.")
-                self.use_chat = False
-            if self.use_chat:
-                try:
-                    self.chat = self.model.start_chat(history=[]) # type: ignore
-                    self.max_history = self.cfg.MAX_CHAT_HISTORY
-                    if self.max_history is None:
-                        logging.warning("MAX_CHAT_HISTORY not in app_config, defaulting to 10.")
-                        self.max_history = 10
-                    logging.debug(f"Chat memory enabled (max history: {self.max_history} exchanges)")
-                except Exception as e:
-                    logging.warning(f"Failed to initialize chat: {e}. Disabling chat memory.")
-                    self.chat = None # type: ignore
-                    self.use_chat = False
-            else:
-                self.chat = None # type: ignore
-                logging.debug("Chat memory is disabled.")
+            self.chat = None  # Chat memory is not supported; AI decides independently
 
             self.ai_interaction_readable_logger = None # Human-readable companion logger
 
@@ -640,15 +622,8 @@ Based on this feedback, you MUST choose a different action to avoid getting stuc
             logging.debug("Requesting AI generation with structured JSON...")
 
             try:
-                if self.use_chat and self.chat:
-                    response = self.chat.send_message(content_for_api)
-                    if len(self.chat.history) > self.max_history * 2 and self.max_history > 0:
-                        num_pairs_to_trim = (len(self.chat.history) // 2) - self.max_history
-                        if num_pairs_to_trim > 0:
-                            self.chat.history = self.chat.history[2 * num_pairs_to_trim:]
-                            logging.debug(f"Trimmed chat history to ~{len(self.chat.history)//2} exchanges.")
-                else:
-                    response = self.model.generate_content(content_for_api)
+                # Chat memory is not supported; AI decides independently
+                response = self.model.generate_content(content_for_api)
 
                 elapsed_time = time.time() - start_time
                 total_tokens = 0

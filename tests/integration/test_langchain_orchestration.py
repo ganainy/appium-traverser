@@ -29,8 +29,6 @@ class TestLangChainOrchestrationIntegration:
         config.MCP_REQUEST_TIMEOUT = 10.0
         config.MCP_MAX_RETRIES = 2
         config.DEFAULT_MODEL_TYPE = "gemini-2.5-flash-image"
-        config.USE_CHAT_MEMORY = False
-        config.MAX_CHAT_HISTORY = 10
         config.LONG_PRESS_MIN_DURATION_MS = 600
         config.FOCUS_AREAS = []
         config.ENABLE_IMAGE_CONTEXT = False  # Disable for integration testing

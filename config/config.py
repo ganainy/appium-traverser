@@ -232,8 +232,6 @@ USE_COORDINATE_FALLBACK = True
 
 AI_PROVIDER = "gemini"  # Available providers: 'gemini', 'openrouter', 'ollama'
 DEFAULT_MODEL_TYPE = "gemini-2.5-flash-image"
-USE_CHAT_MEMORY = False
-MAX_CHAT_HISTORY = 10
 ENABLE_IMAGE_CONTEXT = False
 XML_SNIPPET_MAX_LEN = 15000
 MAX_APPS_TO_SEND_TO_AI = 200
