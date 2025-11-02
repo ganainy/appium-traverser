@@ -6,13 +6,16 @@ This test verifies that the core layer maintains expected interface contracts
 and behaves consistently across different usage scenarios.
 """
 
+
 import pytest
 from typing import Dict, Any
 from unittest.mock import patch
+from core.crawler import CrawlerSession
+from core.parser import ParsedData
 
 def test_configuration_contract():
     """Test Configuration class maintains its contract."""
-    from traverser_ai_api.core.config import Configuration
+    from core.config import Configuration
 
     # Test constructor contract
     config = Configuration(
@@ -55,8 +58,8 @@ def test_configuration_contract():
 
 def test_crawler_session_contract():
     """Test CrawlerSession class maintains its contract."""
-    from traverser_ai_api.core.crawler import CrawlerSession
-    from traverser_ai_api.core.config import Configuration
+    from core.crawler import CrawlerSession
+    from core.config import Configuration
 
     config = Configuration(
         name="Test Config",
@@ -108,7 +111,7 @@ def test_crawler_session_contract():
 
 def test_parsed_data_contract():
     """Test ParsedData class maintains its contract."""
-    from traverser_ai_api.core.parser import ParsedData
+    from core.parser import ParsedData
 
     # Test constructor contract
     data = ParsedData(
@@ -149,8 +152,8 @@ def test_parsed_data_contract():
 
 def test_storage_contract():
     """Test Storage class maintains its contract."""
-    from traverser_ai_api.core.storage import Storage
-    from traverser_ai_api.core.config import Configuration
+    from core.storage import Storage
+    from core.config import Configuration
     import tempfile
     import os
     import time
@@ -183,14 +186,12 @@ def test_storage_contract():
         assert retrieved.config_id == config.config_id
 
         # Test session operations contract
-        from traverser_ai_api.core.crawler import CrawlerSession
         session = CrawlerSession(config, "test-session")
 
         assert hasattr(storage, 'save_session')
         storage.save_session(session)
 
         # Test parsed data operations contract
-        from traverser_ai_api.core.parser import ParsedData
         parsed_data = ParsedData(
             session_id="test-session",
             element_type="button",
@@ -216,8 +217,8 @@ def test_storage_contract():
 
 def test_crawler_contract():
     """Test Crawler class maintains its contract."""
-    from traverser_ai_api.core.crawler import Crawler
-    from traverser_ai_api.core.config import Configuration
+    from core.crawler import Crawler
+    from core.config import Configuration
 
     config = Configuration(
         name="Test Config",
@@ -245,7 +246,7 @@ def test_crawler_contract():
 
 def test_parser_contract():
     """Test parser module maintains its contract."""
-    from traverser_ai_api.core.parser import parse_raw_data
+    from core.parser import parse_raw_data
 
     # Test function contract
     assert callable(parse_raw_data)
@@ -270,32 +271,32 @@ def test_parser_contract():
 def test_core_module_imports_contract():
     """Test that all core modules can be imported and have expected exports."""
     # Test config module
-    from traverser_ai_api import core
+    import core
     assert hasattr(core, 'config')
-    from traverser_ai_api.core import config
+    from core import config
     assert hasattr(config, 'Configuration')
 
     # Test storage module
     assert hasattr(core, 'storage')
-    from traverser_ai_api.core import storage
+    from core import storage
     assert hasattr(storage, 'Storage')
 
     # Test crawler module
     assert hasattr(core, 'crawler')
-    from traverser_ai_api.core import crawler
+    from core import crawler
     assert hasattr(crawler, 'Crawler')
     assert hasattr(crawler, 'CrawlerSession')
 
     # Test parser module
     assert hasattr(core, 'parser')
-    from traverser_ai_api.core import parser
+    from core import parser
     assert hasattr(parser, 'ParsedData')
     assert hasattr(parser, 'parse_raw_data')
 
 def test_error_handling_contract():
     """Test that error handling maintains contract across core modules."""
-    from traverser_ai_api.core.config import Configuration
-    from traverser_ai_api.core.parser import ParsedData
+    from core.config import Configuration
+    from core.parser import ParsedData
 
     # Test Configuration error contract
     config = Configuration(
@@ -319,7 +320,7 @@ def test_error_handling_contract():
 
 def test_backward_compatibility_contract():
     """Test that core APIs maintain backward compatibility."""
-    from traverser_ai_api.core.config import Configuration
+    from core.config import Configuration
 
     # Test that old-style instantiation still works
     config = Configuration(

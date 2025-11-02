@@ -11,11 +11,10 @@ import pytest
 
 # Add project root to path for imports
 project_root = Path(__file__).resolve().parent.parent.parent.parent
-if str(project_root) not in sys.path:
-    sys.path.insert(0, str(project_root))
+sys.path.insert(0, str(project_root))
 
 try:
-    from traverser_ai_api.cli.commands.crawler import (
+    from cli.commands.crawler import (
         StartCrawlerCommand,
         StopCrawlerCommand,
         PauseCrawlerCommand,
@@ -23,8 +22,8 @@ try:
         StatusCrawlerCommand,
         CrawlerCommandGroup
     )
-    from traverser_ai_api.cli.commands.base import CommandResult
-    from traverser_ai_api.cli.shared.context import CLIContext
+    from cli.commands.base import CommandResult
+    from cli.shared.context import CLIContext
 except ImportError as e:
     pytest.skip(f"Crawler command modules not available: {e}", allow_module_level=True)
 

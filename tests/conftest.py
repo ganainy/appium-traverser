@@ -1,5 +1,8 @@
 """
-Shared fixtures for pytest tests.
+This file provides shared pytest fixtures for the test suite. It includes:
+- Temporary directory and configuration fixtures for test isolation.
+- Project root path setup for import resolution.
+- Conditional imports and mocks for CLI and config dependencies.
 """
 
 import os
@@ -20,8 +23,8 @@ if str(project_root) not in sys.path:
 
 # Try to import from traverser_ai_api package first, but delay Config import to fixture
 try:
-    from traverser_ai_api.cli.shared.context import CLIContext, ServiceRegistry
-    from traverser_ai_api.utils import LoggerManager
+    from cli.shared.context import CLIContext, ServiceRegistry
+    from utils.utils import LoggerManager
     CLI_AVAILABLE = True
 except ImportError:
     CLIContext = None  # type: ignore
@@ -51,7 +54,7 @@ def temp_dir() -> Generator[Path, None, None]:
 @pytest.fixture
 def mock_config(temp_dir: Path) -> Mock:
     """Create a mock configuration object."""
-    from traverser_ai_api.config import Config
+    from config.config import Config
     config = Mock(spec=Config)
     config.APP_PACKAGE = "com.example.testapp"
     config.APP_ACTIVITY = "com.example.testapp.MainActivity"

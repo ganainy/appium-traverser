@@ -2,7 +2,7 @@
 Unit tests for core Configuration class.
 """
 import pytest
-from traverser_ai_api.core.config import Configuration
+from core.config import Configuration
 
 
 class TestConfiguration:

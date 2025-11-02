@@ -1,8 +1,8 @@
 """
 CLI command to switch AI provider at runtime.
 """
-from traverser_ai_api.cli.commands.base import CommandHandler, CommandResult
-from traverser_ai_api.cli.shared.context import CLIContext
+from cli.commands.base import CommandHandler, CommandResult
+from cli.shared.context import CLIContext
 
 class SwitchProviderCommand(CommandHandler):
     """Switch the AI provider and reload config at runtime."""

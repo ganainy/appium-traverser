@@ -3,15 +3,15 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "traverser-ai-api"
+name = "traverser"
 version = "0.1.0"
 
 [project.scripts]
-run-cli = "traverser_ai_api.cli:run"
+run-cli = "cli:run"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["traverser_ai_api*"]
+include = ["cli*", "core*", "domain*", "config*", "utils*"]
 
 [tool.pytest.ini_options]
 minversion = "6.0"
@@ -27,4 +27,4 @@ markers = [
 profile = "black"
 multi_line_output = 3
 line_length = 120
-known_first_party = ["traverser_ai_api"]
+known_first_party = ["cli", "core", "domain", "config", "utils"]

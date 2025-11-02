@@ -6,8 +6,8 @@ Analysis command group for managing crawl analysis and reporting.
 import argparse
 from typing import List
 
-from traverser_ai_api.cli.commands.base import CommandGroup, CommandHandler, CommandResult
-from traverser_ai_api.cli.shared.context import CLIContext
+from cli.commands.base import CommandGroup, CommandHandler, CommandResult
+from cli.shared.context import CLIContext
 
 
 class ListAnalysisTargetsCommand(CommandHandler):
@@ -35,7 +35,7 @@ class ListAnalysisTargetsCommand(CommandHandler):
     
     def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
         """Execute the command."""
-        from traverser_ai_api.cli.services.analysis_service import AnalysisService
+        from cli.services.analysis_service import AnalysisService
         
         service = AnalysisService(context)
         success, targets = service.list_analysis_targets()
@@ -102,7 +102,7 @@ class ListRunsForTargetCommand(CommandHandler):
     
     def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
         """Execute the command."""
-        from traverser_ai_api.cli.services.analysis_service import AnalysisService
+        from cli.services.analysis_service import AnalysisService
         
         service = AnalysisService(context)
         
@@ -163,7 +163,7 @@ class GenerateAnalysisPDFCommand(CommandHandler):
     
     def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
         """Execute the command."""
-        from traverser_ai_api.cli.services.analysis_service import AnalysisService
+        from cli.services.analysis_service import AnalysisService
         
         service = AnalysisService(context)
         
@@ -224,7 +224,7 @@ class PrintAnalysisSummaryCommand(CommandHandler):
     
     def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
         """Execute the command."""
-        from traverser_ai_api.cli.services.analysis_service import AnalysisService
+        from cli.services.analysis_service import AnalysisService
         
         service = AnalysisService(context)
         

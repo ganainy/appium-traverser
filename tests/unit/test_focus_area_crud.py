@@ -1,6 +1,12 @@
+"""
+This test module verifies CRUD operations for focus areas in the core module. It checks:
+- Adding, listing, updating, and removing focus areas.
+- Enforcing unique names and maximum allowed focus areas.
+- Proper cleanup before and after each test.
+"""
 import os
 import pytest
-from traverser_ai_api.core import focus_area_crud
+from core import focus_area_crud
 
 TEST_JSON = os.path.join(os.path.dirname(focus_area_crud.__file__), 'focus_areas.json')
 

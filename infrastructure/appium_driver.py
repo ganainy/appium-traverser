@@ -3,7 +3,7 @@ import asyncio
 import logging
 from typing import Any, Dict, Optional, Tuple
 
-from traverser_ai_api.config import Config
+from config.config import Config
 
 class AppiumDriver:
     def __init__(self, app_config: Config):

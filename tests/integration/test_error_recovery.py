@@ -2,7 +2,7 @@ import pytest
 import time
 from unittest.mock import Mock, patch
 import requests
-from traverser_ai_api.mcp_client import MCPClient, MCPConnectionError, CircuitBreaker, CircuitBreakerState
+from infrastructure.mcp_client import MCPClient, MCPConnectionError, CircuitBreaker, CircuitBreakerState
 
 
 class TestCircuitBreakerIntegration:
@@ -18,7 +18,7 @@ class TestCircuitBreakerIntegration:
             circuit_breaker_recovery_timeout=2.0  # Short timeout for testing
         )
 
-    @patch('requests.post')
+    @patch('requests.Session.post')
     def test_circuit_breaker_closes_after_failures(self, mock_post):
         """Test that circuit breaker opens after failure threshold is exceeded."""
         # Mock persistent connection failures
@@ -40,7 +40,7 @@ class TestCircuitBreakerIntegration:
         # Should not have made another HTTP request
         assert mock_post.call_count == 3
 
-    @patch('requests.post')
+    @patch('requests.Session.post')
     def test_circuit_breaker_half_open_recovery(self, mock_post):
         """Test circuit breaker recovery through half-open state."""
         # First, force circuit breaker to open
@@ -70,7 +70,7 @@ class TestCircuitBreakerIntegration:
         assert result == {"jsonrpc": "2.0", "result": {"status": "ok"}, "id": "req-4"}
         assert self.client.circuit_breaker.state == CircuitBreakerState.CLOSED
 
-    @patch('requests.post')
+    @patch('requests.Session.post')
     def test_circuit_breaker_failure_during_recovery(self, mock_post):
         """Test circuit breaker re-opens if recovery attempt fails."""
         # First, force circuit breaker to open
@@ -95,7 +95,7 @@ class TestCircuitBreakerIntegration:
         assert self.client.circuit_breaker.state == CircuitBreakerState.OPEN
         assert mock_post.call_count == 4  # 3 failures + 1 failed recovery
 
-    @patch('requests.post')
+    @patch('requests.Session.post')
     def test_circuit_breaker_allows_requests_when_closed(self, mock_post):
         """Test that circuit breaker allows normal operation when closed."""
         # Mock successful responses
@@ -121,7 +121,7 @@ class TestCircuitBreakerIntegration:
         assert self.client.circuit_breaker.failure_count == 0
         assert mock_post.call_count == 3
 
-    @patch('requests.post')
+    @patch('requests.Session.post')
     def test_circuit_breaker_resets_failure_count_on_success(self, mock_post):
         """Test that failure count resets to zero after successful requests."""
         # Mock alternating failures and successes

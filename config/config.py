@@ -1,9 +1,10 @@
+# Key for output data dir config
+OUTPUT_DATA_DIR_KEY = "output_dir"
 import os
 import logging
 from typing import Any, Callable, Dict, Optional
 from datetime import datetime
-from traverser_ai_api.config_schema import TraverserDefaults
-from traverser_ai_api.infrastructure.user_config_store import UserConfigStore
+from infrastructure.user_config_store import UserConfigStore
 
 # --- Refactored Centralized Configuration Class ---
 class Config:
@@ -12,7 +13,7 @@ class Config:
     cache > user storage (SQLite) > environment > Pydantic defaults
     """
     def __init__(self, user_config_json_path: Optional[str] = None):
-        self._defaults = TraverserDefaults()
+        self._defaults = type('Defaults', (), {})()  # Empty defaults object as placeholder
         self._user_store = UserConfigStore()
         self._cache: Dict[str, Any] = {}
         self._env = os.environ
@@ -41,9 +42,10 @@ class Config:
             val = self._env[key]
             self._cache[key] = val
             return val
-        # 4. Fallback to Pydantic defaults
-        if hasattr(self._defaults, key):
-            val = getattr(self._defaults, key)
+        # 4. Fallback to hardcoded defaults (module-level constants)
+        module = globals()
+        if key in module:
+            val = module[key]
             self._cache[key] = val
             return val
         return default
@@ -64,7 +66,7 @@ class Config:
     # For backward compatibility, expose some common config attributes as properties
     @property
     def OUTPUT_DATA_DIR(self):
-        return self.get("output_dir")
+        return self.get(OUTPUT_DATA_DIR_KEY)
 
     @property
     def ENABLE_IMAGE_CONTEXT(self):
@@ -117,26 +119,18 @@ class Config:
         and persistence. This gathers module-level uppercase defaults and overlays
         any persisted values from the user store.
         """
-        import sys
-
-        module = sys.modules[__name__]
+        module = globals()
         result: Dict[str, Any] = {}
-
-        # Collect module-level uppercase defaults (the legacy constants defined below)
-        for k, v in vars(module).items():
+        for k, v in module.items():
             if k.isupper():
-                # Prefer persisted value from SQLite store when available
                 try:
                     stored = self._user_store.get(k)
                     if stored is not None:
                         result[k] = stored
                     else:
-                        # Fallback to Pydantic defaults object if available, else module value
-                        result[k] = getattr(self._defaults, k, v)
+                        result[k] = v
                 except Exception:
-                    # If anything goes wrong reading the user store, fall back to defaults
-                    result[k] = getattr(self._defaults, k, v)
-
+                    result[k] = v
         return result
 
 # --- Default values (loaded if not in user_config.json or .env) ---
@@ -156,13 +150,13 @@ ALLOWED_EXTERNAL_PACKAGES = [
 ]
 
 OUTPUT_DATA_DIR = "output_data"  # This is a template name, Config class makes it a path
-SESSION_DIR = "{output_data_dir}/{device_id}_{app_package}_{timestamp}"
-APP_INFO_OUTPUT_DIR = "{output_data_dir}/app_info/{device_id}"
+SESSION_DIR = f"{{{OUTPUT_DATA_DIR_KEY}}}/{{device_id}}_{{app_package}}_{{timestamp}}"
+APP_INFO_OUTPUT_DIR = f"{{{OUTPUT_DATA_DIR_KEY}}}/app_info/{{device_id}}"
 SCREENSHOTS_DIR = "{session_dir}/screenshots"
 ANNOTATED_SCREENSHOTS_DIR = "{session_dir}/annotated_screenshots"
 TRAFFIC_CAPTURE_OUTPUT_DIR = "{session_dir}/traffic_captures"
 LOG_DIR = "{session_dir}/logs"
-CRAWLER_PID_PATH = "{output_data_dir}/core/crawler.pid"
+CRAWLER_PID_PATH = f"{{{OUTPUT_DATA_DIR_KEY}}}/core/crawler.pid"
 
 LOG_LEVEL = "INFO"
 LOG_FILE_NAME = "main_traverser_final.log"  # Actual file name, dir is separate

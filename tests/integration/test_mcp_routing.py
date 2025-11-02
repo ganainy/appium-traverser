@@ -8,8 +8,8 @@ and not executed directly via Appium.
 import pytest
 from unittest.mock import Mock, patch
 
-from traverser_ai_api.agent_assistant import AgentAssistant
-from traverser_ai_api.appium_driver import AppiumDriver
+from domain.agent_assistant import AgentAssistant
+from infrastructure.appium_driver import AppiumDriver
 
 
 
@@ -19,7 +19,7 @@ class TestMCPRouting:
     @pytest.fixture
     def mock_config(self):
         """Create a mock config for testing."""
-        from traverser_ai_api.config import Config
+        from config.config import Config
         config = Mock(spec=Config)
         config.AI_PROVIDER = "gemini"
         config.GEMINI_API_KEY = "test_key"
@@ -46,7 +46,7 @@ class TestMCPRouting:
     def agent_assistant(self, mock_config, mock_driver):
         """Create an agent assistant with mocked dependencies."""
         # Mock the model adapter
-        with patch('traverser_ai_api.agent_assistant.create_model_adapter') as mock_create:
+        with patch('domain.agent_assistant.create_model_adapter') as mock_create:
             mock_adapter = Mock()
             mock_adapter.generate_response.return_value = ('{"action": "tap", "target_identifier": "test_button"}', 1.0, 100)
             mock_create.return_value = mock_adapter

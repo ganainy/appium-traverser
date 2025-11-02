@@ -11,15 +11,14 @@ import pytest
 
 # Add project root to path for imports
 project_root = Path(__file__).resolve().parent.parent.parent.parent
-api_dir = project_root / "traverser_ai_api"
-sys.path.insert(0, str(api_dir))
+sys.path.insert(0, str(project_root))
 
 try:
-    from traverser_ai_api.cli.services.crawler_service import CrawlerService
-    from traverser_ai_api.cli.commands.base import CommandResult
-    from traverser_ai_api.cli.shared.context import CLIContext
-    from traverser_ai_api.core.controller import CrawlerOrchestrator
-    from traverser_ai_api.core.adapters import create_process_backend
+    from cli.services.crawler_service import CrawlerService
+    from cli.commands.base import CommandResult
+    from cli.shared.context import CLIContext
+    from core.controller import CrawlerOrchestrator
+    from core.adapters import create_process_backend
 except ImportError as e:
     pytest.skip(f"Crawler service module not available: {e}", allow_module_level=True)
 
@@ -148,14 +147,15 @@ def test_crawler_service_cleanup(cli_context: CLIContext, mock_crawler_orchestra
     service.orchestrator = mock_crawler_orchestrator
     service.backend = Mock()
     
+    # Store reference to mock before cleanup clears it
+    mock_backend = service.backend
+
     service.cleanup()
-    
+
     mock_crawler_orchestrator.stop_crawler.assert_called_once()
-    service.backend.stop_process.assert_called_once()
-    assert service.orchestrator is None
+    mock_backend.stop_process.assert_called_once()
+    assert service.orchestrator is None 
     assert service.backend is None
-
-
 @pytest.mark.cli
 def test_crawler_service_cleanup_not_running(cli_context: CLIContext, mock_crawler_orchestrator: Mock):
     """Test service cleanup when not running."""
@@ -163,6 +163,9 @@ def test_crawler_service_cleanup_not_running(cli_context: CLIContext, mock_crawl
     service.orchestrator = mock_crawler_orchestrator
     service.backend = Mock()
     
+    # Store reference to mock before cleanup clears it
+    mock_backend = service.backend
+
     # Mock orchestrator as not running
     mock_crawler_orchestrator.stop_crawler.return_value = False
     
@@ -170,7 +173,9 @@ def test_crawler_service_cleanup_not_running(cli_context: CLIContext, mock_crawl
     
     mock_crawler_orchestrator.stop_crawler.assert_called_once()
     # Should still cleanup backend even if orchestrator wasn't running
-    service.backend.stop_process.assert_called_once()
+    mock_backend.stop_process.assert_called_once()
+    assert service.orchestrator is None
+    assert service.backend is None
 
 
 # Note: get_logs, validate_prerequisites, and initialize methods are not implemented

@@ -6,8 +6,8 @@ App management commands.
 import argparse
 from typing import List
 
-from traverser_ai_api.cli.commands.base import CommandGroup, CommandHandler, CommandResult
-from traverser_ai_api.cli.shared.context import CLIContext
+from cli.commands.base import CommandGroup, CommandHandler, CommandResult
+from cli.shared.context import CLIContext
 
 
 class ScanAllAppsCommand(CommandHandler):

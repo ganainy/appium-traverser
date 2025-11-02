@@ -3,7 +3,7 @@ import requests
 import requests.adapters
 import time
 from unittest.mock import Mock, patch
-from traverser_ai_api.mcp_client import MCPClient, MCPError, MCPConnectionError, CircuitBreakerState
+from infrastructure.mcp_client import MCPClient, MCPError, MCPConnectionError, CircuitBreakerState
 
 
 class TestMCPClient:

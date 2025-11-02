@@ -18,10 +18,10 @@ from langchain_core.language_models import BaseLanguageModel
 from langchain_core.tools import BaseTool
 from langchain.agents import AgentExecutor, create_openai_tools_agent
 from langchain.chains import LLMChain
-from langchain.memory import ConversationBufferWindowMemory
+from langgraph.checkpoint.memory import MemorySaver
 
 # Always use absolute import for model_adapters
-from traverser_ai_api.model_adapters import create_model_adapter, Session
+from domain.model_adapters import create_model_adapter, Session
 
 class AgentAssistant:
     """
@@ -292,11 +292,8 @@ Analyze this screen state and provide insights for optimal testing progression.
             # Create the context analysis chain
             self.context_analysis_chain = self._create_context_analysis_chain()
 
-            # Initialize memory for cross-request context
-            self.langchain_memory = ConversationBufferWindowMemory(
-                k=getattr(self.cfg, 'LANGCHAIN_MEMORY_K', 10),
-                return_messages=True
-            )
+            # Initialize memory checkpointer for cross-request context
+            self.langchain_memory = MemorySaver()
 
             logging.info("LangChain components initialized successfully")
 
@@ -312,7 +309,7 @@ Analyze this screen state and provide insights for optimal testing progression.
         """Initialize the AI model with appropriate settings using the adapter."""
         try:
             # Check if the required dependencies are installed for the chosen provider
-            from traverser_ai_api.model_adapters import check_dependencies
+            from domain.model_adapters import check_dependencies
             adapter_provider = self._adapter_provider_override or self.ai_provider
             deps_installed, error_msg = check_dependencies(adapter_provider)
             
@@ -403,9 +400,9 @@ Analyze this screen state and provide insights for optimal testing progression.
             
             # Get provider capabilities from config
             try:
-                from traverser_ai_api.config import AI_PROVIDER_CAPABILITIES
+                from config.config import AI_PROVIDER_CAPABILITIES
             except ImportError:
-                from traverser_ai_api.config import AI_PROVIDER_CAPABILITIES
+                from config.config import AI_PROVIDER_CAPABILITIES
             
             capabilities = AI_PROVIDER_CAPABILITIES.get(ai_provider, AI_PROVIDER_CAPABILITIES.get('gemini', {}))
             

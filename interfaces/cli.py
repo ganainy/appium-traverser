@@ -11,10 +11,10 @@ import os
 from typing import Dict, Any, Optional
 
 
-from traverser_ai_api.core.config import Configuration
-from traverser_ai_api.core.crawler import Crawler, CrawlerSession
-from traverser_ai_api.core.storage import Storage
-from traverser_ai_api.core.focus_area_crud import (
+from core.config import Configuration
+from core.crawler import Crawler, CrawlerSession
+from core.storage import Storage
+from core.focus_area_crud import (
     add_focus_area, remove_focus_area, update_focus_area, list_focus_areas
 )
 

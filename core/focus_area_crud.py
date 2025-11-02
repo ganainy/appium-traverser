@@ -3,14 +3,14 @@ Shared CRUD logic for Focus Areas.
 Used by both CLI and GUI interfaces.
 
 Usage examples:
-    from traverser_ai_api.core.focus_area_crud import add_focus_area, list_focus_areas
+    from core.focus_area_crud import add_focus_area, list_focus_areas
     add_focus_area('My Area', 'Description')
     all_areas = list_focus_areas()
     update_focus_area(1, name='New Name')
     remove_focus_area(1)
 """
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, UTC
 import threading
 
 
@@ -50,8 +50,8 @@ class FocusArea:
         self.id = id
         self.name = name
         self.description = description or ""
-        self.created_at = datetime.fromisoformat(created_at) if created_at else datetime.utcnow()
-        self.updated_at = datetime.fromisoformat(updated_at) if updated_at else datetime.utcnow()
+        self.created_at = datetime.fromisoformat(created_at) if created_at else datetime.now(UTC)
+        self.updated_at = datetime.fromisoformat(updated_at) if updated_at else datetime.now(UTC)
 
     def to_dict(self):
         return {
@@ -140,6 +140,6 @@ def update_focus_area(id: int, name: Optional[str] = None, description: Optional
             fa.name = name
         if description is not None:
             fa.description = description
-        fa.updated_at = datetime.utcnow()
+        fa.updated_at = datetime.now(UTC)
         _save_focus_areas()
         return fa.to_dict()

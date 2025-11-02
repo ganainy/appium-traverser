@@ -1,3 +1,9 @@
+"""
+This test module verifies the behavior of the CrawlerOrchestrator and related core components. It checks:
+- Preparation of launch plans for the crawler.
+- Orchestrator interactions with configuration and backend.
+- Correctness of process management and validation logic.
+"""
 #!/usr/bin/env python3
 """
 Tests for the shared crawler orchestrator.
@@ -14,9 +20,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 
 try:
-    from traverser_ai_api.core.adapters import SubprocessBackend
-    from traverser_ai_api.core.controller import CrawlerLaunchPlan, CrawlerOrchestrator, FlagController
-    from traverser_ai_api.core.validation import ValidationService
+    from core.adapters import SubprocessBackend
+    from core.controller import CrawlerLaunchPlan, CrawlerOrchestrator, FlagController
+    from core.validation import ValidationService
 except ImportError:
     from core.adapters import SubprocessBackend
     from core.controller import CrawlerLaunchPlan, CrawlerOrchestrator, FlagController
@@ -28,7 +34,7 @@ class TestCrawlerOrchestrator(unittest.TestCase):
     
     def setUp(self):
         """Set up test fixtures."""
-        from traverser_ai_api.config import Config
+        from config.config import Config
         # Create a mock config
         self.mock_config = Mock(spec=Config)
         self.mock_config.APP_PACKAGE = "com.example.app"
@@ -59,7 +65,7 @@ class TestCrawlerOrchestrator(unittest.TestCase):
         self.assertEqual(plan.python_executable, sys.executable)
         self.assertTrue(plan.script_path.endswith("main.py"))
     
-    @patch('traverser_ai_api.core.validation.ValidationService.validate_all')
+    @patch('core.validation.ValidationService.validate_all')
     def test_prepare_plan_with_validation(self, mock_validate):
         """Test launch plan preparation with validation."""
         # Mock validation to return failure
@@ -164,7 +170,7 @@ class TestFlagController(unittest.TestCase):
         os.makedirs(self.temp_dir, exist_ok=True)
         self.shutdown_flag_path = os.path.join(self.temp_dir, "shutdown.flag")
         self.pause_flag_path = os.path.join(self.temp_dir, "pause.flag")
-        from traverser_ai_api.core.controller import FlagController
+        from core.controller import FlagController
         self.flag_controller = FlagController(self.shutdown_flag_path, self.pause_flag_path)
     
     def tearDown(self):
@@ -223,13 +229,13 @@ class TestValidationService(unittest.TestCase):
     
     def setUp(self):
         """Set up test fixtures."""
-        from traverser_ai_api.config import Config
+        from config.config import Config
         self.mock_config = Mock(spec=Config)
         self.mock_config.APP_PACKAGE = "com.example.app"
         self.mock_config.AI_PROVIDER = "gemini"
         self.mock_config.ENABLE_TRAFFIC_CAPTURE = False
         self.mock_config.ENABLE_MOBSF_ANALYSIS = False
-        from traverser_ai_api.core.validation import ValidationService
+        from core.validation import ValidationService
         self.validation_service = ValidationService(self.mock_config)
     
     @patch('traverser_ai_api.core.validation.requests.get')

@@ -21,6 +21,14 @@ dist/
 .venv/
 venv/
 
+# Universal
+.DS_Store
+Thumbs.db
+*.tmp
+*.swp
+.vscode/
+.idea/
+
 
 /traverser_ai_api/user_config.json
 /output_data/core/crawler.pid

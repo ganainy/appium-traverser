@@ -14,9 +14,9 @@ import requests
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-    from traverser_ai_api.config import Config
+    from config.config import Config
 
-from traverser_ai_api.cli.commands.services_check import PrecheckCommand
+from cli.commands.services_check import PrecheckCommand
 
 
 class ValidationService:
@@ -268,7 +268,7 @@ class ValidationService:
             Tuple of (dependencies_installed, error_message)
         """
         try:
-            from traverser_ai_api.model_adapters import check_dependencies
+            from domain.model_adapters import check_dependencies
         except ImportError:
             try:
                 from model_adapters import check_dependencies

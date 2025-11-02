@@ -9,40 +9,51 @@ import os
 import signal
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict, Any
 
-from traverser_ai_api.cli.shared.context import CLIContext
-from traverser_ai_api.interfaces.cli import CLICrawlerInterface, create_cli_interface
+from cli.shared.context import CLIContext
+from interfaces.cli import CLICrawlerInterface, create_cli_interface
+from core.controller import CrawlerOrchestrator
+from core.adapters import create_process_backend
 
 
 class CrawlerService:
     """Service for managing crawler processes using core interface."""
     
     def __init__(self, context: CLIContext):
+        """Initialize the crawler service."""
         self.context = context
         self.logger = logging.getLogger(__name__)
-        
-        # Get config from context
-        config_service = self.context.services.get("config")
-        if config_service:
-            # Convert config service config to dict for CLI interface
-            config_dict = {
-                "name": "CLI Crawler Config",
-                "settings": {
-                    "max_depth": config_service.get_config_value("MAX_DEPTH", 10),
-                    "timeout": config_service.get_config_value("TIMEOUT", 300),
-                    "platform": config_service.get_config_value("PLATFORM", "android")
-                }
-            }
-            self.cli_interface = create_cli_interface(config_dict)
-            self.logger.info("CLI Crawler Interface initialized")
-        else:
-            self.logger.error("Config service not available")
-            raise RuntimeError("Config service is required")
+        self.orchestrator = None
+        self.backend = None
         
         # Set up signal handlers
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
+    
+    def _initialize_if_needed(self) -> bool:
+        """Initialize orchestrator if not already initialized.
+        
+        Returns:
+            True if initialization was successful, False otherwise
+        """
+        if self.orchestrator:
+            return True
+        
+        config_service = self.context.services.get("config")
+        if not config_service:
+            self.logger.error("Config service not available")
+            return False
+            
+        try:
+            # Set up orchestrator and backend
+            self.backend = create_process_backend()
+            self.orchestrator = CrawlerOrchestrator(config_service.config, self.backend)
+            self.logger.info("Crawler service initialized")
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to initialize crawler service: {e}")
+            return False
     
     def _signal_handler(self, signum, frame):
         """Handle shutdown signals."""
@@ -59,13 +70,12 @@ class CrawlerService:
             True if started successfully, False otherwise
         """
         try:
-            session_id = self.cli_interface.start_crawler_session()
-            if session_id:
-                self.logger.info(f"Crawler session started: {session_id}")
-                return True
-            else:
-                self.logger.error("Failed to start crawler session")
+            # Initialize if needed
+            if not self._initialize_if_needed():
                 return False
+            
+            # Now we know orchestrator exists
+            return self.orchestrator.start_crawler()
         except Exception as e:
             self.logger.error(f"Failed to start crawler: {e}")
             return False
@@ -77,12 +87,12 @@ class CrawlerService:
             True if signal sent successfully, False otherwise
         """
         try:
-            success = self.cli_interface.stop_crawler_session()
-            if success:
-                self.logger.info("Crawler session stopped successfully")
-            else:
-                self.logger.error("Failed to stop crawler session")
-            return success
+            # Not failing if not initialized, just return False
+            if not self.orchestrator:
+                self.logger.warning("Crawler orchestrator not initialized, considering stopped")
+                return False
+                
+            return self.orchestrator.stop_crawler()
         except Exception as e:
             self.logger.error(f"Failed to stop crawler: {e}")
             return False
@@ -93,8 +103,16 @@ class CrawlerService:
         Returns:
             True if paused successfully, False otherwise
         """
-        self.logger.warning("Pause/resume not implemented in core interface yet")
-        return False
+        try:
+            # Initialize if needed
+            if not self._initialize_if_needed():
+                return False
+            
+            # Now we know orchestrator exists
+            return self.orchestrator.pause_crawler()
+        except Exception as e:
+            self.logger.error(f"Failed to pause crawler: {e}")
+            return False
     
     def resume_crawler(self) -> bool:
         """Resume the crawler process.
@@ -102,26 +120,43 @@ class CrawlerService:
         Returns:
             True if resumed successfully, False otherwise
         """
-        self.logger.warning("Pause/resume not implemented in core interface yet")
-        return False
+        try:
+            # Initialize if needed
+            if not self._initialize_if_needed():
+                return False
+            
+            # Now we know orchestrator exists
+            return self.orchestrator.resume_crawler()
+        except Exception as e:
+            self.logger.error(f"Failed to resume crawler: {e}")
+            return False
     
-    def get_status(self) -> dict:
+    def get_status(self) -> Dict[str, Any]:
         """Get crawler status.
         
         Returns:
             Dictionary with status information
         """
         try:
-            status = self.cli_interface.get_session_status()
-            if status:
-                # Convert to the format expected by CLI
-                cli_status = {
-                    "process": f"Running (Session {status['session_id']})",
-                    "state": status["status"],
-                    "target_app": "Unknown",  # Not available in core interface yet
-                    "output_dir": "Unknown"   # Not available in core interface yet
+            # Not failing if not initialized, return stopped status
+            if not self.orchestrator:
+                return {
+                    "process": "Stopped",
+                    "state": "Unknown",
+                    "target_app": "Unknown",
+                    "output_dir": "Unknown"
                 }
-                return cli_status
+                
+            status = self.orchestrator.get_status()
+            
+            if status:
+                # Convert orchestrator status to CLI format
+                return {
+                    "process": f"Running (PID {status.get('process_id', '?')}, CLI-managed)",
+                    "state": status.get("state", "Running"),
+                    "target_app": status.get("app_package", "Unknown"),
+                    "output_dir": status.get("output_dir", "Unknown")
+                }
             else:
                 return {
                     "process": "Stopped",
@@ -137,3 +172,31 @@ class CrawlerService:
                 "target_app": "Unknown",
                 "output_dir": "Unknown"
             }
+    
+    def cleanup(self):
+        """Clean up any resources before shutdown."""
+        self.logger.info("Cleaning up crawler service...")
+        try:
+            # Save references since we'll be clearing them
+            orchestrator = self.orchestrator
+            backend = self.backend
+            
+            if orchestrator:
+                try:
+                    orchestrator.stop_crawler()
+                except Exception as e:
+                    self.logger.error(f"Error stopping orchestrator: {e}")
+                    
+            if backend:
+                try:
+                    backend.stop_process()
+                except Exception as e:
+                    self.logger.error(f"Error stopping backend process: {e}")
+            
+            # Clear references only after successful cleanup 
+            self.orchestrator = None
+            self.backend = None
+                
+            self.logger.info("Crawler service cleanup complete")
+        except Exception as e:
+            self.logger.error(f"Error during crawler service cleanup: {e}")

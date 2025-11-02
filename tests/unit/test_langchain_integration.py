@@ -1,9 +1,15 @@
-﻿import pytest
+﻿"""
+This test module verifies the integration of LangChain with the agent assistant. It checks:
+- Creation of LangChain chains for workflow testing.
+- Mocking of configuration, MCP client, and model adapter.
+- Agent interaction with mocked dependencies and response generation.
+"""
+import pytest
 import json
 from unittest.mock import MagicMock, patch
 from typing import Dict, Any, Optional
 
-from traverser_ai_api.agent_assistant import AgentAssistant
+from domain.agent_assistant import AgentAssistant
 
 
 class TestLangChainIntegration:
@@ -49,8 +55,8 @@ class TestLangChainIntegration:
 
     def test_langchain_chain_creation(self, mock_config, mock_mcp_client, mock_model_adapter):
         '''Test that LangChain chains can be created for testing workflows.'''
-        with patch('traverser_ai_api.agent_assistant.create_model_adapter', return_value=mock_model_adapter), \
-             patch('traverser_ai_api.agent_tools.AgentTools') as mock_tools_class:
+        with patch('domain.agent_assistant.create_model_adapter', return_value=mock_model_adapter), \
+             patch('domain.agent_tools.AgentTools') as mock_tools_class:
 
             mock_tools = MagicMock()
             mock_tools_class.return_value = mock_tools
@@ -73,8 +79,8 @@ class TestLangChainIntegration:
 
     def test_langchain_orchestration_flow(self, mock_config, mock_mcp_client, mock_model_adapter):
         '''Test the orchestration flow through LangChain chains.'''
-        with patch('traverser_ai_api.agent_assistant.create_model_adapter', return_value=mock_model_adapter), \
-             patch('traverser_ai_api.agent_tools.AgentTools') as mock_tools_class:
+        with patch('domain.agent_assistant.create_model_adapter', return_value=mock_model_adapter), \
+             patch('domain.agent_tools.AgentTools') as mock_tools_class:
 
             mock_tools = MagicMock()
             mock_tools_class.return_value = mock_tools
@@ -110,8 +116,8 @@ class TestLangChainIntegration:
 
     def test_langchain_error_handling(self, mock_config, mock_mcp_client, mock_model_adapter):
         '''Test error handling in LangChain orchestration.'''
-        with patch('traverser_ai_api.agent_assistant.create_model_adapter', return_value=mock_model_adapter), \
-             patch('traverser_ai_api.agent_tools.AgentTools') as mock_tools_class:
+        with patch('domain.agent_assistant.create_model_adapter', return_value=mock_model_adapter), \
+             patch('domain.agent_tools.AgentTools') as mock_tools_class:
 
             mock_tools = MagicMock()
             mock_tools_class.return_value = mock_tools

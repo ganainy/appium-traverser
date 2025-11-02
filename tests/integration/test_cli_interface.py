@@ -1,10 +1,9 @@
+"""
+This integration test verifies that the CLI interface can import and use core modules from the layered architecture. It checks:
+- That CLI can import all core modules without errors.
+- That CLI can create instances of core classes and interact with them as expected.
+"""
 #!/usr/bin/env python3
-"""
-Integration test for CLI using core modules.
-
-This test verifies that the CLI interface can successfully import and use
-the core modules from the layered architecture.
-"""
 
 import pytest
 import os
@@ -15,19 +14,19 @@ from unittest.mock import patch, MagicMock
 def test_cli_can_import_core_modules():
     """Test that CLI can import all core modules without errors."""
     try:
-        from traverser_ai_api.core.config import Configuration
-        from traverser_ai_api.core.storage import Storage
-        from traverser_ai_api.core.crawler import CrawlerSession, Crawler
-        from traverser_ai_api.core.parser import ParsedData, parse_raw_data
+        from core.config import Configuration
+        from core.storage import Storage
+        from core.crawler import CrawlerSession, Crawler
+        from core.parser import ParsedData, parse_raw_data
     except ImportError as e:
         pytest.fail(f"CLI failed to import core modules: {e}")
 
 def test_cli_can_create_core_instances():
     """Test that CLI can create instances of core classes."""
-    from traverser_ai_api.core.config import Configuration
-    from traverser_ai_api.core.storage import Storage
-    from traverser_ai_api.core.crawler import CrawlerSession, Crawler
-    from traverser_ai_api.core.parser import ParsedData
+    from core.config import Configuration
+    from core.storage import Storage
+    from core.crawler import CrawlerSession, Crawler
+    from core.parser import ParsedData
 
     # Test Configuration creation with required settings
     config = Configuration(
@@ -83,8 +82,8 @@ def test_cli_can_create_core_instances():
 
 def test_cli_core_validation_works():
     """Test that core validation works in CLI context."""
-    from traverser_ai_api.core.config import Configuration
-    from traverser_ai_api.core.parser import ParsedData
+    from core.config import Configuration
+    from core.parser import ParsedData
 
     # Test Configuration validation with proper settings
     config = Configuration(
@@ -109,8 +108,8 @@ def test_cli_core_validation_works():
 
 def test_cli_core_storage_operations():
     """Test that core storage operations work in CLI context."""
-    from traverser_ai_api.core.config import Configuration
-    from traverser_ai_api.core.storage import Storage
+    from core.config import Configuration
+    from core.storage import Storage
     import tempfile
     import os
     import time
@@ -155,8 +154,8 @@ def test_cli_core_storage_operations():
 
 def test_cli_core_crawler_operations():
     """Test that core crawler operations work in CLI context."""
-    from traverser_ai_api.core.crawler import CrawlerSession, Crawler
-    from traverser_ai_api.core.config import Configuration
+    from core.crawler import CrawlerSession, Crawler
+    from core.config import Configuration
 
     # Setup config with required settings
     config = Configuration(
@@ -192,7 +191,7 @@ def test_cli_core_crawler_operations():
 
 def test_cli_core_parser_operations():
     """Test that core parser operations work in CLI context."""
-    from traverser_ai_api.core.parser import parse_raw_data
+    from core.parser import parse_raw_data
 
     # Test parsing empty data (current implementation returns empty list)
     result = parse_raw_data({})
@@ -201,8 +200,8 @@ def test_cli_core_parser_operations():
 
 def test_cli_core_error_handling():
     """Test that core error handling works in CLI context."""
-    from traverser_ai_api.core.config import Configuration
-    from traverser_ai_api.core.parser import ParsedData
+    from core.config import Configuration
+    from core.parser import ParsedData
 
     # Test Configuration validation error - empty name
     config = Configuration(

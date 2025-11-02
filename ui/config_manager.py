@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 # Import UIComponents 
-from traverser_ai_api.ui.components import UIComponents
+from ui.components import UIComponents
 
 
 class ConfigManager(QObject):

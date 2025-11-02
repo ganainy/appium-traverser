@@ -1,8 +1,11 @@
 """
-Unit tests for core ParsedData entity.
+This test module verifies the behavior of the `ParsedData` entity in the core parser. It checks:
+- Initialization and default values of ParsedData.
+- Validation logic for valid and invalid data.
+- Error handling for invalid element types, identifiers, and bounding boxes.
 """
 import pytest
-from traverser_ai_api.core.parser import ParsedData
+from core.parser import ParsedData
 
 
 class TestParsedData:

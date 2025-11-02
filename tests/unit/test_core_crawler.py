@@ -1,10 +1,14 @@
 """
-Unit tests for core CrawlerSession entity.
+This test module verifies the behavior of the core `CrawlerSession` entity. It checks:
+- Initialization of CrawlerSession with default and custom configurations.
+- Validation logic for session status and progress values.
+- Error handling for invalid session states.
+- Session lifecycle methods such as start and end.
 """
 import pytest
 from datetime import datetime
-from traverser_ai_api.core.config import Configuration
-from traverser_ai_api.core.crawler import CrawlerSession
+from core.config import Configuration
+from core.crawler import CrawlerSession
 
 
 class TestCrawlerSession:

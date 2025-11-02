@@ -8,8 +8,8 @@ import logging
 import os
 from typing import Dict, List, Optional
 
-from traverser_ai_api.cli.shared.context import CLIContext
-from traverser_ai_api.cli.shared.service_names import DATABASE_SERVICE
+from cli.shared.context import CLIContext
+from cli.shared.service_names import DATABASE_SERVICE
 
 
 class FocusAreaService:

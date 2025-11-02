@@ -12,11 +12,10 @@ import pytest
 
 # Add project root to path for imports
 project_root = Path(__file__).resolve().parent.parent.parent.parent
-if str(project_root) not in sys.path:
-    sys.path.insert(0, str(project_root))
+sys.path.insert(0, str(project_root))
 
 try:
-    from traverser_ai_api.cli.commands.apps import (
+    from cli.commands.apps import (
         ScanAllAppsCommand,
         ScanHealthAppsCommand,
         ListAllAppsCommand,
@@ -25,10 +24,23 @@ try:
         ShowSelectedAppCommand,
         AppsCommandGroup
     )
-    from traverser_ai_api.cli.commands.base import CommandResult
-    from traverser_ai_api.cli.shared.context import CLIContext
+    from cli.commands.base import CommandResult
+    from cli.shared.context import CLIContext
 except ImportError as e:
-    pytest.skip(f"Apps command modules not available: {e}", allow_module_level=True)
+    try:
+        from traverser_ai_api.cli.commands.apps import (
+            ScanAllAppsCommand,
+            ScanHealthAppsCommand,
+            ListAllAppsCommand,
+            ListHealthAppsCommand,
+            SelectAppCommand,
+            ShowSelectedAppCommand,
+            AppsCommandGroup
+        )
+        from traverser_ai_api.cli.commands.base import CommandResult
+        from traverser_ai_api.cli.shared.context import CLIContext
+    except ImportError as e2:
+        pytest.skip(f"Apps command modules not available: {e2}", allow_module_level=True)
 
 
 @pytest.mark.cli
@@ -176,7 +188,7 @@ def test_show_selected_app_command_with_selection(cli_context, sample_app_data: 
     # Mock config service (ShowSelectedAppCommand uses config service, not app_scan)
     mock_config_service = Mock()
     selected_app = sample_app_data['apps'][0]
-    mock_config_service.get_value.side_effect = lambda key, default=None: {
+    mock_config_service.get_config_value.side_effect = lambda key, default=None: {
         "LAST_SELECTED_APP": selected_app,
         "APP_PACKAGE": selected_app['package_name'],
         "APP_ACTIVITY": selected_app.get('activity_name', 'MainActivity')
@@ -197,7 +209,7 @@ def test_show_selected_app_command_no_selection(cli_context):
     
     # Mock config service (ShowSelectedAppCommand uses config service, not app_scan)
     mock_config_service = Mock()
-    mock_config_service.get_value.return_value = None
+    mock_config_service.get_config_value.return_value = None
     cli_context.services.register("config", mock_config_service)
     
     result = command.run(args, cli_context)

@@ -1,8 +1,14 @@
+"""
+This test module verifies error handling and retry logic for the MCP client. It checks:
+- Successful requests and retry behavior on connection errors.
+- Exponential backoff and respect for max retries.
+- Proper exception handling for failed requests.
+"""
 import pytest
 import time
 from unittest.mock import Mock, patch, MagicMock
 import requests
-from traverser_ai_api.mcp_client import MCPClient, MCPConnectionError, MCPError
+from infrastructure.mcp_client import MCPClient, MCPConnectionError, MCPError
 
 
 class TestMCPClientRetryLogic:

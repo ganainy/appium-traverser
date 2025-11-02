@@ -13,14 +13,13 @@ import pytest
 
 # Add project root to path for imports
 project_root = Path(__file__).resolve().parent.parent.parent
-api_dir = project_root / "traverser_ai_api"
-sys.path.insert(0, str(api_dir))
+sys.path.insert(0, str(project_root))
 
 try:
     from cli.shared.context import CLIContext
-    from core.controller import CrawlerOrchestrator, CrawlerLaunchPlan
-    from core.validation import ValidationConstraints, validate_launch_plan
-    from core.adapters import SubprocessAdapter, QProcessAdapter
+    from core.controller import CrawlerOrchestrator, CrawlerLaunchPlan, ProcessBackend
+    from core.validation import ValidationService
+    from core.adapters import SubprocessBackend, QtProcessBackend 
     from cli.services.crawler_service import CrawlerService
     from ui.crawler_manager import CrawlerManager
 except ImportError as e:
@@ -65,7 +64,7 @@ def test_basic_functionality_imports():
     """Test basic imports and object creation (migrated from simple_test.py)."""
     try:
         # Test imports
-        from core.controller import CrawlerOrchestrator, CrawlerLaunchPlan
+        from core.controller import CrawlerOrchestrator, CrawlerLaunchPlan, ProcessBackend
         from core.validation import ValidationService
         from core.adapters import SubprocessBackend, QtProcessBackend
         
@@ -106,10 +105,25 @@ def test_module_imports():
 def test_orchestrator_creation():
     """Test that the orchestrator can be created (migrated from test_refactoring.py)."""
     try:
-        from core.controller import CrawlerOrchestrator
+        from core.controller import CrawlerOrchestrator, ProcessBackend
+        from config.config import Config
+        
+        # Create mock config and backend
+        mock_config = Mock(spec=Config)
+        mock_config.APP_PACKAGE = "com.example.app"
+        mock_config.APP_ACTIVITY = "com.example.app.MainActivity"
+        mock_config.BASE_DIR = "/tmp/test"
+        mock_config.OUTPUT_DATA_DIR = "/tmp/test/output"
+        mock_config.LOG_DIR = "/tmp/test/logs"
+        mock_config.LOG_FILE_NAME = "test.log"
+        
+        mock_backend = Mock(spec=ProcessBackend)
+        mock_backend.is_process_running.return_value = False
+        mock_backend.start_process.return_value = True
+        mock_backend.get_process_id.return_value = 12345
         
         # Test creating orchestrator
-        orchestrator = CrawlerOrchestrator()
+        orchestrator = CrawlerOrchestrator(mock_config, mock_backend)
         assert orchestrator is not None
         
     except ImportError as e:
@@ -119,21 +133,28 @@ def test_orchestrator_creation():
 
 
 @pytest.mark.cli
-def test_validation_constraints():
-    """Test validation constraints (migrated from test_refactoring.py)."""
+def test_validation_service():
+    """Test validation service (migrated from test_refactoring.py)."""
     try:
-        from core.validation import ValidationConstraints
+        from core.validation import ValidationService
+        from config.config import Config
         
-        # Test creating constraints
-        constraints = ValidationConstraints()
-        assert constraints is not None
+        # Create mock config for validation service
+        mock_config = Mock(spec=Config)
+        mock_config.APP_PACKAGE = "com.example.app"
+        mock_config.APP_ACTIVITY = "com.example.app.MainActivity"
         
-        # Test default values
-        assert constraints.max_crawl_steps > 0
-        assert constraints.max_crawl_duration_seconds > 0
+        # Test creating validation service
+        validator = ValidationService(mock_config)
+        assert validator is not None
+        
+        # Test validation
+        is_valid, messages = validator.validate_all()
+        assert isinstance(is_valid, bool)
+        assert isinstance(messages, list)
         
     except ImportError as e:
-        pytest.skip(f"Could not import ValidationConstraints: {e}")
+        pytest.skip(f"Could not import ValidationService: {e}")
 
 
 @pytest.mark.cli

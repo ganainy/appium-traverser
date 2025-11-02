@@ -14,10 +14,12 @@ project_root = Path(__file__).resolve().parent.parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
+
+# Updated imports to new local module structure. If modules are missing, skip all tests in this file.
 try:
-    from traverser_ai_api.cli.main import run, _register_commands
-    from traverser_ai_api.cli.commands.base import CommandRegistry
-    from traverser_ai_api.cli.shared.context import CLIContext
+    from cli.main import run, _register_commands
+    from cli.commands.base import CommandRegistry
+    from cli.shared.context import CLIContext
 except ImportError as e:
     pytest.skip(f"CLI modules not available: {e}", allow_module_level=True)
 
@@ -41,7 +43,7 @@ def test_run_with_invalid_command():
 @pytest.mark.cli
 def test_run_keyboard_interrupt():
     """Test CLI run with keyboard interrupt."""
-    with patch('traverser_ai_api.cli.main.build_parser') as mock_build_parser:
+    with patch('cli.main.build_parser') as mock_build_parser:
         mock_parser = Mock()
         mock_build_parser.return_value = mock_parser
         
@@ -55,7 +57,7 @@ def test_run_keyboard_interrupt():
 @pytest.mark.cli
 def test_run_unexpected_exception():
     """Test CLI run with unexpected exception."""
-    with patch('traverser_ai_api.cli.main.build_parser') as mock_build_parser:
+    with patch('cli.main.build_parser') as mock_build_parser:
         mock_parser = Mock()
         mock_build_parser.return_value = mock_parser
         
@@ -90,7 +92,7 @@ def test_register_commands():
 @pytest.mark.cli
 def test_register_commands_import_error():
     """Test command registration with import error."""
-    with patch('traverser_ai_api.cli.main.logging') as mock_logging:
+    with patch('cli.main.logging') as mock_logging:
         with patch('sys.exit') as mock_exit:
             # Mock import to raise ImportError
             with patch('builtins.__import__', side_effect=ImportError("Test error")):
@@ -108,8 +110,8 @@ def test_register_commands_import_error():
 @pytest.mark.cli
 def test_run_successful_command_execution():
     """Test successful command execution."""
-    with patch('traverser_ai_api.cli.main.build_parser') as mock_build_parser:
-        with patch('traverser_ai_api.cli.main.CLIContext') as mock_context_class:
+    with patch('cli.main.build_parser') as mock_build_parser:
+        with patch('cli.main.CLIContext') as mock_context_class:
             # Setup mocks
             mock_parser = Mock()
             mock_args = Mock()
@@ -132,15 +134,15 @@ def test_run_successful_command_execution():
             mock_handler.run.return_value = mock_result
             
             # Mock all services to avoid initialization issues
-            with patch('traverser_ai_api.cli.services.config_service.ConfigService'):
-                with patch('traverser_ai_api.cli.services.device_service.DeviceService'):
-                    with patch('traverser_ai_api.cli.services.app_scan_service.AppScanService'):
-                        with patch('traverser_ai_api.cli.services.crawler_service.CrawlerService'):
-                            with patch('traverser_ai_api.cli.services.analysis_service.AnalysisService'):
-                                with patch('traverser_ai_api.cli.services.focus_area_service.FocusAreaService'):
-                                    with patch('traverser_ai_api.cli.services.openrouter_service.OpenRouterService'):
+            with patch('cli.services.config_service.ConfigService'):
+                with patch('cli.services.device_service.DeviceService'):
+                    with patch('cli.services.app_scan_service.AppScanService'):
+                        with patch('cli.services.crawler_service.CrawlerService'):
+                            with patch('cli.services.analysis_service.AnalysisService'):
+                                with patch('cli.services.focus_area_service.FocusAreaService'):
+                                    with patch('cli.services.openrouter_service.OpenRouterService'):
                                         # Mock registry
-                                        with patch('traverser_ai_api.cli.main.CommandRegistry') as mock_registry_class:
+                                        with patch('cli.main.CommandRegistry') as mock_registry_class:
                                             mock_registry = Mock()
                                             mock_registry.groups = {}  # Make groups a dict instead of Mock
                                             mock_registry.standalone_commands = {}  # Make standalone_commands a dict
@@ -158,8 +160,8 @@ def test_run_successful_command_execution():
 @pytest.mark.cli
 def test_run_command_execution_with_failure():
     """Test command execution with failure."""
-    with patch('traverser_ai_api.cli.main.build_parser') as mock_build_parser:
-        with patch('traverser_ai_api.cli.main.CLIContext') as mock_context_class:
+    with patch('cli.main.build_parser') as mock_build_parser:
+        with patch('cli.main.CLIContext') as mock_context_class:
             # Setup mocks
             mock_parser = Mock()
             mock_args = Mock()
@@ -174,15 +176,15 @@ def test_run_command_execution_with_failure():
             mock_context_class.return_value = mock_context
             
             # Mock all services to avoid initialization issues
-            with patch('traverser_ai_api.cli.services.config_service.ConfigService'):
-                with patch('traverser_ai_api.cli.services.device_service.DeviceService'):
-                    with patch('traverser_ai_api.cli.services.app_scan_service.AppScanService'):
-                        with patch('traverser_ai_api.cli.services.crawler_service.CrawlerService'):
-                            with patch('traverser_ai_api.cli.services.analysis_service.AnalysisService'):
-                                with patch('traverser_ai_api.cli.services.focus_area_service.FocusAreaService'):
-                                    with patch('traverser_ai_api.cli.services.openrouter_service.OpenRouterService'):
+            with patch('cli.services.config_service.ConfigService'):
+                with patch('cli.services.device_service.DeviceService'):
+                    with patch('cli.services.app_scan_service.AppScanService'):
+                        with patch('cli.services.crawler_service.CrawlerService'):
+                            with patch('cli.services.analysis_service.AnalysisService'):
+                                with patch('cli.services.focus_area_service.FocusAreaService'):
+                                    with patch('cli.services.openrouter_service.OpenRouterService'):
                                         # Mock registry with no handler
-                                        with patch('traverser_ai_api.cli.main.CommandRegistry') as mock_registry_class:
+                                        with patch('cli.main.CommandRegistry') as mock_registry_class:
                                             mock_registry = Mock()
                                             mock_registry.groups = {}  # Make groups a dict instead of Mock
                                             mock_registry.standalone_commands = {}  # Make standalone_commands a dict
@@ -201,8 +203,8 @@ def test_run_command_execution_with_failure():
 @pytest.mark.cli
 def test_run_with_verbose_flag():
     """Test CLI run with verbose flag."""
-    with patch('traverser_ai_api.cli.main.build_parser') as mock_build_parser:
-        with patch('traverser_ai_api.cli.main.CLIContext') as mock_context_class:
+    with patch('cli.main.build_parser') as mock_build_parser:
+        with patch('cli.main.CLIContext') as mock_context_class:
             # Setup mocks
             mock_parser = Mock()
             mock_args = Mock()
@@ -225,15 +227,15 @@ def test_run_with_verbose_flag():
             mock_handler.run.return_value = mock_result
             
             # Mock all services to avoid initialization issues
-            with patch('traverser_ai_api.cli.services.config_service.ConfigService'):
-                with patch('traverser_ai_api.cli.services.device_service.DeviceService'):
-                    with patch('traverser_ai_api.cli.services.app_scan_service.AppScanService'):
-                        with patch('traverser_ai_api.cli.services.crawler_service.CrawlerService'):
-                            with patch('traverser_ai_api.cli.services.analysis_service.AnalysisService'):
-                                with patch('traverser_ai_api.cli.services.focus_area_service.FocusAreaService'):
-                                    with patch('traverser_ai_api.cli.services.openrouter_service.OpenRouterService'):
+            with patch('cli.services.config_service.ConfigService'):
+                with patch('cli.services.device_service.DeviceService'):
+                    with patch('cli.services.app_scan_service.AppScanService'):
+                        with patch('cli.services.crawler_service.CrawlerService'):
+                            with patch('cli.services.analysis_service.AnalysisService'):
+                                with patch('cli.services.focus_area_service.FocusAreaService'):
+                                    with patch('cli.services.openrouter_service.OpenRouterService'):
                                         # Mock registry
-                                        with patch('traverser_ai_api.cli.main.CommandRegistry') as mock_registry_class:
+                                        with patch('cli.main.CommandRegistry') as mock_registry_class:
                                             mock_registry = Mock()
                                             mock_registry.groups = {}  # Make groups a dict instead of Mock
                                             mock_registry.standalone_commands = {}  # Make standalone_commands a dict
@@ -251,8 +253,8 @@ def test_run_with_verbose_flag():
 @pytest.mark.cli
 def test_run_services_registration():
     """Test that services are properly registered."""
-    with patch('traverser_ai_api.cli.main.build_parser') as mock_build_parser:
-        with patch('traverser_ai_api.cli.main.CLIContext') as mock_context_class:
+    with patch('cli.main.build_parser') as mock_build_parser:
+        with patch('cli.main.CLIContext') as mock_context_class:
             # Setup mocks
             mock_parser = Mock()
             mock_args = Mock()
@@ -277,9 +279,9 @@ def test_run_services_registration():
             mock_handler.run.return_value = mock_result
             
             # Mock _register_commands to avoid the len() issue
-            with patch('traverser_ai_api.cli.main._register_commands'):
+            with patch('cli.main._register_commands'):
                 # Mock registry
-                with patch('traverser_ai_api.cli.main.CommandRegistry') as mock_registry_class:
+                with patch('cli.main.CommandRegistry') as mock_registry_class:
                     mock_registry = Mock()
                     mock_registry.groups = {}  # Make groups a dict instead of Mock
                     mock_registry.standalone_commands = {}  # Make standalone_commands a dict
@@ -287,9 +289,9 @@ def test_run_services_registration():
                     mock_registry.get_command_handler.return_value = mock_handler
                     
                     # Mock config service to provide proper paths
-                    with patch('traverser_ai_api.cli.services.config_service.ConfigService'):
+                    with patch('cli.services.config_service.ConfigService'):
                         # Mock CrawlerService to avoid path issues
-                        with patch('traverser_ai_api.cli.services.crawler_service.CrawlerService'):
+                        with patch('cli.services.crawler_service.CrawlerService'):
                             # Run CLI
                             result = run(['show-config'])
                         

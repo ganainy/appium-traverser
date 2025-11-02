@@ -4,7 +4,7 @@ import argparse
 import sys
 import os
 import json
-from traverser_ai_api.cli import run
+from cli import run
 
 def main():
     parser = argparse.ArgumentParser(description="Appium Traverser CLI")

@@ -7,7 +7,7 @@ import logging
 import subprocess
 from typing import List, Optional
 
-from traverser_ai_api.cli.shared.context import CLIContext
+from cli.shared.context import CLIContext
 
 
 class DeviceService:

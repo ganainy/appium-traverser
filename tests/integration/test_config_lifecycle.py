@@ -2,8 +2,8 @@ import os
 import tempfile
 import pytest
 import json
-from traverser_ai_api.config import Config
-from traverser_ai_api.core.user_storage import UserConfigStore
+from config.config import Config
+from core.user_storage import UserConfigStore
 
 @pytest.fixture
 def temp_config_env(tmp_path):

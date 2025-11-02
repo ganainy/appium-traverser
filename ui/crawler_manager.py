@@ -14,10 +14,10 @@ from PySide6.QtWidgets import QApplication
 
 # Import shared orchestrator components
 try:
-    from traverser_ai_api.core import get_process_backend, get_crawler_orchestrator, get_validation_service
+    from core import get_process_backend, get_crawler_orchestrator, get_validation_service
 except ImportError:
     # Use the new core interface
-    from traverser_ai_api.interfaces.gui import GUICrawlerInterface, create_gui_interface
+    from interfaces.gui import GUICrawlerInterface, create_gui_interface
 
 
 class ValidationWorker(QRunnable):
@@ -484,7 +484,7 @@ class CrawlerManager(QObject):
         """Internal method to start the actual crawler process."""
         # Check if the required dependencies are installed for the selected AI provider
         try:
-            from traverser_ai_api.model_adapters import check_dependencies
+            from domain.model_adapters import check_dependencies
         except ImportError:
             try:
                 from model_adapters import check_dependencies

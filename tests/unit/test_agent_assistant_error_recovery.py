@@ -1,7 +1,7 @@
 import pytest
 import json
 from unittest.mock import Mock, patch, MagicMock
-from traverser_ai_api.agent_assistant import AgentAssistant
+from domain.agent_assistant import AgentAssistant
 
 
 class TestAgentAssistantErrorRecovery:
@@ -41,8 +41,8 @@ class TestAgentAssistantErrorRecovery:
     @pytest.fixture
     def agent_assistant(self, mock_config, mock_mcp_client):
         """Create an AgentAssistant instance with mocked dependencies."""
-        with patch('traverser_ai_api.agent_assistant.create_model_adapter') as mock_adapter, \
-             patch('traverser_ai_api.agent_assistant.Session') as mock_session, \
+        with patch('domain.agent_assistant.create_model_adapter') as mock_adapter, \
+             patch('domain.agent_assistant.Session') as mock_session, \
              patch.object(AgentAssistant, '_init_langchain_components') as mock_init_langchain:
 
             # Mock the model adapter
@@ -187,7 +187,7 @@ class TestAgentAssistantErrorRecovery:
 
     def test_log_error_recovery_event_mcp_fallback(self, agent_assistant):
         """Test logging of MCP fallback recovery events."""
-        with patch('traverser_ai_api.agent_assistant.logging') as mock_logging:
+        with patch('domain.agent_assistant.logging') as mock_logging:
             agent_assistant.log_error_recovery_event("mcp_fallback", {
                 "fallback_from": "langchain_orchestration",
                 "fallback_to": "direct_model",
@@ -206,7 +206,7 @@ class TestAgentAssistantErrorRecovery:
 
     def test_log_error_recovery_event_mcp_unavailable(self, agent_assistant):
         """Test logging of MCP unavailable events."""
-        with patch('traverser_ai_api.agent_assistant.logging') as mock_logging:
+        with patch('domain.agent_assistant.logging') as mock_logging:
             agent_assistant.log_error_recovery_event("mcp_unavailable", {
                 "context": "direct_model_call",
                 "reason": "Server down",
@@ -231,7 +231,7 @@ class TestAgentAssistantErrorRecovery:
         }
         mock_mcp_client.get_screen_state.return_value = {"status": "healthy"}
 
-        with patch('traverser_ai_api.agent_assistant.logging') as mock_logging:
+        with patch('domain.agent_assistant.logging') as mock_logging:
             agent_assistant.log_mcp_connection_status()
 
             # Verify structured logging includes circuit breaker info

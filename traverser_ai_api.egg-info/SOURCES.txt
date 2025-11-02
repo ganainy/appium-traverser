@@ -3,7 +3,6 @@ pyproject.toml
 tests/test_config.py
 tests/test_config_schema.py
 tests/test_user_storage.py
-traverser_ai_api/__init__.py
 traverser_ai_api.egg-info/PKG-INFO
 traverser_ai_api.egg-info/SOURCES.txt
 traverser_ai_api.egg-info/dependency_links.txt

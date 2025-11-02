@@ -8,10 +8,10 @@ import time
 
 try:
     # Import Config only when needed to avoid circular import
-    from traverser_ai_api.config import Config
+    from config.config import Config
 except ImportError:
     # Import Config only when needed to avoid circular import
-    from traverser_ai_api.config import Config
+    from config.config import Config
 
 import hashlib
 import shutil

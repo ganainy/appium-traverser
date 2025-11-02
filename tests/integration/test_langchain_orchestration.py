@@ -9,8 +9,8 @@ import json
 from unittest.mock import Mock, patch, MagicMock
 from typing import Dict, Any, Optional
 
-from traverser_ai_api.agent_assistant import AgentAssistant
-from traverser_ai_api.mcp_client import MCPClient
+from domain.agent_assistant import AgentAssistant
+from infrastructure.mcp_client import MCPClient
 
 
 
@@ -20,7 +20,7 @@ class TestLangChainOrchestrationIntegration:
     @pytest.fixture
     def real_config(self):
         """Create a real config object for integration testing."""
-        from traverser_ai_api.config import Config
+        from config.config import Config
         config = Mock(spec=Config)
         config.AI_PROVIDER = "gemini"
         config.GEMINI_API_KEY = "test_key"
@@ -101,7 +101,7 @@ class TestLangChainOrchestrationIntegration:
     @pytest.fixture
     def agent_with_mcp(self, real_config, mock_mcp_client, mock_model_adapter):
         """Create an AgentAssistant with MCP client integration."""
-        with patch('traverser_ai_api.agent_assistant.create_model_adapter', return_value=mock_model_adapter):
+        with patch('domain.agent_assistant.create_model_adapter', return_value=mock_model_adapter):
             # Create mock agent tools
             mock_tools = Mock()
             mock_tools.driver = Mock()
@@ -229,7 +229,7 @@ class TestLangChainOrchestrationIntegration:
         # Configure MCP client to fail
         mock_mcp_client.initialize_session.side_effect = Exception("MCP server unavailable")
 
-        with patch('traverser_ai_api.agent_assistant.create_model_adapter', return_value=mock_model_adapter):
+        with patch('domain.agent_assistant.create_model_adapter', return_value=mock_model_adapter):
             mock_tools = Mock()
             agent = AgentAssistant(
                 app_config=real_config,

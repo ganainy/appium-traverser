@@ -1,5 +1,5 @@
 import pytest
-from traverser_ai_api.mcp_client import MCPClient, MCPConnectionError
+from infrastructure.mcp_client import MCPClient, MCPConnectionError
 
 
 class TestMCPConnectionIntegration:

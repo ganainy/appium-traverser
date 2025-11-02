@@ -7,8 +7,8 @@ from typing import Any, Dict, List, Tuple
 
 import requests
 
-from traverser_ai_api.cli.commands.base import CommandHandler, CommandResult
-from traverser_ai_api.cli.shared.context import CLIContext
+from cli.commands.base import CommandHandler, CommandResult
+from cli.shared.context import CLIContext
 
 
 class PrecheckCommand(CommandHandler):
@@ -180,7 +180,7 @@ class PrecheckCommand(CommandHandler):
         
         # Try CLI command
         try:
-            from traverser_ai_api.cli.services.process_utils import ProcessUtils
+            from cli.services.process_utils import ProcessUtils
             result = ProcessUtils.run_subprocess(
                 ["ollama", "list"],
                 timeout=2,

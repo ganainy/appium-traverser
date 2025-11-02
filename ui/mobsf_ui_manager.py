@@ -142,7 +142,7 @@ logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %
 sys.path.insert(0, r'{api_dir_path}')
 
 try:
-    from traverser_ai_api.config import Config
+    from config.config import Config
     from mobsf_manager import MobSFManager
     
     # Initialize Config with properly escaped paths

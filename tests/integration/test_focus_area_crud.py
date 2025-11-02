@@ -1,8 +1,8 @@
 import os
 import pytest
-from traverser_ai_api.interfaces.cli import CLICrawlerInterface
-from traverser_ai_api.interfaces.gui import GUICrawlerInterface
-from traverser_ai_api.core import focus_area_crud
+from interfaces.cli import CLICrawlerInterface
+from interfaces.gui import GUICrawlerInterface
+from core import focus_area_crud
 
 TEST_JSON = os.path.join(os.path.dirname(focus_area_crud.__file__), 'focus_areas.json')
 

@@ -15,19 +15,19 @@ from unittest.mock import patch, MagicMock
 def test_gui_can_import_core_modules():
     """Test that GUI can import all core modules without errors."""
     try:
-        from traverser_ai_api.core.config import Configuration
-        from traverser_ai_api.core.storage import Storage
-        from traverser_ai_api.core.crawler import CrawlerSession, Crawler
-        from traverser_ai_api.core.parser import ParsedData, parse_raw_data
+        from core.config import Configuration
+        from core.storage import Storage
+        from core.crawler import CrawlerSession, Crawler
+        from core.parser import ParsedData, parse_raw_data
     except ImportError as e:
         pytest.fail(f"GUI failed to import core modules: {e}")
 
 def test_gui_can_create_core_instances():
     """Test that GUI can create instances of core classes."""
-    from traverser_ai_api.core.config import Configuration
-    from traverser_ai_api.core.storage import Storage
-    from traverser_ai_api.core.crawler import CrawlerSession, Crawler
-    from traverser_ai_api.core.parser import ParsedData
+    from core.config import Configuration
+    from core.storage import Storage
+    from core.crawler import CrawlerSession, Crawler
+    from core.parser import ParsedData
 
     # Test Configuration creation with required settings
     config = Configuration(
@@ -83,8 +83,8 @@ def test_gui_can_create_core_instances():
 
 def test_gui_core_validation_works():
     """Test that core validation works in GUI context."""
-    from traverser_ai_api.core.config import Configuration
-    from traverser_ai_api.core.parser import ParsedData
+    from core.config import Configuration
+    from core.parser import ParsedData
 
     # Test Configuration validation with proper settings
     config = Configuration(
@@ -109,8 +109,8 @@ def test_gui_core_validation_works():
 
 def test_gui_core_storage_operations():
     """Test that core storage operations work in GUI context."""
-    from traverser_ai_api.core.config import Configuration
-    from traverser_ai_api.core.storage import Storage
+    from core.config import Configuration
+    from core.storage import Storage
     import tempfile
     import os
     import time
@@ -153,8 +153,8 @@ def test_gui_core_storage_operations():
 
 def test_gui_core_crawler_operations():
     """Test that core crawler operations work in GUI context."""
-    from traverser_ai_api.core.crawler import CrawlerSession, Crawler
-    from traverser_ai_api.core.config import Configuration
+    from core.crawler import CrawlerSession, Crawler
+    from core.config import Configuration
 
     # Setup config with required settings
     config = Configuration(
@@ -190,7 +190,7 @@ def test_gui_core_crawler_operations():
 
 def test_gui_core_parser_operations():
     """Test that core parser operations work in GUI context."""
-    from traverser_ai_api.core.parser import parse_raw_data
+    from core.parser import parse_raw_data
 
     # Test parsing empty data (current implementation returns empty list)
     result = parse_raw_data({})
@@ -199,8 +199,8 @@ def test_gui_core_parser_operations():
 
 def test_gui_core_error_handling():
     """Test that core error handling works in GUI context."""
-    from traverser_ai_api.core.config import Configuration
-    from traverser_ai_api.core.parser import ParsedData
+    from core.config import Configuration
+    from core.parser import ParsedData
 
     # Test Configuration validation error - empty name
     config = Configuration(
@@ -229,14 +229,14 @@ def test_gui_core_error_handling():
 def test_gui_interface_can_be_imported():
     """Test that GUI interface can be imported without errors."""
     try:
-        from traverser_ai_api.interfaces.gui import GUICrawlerInterface, create_gui_interface
+        from interfaces.gui import GUICrawlerInterface, create_gui_interface
     except ImportError as e:
         pytest.fail(f"GUI interface failed to import: {e}")
 
 
 def test_gui_interface_initialization():
     """Test that GUI interface can be initialized."""
-    from traverser_ai_api.interfaces.gui import GUICrawlerInterface
+    from interfaces.gui import GUICrawlerInterface
 
     interface = GUICrawlerInterface()
     assert interface is not None
@@ -248,7 +248,7 @@ def test_gui_interface_initialization():
 
 def test_gui_interface_core_initialization():
     """Test that GUI interface can initialize core modules."""
-    from traverser_ai_api.interfaces.gui import GUICrawlerInterface
+    from interfaces.gui import GUICrawlerInterface
 
     config_data = {
         "name": "Test GUI Config",
@@ -271,7 +271,7 @@ def test_gui_interface_core_initialization():
 
 def test_gui_interface_default_initialization():
     """Test that GUI interface can initialize with default config."""
-    from traverser_ai_api.interfaces.gui import GUICrawlerInterface
+    from interfaces.gui import GUICrawlerInterface
 
     interface = GUICrawlerInterface()
     success = interface.initialize_core()
@@ -286,7 +286,7 @@ def test_gui_interface_default_initialization():
 
 def test_gui_interface_session_operations():
     """Test that GUI interface session operations work."""
-    from traverser_ai_api.interfaces.gui import GUICrawlerInterface
+    from interfaces.gui import GUICrawlerInterface
 
     interface = GUICrawlerInterface()
     interface.initialize_core()
@@ -315,7 +315,7 @@ def test_gui_interface_session_operations():
 
 def test_gui_interface_configuration_operations():
     """Test that GUI interface configuration operations work."""
-    from traverser_ai_api.interfaces.gui import GUICrawlerInterface
+    from interfaces.gui import GUICrawlerInterface
 
     interface = GUICrawlerInterface()
     interface.initialize_core()
@@ -333,7 +333,7 @@ def test_gui_interface_configuration_operations():
 
 def test_gui_interface_error_handling():
     """Test that GUI interface handles errors gracefully."""
-    from traverser_ai_api.interfaces.gui import GUICrawlerInterface
+    from interfaces.gui import GUICrawlerInterface
 
     interface = GUICrawlerInterface()
 
@@ -348,7 +348,7 @@ def test_gui_interface_error_handling():
 
 def test_gui_convenience_functions():
     """Test GUI convenience functions."""
-    from traverser_ai_api.interfaces.gui import create_gui_interface, start_gui_session, get_gui_status, stop_gui_session
+    from interfaces.gui import create_gui_interface, start_gui_session, get_gui_status, stop_gui_session
 
     # Create interface
     interface = create_gui_interface()

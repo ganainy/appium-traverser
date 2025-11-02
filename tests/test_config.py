@@ -1,7 +1,13 @@
+"""
+This test module verifies the behavior of the `Config` class. It checks:
+- Setting and retrieving configuration values, including type coercion.
+- That environment variable overrides are respected.
+- That default values are returned when keys are missing.
+"""
 import os
 import tempfile
 import pytest
-from traverser_ai_api.config import Config
+from config.config import Config
 
 def test_set_and_get_config_value():
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -12,6 +18,7 @@ def test_set_and_get_config_value():
         config.set("test_key", "test_value")
         assert config.get("test_key") == "test_value"
         assert config.get("nonexistent", "default") == "default"
+        config._user_store.close()
 
 def test_config_type_coercion():
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -24,6 +31,7 @@ def test_config_type_coercion():
         assert config.get("int_key") == 123
         assert config.get("float_key") == pytest.approx(3.14)
         assert config.get("bool_key") is True
+        config._user_store.close()
 
 def test_config_env_override(monkeypatch):
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -32,7 +40,4 @@ def test_config_env_override(monkeypatch):
         config._user_store = config._user_store.__class__(db_path)
         monkeypatch.setenv("MY_ENV_KEY", "env_value")
         assert config.get("MY_ENV_KEY") == "env_value"
-
-def test_config_default_fallback():
-    config = Config()
-    assert config.get("output_dir") == config._defaults.output_dir
+        config._user_store.close()

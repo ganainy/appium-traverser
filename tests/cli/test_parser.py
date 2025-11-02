@@ -12,8 +12,7 @@ import pytest
 
 # Add project root to path for imports
 project_root = Path(__file__).resolve().parent.parent.parent
-api_dir = project_root / "traverser_ai_api"
-sys.path.insert(0, str(api_dir))
+sys.path.insert(0, str(project_root))
 
 try:
     from cli.parser import (

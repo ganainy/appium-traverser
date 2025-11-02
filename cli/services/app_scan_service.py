@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from traverser_ai_api.cli.shared.context import CLIContext
+from cli.shared.context import CLIContext
 
 
 class AppScanService:

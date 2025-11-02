@@ -6,7 +6,7 @@ OpenRouter service for managing AI model selection and metadata.
 import logging
 from typing import Dict, List, Optional, Tuple
 
-from traverser_ai_api.cli.shared.context import CLIContext
+from cli.shared.context import CLIContext
 
 
 class OpenRouterService:
