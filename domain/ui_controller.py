@@ -98,18 +98,23 @@ class CrawlerControllerWindow(QMainWindow):
 
         # Initialize Config instance
         from config.config import Config
+        from ui.components import UIComponents
         self.config = Config()
 
-        # Set default UI_MODE if not already in config
-        # This is done after config instantiation to not overwrite existing setting
-        if not hasattr(self.config, "UI_MODE"):
-            logging.debug("Setting default UI_MODE to Expert in config.")
+        # Only set default UI_MODE if it hasn't been saved yet (check SQLite, not attributes)
+        # This ensures we don't overwrite an existing user preference
+        existing_ui_mode = self.config.get(UIComponents.UI_MODE_CONFIG_KEY)
+        if not existing_ui_mode:
+            logging.debug(f"No existing UI_MODE found in config. Setting default to {UIComponents.UI_MODE_DEFAULT}.")
             if hasattr(self.config, "update_setting_and_save"):
                 self.config.update_setting_and_save(
-                    "UI_MODE", "Expert", getattr(self, "_sync_user_config_files", None)
+                    UIComponents.UI_MODE_CONFIG_KEY, UIComponents.UI_MODE_DEFAULT, getattr(self, "_sync_user_config_files", None)
                 )
-        # Log current UI_MODE setting
-        ui_mode = getattr(self.config, "UI_MODE", "Unknown")
+        else:
+            logging.debug(f"Found existing UI_MODE in config: {existing_ui_mode}")
+        
+        # Log current UI_MODE setting for debugging
+        ui_mode = self.config.get(UIComponents.UI_MODE_CONFIG_KEY, UIComponents.UI_MODE_DEFAULT)
         logging.debug(f"Current UI_MODE setting: {ui_mode}")
 
         # Initialize instance variables

@@ -254,7 +254,7 @@ class ConfigManager(QObject):
         if last_selected_app is not None:
             self.main_controller.last_selected_app = last_selected_app or {}
         # UI_MODE
-        ui_mode = self.config.get('UI_MODE', None)
+        ui_mode = self.config.get(UIComponents.UI_MODE_CONFIG_KEY, None)
         if ui_mode and hasattr(self, 'ui_mode_dropdown'):
             index = self.ui_mode_dropdown.findText(ui_mode)
             if index >= 0:

@@ -32,6 +32,12 @@ from ui.custom_widgets import NoScrollSpinBox as QSpinBox
 class UIComponents:
     """Factory class for creating UI components used in the Crawler Controller."""
 
+    # UI Mode Constants
+    UI_MODE_BASIC = "Basic"
+    UI_MODE_EXPERT = "Expert"
+    UI_MODE_DEFAULT = UI_MODE_BASIC
+    UI_MODE_CONFIG_KEY = "UI_MODE"
+
     # Define which settings groups and fields are considered advanced
     # These will be hidden in basic mode
     ADVANCED_GROUPS = [
@@ -512,24 +518,30 @@ class UIComponents:
         mode_layout = QHBoxLayout()
         mode_label = QLabel("UI Mode:")
         config_handler.ui_mode_dropdown = QComboBox()
-        config_handler.ui_mode_dropdown.addItems(["Basic", "Expert"])
+        config_handler.ui_mode_dropdown.addItems([
+            UIComponents.UI_MODE_BASIC,
+            UIComponents.UI_MODE_EXPERT
+        ])
 
         # Get the UI mode from config
-        initial_mode = "Basic"  # Default if not found
+        initial_mode = UIComponents.UI_MODE_DEFAULT  # Default if not found
 
-        # Check if the user_config has a UI_MODE (loaded from user_config.json)
-        if (
+        # Try to get UI_MODE from the Config object's SQLite store
+        try:
+            stored_mode = config_handler.main_controller.config.get(UIComponents.UI_MODE_CONFIG_KEY)
+            if stored_mode:
+                initial_mode = stored_mode
+                logging.debug(f"Setting initial UI mode from SQLite config store: {initial_mode}")
+        except Exception as e:
+            logging.warning(f"Error retrieving {UIComponents.UI_MODE_CONFIG_KEY} from config store: {e}")
+
+        # Fallback: Check if the user_config dict has a UI_MODE (loaded from user_config.json)
+        if initial_mode == UIComponents.UI_MODE_DEFAULT and (
             hasattr(config_handler, "user_config")
-            and "UI_MODE" in config_handler.user_config
+            and UIComponents.UI_MODE_CONFIG_KEY in config_handler.user_config
         ):
-            initial_mode = config_handler.user_config["UI_MODE"]
-            logging.debug(f"Setting initial UI mode from user_config: {initial_mode}")
-        # Fallback to config attribute if it exists
-        elif hasattr(config_handler.main_controller.config, "UI_MODE"):
-            initial_mode = config_handler.main_controller.config.UI_MODE
-            logging.debug(
-                f"Setting initial UI mode from config attribute: {initial_mode}"
-            )
+            initial_mode = config_handler.user_config[UIComponents.UI_MODE_CONFIG_KEY]
+            logging.debug(f"Setting initial UI mode from user_config dict: {initial_mode}")
 
         logging.debug(f"Initial UI mode determined as: {initial_mode}")
 
@@ -663,10 +675,10 @@ class UIComponents:
         Toggle between basic and expert UI modes
 
         Args:
-            mode: "Basic" or "Expert" mode
+            mode: "Basic" or "Expert" mode (use UIComponents.UI_MODE_BASIC or UIComponents.UI_MODE_EXPERT)
             config_handler: The config handler with references to UI widgets
         """
-        is_basic = mode == "Basic"
+        is_basic = mode == UIComponents.UI_MODE_BASIC
 
         # Toggle group visibility based on mode
         for group_name, group_widget in config_handler.ui_groups.items():
@@ -729,7 +741,7 @@ class UIComponents:
 
         # Save the current mode to user config
         config_handler.config.update_setting_and_save(
-            "UI_MODE", mode, config_handler.main_controller._sync_user_config_files
+            UIComponents.UI_MODE_CONFIG_KEY, mode, config_handler.main_controller._sync_user_config_files
         )
 
         # Synchronize the changes to the API config file
