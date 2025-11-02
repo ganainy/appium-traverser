@@ -25,8 +25,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from traverser_ai_api.ui.custom_widgets import NoScrollComboBox as QComboBox
-from traverser_ai_api.ui.custom_widgets import NoScrollSpinBox as QSpinBox
+from ui.custom_widgets import NoScrollComboBox as QComboBox
+from ui.custom_widgets import NoScrollSpinBox as QSpinBox
 
 
 class UIComponents:
@@ -62,7 +62,7 @@ class UIComponents:
             model_dropdown.addItem("No model selected")
 
         # Get provider capabilities from config
-        from traverser_ai_api.config import AI_PROVIDER_CAPABILITIES
+        from config.config import AI_PROVIDER_CAPABILITIES
 
         capabilities = AI_PROVIDER_CAPABILITIES.get(
             provider.lower(), AI_PROVIDER_CAPABILITIES.get("gemini", {})
@@ -440,7 +440,7 @@ class UIComponents:
             try:
                 from PySide6.QtWidgets import QApplication
 
-                from traverser_ai_api.ui_controller import CrawlerControllerWindow
+                from domain.ui_controller import CrawlerControllerWindow
 
                 # Get the main window instance if it exists
                 app = QApplication.instance()
@@ -1150,9 +1150,9 @@ class UIComponents:
     def _get_openrouter_cache_path() -> str:
         # Delegate to central utility to avoid UI-only coupling
         try:
-            from traverser_ai_api.openrouter_models import get_openrouter_cache_path
+            from domain.openrouter_models import get_openrouter_cache_path
         except ImportError:
-            from openrouter_models import get_openrouter_cache_path
+            from domain.openrouter_models import get_openrouter_cache_path
         return get_openrouter_cache_path()
 
     @staticmethod
@@ -1160,9 +1160,9 @@ class UIComponents:
         try:
             # Delegate to central utility
             try:
-                from traverser_ai_api.openrouter_models import load_openrouter_models_cache
+                from domain.openrouter_models import load_openrouter_models_cache
             except ImportError:
-                from openrouter_models import load_openrouter_models_cache
+                from domain.openrouter_models import load_openrouter_models_cache
             return load_openrouter_models_cache()
         except Exception as e:
             logging.debug(f"Failed to read OpenRouter cache: {e}")
@@ -1172,9 +1172,9 @@ class UIComponents:
     def _save_openrouter_models_to_cache(models: List[Dict[str, Any]]) -> None:
         try:
             try:
-                from traverser_ai_api.openrouter_models import save_openrouter_models_to_cache
+                from domain.openrouter_models import save_openrouter_models_to_cache
             except ImportError:
-                from openrouter_models import save_openrouter_models_to_cache
+                from domain.openrouter_models import save_openrouter_models_to_cache
             save_openrouter_models_to_cache(models)
         except Exception as e:
             logging.debug(f"Failed to save OpenRouter cache via central utility: {e}")
@@ -1185,9 +1185,9 @@ class UIComponents:
         try:
             # Delegate to central utility
             try:
-                from traverser_ai_api.openrouter_models import is_openrouter_model_vision
+                from domain.openrouter_models import is_openrouter_model_vision
             except ImportError:
-                from openrouter_models import is_openrouter_model_vision
+                from domain.openrouter_models import is_openrouter_model_vision
             return is_openrouter_model_vision(model_id)
         except Exception as e:
             logging.debug(f"Failed to determine vision support: {e}")
@@ -1354,9 +1354,9 @@ class UIComponents:
         try:
             # Delegate to central utility
             try:
-                from traverser_ai_api.openrouter_models import is_openrouter_model_free
+                from domain.openrouter_models import is_openrouter_model_free
             except ImportError:
-                from openrouter_models import is_openrouter_model_free
+                from domain.openrouter_models import is_openrouter_model_free
             return is_openrouter_model_free(model_meta)
         except Exception as e:
             logging.debug(f"Failed to determine free status: {e}")
@@ -1368,9 +1368,9 @@ class UIComponents:
         try:
             # Delegate to central utility
             try:
-                from traverser_ai_api.openrouter_models import get_openrouter_model_meta
+                from domain.openrouter_models import get_openrouter_model_meta
             except ImportError:
-                from openrouter_models import get_openrouter_model_meta
+                from domain.openrouter_models import get_openrouter_model_meta
             return get_openrouter_model_meta(model_id)
         except Exception as e:
             logging.debug(f"Failed to lookup model meta: {e}")
@@ -1382,9 +1382,9 @@ class UIComponents:
         try:
             # Delegate to central utility
             try:
-                from traverser_ai_api.openrouter_models import background_refresh_openrouter_models
+                from domain.openrouter_models import background_refresh_openrouter_models
             except ImportError:
-                from openrouter_models import background_refresh_openrouter_models
+                from domain.openrouter_models import background_refresh_openrouter_models
             background_refresh_openrouter_models()
         except Exception as e:
             logging.debug(f"Failed to queue background OpenRouter refresh via central utility: {e}")
@@ -1402,9 +1402,9 @@ class UIComponents:
 
         # Import the focus areas widget
         try:
-            from traverser_ai_api.ui.focus_areas_widget import FocusAreasWidget
+            from ui.focus_areas_widget import FocusAreasWidget
         except ImportError:
-            from focus_areas_widget import FocusAreasWidget
+            from ui.focus_areas_widget import FocusAreasWidget
 
         # Try to get focus service from main controller
         focus_service = None

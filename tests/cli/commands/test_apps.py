@@ -28,7 +28,7 @@ try:
     from cli.shared.context import CLIContext
 except ImportError as e:
     try:
-        from traverser_ai_api.cli.commands.apps import (
+        from cli.commands.apps import (
             ScanAllAppsCommand,
             ScanHealthAppsCommand,
             ListAllAppsCommand,
@@ -37,8 +37,8 @@ except ImportError as e:
             ShowSelectedAppCommand,
             AppsCommandGroup
         )
-        from traverser_ai_api.cli.commands.base import CommandResult
-        from traverser_ai_api.cli.shared.context import CLIContext
+        from cli.commands.base import CommandResult
+        from cli.shared.context import CLIContext
     except ImportError as e2:
         pytest.skip(f"Apps command modules not available: {e2}", allow_module_level=True)
 

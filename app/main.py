@@ -8,15 +8,15 @@ import time
 from typing import Optional
 
 try:
-    from traverser_ai_api.config import Config
+    from config.config import Config
 except ImportError:
-    from traverser_ai_api.config import Config
+    from config.config import Config
 
 try:
     try:
-        from traverser_ai_api.utils import SCRIPT_START_TIME, ElapsedTimeFormatter, LoggerManager
+        from utils.utils import SCRIPT_START_TIME, ElapsedTimeFormatter, LoggerManager
     except ImportError:
-        from traverser_ai_api.utils import SCRIPT_START_TIME, ElapsedTimeFormatter, LoggerManager
+        from utils.utils import SCRIPT_START_TIME, ElapsedTimeFormatter, LoggerManager
 except ImportError as e:
     sys.stderr.write(f"Error: Could not import logging utilities from utils.py: {e}\n")
     if 'SCRIPT_START_TIME' not in globals():
@@ -41,8 +41,7 @@ USER_CONFIG_JSON_PATH = os.path.join(_current_script_dir, USER_CONFIG_JSON_FILEN
 cfg: Optional[Config] = None # Define cfg early for wider scope
 
 try:
-    cfg = Config(defaults_module_path=DEFAULT_CONFIG_MODULE_PATH,
-                user_config_json_path=USER_CONFIG_JSON_PATH)
+    cfg = Config(user_config_json_path=USER_CONFIG_JSON_PATH)
 except Exception as e:
     bootstrap_logger.critical(f"CRITICAL: Failed to initialize Config object during startup. Error: {e}", exc_info=True)
     sys.exit(100)
@@ -122,19 +121,17 @@ if __name__ == "__main__":
     bootstrap_logger.info(f"Base Config Dir (for defaults/flag): {cfg.BASE_DIR}")
     bootstrap_logger.info(f"Output Data Dir: {cfg.OUTPUT_DATA_DIR}")
 
-    if cfg.SHUTDOWN_FLAG_PATH and os.path.exists(cfg.SHUTDOWN_FLAG_PATH):
-        bootstrap_logger.warning(f"Found existing shutdown flag at startup: {cfg.SHUTDOWN_FLAG_PATH}. Removing it.")
-        remove_with_retry(cfg.SHUTDOWN_FLAG_PATH)
-
-
-    if not cfg.APP_PACKAGE:
+    if cfg.get('SHUTDOWN_FLAG_PATH') and os.path.exists(cfg.get('SHUTDOWN_FLAG_PATH')):
+        bootstrap_logger.warning(f"Found existing shutdown flag at startup: {cfg.get('SHUTDOWN_FLAG_PATH')}. Removing it.")
+        remove_with_retry(cfg.get('SHUTDOWN_FLAG_PATH'))
+    if not cfg.get('APP_PACKAGE'):
         bootstrap_logger.critical("APP_PACKAGE is not defined in configuration. Cannot proceed. Exiting.")
         sys.exit(1)
-    if not cfg.APP_ACTIVITY:
+    if not cfg.get('APP_ACTIVITY'):
         bootstrap_logger.critical("APP_ACTIVITY is not defined in configuration. Cannot proceed. Exiting.")
         sys.exit(1)
     # These checks can remain with bootstrap_logger
-    if cfg.ENABLE_TRAFFIC_CAPTURE and not cfg.PCAPDROID_API_KEY and cfg.PCAPDROID_PACKAGE == "com.emanuelef.remote_capture":
+    if cfg.get('ENABLE_TRAFFIC_CAPTURE') and not cfg.get('PCAPDROID_API_KEY') and cfg.get('PCAPDROID_PACKAGE') == "com.emanuelef.remote_capture":
         bootstrap_logger.warning("PCAPDROID_API_KEY is not set, but traffic capture is enabled for PCAPdroid. Capture might fail if API key is required.")
     # Provider-agnostic credential check
     ai_provider = str(getattr(cfg, 'AI_PROVIDER', 'gemini')).lower()
@@ -154,8 +151,8 @@ if __name__ == "__main__":
         else:
             bootstrap_logger.info("Ollama base URL detected.")
 
-    current_app_package = cfg.APP_PACKAGE
-    current_app_activity = cfg.APP_ACTIVITY
+    current_app_package = cfg.get('APP_PACKAGE')
+    current_app_activity = cfg.get('APP_ACTIVITY')
     bootstrap_logger.info(f"Application will target: PACKAGE='{current_app_package}', ACTIVITY='{current_app_activity}'")
 
     # --- Determine log file path BEFORE potential deletion of its directory ---
@@ -247,9 +244,9 @@ if __name__ == "__main__":
         if _current_script_dir not in sys.path:
             sys.path.insert(0, _current_script_dir) 
         try:
-            from traverser_ai_api.crawler import AppCrawler  
+            from legacy_code.crawler import AppCrawler  
         except ImportError:
-            from traverser_ai_api.crawler import AppCrawler 
+            from legacy_code.crawler import AppCrawler 
         crawler_instance = AppCrawler(app_config=cfg)
         root_logger.info("AppCrawler initialized. Starting crawl...")
         crawler_instance.run() # This internally calls asyncio.run()
@@ -290,9 +287,9 @@ if __name__ == "__main__":
                     # Import model adapters and PIL
                     try:
                         try:
-                            from traverser_ai_api.model_adapters import create_model_adapter
+                            from domain.model_adapters import create_model_adapter
                         except ImportError:
-                            from traverser_ai_api.model_adapters import create_model_adapter
+                            from domain.model_adapters import create_model_adapter
                         import glob
                         import re
 

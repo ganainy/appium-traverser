@@ -34,21 +34,21 @@ from PySide6.QtWidgets import (
 )
 
 try:
-    from traverser_ai_api.analysis_viewer import XHTML2PDF_AVAILABLE, RunAnalyzer
+    from domain.analysis_viewer import XHTML2PDF_AVAILABLE, RunAnalyzer
 except Exception:
     try:
-        from traverser_ai_api.analysis_viewer import XHTML2PDF_AVAILABLE, RunAnalyzer
+        from domain.analysis_viewer import XHTML2PDF_AVAILABLE, RunAnalyzer
     except Exception:
         RunAnalyzer = None
         XHTML2PDF_AVAILABLE = False
-from traverser_ai_api.ui.components import UIComponents
-from traverser_ai_api.ui.config_manager import ConfigManager
-from traverser_ai_api.ui.crawler_manager import CrawlerManager
-from traverser_ai_api.ui.custom_widgets import BusyDialog
-from traverser_ai_api.ui.health_app_scanner import HealthAppScanner
-from traverser_ai_api.ui.logo import LogoWidget
-from traverser_ai_api.ui.mobsf_ui_manager import MobSFUIManager
-from traverser_ai_api.ui.utils import update_screenshot
+from ui.components import UIComponents
+from ui.config_manager import ConfigManager
+from ui.crawler_manager import CrawlerManager
+from ui.custom_widgets import BusyDialog
+from ui.health_app_scanner import HealthAppScanner
+from ui.logo import LogoWidget
+from ui.mobsf_ui_manager import MobSFUIManager
+from ui.utils import update_screenshot
 
 
 class CrawlerControllerWindow(QMainWindow):
@@ -96,9 +96,9 @@ class CrawlerControllerWindow(QMainWindow):
         self.api_dir = os.path.dirname(__file__)  # Directory containing this script
         self.project_root = os.path.dirname(self.api_dir)  # Parent directory of api_dir
 
-    # Initialize Config instance
-    from traverser_ai_api.config import Config
-    self.config: "Config" = Config()
+        # Initialize Config instance
+        from config.config import Config
+        self.config = Config()
 
         # Set default UI_MODE if not already in config
         # This is done after config instantiation to not overwrite existing setting
@@ -411,7 +411,7 @@ class CrawlerControllerWindow(QMainWindow):
     def _init_agent_assistant(self):
         """(Re)initialize the AgentAssistant with current config and model."""
         try:
-            from traverser_ai_api.agent_assistant import AgentAssistant
+            from domain.agent_assistant import AgentAssistant
             provider = getattr(self.config, "AI_PROVIDER", None)
             model = getattr(self.config, "DEFAULT_MODEL_TYPE", None)
             if not provider or not model or str(model).strip() in ["", "No model selected"]:
@@ -549,6 +549,13 @@ class CrawlerControllerWindow(QMainWindow):
                 "OUTPUT_DATA_DIR",
                 os.path.join(self.api_dir, "output_data"),
             )
+
+            # Handle case where OUTPUT_DATA_DIR might be None
+            if output_base_dir is None:
+                output_base_dir = os.path.join(self.api_dir, "output_data")
+                self.config.update_setting_and_save(
+                    "OUTPUT_DATA_DIR", output_base_dir, self._sync_user_config_files
+                )
 
             # Create base output directory if it doesn't exist
             if not os.path.exists(output_base_dir):
@@ -1124,9 +1131,9 @@ class CrawlerControllerWindow(QMainWindow):
 if __name__ == "__main__":
     # Import LoggerManager for proper logging setup
     try:
-        from traverser_ai_api.utils import LoggerManager
+        from utils.utils import LoggerManager
     except ImportError:
-        from traverser_ai_api.utils import LoggerManager
+        from utils.utils import LoggerManager
 
     app = QApplication(sys.argv)
     window = CrawlerControllerWindow()

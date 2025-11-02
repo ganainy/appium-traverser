@@ -7,10 +7,10 @@ from typing import Any, List, Optional, Tuple, Union
 
 try:
     # Import Config only when needed to avoid circular import
-    from traverser_ai_api.config.config import Config
+    from config.config import Config
 except ImportError:
     # Import Config only when needed to avoid circular import
-    from traverser_ai_api.config.config import Config
+    from config.config import Config
 
 class DatabaseManager:
     SCREENS_TABLE = "screens"
@@ -18,7 +18,7 @@ class DatabaseManager:
 
     def __init__(self, app_config: Config):
         self.cfg = app_config
-        self.db_path = str(self.cfg.DB_NAME)
+        self.db_path = str(self.cfg.get('DB_NAME'))
         self.conn: Optional[sqlite3.Connection] = None
         self._conn_thread_ident: Optional[int] = None # Stores the thread ID that owns self.conn
 
@@ -60,8 +60,8 @@ class DatabaseManager:
                 os.makedirs(db_dir, exist_ok=True)
                 logging.debug(f"Created database directory: {db_dir}")
 
-            connect_timeout_seconds = float(self.cfg.DB_CONNECT_TIMEOUT)
-            busy_timeout_ms = int(self.cfg.DB_BUSY_TIMEOUT)
+            connect_timeout_seconds = float(self.cfg.get('DB_CONNECT_TIMEOUT'))
+            busy_timeout_ms = int(self.cfg.get('DB_BUSY_TIMEOUT'))
 
             # Connect with check_same_thread=True (default)
             self.conn = sqlite3.connect(self.db_path, timeout=connect_timeout_seconds)

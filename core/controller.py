@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from traverser_ai_api.config import Config
+    from config.config import Config
 
 
 @dataclass
@@ -260,7 +260,7 @@ class CrawlerOrchestrator:
         log_file_path = os.path.join(log_dir, getattr(self.config, 'LOG_FILE_NAME', 'crawler.log'))
         
         # PID file path
-        pid_file_path = self.config.CRAWLER_PID_PATH
+        pid_file_path = self.config.get('CRAWLER_PID_PATH')
         
         # Prepare environment
         env = os.environ.copy()
@@ -289,7 +289,7 @@ class CrawlerOrchestrator:
     
     def _validate_plan(self, plan: CrawlerLaunchPlan):
         """Validate the launch plan."""
-        from traverser_ai_api.core.validation import ValidationService
+        from core.validation import ValidationService
         
         validation_service = ValidationService(self.config)
         is_valid, messages = validation_service.validate_all()

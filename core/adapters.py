@@ -14,13 +14,13 @@ import threading
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Callable, Optional, TYPE_CHECKING
+from .controller import ProcessBackend
 
 if TYPE_CHECKING:
-    from traverser_ai_api.core.controller import CrawlerLaunchPlan, OutputParser, ProcessBackend
+    from core.controller import CrawlerLaunchPlan, OutputParser, ProcessBackend
 
 
-class SubprocessBackend:
-    from .controller import ProcessBackend
+class SubprocessBackend(ProcessBackend):
     """Process backend using subprocess for CLI environments."""
     
     def __init__(self):
@@ -114,8 +114,7 @@ class SubprocessBackend:
             self.logger.error(f"Error monitoring subprocess (PID {pid}): {e}")
 
 
-class QtProcessBackend:
-    from .controller import ProcessBackend
+class QtProcessBackend(ProcessBackend):
     """Process backend using QProcess for UI environments."""
     
     def __init__(self):

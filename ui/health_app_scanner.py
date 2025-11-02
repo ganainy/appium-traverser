@@ -31,7 +31,7 @@ class HealthAppScanner(QObject):
         self.main_controller = main_controller
         self.config = main_controller.config
         self.api_dir = self.config.BASE_DIR
-        self.find_app_info_script_path = os.path.join(self.api_dir, "find_app_info.py")
+        self.find_app_info_script_path = os.path.join(self.api_dir, "..", "domain", "find_app_info.py")
         self.find_apps_process: Optional[QProcess] = None
         self.find_apps_stdout_buffer: str = ""
         self.health_apps_data: List[Dict[str, Any]] = []
@@ -135,6 +135,11 @@ class HealthAppScanner(QObject):
         """
         if not device_id:
             device_id = self._get_current_device_id()
+
+        # Ensure device_id is not None or empty
+        if not device_id:
+            device_id = "unknown_device"
+
         # Create app_info/device_id directory if it doesn't exist
         app_info_dir = os.path.join(
             self.api_dir,
@@ -815,10 +820,6 @@ class HealthAppScanner(QObject):
                     except Exception as cached_error:
                         self.main_controller.log_message(
                             f"Error loading from device cache: {cached_error}", "red"
-                        )
-                    except Exception as generic_error:
-                        self.main_controller.log_message(
-                            f"Error loading from generic path: {generic_error}", "red"
                         )
 
                 # Check for specific error patterns in the output

@@ -13,9 +13,16 @@ import sys
 import argparse
 import os
 import json
-from PyQt6.QtWidgets import QApplication
-from traverser_ai_api.ui_controller import CrawlerControllerWindow
-from traverser_ai_api.utils import LoggerManager
+try:
+    from PyQt6.QtWidgets import QApplication
+except ImportError:
+    try:
+        from PySide6.QtWidgets import QApplication
+    except ImportError:
+        print("ERROR: Neither PyQt6 nor PySide6 is installed. Please install one of them.")
+        sys.exit(1)
+from domain.ui_controller import CrawlerControllerWindow
+from utils.utils import LoggerManager
 
 def main():
     parser = argparse.ArgumentParser(description="Appium Traverser UI")
@@ -24,7 +31,7 @@ def main():
     args, unknown = parser.parse_known_args()
 
     # Determine config file path
-    api_dir = os.path.join(os.path.dirname(__file__), "traverser_ai_api")
+    api_dir = os.path.dirname(__file__)
     user_config_path = os.path.join(api_dir, "user_config.json")
 
     # Load or create user_config.json

@@ -15,9 +15,15 @@ from PySide6.QtWidgets import QApplication
 # Import shared orchestrator components
 try:
     from core import get_process_backend, get_crawler_orchestrator, get_validation_service
+    from core.adapters import create_process_backend
 except ImportError:
     # Use the new core interface
-    from interfaces.gui import GUICrawlerInterface, create_gui_interface
+    try:
+        from interfaces.gui import GUICrawlerInterface, create_gui_interface
+        from core.adapters import create_process_backend
+    except ImportError:
+        from interfaces.gui import GUICrawlerInterface, create_gui_interface
+        from core.adapters import create_process_backend
 
 
 class ValidationWorker(QRunnable):
@@ -92,7 +98,11 @@ class CrawlerManager(QObject):
                     "platform": getattr(self.config, 'PLATFORM', 'android')
                 }
             }
-            self.gui_interface = create_gui_interface(config_dict)
+            try:
+                self.gui_interface = create_gui_interface(config_dict)
+            except NameError:
+                # create_gui_interface not available, create a minimal fallback
+                self.gui_interface = None
             self.orchestrator = None  # Not available
             logging.info("GUI Crawler Interface initialized for core operations")
         
@@ -105,6 +115,8 @@ class CrawlerManager(QObject):
     
     def _connect_orchestrator_signals(self):
         """Connect orchestrator output callbacks to UI signals."""
+        if self.orchestrator is None:
+            return
         # Register callbacks with the orchestrator
         self.orchestrator.register_callback('step', self._on_step_callback)
         self.orchestrator.register_callback('action', self._on_action_callback)
@@ -335,17 +347,20 @@ class CrawlerManager(QObject):
             Dictionary with service status details
         """
         # Use the shared validation service if orchestrator available
-        if self.orchestrator:
-            validation_service = get_validation_service(self.config)
-            return validation_service.get_service_status_details()
-        else:
-            # Fallback to basic validation using GUI interface
-            return {
-                "appium": {"running": False, "message": "Appium server status unknown", "required": True},
-                "ollama": {"running": False, "message": "Ollama service status unknown", "required": False},
-                "api_keys": {"running": False, "message": "API keys status unknown", "required": True},
-                "app_selected": {"running": bool(getattr(self.config, 'APP_PACKAGE', None)), "message": f"App selected: {getattr(self.config, 'APP_PACKAGE', 'None')}", "required": True}
-            }
+        try:
+            if self.orchestrator and get_validation_service:
+                validation_service = get_validation_service(self.config)
+                return validation_service.get_service_status_details()
+        except NameError:
+            pass
+
+        # Fallback to basic validation using GUI interface
+        return {
+            "appium": {"running": False, "message": "Appium server status unknown", "required": True},
+            "ollama": {"running": False, "message": "Ollama service status unknown", "required": False},
+            "api_keys": {"running": False, "message": "API keys status unknown", "required": True},
+            "app_selected": {"running": bool(getattr(self.config, 'APP_PACKAGE', None)), "message": f"App selected: {getattr(self.config, 'APP_PACKAGE', 'None')}", "required": True}
+        }
     
     def update_progress(self):
         """Update the progress bar based on the current step count."""
@@ -487,7 +502,7 @@ class CrawlerManager(QObject):
             from domain.model_adapters import check_dependencies
         except ImportError:
             try:
-                from model_adapters import check_dependencies
+                from domain.model_adapters import check_dependencies
             except ImportError:
                 self.main_controller.log_message(
                     "ERROR: Could not import model_adapters module. Please check your installation.",

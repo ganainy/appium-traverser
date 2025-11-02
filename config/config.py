@@ -1,5 +1,5 @@
 # Key for output data dir config
-OUTPUT_DATA_DIR_KEY = "output_dir"
+OUTPUT_DATA_DIR_KEY = "OUTPUT_DATA_DIR"
 import os
 import logging
 from typing import Any, Callable, Dict, Optional
@@ -87,6 +87,11 @@ class Config:
     @property
     def AI_PROVIDER(self):
         return self.get("ai_provider")
+
+    @property
+    def USER_CONFIG_FILE_PATH(self):
+        """Path to the user config file (SQLite-backed config)."""
+        return self._user_store.db_path
 
     @property
     def FOCUS_AREAS(self):

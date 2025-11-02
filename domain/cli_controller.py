@@ -37,7 +37,7 @@ if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
 try:
-    from traverser_ai_api.config import Config
+    from config.config import Config
 except ImportError as e:
     sys.stderr.write(f"FATAL: Could not import 'Config' class from config.py: {e}\n")
     sys.stderr.write(
@@ -46,7 +46,7 @@ except ImportError as e:
     sys.exit(1)
 
 try:
-    from utils import SCRIPT_START_TIME, LoggerManager
+    from utils.utils import SCRIPT_START_TIME, LoggerManager
 except ImportError as e:
     sys.stderr.write(f"FATAL: Could not import logging utilities from utils.py: {e}\n")
     sys.stderr.write(
@@ -76,7 +76,7 @@ class CLIController:
         self.find_app_info_script_path = os.path.join(self.api_dir, "find_app_info.py")
         self.health_apps_data: List[Dict[str, Any]] = []
         self.pid_file_path = os.path.join(
-            self.cfg.CRAWLER_PID_PATH
+            self.cfg.get('CRAWLER_PID_PATH')
         )
         self.crawler_process: Optional[subprocess.Popen] = None
         self.discovered_analysis_targets: List[Dict[str, Any]] = []
@@ -87,7 +87,7 @@ class CLIController:
         signal.signal(signal.SIGTERM, self._signal_handler)
 
         # Attempt to auto-load cached health apps on startup
-        cached_path = self.cfg.CURRENT_HEALTH_APP_LIST_FILE
+        cached_path = self.cfg.get('CURRENT_HEALTH_APP_LIST_FILE')
         if cached_path:
             # Normalize relative path to absolute based on api_dir
             if not os.path.isabs(cached_path):
@@ -185,14 +185,14 @@ class CLIController:
     def scan_apps(self, force_rescan: bool = False) -> bool:
         if (
             not force_rescan
-            and self.cfg.CURRENT_HEALTH_APP_LIST_FILE
-            and os.path.exists(self.cfg.CURRENT_HEALTH_APP_LIST_FILE)
+            and self.cfg.get('CURRENT_HEALTH_APP_LIST_FILE')
+            and os.path.exists(self.cfg.get('CURRENT_HEALTH_APP_LIST_FILE'))
         ):
             logging.debug(
-                f"Using cached health app list: {self.cfg.CURRENT_HEALTH_APP_LIST_FILE}"
+                f"Using cached health app list: {self.cfg.get('CURRENT_HEALTH_APP_LIST_FILE')}"
             )
             return self._load_health_apps_from_file(
-                self.cfg.CURRENT_HEALTH_APP_LIST_FILE
+                self.cfg.get('CURRENT_HEALTH_APP_LIST_FILE')
             )
 
         if not os.path.exists(self.find_app_info_script_path):
@@ -357,10 +357,10 @@ class CLIController:
     def list_health_apps(self):
         # Try using the configured path first; otherwise resolve latest health_filtered cache
         source_path = None
-        if self.cfg.CURRENT_HEALTH_APP_LIST_FILE and os.path.exists(
-            self.cfg.CURRENT_HEALTH_APP_LIST_FILE
+        if self.cfg.get('CURRENT_HEALTH_APP_LIST_FILE') and os.path.exists(
+            self.cfg.get('CURRENT_HEALTH_APP_LIST_FILE')
         ):
-            source_path = self.cfg.CURRENT_HEALTH_APP_LIST_FILE
+            source_path = self.cfg.get('CURRENT_HEALTH_APP_LIST_FILE')
         else:
             source_path = self._resolve_latest_cache_file_by_suffix("health_filtered")
 
@@ -436,7 +436,7 @@ class CLIController:
         print("\n=== Currently Selected App ===")
         
         # Try to get app info from LAST_SELECTED_APP first
-        selected_app = self.cfg.LAST_SELECTED_APP
+        selected_app = self.cfg.get('LAST_SELECTED_APP')
         
         if selected_app:
             app_name = selected_app.get("app_name", "Unknown")
@@ -445,8 +445,8 @@ class CLIController:
         else:
             # Fallback to individual config values
             app_name = "Unknown"
-            package_name = self.cfg.APP_PACKAGE or "Not Set"
-            activity_name = self.cfg.APP_ACTIVITY or "Not Set"
+            package_name = self.cfg.get('APP_PACKAGE') or "Not Set"
+            activity_name = self.cfg.get('APP_ACTIVITY') or "Not Set"
         
         print(f"  App Name:    {app_name}")
         print(f"  Package:     {package_name}")
@@ -461,12 +461,12 @@ class CLIController:
 
     def pause_crawler(self) -> bool:
         logging.debug("Signaling crawler to pause...")
-        if not self.cfg.PAUSE_FLAG_PATH:
+        if not self.cfg.get('PAUSE_FLAG_PATH'):
             logging.error("PAUSE_FLAG_PATH not configured.")
             return False
         try:
-            Path(self.cfg.PAUSE_FLAG_PATH).write_text("pause")
-            logging.debug(f"Pause flag created: {self.cfg.PAUSE_FLAG_PATH}.")
+            Path(self.cfg.get('PAUSE_FLAG_PATH')).write_text("pause")
+            logging.debug(f"Pause flag created: {self.cfg.get('PAUSE_FLAG_PATH')}.")
             return True
         except Exception as e:
             logging.error(f"Failed to create pause flag: {e}", exc_info=True)
@@ -474,13 +474,13 @@ class CLIController:
 
     def resume_crawler(self) -> bool:
         logging.debug("Signaling crawler to resume...")
-        if not self.cfg.PAUSE_FLAG_PATH:
+        if not self.cfg.get('PAUSE_FLAG_PATH'):
             logging.error("PAUSE_FLAG_PATH not configured.")
             return False
         try:
-            if Path(self.cfg.PAUSE_FLAG_PATH).exists():
-                Path(self.cfg.PAUSE_FLAG_PATH).unlink()
-                logging.debug(f"Pause flag removed: {self.cfg.PAUSE_FLAG_PATH}.")
+            if Path(self.cfg.get('PAUSE_FLAG_PATH')).exists():
+                Path(self.cfg.get('PAUSE_FLAG_PATH')).unlink()
+                logging.debug(f"Pause flag removed: {self.cfg.get('PAUSE_FLAG_PATH')}.")
             else:
                 logging.debug("Pause flag not found, crawler is likely not paused.")
             return True

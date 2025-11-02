@@ -238,7 +238,7 @@ class TestValidationService(unittest.TestCase):
         from core.validation import ValidationService
         self.validation_service = ValidationService(self.mock_config)
     
-    @patch('traverser_ai_api.core.validation.requests.get')
+    @patch('core.validation.requests.get')
     def test_check_appium_server_success(self, mock_get):
         """Test successful Appium server check."""
         # Mock the response
@@ -251,7 +251,7 @@ class TestValidationService(unittest.TestCase):
         
         self.assertTrue(result)
     
-    @patch('traverser_ai_api.core.validation.requests.get')
+    @patch('core.validation.requests.get')
     def test_check_appium_server_failure(self, mock_get):
         """Test failed Appium server check."""
         # Mock the response to raise an exception

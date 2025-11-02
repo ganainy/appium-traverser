@@ -4,22 +4,22 @@ import time
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple
 
 try:
-    from traverser_ai_api import utils
+    import utils.utils as utils
 except ImportError:
     import utils
 try:
-    from traverser_ai_api.database import DatabaseManager
+    from infrastructure.database import DatabaseManager
 except ImportError:
     from database import DatabaseManager
 
 # Import your main Config class
 try:
-    from traverser_ai_api.config import Config  # Assuming Config class is in config.py in the same package
+    from config.config import Config  # Assuming Config class is in config.py in the same package
 except ImportError:
-    from traverser_ai_api.config import Config  # Assuming Config class is in config.py in the same package
+    from config.config import Config  # Assuming Config class is in config.py in the same package
 
 if TYPE_CHECKING:
-    from appium_driver import AppiumDriver
+    from infrastructure.appium_driver import AppiumDriver
 
 class ScreenRepresentation:
     """Minimal representation of a discovered screen state."""
@@ -75,8 +75,8 @@ class ScreenStateManager:
                 raise ValueError(f"ScreenStateManager: Config missing or '{attr}' is None.")
 
         self.current_run_id: Optional[int] = None
-        self.current_app_package: str = str(self.cfg.APP_PACKAGE)
-        self.current_start_activity: str = str(self.cfg.APP_ACTIVITY)
+        self.current_app_package: str = str(self.cfg.get('APP_PACKAGE'))
+        self.current_start_activity: str = str(self.cfg.get('APP_ACTIVITY'))
         self.current_run_latest_step_number: int = 0 # Added attribute
 
         self.known_screens_cache: Dict[str, ScreenRepresentation] = {}
@@ -206,9 +206,9 @@ class ScreenStateManager:
 
         temp_id = -step_number
         ss_filename = f"screen_run{run_id}_step{step_number}_{visual_hash[:8]}.png"
-        ss_path = os.path.join(str(self.cfg.SCREENSHOTS_DIR), ss_filename)
+        ss_path = os.path.join(str(self.cfg.get('SCREENSHOTS_DIR')), ss_filename)
 
-        os.makedirs(str(self.cfg.SCREENSHOTS_DIR), exist_ok=True)
+        os.makedirs(str(self.cfg.get('SCREENSHOTS_DIR')), exist_ok=True)
 
         return ScreenRepresentation(
             screen_id=temp_id, composite_hash=composite_hash, xml_hash=xml_hash, visual_hash=visual_hash,
@@ -225,10 +225,10 @@ class ScreenStateManager:
             logging.debug(f"Exact screen match found in cache: ID {final_screen_to_use.id} (Hash: {final_screen_to_use.composite_hash})")
         else:
             found_similar_screen = None
-            similarity_threshold = int(self.cfg.VISUAL_SIMILARITY_THRESHOLD) # type: ignore
+            similarity_threshold = int(self.cfg.get('VISUAL_SIMILARITY_THRESHOLD')) # type: ignore
             if similarity_threshold >= 0:
                 for existing_screen in self.known_screens_cache.values():
-                    if utils.are_visual_hashes_valid(candidate_screen.visual_hash, existing_screen.visual_hash):
+                    if candidate_screen.visual_hash not in ["no_image", "hash_error"] and existing_screen.visual_hash not in ["no_image", "hash_error"]:
                         dist = utils.visual_hash_distance(candidate_screen.visual_hash, existing_screen.visual_hash)
                         if dist <= similarity_threshold:
                             logging.debug(f"Screen visually similar (dist={dist}<={similarity_threshold}) to existing Screen ID {existing_screen.id}. Using existing state.")
@@ -242,7 +242,7 @@ class ScreenStateManager:
                 candidate_screen.id = self._next_screen_db_id_counter
 
                 ss_filename = f"screen_{candidate_screen.id}_{candidate_screen.visual_hash[:8]}.png"
-                candidate_screen.screenshot_path = os.path.join(str(self.cfg.SCREENSHOTS_DIR), ss_filename)
+                candidate_screen.screenshot_path = os.path.join(str(self.cfg.get('SCREENSHOTS_DIR')), ss_filename)
 
                 try:
                     if candidate_screen.screenshot_bytes:

@@ -11,8 +11,8 @@ import time
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 if TYPE_CHECKING:
-    from traverser_ai_api.infrastructure.appium_driver import AppiumDriver
-    from traverser_ai_api.config.config import Config
+    from infrastructure.appium_driver import AppiumDriver
+    from config.config import Config
 
 
 class AgentTools:

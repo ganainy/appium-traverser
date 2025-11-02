@@ -7,7 +7,7 @@ This module reuses the existing logic from UIComponents to:
 - Refresh the cache from OpenRouter API (background thread)
 
 Requirements:
-- OPENROUTER_API_KEY must be available via traverser_ai_api.config.Config
+- OPENROUTER_API_KEY must be available via config.config.Config
 """
 
 import json

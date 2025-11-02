@@ -9,13 +9,13 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 # Assuming AppiumDriver is type hinted correctly
 if TYPE_CHECKING:
-    from appium_driver import AppiumDriver
+    from infrastructure.appium_driver import AppiumDriver
 
 # Import your main Config class
 try:
-    from traverser_ai_api.config import Config  # Adjust path as necessary
+    from config.config import Config  # Adjust path as necessary
 except ImportError:
-    from traverser_ai_api.config import Config  # Adjust path as necessary
+    from config.config import Config  # Adjust path as necessary
 
 class TrafficCaptureManager:
     def __init__(self, driver: 'AppiumDriver', app_config: Config):
@@ -28,7 +28,7 @@ class TrafficCaptureManager:
         """
         self.driver = driver
         self.cfg = app_config
-        self.traffic_capture_enabled: bool = bool(self.cfg.ENABLE_TRAFFIC_CAPTURE) # Get from cfg
+        self.traffic_capture_enabled: bool = bool(self.cfg.get('ENABLE_TRAFFIC_CAPTURE')) # Get from cfg
 
         self.pcap_filename_on_device: Optional[str] = None
         self.local_pcap_file_path: Optional[str] = None
@@ -108,11 +108,11 @@ class TrafficCaptureManager:
             logging.warning("Traffic capture already started by this manager.")
             return True # Or False if it's an error to call start again
 
-        target_app_package = str(self.cfg.APP_PACKAGE)
+        target_app_package = str(self.cfg.get('APP_PACKAGE'))
         # PCAPdroid activity usually constructed like: com.example/.Activity
-        pcapdroid_activity = str(self.cfg.PCAPDROID_ACTIVITY) 
+        pcapdroid_activity = str(self.cfg.get('PCAPDROID_ACTIVITY')) 
         if not pcapdroid_activity: # Fallback if PCAPDROID_ACTIVITY is not fully qualified
-            pcapdroid_pkg = str(self.cfg.PCAPDROID_PACKAGE)
+            pcapdroid_pkg = str(self.cfg.get('PCAPDROID_PACKAGE'))
             pcapdroid_activity = f"{pcapdroid_pkg}/.activities.CaptureCtrl"
         
         sanitized_package = re.sub(r'[^\w.-]+', '_', target_app_package)
@@ -132,10 +132,10 @@ class TrafficCaptureManager:
 
         # This is where the final PCAP file will be saved locally after pulling
         self.local_pcap_file_path = os.path.join(
-            str(self.cfg.TRAFFIC_CAPTURE_OUTPUT_DIR), 
+            str(self.cfg.get('TRAFFIC_CAPTURE_OUTPUT_DIR')), 
             self.pcap_filename_on_device
         )
-        os.makedirs(str(self.cfg.TRAFFIC_CAPTURE_OUTPUT_DIR), exist_ok=True)
+        os.makedirs(str(self.cfg.get('TRAFFIC_CAPTURE_OUTPUT_DIR')), exist_ok=True)
 
         logging.debug(f"Attempting to start traffic capture for app: {target_app_package}")
         logging.debug(f"PCAPdroid filename on device (pcap_name extra): {self.pcap_filename_on_device}")
@@ -155,8 +155,8 @@ class TrafficCaptureManager:
         if getattr(self.cfg, 'PCAPDROID_TLS_DECRYPTION', False): # Example config flag
             start_command_args.extend(['-e', 'tls_decryption', 'true'])
 
-        if self.cfg.PCAPDROID_API_KEY:
-            start_command_args.extend(['-e', 'api_key', str(self.cfg.PCAPDROID_API_KEY)])
+        if self.cfg.get('PCAPDROID_API_KEY'):
+            start_command_args.extend(['-e', 'api_key', str(self.cfg.get('PCAPDROID_API_KEY'))])
             logging.debug("Using PCAPdroid API key.")
         else:
             logging.warning("PCAPDROID_API_KEY not configured. User consent on device may be required.")
@@ -189,15 +189,15 @@ class TrafficCaptureManager:
             logging.warning("Traffic capture not started by this manager or filename not set. Cannot stop/pull.")
             return None
 
-        pcapdroid_activity = str(self.cfg.PCAPDROID_ACTIVITY)
+        pcapdroid_activity = str(self.cfg.get('PCAPDROID_ACTIVITY'))
         if not pcapdroid_activity:
-             pcapdroid_pkg = str(self.cfg.PCAPDROID_PACKAGE)
+             pcapdroid_pkg = str(self.cfg.get('PCAPDROID_PACKAGE'))
              pcapdroid_activity = f"{pcapdroid_pkg}/.activities.CaptureCtrl"
 
         logging.debug("Attempting to stop PCAPdroid traffic capture...")
         stop_command_args = ['shell', 'am', 'start', '-n', pcapdroid_activity, '-e', 'action', 'stop']
-        if self.cfg.PCAPDROID_API_KEY:
-            stop_command_args.extend(['-e', 'api_key', str(self.cfg.PCAPDROID_API_KEY)])
+        if self.cfg.get('PCAPDROID_API_KEY'):
+            stop_command_args.extend(['-e', 'api_key', str(self.cfg.get('PCAPDROID_API_KEY'))])
 
         stdout_stop, retcode_stop = await self._run_adb_command_async(stop_command_args, suppress_stderr=True)
         self._is_currently_capturing = False # Assume stopped even if command had issues, to allow cleanup
@@ -219,7 +219,7 @@ class TrafficCaptureManager:
             return None
             
         # Default PCAPdroid directory on device where pcap_name is saved
-        device_pcap_base_dir = str(self.cfg.DEVICE_PCAP_DIR) # e.g., "/sdcard/Download/PCAPdroid"
+        device_pcap_base_dir = str(self.cfg.get('DEVICE_PCAP_DIR')) # e.g., "/sdcard/Download/PCAPdroid"
         device_pcap_full_path = os.path.join(device_pcap_base_dir, self.pcap_filename_on_device).replace("\\", "/")
         
         logging.debug(f"Attempting to pull PCAP file: '{device_pcap_full_path}' to '{self.local_pcap_file_path}'")
@@ -234,13 +234,13 @@ class TrafficCaptureManager:
         if os.path.exists(self.local_pcap_file_path):
             if os.path.getsize(self.local_pcap_file_path) > 0:
                 logging.debug(f"PCAP file pulled successfully: {os.path.abspath(self.local_pcap_file_path)}")
-                if bool(self.cfg.CLEANUP_DEVICE_PCAP_FILE):
+                if bool(self.cfg.get('CLEANUP_DEVICE_PCAP_FILE')):
                     await self._cleanup_device_pcap_file_async(device_pcap_full_path)
                 return os.path.abspath(self.local_pcap_file_path)
             else:
                 logging.warning(f"PCAP file pulled to '{self.local_pcap_file_path}' but it is EMPTY.")
                 # Still try cleanup if configured, as an empty file might have been created
-                if bool(self.cfg.CLEANUP_DEVICE_PCAP_FILE):
+                if bool(self.cfg.get('CLEANUP_DEVICE_PCAP_FILE')):
                     await self._cleanup_device_pcap_file_async(device_pcap_full_path)
                 return os.path.abspath(self.local_pcap_file_path) # Return path even if empty
         else:
@@ -262,15 +262,15 @@ class TrafficCaptureManager:
         if not self.traffic_capture_enabled:
             return {"status": "disabled", "running": False, "error": "Traffic capture not enabled by config."}
 
-        pcapdroid_activity = str(self.cfg.PCAPDROID_ACTIVITY)
+        pcapdroid_activity = str(self.cfg.get('PCAPDROID_ACTIVITY'))
         if not pcapdroid_activity:
-             pcapdroid_pkg = str(self.cfg.PCAPDROID_PACKAGE)
+             pcapdroid_pkg = str(self.cfg.get('PCAPDROID_PACKAGE'))
              pcapdroid_activity = f"{pcapdroid_pkg}/.activities.CaptureCtrl"
 
         logging.debug("Querying PCAPdroid capture status...")
         status_command_args = ['shell', 'am', 'start', '-n', pcapdroid_activity, '-e', 'action', 'get_status']
-        if self.cfg.PCAPDROID_API_KEY:
-            status_command_args.extend(['-e', 'api_key', str(self.cfg.PCAPDROID_API_KEY)])
+        if self.cfg.get('PCAPDROID_API_KEY'):
+            status_command_args.extend(['-e', 'api_key', str(self.cfg.get('PCAPDROID_API_KEY'))])
 
         stdout, retcode = await self._run_adb_command_async(status_command_args)
 

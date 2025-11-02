@@ -81,21 +81,6 @@ If checks fail, the UI shows blocking issues (❌) or warnings (⚠️). You can
 
 - Use Pause/Resume where supported by the orchestrator.
 
-## Troubleshooting
-
-- Appium server issues:
-  - Check Appium is running and reachable: http://127.0.0.1:4723/status
-  - Verify APPIUM_SERVER_URL in the UI config
-
-- PySide6 / PyQt installation:
-  - Ensure PySide6 or PyQt6 is installed in the active virtual environment
-  - If display issues occur on headless systems, run with virtual framebuffer or use CLI instead
-
-- Missing dependencies for AI providers:
-  - The UI checks provider dependencies; follow the error messages to install required packages
-
-- Windows-specific process start issues:
-  - Ensure the Python executable and project root paths are valid. The GUI launches crawler using `python -u -m traverser_ai_api.main`
 
 ## Tips
 

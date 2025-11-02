@@ -33,10 +33,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 # Provider-agnostic model adapters
 try:
-    from traverser_ai_api.model_adapters import check_dependencies, create_model_adapter
+    from domain.model_adapters import check_dependencies, create_model_adapter
 except ImportError:
     try:
-        from traverser_ai_api.model_adapters import check_dependencies, create_model_adapter
+        from domain.model_adapters import check_dependencies, create_model_adapter
     except ImportError as e:
         sys.stderr.write(
             f"FATAL: Could not import 'model_adapters'. Ensure the module is accessible. Error: {e}\n"
@@ -59,11 +59,11 @@ USER_CONFIG_JSON_PATH_FOR_FIND_APP = os.path.join(
 # This import path assumes config.py is in the same directory as find_app_info.py
 # or traverser_ai_api is in PYTHONPATH. Adjust if find_app_info.py is outside this structure.
 try:
-    from traverser_ai_api.config import Config
+    from config.config import Config
 except ImportError as e:
     # Try relative import if it's part of a package and config.py is in the same package
     try:
-        from traverser_ai_api.config import Config
+        from config.config import Config
     except ImportError:
         sys.stderr.write(
             f"FATAL: Could not import 'Config' class. Ensure config.py is accessible and there are no circular imports. Error: {e}\n"
@@ -73,10 +73,7 @@ except ImportError as e:
 
 # Instantiate Config early
 try:
-    cfg = Config(
-        defaults_module_path=DEFAULT_CONFIG_MODULE_PATH_FOR_FIND_APP,
-        user_config_json_path=USER_CONFIG_JSON_PATH_FOR_FIND_APP,
-    )
+    cfg = Config()
 except Exception as e:
     sys.stderr.write(f"CRITICAL ERROR initializing Config in find_app_info.py: {e}\n")
     traceback.print_exc(file=sys.stderr)
@@ -101,7 +98,7 @@ DEFAULT_AI_MODEL_NAME = None
 AI_MODEL_SAFETY_SETTINGS = None
 PROVIDER_API_KEY_OR_URL = None
 
-APP_INFO_DIR = cfg.APP_INFO_OUTPUT_DIR or os.path.join(
+APP_INFO_DIR = cfg.get('APP_INFO_OUTPUT_DIR') or os.path.join(
     os.getcwd(), "app_info"
 )  # Default if None
 if not isinstance(APP_INFO_DIR, str):
@@ -178,8 +175,8 @@ if CAN_ENABLE_AI_FILTERING_GLOBALLY:
 
 # Load safety settings if available (primarily for Gemini)
 if CAN_ENABLE_AI_FILTERING_GLOBALLY:
-    if hasattr(cfg, "AI_SAFETY_SETTINGS") and isinstance(cfg.AI_SAFETY_SETTINGS, dict):
-        AI_MODEL_SAFETY_SETTINGS = cfg.AI_SAFETY_SETTINGS
+    if hasattr(cfg, "AI_SAFETY_SETTINGS") and isinstance(cfg.get('AI_SAFETY_SETTINGS'), dict):
+        AI_MODEL_SAFETY_SETTINGS = cfg.get('AI_SAFETY_SETTINGS')
         print(f"Using AI Safety Settings from Config: {AI_MODEL_SAFETY_SETTINGS}")
     else:
         # Not fatal for non-Gemini providers
@@ -552,10 +549,10 @@ def filter_apps_with_ai(app_data_list: list):
         return app_data_list
 
     filtered_results = []
-    for i in range(0, len(app_data_list), cfg.MAX_APPS_TO_SEND_TO_AI):
-        chunk = app_data_list[i : i + cfg.MAX_APPS_TO_SEND_TO_AI]
+    for i in range(0, len(app_data_list), cfg.get('MAX_APPS_TO_SEND_TO_AI')):
+        chunk = app_data_list[i : i + cfg.get('MAX_APPS_TO_SEND_TO_AI')]
         print(
-            f"Processing chunk {i//cfg.MAX_APPS_TO_SEND_TO_AI + 1}/{(len(app_data_list) + cfg.MAX_APPS_TO_SEND_TO_AI - 1)//cfg.MAX_APPS_TO_SEND_TO_AI} ({len(chunk)} apps)..."
+            f"Processing chunk {i//cfg.get('MAX_APPS_TO_SEND_TO_AI') + 1}/{(len(app_data_list) + cfg.get('MAX_APPS_TO_SEND_TO_AI') - 1)//cfg.get('MAX_APPS_TO_SEND_TO_AI')} ({len(chunk)} apps)..."
         )
 
         try:
@@ -721,10 +718,10 @@ def generate_app_info_cache(perform_ai_filtering_on_this_call: bool = False):
     print(f"Device ID: {device_id}")
     # Use THIRD_PARTY_APPS_ONLY from cfg instance
     print(
-        f"\n--- Discovering installed packages (Third-party only: {cfg.THIRD_PARTY_APPS_ONLY}) ---"
+        f"\n--- Discovering installed packages (Third-party only: {cfg.get('THIRD_PARTY_APPS_ONLY')}) ---"
     )
     packages = get_installed_packages(
-        third_party_only_from_param=cfg.THIRD_PARTY_APPS_ONLY
+        third_party_only_from_param=cfg.get('THIRD_PARTY_APPS_ONLY')
     )  # Use cfg value
     if not packages:
         print(
@@ -946,7 +943,7 @@ if __name__ == "__main__":
         else:
             # cfg.USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY should be a boolean from your Config
             should_attempt_ai_filtering_for_discover = (
-                cfg.USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY
+                cfg.get('USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY')
             )
             print(
                 f"CLI --ai-filter flag NOT set. Defaulting to Config 'USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY': {should_attempt_ai_filtering_for_discover}"

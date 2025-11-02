@@ -27,13 +27,13 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 try:
-    from traverser_ai_api.config import Config
-    from traverser_ai_api.database import DatabaseManager
-    from traverser_ai_api.utils import draw_rectangle_on_image
+    from config.config import Config
+    from infrastructure.database import DatabaseManager
+    from utils.utils import draw_rectangle_on_image
 except Exception:
-    from config import Config
-    from database import DatabaseManager
-    from utils import draw_rectangle_on_image
+    from config.config import Config
+    from infrastructure.database import DatabaseManager
+    from utils.utils import draw_rectangle_on_image
 
 
 def is_normalized_bbox(bbox: Dict[str, Any]) -> bool:
