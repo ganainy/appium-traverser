@@ -1,4 +1,3 @@
-
 import os
 import logging
 from typing import Any, Callable, Dict, Optional
@@ -95,19 +94,50 @@ class Config:
             return [fa["area"] for fa in focus_areas if fa["enabled"]]
         return self.get("focus_areas")
 
-    # Add more properties as needed for compatibility
-    # ...existing code for session dir generation and path resolution can be adapted as needed...
+    def update_setting_and_save(self, key: str, value: Any, callback: Optional[Callable] = None) -> None:
+        """
+        Backwards-compatible helper used throughout the codebase.
+        Persists the value to the runtime cache and user store (unless secret),
+        then invokes an optional callback (used to sync UI/API files).
+        """
+        try:
+            # Use existing set() which handles persistence and secrets
+            self.set(key, value, persist=True)
+            if callback:
+                try:
+                    callback()
+                except Exception:
+                    logging.exception("Callback in update_setting_and_save failed.")
+        except Exception:
+            logging.exception("Failed to update setting and save.")
 
-    # ...removed: _update_attribute, legacy JSON/exec logic, replaced by get/set...
+    def _get_user_savable_config(self) -> Dict[str, Any]:
+        """
+        Return a dictionary of configuration values intended for user-facing display
+        and persistence. This gathers module-level uppercase defaults and overlays
+        any persisted values from the user store.
+        """
+        import sys
 
-    # ...removed: legacy load_user_config logic...
+        module = sys.modules[__name__]
+        result: Dict[str, Any] = {}
 
-    # ...removed: legacy user config save logic...
+        # Collect module-level uppercase defaults (the legacy constants defined below)
+        for k, v in vars(module).items():
+            if k.isupper():
+                # Prefer persisted value from SQLite store when available
+                try:
+                    stored = self._user_store.get(k)
+                    if stored is not None:
+                        result[k] = stored
+                    else:
+                        # Fallback to Pydantic defaults object if available, else module value
+                        result[k] = getattr(self._defaults, k, v)
+                except Exception:
+                    # If anything goes wrong reading the user store, fall back to defaults
+                    result[k] = getattr(self._defaults, k, v)
 
-    # ...removed: legacy path resolution logic, to be reimplemented as needed...
-
-    # ...removed: update_setting_and_save, replaced by set()...
-
+        return result
 
 # --- Default values (loaded if not in user_config.json or .env) ---
 # --- These are loaded by _load_from_defaults_module by exec-ing this file ---
@@ -132,6 +162,7 @@ SCREENSHOTS_DIR = "{session_dir}/screenshots"
 ANNOTATED_SCREENSHOTS_DIR = "{session_dir}/annotated_screenshots"
 TRAFFIC_CAPTURE_OUTPUT_DIR = "{session_dir}/traffic_captures"
 LOG_DIR = "{session_dir}/logs"
+CRAWLER_PID_PATH = "{output_data_dir}/core/crawler.pid"
 
 LOG_LEVEL = "INFO"
 LOG_FILE_NAME = "main_traverser_final.log"  # Actual file name, dir is separate
@@ -450,7 +481,6 @@ ACTION_DESC_LONG_PRESS = (
 )
 
 LONG_PRESS_MIN_DURATION_MS = 600
-
 
 MAX_CONSECUTIVE_AI_FAILURES = 3
 MAX_CONSECUTIVE_MAP_FAILURES = 3

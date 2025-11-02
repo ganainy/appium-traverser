@@ -4,29 +4,24 @@ import pytest
 import json
 from traverser_ai_api.config import Config
 from traverser_ai_api.core.user_storage import UserConfigStore
-# Migration script may have been removed; import defensively and skip integration when absent.
-try:
-    from traverser_ai_api.migrations.migrate_to_sqlite import migrate_user_config_json_to_sqlite
-except Exception:
-    migrate_user_config_json_to_sqlite = None
 
 @pytest.fixture
 def temp_config_env(tmp_path):
-    # Setup temp user_config.json and SQLite DB
+    # Setup SQLite DB with test data
     sample_data = {
         "max_tokens": 2048,
         "temperature": 0.7,
         "enable_image_context": True,
         "focus_areas": ["test", "integration"]
     }
-    user_config_path = tmp_path / "user_config.json"
     db_path = tmp_path / "config.db"
-    with open(user_config_path, 'w', encoding='utf-8') as f:
-        json.dump(sample_data, f)
     store = UserConfigStore(db_path=str(db_path))
-    if migrate_user_config_json_to_sqlite is None:
-        pytest.skip("migration script not available")
-    migrate_user_config_json_to_sqlite(store, json_path=str(user_config_path))
+    for key, value in sample_data.items():
+        if key == "focus_areas":
+            for area in value:
+                store.add_focus_area(area)
+        else:
+            store.set_config(key, value)
     yield str(db_path)
 
 def test_config_lifecycle_integration(temp_config_env):

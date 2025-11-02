@@ -260,7 +260,7 @@ class CrawlerOrchestrator:
         log_file_path = os.path.join(log_dir, getattr(self.config, 'LOG_FILE_NAME', 'crawler.log'))
         
         # PID file path
-        pid_file_path = os.path.join(self.config.BASE_DIR or project_root, "crawler.pid")
+        pid_file_path = self.config.CRAWLER_PID_PATH
         
         # Prepare environment
         env = os.environ.copy()

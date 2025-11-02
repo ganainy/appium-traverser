@@ -94,3 +94,20 @@ class UserConfigStore:
         if type_ == 'bool':
             return 'true' if value else 'false'
         return str(value)
+    
+    
+    # Backwards-compatible methods expected by tests and older code
+    def set_config(self, key: str, value: Any) -> None:
+        """
+        Backward-compatible wrapper for legacy API `set_config`.
+        Delegates to the newer `set` method which handles type inference.
+        """
+        self.set(key, value)
+    
+    
+    def get_config_value(self, key: str, default: Any = None) -> Any:
+        """
+        Backward-compatible wrapper for legacy API `get_config_value`.
+        Delegates to the newer `get` method.
+        """
+        return self.get(key, default)

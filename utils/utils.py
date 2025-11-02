@@ -294,10 +294,9 @@ def simplify_xml_for_ai(xml_string: str, max_len: int, provider: str = "gemini",
         from config import AI_PROVIDER_CAPABILITIES
     
     capabilities = AI_PROVIDER_CAPABILITIES.get(provider.lower(), AI_PROVIDER_CAPABILITIES.get('gemini', {}))
-    provider_xml_limit = capabilities.get('xml_max_len', max_len)
     
     # Use the more restrictive limit between configured max_len and provider capability
-    effective_max_len = min(max_len, provider_xml_limit)
+    effective_max_len = min(max_len, capabilities.get('xml_max_len', max_len))
     # Tight mode for small provider limits or explicitly small max_len
     tight_mode = effective_max_len <= 50000 or provider.lower() in {"openrouter", "ollama"}
     

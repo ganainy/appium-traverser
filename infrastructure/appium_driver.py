@@ -1,12 +1,9 @@
-# appium_driver.py - MCP Client version
+# appium_driver.py - MCP Client version (moved to infrastructure)
 import asyncio
 import logging
 from typing import Any, Dict, Optional, Tuple
 
-try:
-    from traverser_ai_api.config import Config
-except ImportError:
-    from traverser_ai_api.config import Config
+from traverser_ai_api.config import Config
 
 class AppiumDriver:
     def __init__(self, app_config: Config):

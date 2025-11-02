@@ -23,7 +23,8 @@ venv/
 
 
 /traverser_ai_api/user_config.json
-/traverser_ai_api/crawler.pid
+/output_data/core/crawler.pid
+/src/core/crawler.pid
 *.pid
 
 /traverser_ai_api/__pycache__/
@@ -78,3 +79,11 @@ Thumbs.db
 # Speckit generated files
 specs/
 
+
+
+# Legacy code (moved files)
+/src/legacy_code/
+legacy_code/
+
+# Ignore test-suite error reports
+dev/test-suite-errors.md

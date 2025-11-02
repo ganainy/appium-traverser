@@ -363,7 +363,7 @@ Based on this feedback, you MUST choose a different action to avoid getting stuc
         
         # Simplified guidance for action_to_perform.target_bounding_box
         action_target_bbox_guidance = "**target_bounding_box:** Use XML bounds when available; otherwise estimate. Use null for scroll/back if not applicable."
-
+        
         targeted_gesture_guidance = (
             "**Strategic Guidance: Prefer TARGETED gestures**\n"
             "- For swipe_left/swipe_right and scroll_up/scroll_down: When possible, include target_identifier of the scrollable region (e.g., carousel/container) or provide a target_bounding_box of the region to gesture within. Avoid full-screen gestures when a specific region is intended.\n"

@@ -403,9 +403,9 @@ Analyze this screen state and provide insights for optimal testing progression.
             
             # Get provider capabilities from config
             try:
-                from config import AI_PROVIDER_CAPABILITIES
+                from traverser_ai_api.config import AI_PROVIDER_CAPABILITIES
             except ImportError:
-                from config import AI_PROVIDER_CAPABILITIES
+                from traverser_ai_api.config import AI_PROVIDER_CAPABILITIES
             
             capabilities = AI_PROVIDER_CAPABILITIES.get(ai_provider, AI_PROVIDER_CAPABILITIES.get('gemini', {}))
             
@@ -541,9 +541,9 @@ Analyze this screen state and provide insights for optimal testing progression.
         test_name_val = os.environ.get("TEST_NAME", "Test User")
         
         input_value_guidance = f"Input hints: email {test_email_val}, password {test_password_val}, name {test_name_val}. Use realistic values; avoid placeholders."
-
+        
         defer_authentication_guidance = "Strategy: Prefer non-auth flows (Guest/Skip) to explore features first."
-
+        
         # Check if image context is enabled
         enable_image_context = getattr(self.cfg, 'ENABLE_IMAGE_CONTEXT', True)
         
@@ -975,7 +975,7 @@ Analyze this screen state and provide insights for optimal testing progression.
                         top_left = bbox.get("top_left", [])
                         bottom_right = bbox.get("bottom_right", [])
                         if len(top_left) == 2 and len(bottom_right) == 2:
-                            # FIX: Bounding box format is {"top_left": [y1, x1], "bottom_right": [y2, x2]}
+                            # FIX: Bounding box format is {"top_left": [y,x], "bottom_right": [y,x]}
                             y1, x1 = top_left
                             y2, x2 = bottom_right
                             center_x = (x1 + x2) / 2  # CORRECT
@@ -1160,13 +1160,13 @@ Analyze this screen state and provide insights for optimal testing progression.
         
         if not result:
             return None
-            
+        
         response, elapsed_time, total_tokens = result
         
         action_data = response.get("action_to_perform")
         if not action_data:
             return None
-            
+        
         # Execute the action using agent tools
         success = self.execute_action(action_data)
         
@@ -1193,7 +1193,7 @@ Analyze this screen state and provide insights for optimal testing progression.
                 cleaned = re.sub(r":\s*'([^']*)'", r': "\1"', cleaned)
                 cleaned = re.sub(r":\s*'([^']*)'\s*,", r': "\1",', cleaned)
                 cleaned = re.sub(r":\s*'([^']*)'\s*}", r': "\1"}', cleaned)
-                cleaned = re.sub(r":\s*'([^']*)'\s*]", r': "\1"]', cleaned)
+                cleaned = re.sub(r":\s*'([^']*)'\s*]", r': \1"]', cleaned)
 
                 # Handle arrays: ['item1', 'item2'] -> ["item1", "item2"]
                 cleaned = re.sub(r"\[\s*'([^']*)'\s*\]", r'["\1"]', cleaned)
@@ -1597,7 +1597,7 @@ Analyze this screen state and provide insights for optimal testing progression.
         """
         # Remove version tag if present (e.g., ":latest", ":7b")
         if ":" in model_name:
-            base_name = model_name.split(":")[0]
+            base_name = model_name.split(":")[0] 
         else:
             base_name = model_name
             
@@ -1683,8 +1683,8 @@ Analyze this screen state and provide insights for optimal testing progression.
                 "timestamp": status.get("last_check", datetime.now(timezone.utc).isoformat() + "Z"),
                 "mcp_connection": {
                     "status": "connected" if status["connected"] else "disconnected",
-                    "response_time_ms": status.get("response_time_ms"),
-                    "reason": status.get("reason"),
+                    "response_time_ms": status.get('response_time_ms'),
+                    "reason": status.get('reason'),
                     "server_url": getattr(self.cfg, 'MCP_SERVER_URL', 'unknown') if hasattr(self, 'cfg') else 'unknown',
                     "circuit_breaker": {
                         "state": circuit_breaker_info.get("state", "unknown"),

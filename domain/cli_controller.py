@@ -76,7 +76,7 @@ class CLIController:
         self.find_app_info_script_path = os.path.join(self.api_dir, "find_app_info.py")
         self.health_apps_data: List[Dict[str, Any]] = []
         self.pid_file_path = os.path.join(
-            self.cfg.BASE_DIR or self.api_dir, "crawler.pid"
+            self.cfg.CRAWLER_PID_PATH
         )
         self.crawler_process: Optional[subprocess.Popen] = None
         self.discovered_analysis_targets: List[Dict[str, Any]] = []
