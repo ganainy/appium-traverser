@@ -3,11 +3,14 @@
 OpenRouter CLI command group.
 """
 
+
 import argparse
 from typing import Dict, List, Optional
 
 from cli.commands.base import CommandGroup, CommandHandler, CommandResult
 from cli.shared.context import CLIContext
+from cli.constants import messages as MSG
+from cli.constants import keys as K
 
 
 class RefreshModelsCommand(CommandHandler):
@@ -15,16 +18,13 @@ class RefreshModelsCommand(CommandHandler):
     
     @property
     def name(self) -> str:
-        """Get command name."""
-        return "refresh-models"
-    
+        return MSG.REFRESH_MODELS_CMD_NAME
+
     @property
     def description(self) -> str:
-        """Get command description."""
-        return "Refresh OpenRouter models cache"
+        return MSG.REFRESH_MODELS_DESC
     
     def register(self, subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
-        """Register the command with the argument parser."""
         parser = subparsers.add_parser(
             self.name,
             help=self.description,
@@ -36,29 +36,27 @@ class RefreshModelsCommand(CommandHandler):
             action="store_true",
             help="Wait for refresh to complete before returning"
         )
+        parser.set_defaults(**{K.HANDLER: self})
         return parser
     
     def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
-        """Execute the command."""
-        openrouter_service = context.services.get("openrouter")
+        openrouter_service = context.services.get(K.OPENROUTER_SERVICE)
         if not openrouter_service:
             return CommandResult(
                 success=False,
-                message="OpenRouter service not available",
+                message=MSG.OPENROUTER_SERVICE_NOT_AVAILABLE,
                 exit_code=1
             )
-        
         success = openrouter_service.refresh_models(wait_for_completion=args.wait)
-        
         if success:
             return CommandResult(
                 success=True,
-                message="OpenRouter models cache refreshed successfully"
+                message=MSG.REFRESH_MODELS_SUCCESS
             )
         else:
             return CommandResult(
                 success=False,
-                message="Failed to refresh OpenRouter models cache",
+                message=MSG.REFRESH_MODELS_FAIL,
                 exit_code=1
             )
 
@@ -68,16 +66,13 @@ class ListModelsCommand(CommandHandler):
     
     @property
     def name(self) -> str:
-        """Get command name."""
-        return "list-models"
-    
+        return MSG.LIST_MODELS_CMD_NAME
+
     @property
     def description(self) -> str:
-        """Get command description."""
-        return "List available OpenRouter models"
+        return MSG.LIST_MODELS_DESC
     
     def register(self, subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
-        """Register the command with the argument parser."""
         parser = subparsers.add_parser(
             self.name,
             help=self.description,
@@ -87,66 +82,45 @@ class ListModelsCommand(CommandHandler):
         parser.add_argument(
             "--free-only",
             action="store_true",
-            help="Show only free models"
+            help=MSG.LIST_MODELS_FREE_ONLY
         )
         parser.add_argument(
             "--all",
             action="store_true",
-            help="Show all models (ignores OPENROUTER_SHOW_FREE_ONLY config)"
+            help=MSG.LIST_MODELS_ALL
         )
+        parser.set_defaults(**{K.HANDLER: self})
         return parser
     
     def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
-        """Execute the command."""
-        openrouter_service = context.services.get("openrouter")
+        openrouter_service = context.services.get(K.OPENROUTER_SERVICE)
         if not openrouter_service:
             return CommandResult(
                 success=False,
-                message="OpenRouter service not available",
+                message=MSG.OPENROUTER_SERVICE_NOT_AVAILABLE,
                 exit_code=1
             )
-        
-        # Determine filter setting
-        free_only = None
-        if args.free_only:
-            free_only = True
-        elif args.all:
-            free_only = False
-        
-        success, models = openrouter_service.list_models(free_only=free_only)
-        
+        telemetry_service = context.services.get(K.TELEMETRY_SERVICE)
+        if not telemetry_service:
+            return CommandResult(
+                success=False,
+                message=MSG.TELEMETRY_SERVICE_NOT_AVAILABLE,
+                exit_code=1
+            )
+        success, models = openrouter_service.list_models(free_only=args.free_only, all_models=args.all)
         if not success:
             return CommandResult(
                 success=False,
-                message="Failed to list OpenRouter models. Try running refresh-models first.",
+                message=MSG.LIST_MODELS_FAIL,
                 exit_code=1
             )
-        
         if not models:
-            print("No models available.")
-            return CommandResult(success=True, message="No models found")
-        
-        print(f"\n=== OpenRouter Models ({len(models)}) ===")
-        for i, model in enumerate(models):
-            model_id = model.get("id", "Unknown")
-            model_name = model.get("name", "Unknown")
-            pricing = model.get("pricing", {})
-            
-            # Check if free
-            is_free = (pricing.get("prompt", "0") == "0" and 
-                      pricing.get("completion", "0") == "0")
-            
-            free_marker = "[FREE]" if is_free else ""
-            print(f"{i+1:2d}. {model_name} {free_marker}")
-            print(f"    ID: {model_id}")
-            print(f"    Prompt: {pricing.get('prompt', 'N/A')} | Completion: {pricing.get('completion', 'N/A')}")
-            print()
-        
-        print("==============================")
-        
+            telemetry_service.print_model_list(models)
+            return CommandResult(success=True, message=MSG.LIST_MODELS_NONE)
+        telemetry_service.print_model_list(models)
         return CommandResult(
             success=True,
-            message=f"Listed {len(models)} OpenRouter models"
+            message=MSG.LIST_MODELS_SUCCESS.format(count=len(models))
         )
 
 
@@ -155,16 +129,13 @@ class SelectModelCommand(CommandHandler):
     
     @property
     def name(self) -> str:
-        """Get command name."""
-        return "select-model"
-    
+        return MSG.SELECT_MODEL_CMD_NAME
+
     @property
     def description(self) -> str:
-        """Get command description."""
-        return "Select an OpenRouter model by index or name"
+        return MSG.SELECT_MODEL_DESC
     
     def register(self, subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
-        """Register the command with the argument parser."""
         parser = subparsers.add_parser(
             self.name,
             help=self.description,
@@ -174,33 +145,31 @@ class SelectModelCommand(CommandHandler):
         parser.add_argument(
             "model_identifier",
             metavar="ID_OR_NAME",
-            help="Model index (1-based) or name/ID fragment"
+            help=MSG.SELECT_MODEL_ARG
         )
+        parser.set_defaults(**{K.HANDLER: self})
         return parser
     
     def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
-        """Execute the command."""
-        openrouter_service = context.services.get("openrouter")
+        openrouter_service = context.services.get(K.OPENROUTER_SERVICE)
         if not openrouter_service:
             return CommandResult(
                 success=False,
-                message="OpenRouter service not available",
+                message=MSG.OPENROUTER_SERVICE_NOT_AVAILABLE,
                 exit_code=1
             )
-        
         success, selected_model = openrouter_service.select_model(args.model_identifier)
-        
         if success:
-            model_id = selected_model.get("id", "Unknown")
-            model_name = selected_model.get("name", "Unknown")
+            model_id = selected_model.get(K.MODEL_ID, "Unknown")
+            model_name = selected_model.get(K.MODEL_NAME, "Unknown")
             return CommandResult(
                 success=True,
-                message=f"Selected OpenRouter model: {model_name} ({model_id})"
+                message=MSG.SELECT_MODEL_SUCCESS.format(name=model_name, id=model_id)
             )
         else:
             return CommandResult(
                 success=False,
-                message=f"Failed to select model: {args.model_identifier}",
+                message=MSG.SELECT_MODEL_FAIL.format(identifier=args.model_identifier),
                 exit_code=1
             )
 
@@ -210,53 +179,55 @@ class ShowSelectionCommand(CommandHandler):
     
     @property
     def name(self) -> str:
-        """Get command name."""
-        return "show-selection"
-    
+        return MSG.SHOW_SELECTION_CMD_NAME
+
     @property
     def description(self) -> str:
-        """Get command description."""
-        return "Show currently selected OpenRouter model"
+        return MSG.SHOW_SELECTION_DESC
     
     def register(self, subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
-        """Register the command with the argument parser."""
         parser = subparsers.add_parser(
             self.name,
             help=self.description,
             description=self.description
         )
         self.add_common_arguments(parser)
+        parser.set_defaults(**{K.HANDLER: self})
         return parser
     
     def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
-        """Execute the command."""
-        openrouter_service = context.services.get("openrouter")
+        openrouter_service = context.services.get(K.OPENROUTER_SERVICE)
         if not openrouter_service:
             return CommandResult(
                 success=False,
-                message="OpenRouter service not available",
+                message=MSG.OPENROUTER_SERVICE_NOT_AVAILABLE,
+                exit_code=1
+            )
+        
+        telemetry_service = context.services.get(K.TELEMETRY_SERVICE)
+        if not telemetry_service:
+            return CommandResult(
+                success=False,
+                message=MSG.TELEMETRY_SERVICE_NOT_AVAILABLE,
                 exit_code=1
             )
         
         selected_model = openrouter_service.get_selected_model()
         
+        # Delegate presentation to telemetry service
+        telemetry_service.print_selected_model(selected_model)
+        
         if selected_model:
-            model_id = selected_model.get("id", "Unknown")
-            model_name = selected_model.get("name", "Unknown")
-            print(f"\n=== Selected OpenRouter Model ===")
-            print(f"Name: {model_name}")
-            print(f"ID: {model_id}")
-            print("==============================")
-            
+            model_id = selected_model.get(K.MODEL_ID, "Unknown")
+            model_name = selected_model.get(K.MODEL_NAME, "Unknown")
             return CommandResult(
                 success=True,
-                message=f"Selected model: {model_name} ({model_id})"
+                message=MSG.SHOW_SELECTION_SUCCESS.format(name=model_name, id=model_id)
             )
         else:
-            print("No OpenRouter model selected.")
             return CommandResult(
                 success=False,
-                message="No model selected",
+                message=MSG.SHOW_SELECTION_FAIL,
                 exit_code=1
             )
 
@@ -266,45 +237,40 @@ class ShowModelDetailsCommand(CommandHandler):
     
     @property
     def name(self) -> str:
-        """Get command name."""
-        return "show-model-details"
-    
+        return MSG.SHOW_MODEL_DETAILS_CMD_NAME
+
     @property
     def description(self) -> str:
-        """Get command description."""
-        return "Show detailed information about selected model"
+        return MSG.SHOW_MODEL_DETAILS_DESC
     
     def register(self, subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
-        """Register the command with the argument parser."""
         parser = subparsers.add_parser(
             self.name,
             help=self.description,
             description=self.description
         )
         self.add_common_arguments(parser)
+        parser.set_defaults(**{K.HANDLER: self})
         return parser
     
     def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
-        """Execute the command."""
-        openrouter_service = context.services.get("openrouter")
+        openrouter_service = context.services.get(K.OPENROUTER_SERVICE)
         if not openrouter_service:
             return CommandResult(
                 success=False,
-                message="OpenRouter service not available",
+                message=MSG.OPENROUTER_SERVICE_NOT_AVAILABLE,
                 exit_code=1
             )
-        
         success = openrouter_service.show_model_details()
-        
         if success:
             return CommandResult(
                 success=True,
-                message="Model details displayed"
+                message=MSG.SHOW_MODEL_DETAILS_SUCCESS
             )
         else:
             return CommandResult(
                 success=False,
-                message="Failed to show model details",
+                message=MSG.SHOW_MODEL_DETAILS_FAIL,
                 exit_code=1
             )
 
@@ -314,16 +280,13 @@ class ConfigureImageContextCommand(CommandHandler):
     
     @property
     def name(self) -> str:
-        """Get command name."""
-        return "configure-image-context"
-    
+        return MSG.CONFIGURE_IMAGE_CONTEXT_CMD_NAME
+
     @property
     def description(self) -> str:
-        """Get command description."""
-        return "Configure image context for vision models"
+        return MSG.CONFIGURE_IMAGE_CONTEXT_DESC
     
     def register(self, subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
-        """Register the command with the argument parser."""
         parser = subparsers.add_parser(
             self.name,
             help=self.description,
@@ -333,59 +296,55 @@ class ConfigureImageContextCommand(CommandHandler):
         parser.add_argument(
             "--model",
             metavar="MODEL_ID",
-            help="Model ID (uses current if not specified)"
+            help=MSG.CONFIGURE_IMAGE_CONTEXT_MODEL_ARG
         )
         parser.add_argument(
             "--enable",
             action="store_true",
-            help="Enable image context"
+            help=MSG.CONFIGURE_IMAGE_CONTEXT_ENABLE
         )
         parser.add_argument(
             "--disable",
             action="store_true",
-            help="Disable image context"
+            help=MSG.CONFIGURE_IMAGE_CONTEXT_DISABLE
         )
+        parser.set_defaults(**{K.HANDLER: self})
         return parser
     
     def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
-        """Execute the command."""
-        openrouter_service = context.services.get("openrouter")
+        openrouter_service = context.services.get(K.OPENROUTER_SERVICE)
         if not openrouter_service:
             return CommandResult(
                 success=False,
-                message="OpenRouter service not available",
+                message=MSG.OPENROUTER_SERVICE_NOT_AVAILABLE,
                 exit_code=1
             )
-        
         # Validate arguments
         if args.enable and args.disable:
             return CommandResult(
                 success=False,
-                message="Cannot specify both --enable and --disable",
+                message=MSG.CONFIGURE_IMAGE_CONTEXT_CONFLICT,
                 exit_code=1
             )
-        
         enabled = None
         if args.enable:
             enabled = True
         elif args.disable:
             enabled = False
-        
         success = openrouter_service.configure_image_context(
             model_identifier=args.model,
             enabled=enabled
         )
-        
         if success:
             action = "enabled" if args.enable else ("disabled" if args.disable else "checked")
             return CommandResult(
                 success=True,
-                message=f"Image context {action} for model"
+                message=MSG.CONFIGURE_IMAGE_CONTEXT_SUCCESS.format(action=action)
             )
         else:
             return CommandResult(
                 success=False,
-                message="Failed to configure image context",
+                message=MSG.CONFIGURE_IMAGE_CONTEXT_FAIL,
                 exit_code=1
             )
 
@@ -394,8 +353,7 @@ class OpenRouterCommandGroup(CommandGroup):
     """OpenRouter command group."""
     
     def __init__(self):
-        """Initialize OpenRouter command group."""
-        super().__init__("openrouter", "OpenRouter model management commands")
+        super().__init__(MSG.OPENROUTER_GROUP_NAME, MSG.OPENROUTER_GROUP_DESC)
     
     def get_commands(self) -> List[CommandHandler]:
         """Get commands in this group."""

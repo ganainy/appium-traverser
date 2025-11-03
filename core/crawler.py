@@ -97,10 +97,19 @@ class Crawler:
         Start a new crawling session.
         """
         try:
+            logger.debug("DIAGNOSTIC: About to validate config")
             self.config.validate()
+            logger.debug("DIAGNOSTIC: Config validated successfully")
             session = CrawlerSession(self.config)
+            logger.debug(f"DIAGNOSTIC: Created session object with status: {session.status}")
             self.storage.save_session(session)
+            logger.debug(f"DIAGNOSTIC: Session saved to storage, status after save: {session.status}")
             logger.info(f"Started crawler session {session.session_id} with config {self.config.name}")
+            
+            # DIAGNOSTIC: Critical issue - session remains in 'pending' state
+            logger.warning("DIAGNOSTIC: Session created but never transitioned to 'running' - this is likely the root cause!")
+            logger.debug(f"DIAGNOSTIC: Session details: {session}")
+            
             return session
         except Exception as e:
             logger.error(f"Failed to start crawler session: {e}")
@@ -111,14 +120,19 @@ class Crawler:
         Get the current status of a crawling session.
         """
         try:
+            logger.debug(f"DIAGNOSTIC: Retrieving session {session_id} from storage")
             session = self.storage.get_session(session_id)
             if session:
-                logger.debug(f"Retrieved status for session {session_id}: {session.status}")
+                logger.debug(f"DIAGNOSTIC: Retrieved session {session_id} with status: {session.status}")
+                logger.debug(f"DIAGNOSTIC: Session start_time: {session.start_time}, end_time: {session.end_time}")
+                if session.status == "pending":
+                    logger.warning(f"DIAGNOSTIC: Session {session_id} still in 'pending' state - no crawling logic executed!")
                 return session
             else:
                 # Session not found, create a new one (for backward compatibility)
+                logger.warning(f"DIAGNOSTIC: Session {session_id} not found in storage, creating new one")
                 session = CrawlerSession(self.config, session_id)
-                logger.debug(f"Created new session for {session_id}: {session.status}")
+                logger.debug(f"DIAGNOSTIC: Created new session for {session_id}: {session.status}")
                 return session
         except Exception as e:
             logger.error(f"Failed to get status for session {session_id}: {e}")

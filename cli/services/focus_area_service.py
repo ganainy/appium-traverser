@@ -38,25 +38,27 @@ class FocusAreaService:
             self.logger.error(f"Failed to load focus areas from database: {e}")
             return []
     
-    def list_focus_areas(self) -> bool:
+    def list_focus_areas(self) -> List[Dict]:
         """List configured focus areas.
         
         Returns:
-            True if successful, False otherwise
+            List of focus area dictionaries with consistent properties
         """
         areas = self.get_focus_areas()
-        if not areas:
-            print("No focus areas configured.")
-            return True
+        processed_areas = []
         
-        print("\n=== Focus Areas ===")
         for i, area in enumerate(areas):
-            name = area.get("title") or area.get("name") or f"Area {i+1}"
-            enabled = area.get("enabled", True)
-            priority = area.get("priority", i)
-            print(f"{i+1:2d}. {name} | enabled={enabled} | priority={priority}")
-        print("===================")
-        return True
+            # Create a new dictionary with consistent properties
+            processed_area = {
+                "id": area.get("id"),
+                "display_name": area.get("title") or area.get("name") or f"Area {i+1}",
+                "enabled": area.get("enabled", True),
+                "priority": area.get("priority", i),
+                "original_data": area  # Keep original data for reference if needed
+            }
+            processed_areas.append(processed_area)
+        
+        return processed_areas
     
     def _find_focus_area_index(self, id_or_name: str) -> Optional[int]:
         """Find focus area index by ID or name.

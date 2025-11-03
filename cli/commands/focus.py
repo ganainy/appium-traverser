@@ -3,6 +3,7 @@
 Focus area management commands.
 """
 
+
 import argparse
 import json
 import os
@@ -10,6 +11,9 @@ from typing import List
 
 from cli.commands.base import CommandGroup, CommandHandler, CommandResult
 from cli.shared.context import CLIContext
+from cli.constants import messages as MSG
+from cli.constants import keys as KEY
+from cli.constants.config import DEFAULT_FOCUS_PRIORITY
 
 
 class ListFocusAreasCommand(CommandHandler):
@@ -17,11 +21,11 @@ class ListFocusAreasCommand(CommandHandler):
     
     @property
     def name(self) -> str:
-        return "list"
-    
+        return MSG.LIST_FOCUS_CMD_NAME
+
     @property
     def description(self) -> str:
-        return "List all configured focus areas"
+        return MSG.LIST_FOCUS_CMD_DESC
     
     def register(self, subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
         parser = subparsers.add_parser(
@@ -30,34 +34,32 @@ class ListFocusAreasCommand(CommandHandler):
             description=self.description
         )
         self.add_common_arguments(parser)
+        parser.set_defaults(handler=self)
         return parser
     
     def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
-        focus_service = context.services.get("focus")
+        focus_service = context.services.get(KEY.FOCUS_SERVICE)
         if not focus_service:
             return CommandResult(
                 success=False,
-                message="Focus area service not available",
+                message=MSG.FOCUS_SERVICE_NOT_AVAILABLE,
                 exit_code=1
             )
-        
+
+        telemetry_service = context.services.get(KEY.TELEMETRY_SERVICE)
+        if not telemetry_service:
+            return CommandResult(
+                success=False,
+                message=MSG.TELEMETRY_SERVICE_NOT_AVAILABLE,
+                exit_code=1
+            )
+
         areas = focus_service.list_focus_areas()
-        
-        if not areas:
-            print("No focus areas configured.")
-            return CommandResult(success=True, message="No focus areas found")
-        
-        print("\n=== Focus Areas ===")
-        for i, area in enumerate(areas):
-            name = area.get("title") or area.get("name") or f"Area {i+1}"
-            enabled = area.get("enabled", True)
-            priority = area.get("priority", i)
-            print(f"{i+1:2d}. {name} | enabled={enabled} | priority={priority}")
-        print("===================")
-        
+        telemetry_service.print_focus_areas(areas)
+
         return CommandResult(
             success=True,
-            message=f"Found {len(areas)} focus areas"
+            message=MSG.FOUND_FOCUS_AREAS.format(count=len(areas))
         )
 
 class AddFocusAreaCommand(CommandHandler):
@@ -65,11 +67,11 @@ class AddFocusAreaCommand(CommandHandler):
     
     @property
     def name(self) -> str:
-        return "add"
-    
+        return MSG.ADD_FOCUS_CMD_NAME
+
     @property
     def description(self) -> str:
-        return "Add a new focus area"
+        return MSG.ADD_FOCUS_CMD_DESC
     
     def register(self, subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
         parser = subparsers.add_parser(
@@ -78,59 +80,60 @@ class AddFocusAreaCommand(CommandHandler):
             description=self.description
         )
         parser.add_argument(
-            "title",
-            metavar="TITLE",
+            MSG.ADD_FOCUS_ARG_TITLE,
+            metavar=MSG.ADD_FOCUS_ARG_TITLE_METAVAR,
             type=str,
-            help="Title of the focus area"
+            help=MSG.ADD_FOCUS_ARG_TITLE_HELP
         )
         parser.add_argument(
-            "--description",
-            metavar="TEXT",
+            f"--{MSG.ADD_FOCUS_ARG_DESC}",
+            metavar=MSG.ADD_FOCUS_ARG_DESC_METAVAR,
             type=str,
             default="",
-            help="Description of the focus area"
+            help=MSG.ADD_FOCUS_ARG_DESC_HELP
         )
         parser.add_argument(
-            "--priority",
-            metavar="NUMBER",
+            f"--{MSG.ADD_FOCUS_ARG_PRIORITY}",
+            metavar=MSG.ADD_FOCUS_ARG_PRIORITY_METAVAR,
             type=int,
-            default=999,
-            help="Priority of the focus area (default: 999)"
+            default=DEFAULT_FOCUS_PRIORITY,
+            help=MSG.ADD_FOCUS_ARG_PRIORITY_HELP.format(default=DEFAULT_FOCUS_PRIORITY)
         )
         parser.add_argument(
-            "--enabled",
+            f"--{MSG.ADD_FOCUS_ARG_ENABLED}",
             action="store_true",
             default=True,
-            help="Enable the focus area (default: enabled)"
+            help=MSG.ADD_FOCUS_ARG_ENABLED_HELP
         )
         self.add_common_arguments(parser)
+        parser.set_defaults(handler=self)
         return parser
     
     def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
-        focus_service = context.services.get("focus")
+        focus_service = context.services.get(KEY.FOCUS_SERVICE)
         if not focus_service:
             return CommandResult(
                 success=False,
-                message="Focus area service not available",
+                message=MSG.FOCUS_SERVICE_NOT_AVAILABLE,
                 exit_code=1
             )
-        
+
         success = focus_service.add_focus_area(
-            title=args.title,
-            description=args.description,
-            priority=args.priority,
-            enabled=args.enabled
+            title=getattr(args, MSG.ADD_FOCUS_ARG_TITLE),
+            description=getattr(args, MSG.ADD_FOCUS_ARG_DESC),
+            priority=getattr(args, MSG.ADD_FOCUS_ARG_PRIORITY),
+            enabled=getattr(args, MSG.ADD_FOCUS_ARG_ENABLED)
         )
-        
+
         if success:
             return CommandResult(
                 success=True,
-                message=f"Successfully added focus area: {args.title}"
+                message=MSG.ADD_FOCUS_SUCCESS.format(title=getattr(args, MSG.ADD_FOCUS_ARG_TITLE))
             )
         else:
             return CommandResult(
                 success=False,
-                message=f"Failed to add focus area: {args.title}",
+                message=MSG.ADD_FOCUS_FAIL.format(title=getattr(args, MSG.ADD_FOCUS_ARG_TITLE)),
                 exit_code=1
             )
 
@@ -139,11 +142,11 @@ class EditFocusAreaCommand(CommandHandler):
     
     @property
     def name(self) -> str:
-        return "edit"
-    
+        return MSG.EDIT_FOCUS_CMD_NAME
+
     @property
     def description(self) -> str:
-        return "Edit an existing focus area"
+        return MSG.EDIT_FOCUS_CMD_DESC
     
     def register(self, subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
         parser = subparsers.add_parser(
@@ -152,82 +155,88 @@ class EditFocusAreaCommand(CommandHandler):
             description=self.description
         )
         parser.add_argument(
-            "id_or_name",
-            metavar="ID_OR_NAME",
+            MSG.EDIT_FOCUS_ARG_ID_OR_NAME,
+            metavar=MSG.EDIT_FOCUS_ARG_ID_OR_NAME_METAVAR,
             type=str,
-            help="ID or name of the focus area to edit"
+            help=MSG.EDIT_FOCUS_ARG_ID_OR_NAME_HELP
         )
         parser.add_argument(
-            "--title",
-            metavar="TITLE",
+            f"--{MSG.EDIT_FOCUS_ARG_TITLE}",
+            metavar=MSG.EDIT_FOCUS_ARG_TITLE_METAVAR,
             type=str,
-            help="New title for the focus area"
+            help=MSG.EDIT_FOCUS_ARG_TITLE_HELP,
+            default=None
         )
         parser.add_argument(
-            "--description",
-            metavar="TEXT",
+            f"--{MSG.EDIT_FOCUS_ARG_DESC}",
+            metavar=MSG.EDIT_FOCUS_ARG_DESC_METAVAR,
             type=str,
-            help="New description for the focus area"
+            help=MSG.EDIT_FOCUS_ARG_DESC_HELP,
+            default=None
         )
         parser.add_argument(
-            "--priority",
-            metavar="NUMBER",
+            f"--{MSG.EDIT_FOCUS_ARG_PRIORITY}",
+            metavar=MSG.EDIT_FOCUS_ARG_PRIORITY_METAVAR,
             type=int,
-            help="New priority for the focus area"
+            help=MSG.EDIT_FOCUS_ARG_PRIORITY_HELP,
+            default=None
         )
         parser.add_argument(
-            "--enabled",
+            f"--{MSG.EDIT_FOCUS_ARG_ENABLED}",
             action="store_true",
             dest="enable",
-            help="Enable the focus area"
+            help=MSG.EDIT_FOCUS_ARG_ENABLED_HELP
         )
         parser.add_argument(
-            "--disabled",
+            f"--{MSG.EDIT_FOCUS_ARG_DISABLED}",
             action="store_false",
             dest="enable",
-            help="Disable the focus area"
+            help=MSG.EDIT_FOCUS_ARG_DISABLED_HELP
         )
+        parser.set_defaults(enable=None)
         self.add_common_arguments(parser)
+        parser.set_defaults(handler=self)
         return parser
     
     def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
-        focus_service = context.services.get("focus")
+        focus_service = context.services.get(KEY.FOCUS_SERVICE)
         if not focus_service:
             return CommandResult(
                 success=False,
-                message="Focus area service not available",
+                message=MSG.FOCUS_SERVICE_NOT_AVAILABLE,
                 exit_code=1
             )
-        
+
         # Only pass parameters that were actually provided
         kwargs = {}
-        if args.title is not None:
-            kwargs["title"] = args.title
-        if args.description is not None:
-            kwargs["description"] = args.description
-        if args.priority is not None:
-            kwargs["priority"] = args.priority
-        if hasattr(args, "enable"):
+        if getattr(args, MSG.EDIT_FOCUS_ARG_TITLE) is not None:
+            kwargs["title"] = getattr(args, MSG.EDIT_FOCUS_ARG_TITLE)
+        if getattr(args, MSG.EDIT_FOCUS_ARG_DESC) is not None:
+            kwargs["description"] = getattr(args, MSG.EDIT_FOCUS_ARG_DESC)
+        if getattr(args, MSG.EDIT_FOCUS_ARG_PRIORITY) is not None:
+            kwargs["priority"] = getattr(args, MSG.EDIT_FOCUS_ARG_PRIORITY)
+        if args.enable is not None:
             kwargs["enabled"] = args.enable
-        
+
         if not kwargs:
             return CommandResult(
                 success=False,
-                message="No changes specified. Use --title, --description, --priority, or --enabled/--disabled.",
+                message=MSG.EDIT_FOCUS_NO_CHANGES,
                 exit_code=1
             )
-        
-        success = focus_service.edit_focus_area(args.id_or_name, **kwargs)
-        
+
+        id_or_name = getattr(args, MSG.EDIT_FOCUS_ARG_ID_OR_NAME)
+        success = focus_service.edit_focus_area(id_or_name, **kwargs)
+
         if success:
             return CommandResult(
                 success=True,
-                message=f"Successfully updated focus area: {args.id_or_name}"
+                message=MSG.EDIT_FOCUS_SUCCESS.format(id_or_name=id_or_name)
             )
         else:
             return CommandResult(
                 success=False,
-                message=f"Failed to update focus area: {args.id_or_name}",
+                message=MSG.EDIT_FOCUS_FAIL.format(id_or_name=id_or_name),
                 exit_code=1
             )
 
@@ -236,11 +245,11 @@ class RemoveFocusAreaCommand(CommandHandler):
     
     @property
     def name(self) -> str:
-        return "remove"
-    
+        return MSG.REMOVE_FOCUS_CMD_NAME
+
     @property
     def description(self) -> str:
-        return "Remove a focus area"
+        return MSG.REMOVE_FOCUS_CMD_DESC
     
     def register(self, subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
         parser = subparsers.add_parser(
@@ -249,34 +258,36 @@ class RemoveFocusAreaCommand(CommandHandler):
             description=self.description
         )
         parser.add_argument(
-            "id_or_name",
-            metavar="ID_OR_NAME",
+            MSG.REMOVE_FOCUS_ARG_ID_OR_NAME,
+            metavar=MSG.REMOVE_FOCUS_ARG_ID_OR_NAME_METAVAR,
             type=str,
-            help="ID or name of the focus area to remove"
+            help=MSG.REMOVE_FOCUS_ARG_ID_OR_NAME_HELP
         )
         self.add_common_arguments(parser)
+        parser.set_defaults(handler=self)
         return parser
     
     def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
-        focus_service = context.services.get("focus")
+        focus_service = context.services.get(KEY.FOCUS_SERVICE)
         if not focus_service:
             return CommandResult(
                 success=False,
-                message="Focus area service not available",
+                message=MSG.FOCUS_SERVICE_NOT_AVAILABLE,
                 exit_code=1
             )
-        
-        success = focus_service.remove_focus_area(args.id_or_name)
-        
+
+        id_or_name = getattr(args, MSG.REMOVE_FOCUS_ARG_ID_OR_NAME)
+        success = focus_service.remove_focus_area(id_or_name)
+
         if success:
             return CommandResult(
                 success=True,
-                message=f"Successfully removed focus area: {args.id_or_name}"
+                message=MSG.REMOVE_FOCUS_SUCCESS.format(id_or_name=id_or_name)
             )
         else:
             return CommandResult(
                 success=False,
-                message=f"Failed to remove focus area: {args.id_or_name}",
+                message=MSG.REMOVE_FOCUS_FAIL.format(id_or_name=id_or_name),
                 exit_code=1
             )
 
@@ -285,11 +296,11 @@ class ImportFocusAreasCommand(CommandHandler):
     
     @property
     def name(self) -> str:
-        return "import"
-    
+        return MSG.IMPORT_FOCUS_CMD_NAME
+
     @property
     def description(self) -> str:
-        return "Import focus areas from a JSON file"
+        return MSG.IMPORT_FOCUS_CMD_DESC
     
     def register(self, subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
         parser = subparsers.add_parser(
@@ -298,34 +309,36 @@ class ImportFocusAreasCommand(CommandHandler):
             description=self.description
         )
         parser.add_argument(
-            "file_path",
-            metavar="FILE_PATH",
+            MSG.IMPORT_FOCUS_ARG_FILE_PATH,
+            metavar=MSG.IMPORT_FOCUS_ARG_FILE_PATH_METAVAR,
             type=str,
-            help="Path to the JSON file to import"
+            help=MSG.IMPORT_FOCUS_ARG_FILE_PATH_HELP
         )
         self.add_common_arguments(parser)
+        parser.set_defaults(handler=self)
         return parser
     
     def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
-        focus_service = context.services.get("focus")
+        focus_service = context.services.get(KEY.FOCUS_SERVICE)
         if not focus_service:
             return CommandResult(
                 success=False,
-                message="Focus area service not available",
+                message=MSG.FOCUS_SERVICE_NOT_AVAILABLE,
                 exit_code=1
             )
-        
-        success = focus_service.import_focus_areas(args.file_path)
-        
+
+        file_path = getattr(args, MSG.IMPORT_FOCUS_ARG_FILE_PATH)
+        success = focus_service.import_focus_areas(file_path)
+
         if success:
             return CommandResult(
                 success=True,
-                message=f"Successfully imported focus areas from: {args.file_path}"
+                message=MSG.IMPORT_FOCUS_SUCCESS.format(file_path=file_path)
             )
         else:
             return CommandResult(
                 success=False,
-                message=f"Failed to import focus areas from: {args.file_path}",
+                message=MSG.IMPORT_FOCUS_FAIL.format(file_path=file_path),
                 exit_code=1
             )
 
@@ -334,11 +347,11 @@ class ExportFocusAreasCommand(CommandHandler):
     
     @property
     def name(self) -> str:
-        return "export"
-    
+        return MSG.EXPORT_FOCUS_CMD_NAME
+
     @property
     def description(self) -> str:
-        return "Export focus areas to a JSON file"
+        return MSG.EXPORT_FOCUS_CMD_DESC
     
     def register(self, subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
         parser = subparsers.add_parser(
@@ -347,34 +360,36 @@ class ExportFocusAreasCommand(CommandHandler):
             description=self.description
         )
         parser.add_argument(
-            "file_path",
-            metavar="FILE_PATH",
+            MSG.EXPORT_FOCUS_ARG_FILE_PATH,
+            metavar=MSG.EXPORT_FOCUS_ARG_FILE_PATH_METAVAR,
             type=str,
-            help="Path to the JSON file to export to"
+            help=MSG.EXPORT_FOCUS_ARG_FILE_PATH_HELP
         )
         self.add_common_arguments(parser)
+        parser.set_defaults(handler=self)
         return parser
     
     def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
-        focus_service = context.services.get("focus")
+        focus_service = context.services.get(KEY.FOCUS_SERVICE)
         if not focus_service:
             return CommandResult(
                 success=False,
-                message="Focus area service not available",
+                message=MSG.FOCUS_SERVICE_NOT_AVAILABLE,
                 exit_code=1
             )
-        
-        success = focus_service.export_focus_areas(args.file_path)
-        
+
+        file_path = getattr(args, MSG.EXPORT_FOCUS_ARG_FILE_PATH)
+        success = focus_service.export_focus_areas(file_path)
+
         if success:
             return CommandResult(
                 success=True,
-                message=f"Successfully exported focus areas to: {args.file_path}"
+                message=MSG.EXPORT_FOCUS_SUCCESS.format(file_path=file_path)
             )
         else:
             return CommandResult(
                 success=False,
-                message=f"Failed to export focus areas to: {args.file_path}",
+                message=MSG.EXPORT_FOCUS_FAIL.format(file_path=file_path),
                 exit_code=1
             )
 
@@ -382,12 +397,15 @@ class FocusCommandGroup(CommandGroup):
     """Focus area management command group."""
     
     def __init__(self):
-        super().__init__("focus", "Focus area management commands")
-        
-        # Add commands to the group
-        self.add_command(ListFocusAreasCommand())
-        self.add_command(AddFocusAreaCommand())
-        self.add_command(EditFocusAreaCommand())
-        self.add_command(RemoveFocusAreaCommand())
-        self.add_command(ImportFocusAreasCommand())
-        self.add_command(ExportFocusAreasCommand())
+        super().__init__("focus", MSG.FOCUS_COMMAND_GROUP_DESC)
+    
+    def get_commands(self) -> List['CommandHandler']:
+        """Return a list of CommandHandler instances for this group."""
+        return [
+            ListFocusAreasCommand(),
+            AddFocusAreaCommand(),
+            EditFocusAreaCommand(),
+            RemoveFocusAreaCommand(),
+            ImportFocusAreasCommand(),
+            ExportFocusAreasCommand()
+        ]

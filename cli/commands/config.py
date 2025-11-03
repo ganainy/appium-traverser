@@ -2,112 +2,103 @@
 Configuration commands for CLI operations.
 """
 
+
 import argparse
 from typing import Optional
 
 from cli.commands.base import CommandGroup, CommandHandler, CommandResult
 from cli.shared.context import CLIContext
+from cli.constants import messages as MSG
+from cli.constants import keys as KEYS
+from cli.commands.switch_provider import SwitchProviderCommand
 
 
 class ShowConfigCommand(CommandHandler):
     """Command to show current configuration."""
-    
+
     @property
     def name(self) -> str:
-        return "show-config"
-    
+        return MSG.SHOW_CONFIG_CMD_NAME
+
     @property
     def description(self) -> str:
-        return "Show current configuration"
-    
+        return MSG.SHOW_CONFIG_CMD_DESC
+
     def register(self, subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
         parser = subparsers.add_parser(
             self.name,
             help=self.description,
             description=self.description
         )
-        
+
         parser.add_argument(
             "filter",
             nargs="?",
-            help="Filter configuration by key (optional)"
+            help=MSG.SHOW_CONFIG_FILTER_HELP
         )
-        
+
         self.add_common_arguments(parser)
+        parser.set_defaults(handler=self)
         return parser
-    
+
     def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
         from cli.services.config_service import ConfigService
-        
+
         config_service = ConfigService(context)
         config_data = config_service.show_config(args.filter)
-        
-        context.services.get("telemetry").print_config_table(config_data, args.filter)
-        
+
+        context.services.get(KEYS.TELEMETRY_SERVICE).print_config_table(config_data, args.filter)
+
+        if args.filter:
+            msg = MSG.SHOW_CONFIG_DISPLAYED_FILTERED.format(filter=args.filter)
+        else:
+            msg = MSG.SHOW_CONFIG_DISPLAYED
+
         return CommandResult(
             success=True,
-            message=f"Configuration displayed{f' (filtered by: {args.filter})' if args.filter else ''}"
+            message=msg
         )
 
 
 class SetConfigCommand(CommandHandler):
     """Command to set configuration values."""
-    
+
     @property
     def name(self) -> str:
-        return "set-config"
-    
+        return MSG.SET_CONFIG_CMD_NAME
+
     @property
     def description(self) -> str:
-        return "Set configuration values"
-    
+        return MSG.SET_CONFIG_CMD_DESC
+
     def register(self, subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
         parser = subparsers.add_parser(
             self.name,
             help=self.description,
             description=self.description
         )
-        
+
         parser.add_argument(
             "key_value_pairs",
             nargs="+",
-            help="Configuration key=value pairs (e.g., MAX_CRAWL_STEPS=100)"
+            help=MSG.SET_CONFIG_KEY_VALUE_HELP
         )
-        
+
         self.add_common_arguments(parser)
+        parser.set_defaults(handler=self)
         return parser
-    
+
     def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
         from cli.services.config_service import ConfigService
-        
+
         config_service = ConfigService(context)
-        telemetry = context.services.get("telemetry")
-        
-        success_count = 0
+        success = config_service.set_and_save_from_pairs(args.key_value_pairs)
         total_count = len(args.key_value_pairs)
-        
-        for kv_pair in args.key_value_pairs:
-            if "=" not in kv_pair:
-                telemetry.print_error(f"Invalid format: {kv_pair}. Use KEY=VALUE format.")
-                continue
-            
-            key, value = kv_pair.split("=", 1)
-            if config_service.set_config_value(key.strip(), value.strip()):
-                success_count += 1
-                telemetry.print_success(f"Set {key} = {value}")
-            else:
-                telemetry.print_error(f"Failed to set {key}")
-        
-        # Save all changes
-        if success_count > 0:
-            if config_service.save_all_changes():
-                telemetry.print_success("Configuration saved successfully")
-            else:
-                telemetry.print_warning("Configuration updated but failed to save")
-        
-        success = success_count == total_count
+
+        # Calculate success count for the message
+        success_count = total_count if success else 0
         message = f"Set {success_count}/{total_count} configuration values"
-        
+
         return CommandResult(
             success=success,
             message=message,
@@ -117,12 +108,12 @@ class SetConfigCommand(CommandHandler):
 
 class ConfigCommandGroup(CommandGroup):
     """Command group for configuration operations."""
-    
+
     def __init__(self):
         super().__init__(
-            name="config",
-            description="Configuration management commands"
+            name=MSG.CONFIG_GROUP_NAME,
+            description=MSG.CONFIG_GROUP_DESC
         )
-        
         self.add_command(ShowConfigCommand())
         self.add_command(SetConfigCommand())
+        self.add_command(SwitchProviderCommand())

@@ -22,15 +22,22 @@ if str(project_root) not in sys.path:
 
 
 # Try to import from traverser_ai_api package first, but delay Config import to fixture
+# Support refactor: modules moved out of traverser_ai_api into cli/, utils/, etc.
 try:
     from cli.shared.context import CLIContext, ServiceRegistry
     from utils.utils import LoggerManager
     CLI_AVAILABLE = True
 except ImportError:
-    CLIContext = None  # type: ignore
-    ServiceRegistry = None  # type: ignore
-    LoggerManager = None  # type: ignore
-    CLI_AVAILABLE = False
+    try:
+        # Fallback to old traverser_ai_api paths for backwards compatibility
+        from traverser_ai_api.cli.shared.context import CLIContext, ServiceRegistry
+        from traverser_ai_api.utils.utils import LoggerManager
+        CLI_AVAILABLE = True
+    except ImportError:
+        CLIContext = None  # type: ignore
+        ServiceRegistry = None  # type: ignore
+        LoggerManager = None  # type: ignore
+        CLI_AVAILABLE = False
 
 
 @pytest.fixture(scope="session", autouse=True)

@@ -2,11 +2,13 @@
 Base command infrastructure for CLI operations.
 """
 
+
 import argparse
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional
 
 from cli.shared.context import CLIContext
+from cli.constants import messages as MSG
 
 
 class CommandResult:
@@ -89,21 +91,23 @@ class CommandHandler(ABC):
         parser.add_argument(
             "-v", "--verbose",
             action="store_true",
-            help="Enable verbose output for this command"
+            help=MSG.ARG_HELP_VERBOSE if hasattr(MSG, "ARG_HELP_VERBOSE") else "Enable verbose output for this command"
         )
 
 
-class CommandGroup:
+
+from typing import List
+from abc import ABC, abstractmethod
+
+class CommandGroup(ABC):
     """
-    Group of related commands.
-    
+    Abstract base class for a group of related commands.
     Used to organize commands into logical groups like "apps", "device", etc.
     """
-    
+
     def __init__(self, name: str, description: str):
         """
         Initialize command group.
-        
         Args:
             name: Group name
             description: Group description
@@ -111,60 +115,54 @@ class CommandGroup:
         self.name = name
         self.description = description
         self.commands: Dict[str, CommandHandler] = {}
-    
-    def add_command(self, command: CommandHandler) -> None:
+
+    @abstractmethod
+    def get_commands(self) -> List['CommandHandler']:
+        """
+        Return a list of CommandHandler instances for this group.
+        """
+        pass
+
+    def add_command(self, command: 'CommandHandler') -> None:
         """
         Add a command to this group.
-        
         Args:
             command: Command handler to add
         """
         self.commands[command.name] = command
-    
+
     def register(self, subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
         """
         Register the command group and all its commands.
-        
         Args:
             subparsers: Subparsers action to register with
-            
         Returns:
             The group parser
         """
-        # If the group hasn't explicitly added commands, but implements get_commands(),
-        # populate the internal registry before creating subparsers. This keeps backward
-        # compatibility with groups that simply expose a list of commands via get_commands().
-        if not self.commands and hasattr(self, "get_commands"):
-            try:
-                for cmd in getattr(self, "get_commands")():
-                    self.add_command(cmd)
-            except Exception:
-                # Fallback silently; group will just have no commands
-                pass
+        # Always populate self.commands from get_commands()
+        self.commands.clear()
+        for cmd in self.get_commands():
+            self.add_command(cmd)
 
+        group_help = getattr(MSG, f"{self.name.upper()}_GROUP_DESC", self.description)
+        group_desc = group_help
         group_parser = subparsers.add_parser(
             self.name,
-            help=self.description,
-            description=self.description
+            help=group_help,
+            description=group_desc
         )
-        
         group_subparsers = group_parser.add_subparsers(
-            dest=f"{self.name}_command",
             help=f"Available {self.name} commands"
         )
-        
         for command in self.commands.values():
             command.register(group_subparsers)
-        
         return group_parser
-    
-    def get_command(self, name: str) -> Optional[CommandHandler]:
+
+    def get_command(self, name: str) -> Optional['CommandHandler']:
         """
         Get a command by name.
-        
         Args:
             name: Command name
-            
         Returns:
             Command handler or None if not found
         """
@@ -208,13 +206,11 @@ class CommandRegistry:
         """
         subparsers = parser.add_subparsers(
             dest="command",
-            help="Available commands"
+            help=getattr(MSG, "HELP_AVAILABLE_COMMANDS", "Available commands")
         )
-        
         # Register standalone commands
         for command in self.standalone_commands.values():
             command.register(subparsers)
-        
         # Register command groups
         for group in self.groups.values():
             group.register(subparsers)
@@ -229,16 +225,4 @@ class CommandRegistry:
         Returns:
             Command handler or None if not found
         """
-        # Check for group commands first
-        for group in self.groups.values():
-            group_command_attr = f"{group.name}_command"
-            if hasattr(args, group_command_attr):
-                command_name = getattr(args, group_command_attr)
-                if command_name:
-                    return group.get_command(command_name)
-        
-        # Check for standalone commands
-        if hasattr(args, "command") and args.command:
-            return self.standalone_commands.get(args.command)
-        
-        return None
+        return getattr(args, "handler", None)

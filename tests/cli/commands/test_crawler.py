@@ -58,6 +58,7 @@ def test_start_crawler_command_run_success(cli_context):
     """Test successful crawler start."""
     command = StartCrawlerCommand()
     args = Mock()
+    args.annotate_offline_after_run = False
     
     # Mock crawler service
     mock_crawler_service = Mock()
@@ -69,7 +70,28 @@ def test_start_crawler_command_run_success(cli_context):
     assert result.success is True
     assert "started successfully" in result.message
     assert result.exit_code == 0
-    mock_crawler_service.start_crawler.assert_called_once()
+    mock_crawler_service.start_crawler.assert_called_once_with(annotate_after_run=False)
+
+
+@pytest.mark.cli
+def test_start_crawler_command_run_with_annotation(cli_context):
+    """Test successful crawler start with annotation."""
+    command = StartCrawlerCommand()
+    args = Mock()
+    args.annotate_offline_after_run = True
+    
+    # Mock crawler service
+    mock_crawler_service = Mock()
+    mock_crawler_service.start_crawler.return_value = True
+    cli_context.services.register("crawler", mock_crawler_service)
+    
+    result = command.run(args, cli_context)
+    
+    assert result.success is True
+    assert "started successfully" in result.message
+    assert "Offline annotation will run after completion" in result.message
+    assert result.exit_code == 0
+    mock_crawler_service.start_crawler.assert_called_once_with(annotate_after_run=True)
 
 
 @pytest.mark.cli
@@ -77,6 +99,7 @@ def test_start_crawler_command_run_failure(cli_context):
     """Test failed crawler start."""
     command = StartCrawlerCommand()
     args = Mock()
+    args.annotate_offline_after_run = False
     
     # Mock crawler service
     mock_crawler_service = Mock()
@@ -88,6 +111,7 @@ def test_start_crawler_command_run_failure(cli_context):
     assert result.success is False
     assert "Failed to start" in result.message
     assert result.exit_code == 1
+    mock_crawler_service.start_crawler.assert_called_once_with(annotate_after_run=False)
 
 
 @pytest.mark.cli
@@ -171,11 +195,41 @@ def test_status_crawler_command_run(cli_context):
     mock_crawler_service.get_status.return_value = mock_status
     cli_context.services.register("crawler", mock_crawler_service)
     
+    # Mock telemetry service
+    mock_telemetry_service = Mock()
+    cli_context.services.register("telemetry", mock_telemetry_service)
+    
     result = command.run(args, cli_context)
     
     assert result.success is True
-    # Status command doesn't return data, just prints it
+    assert result.message == "Status retrieved"
+    mock_crawler_service.get_status.assert_called_once()
+    mock_telemetry_service.print_crawler_status.assert_called_once_with(mock_status)
+
+
+@pytest.mark.cli
+def test_status_crawler_command_run_without_telemetry(cli_context):
+    """Test crawler status command without telemetry service."""
+    command = StatusCrawlerCommand()
+    args = Mock()
+    
+    # Mock crawler service
+    mock_crawler_service = Mock()
+    mock_status = {
+        "process": "Running (PID 12345, CLI-managed)",
+        "state": "Running",
+        "target_app": "com.example.app",
+        "output_dir": "/tmp/output"
+    }
+    mock_crawler_service.get_status.return_value = mock_status
+    cli_context.services.register("crawler", mock_crawler_service)
+    
+    # Don't register telemetry service
+    
+    result = command.run(args, cli_context)
+    
     assert result.success is True
+    assert result.message == "Status retrieved"
     mock_crawler_service.get_status.assert_called_once()
 
 
@@ -218,6 +272,7 @@ def test_crawler_command_with_validation_error(cli_context):
     """Test crawler command with validation error."""
     command = StartCrawlerCommand()
     args = Mock()
+    args.annotate_offline_after_run = False
     
     # Mock crawler service to return failure
     mock_crawler_service = Mock()
@@ -229,6 +284,7 @@ def test_crawler_command_with_validation_error(cli_context):
     assert result.success is False
     assert "Failed to start crawler" in result.message
     assert result.exit_code == 1
+    mock_crawler_service.start_crawler.assert_called_once_with(annotate_after_run=False)
 
 
 @pytest.mark.cli
@@ -236,6 +292,7 @@ def test_crawler_command_with_service_unavailable(cli_context):
     """Test crawler command when service is unavailable."""
     command = StartCrawlerCommand()
     args = Mock()
+    args.annotate_offline_after_run = False
     
     # Don't register crawler service
     result = command.run(args, cli_context)
@@ -250,6 +307,7 @@ def test_crawler_command_with_exception(cli_context):
     """Test crawler command with unexpected exception."""
     command = StartCrawlerCommand()
     args = Mock()
+    args.annotate_offline_after_run = False
     
     # Mock crawler service to return failure
     mock_crawler_service = Mock()
@@ -261,6 +319,7 @@ def test_crawler_command_with_exception(cli_context):
     assert result.success is False
     assert "Failed to start crawler" in result.message
     assert result.exit_code == 1
+    mock_crawler_service.start_crawler.assert_called_once_with(annotate_after_run=False)
 
 
 @pytest.mark.cli
@@ -280,11 +339,16 @@ def test_crawler_status_when_not_running(cli_context):
     mock_crawler_service.get_status.return_value = mock_status
     cli_context.services.register("crawler", mock_crawler_service)
     
+    # Mock telemetry service
+    mock_telemetry_service = Mock()
+    cli_context.services.register("telemetry", mock_telemetry_service)
+    
     result = command.run(args, cli_context)
     
     assert result.success is True
-    # Status command doesn't return data, just prints it
-    assert result.success is True
+    assert result.message == "Status retrieved"
+    mock_crawler_service.get_status.assert_called_once()
+    mock_telemetry_service.print_crawler_status.assert_called_once_with(mock_status)
 
 
 @pytest.mark.cli

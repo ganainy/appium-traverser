@@ -8,6 +8,30 @@ from typing import List
 
 from cli.commands.base import CommandGroup, CommandHandler, CommandResult
 from cli.shared.context import CLIContext
+from cli.constants.messages import (
+    ANALYSIS_GROUP_DESC,
+    CMD_LIST_ANALYSIS_TARGETS_DESC,
+    ERR_ANALYSIS_TARGET_DISCOVERY_FAILED,
+    INFO_NO_ANALYSIS_TARGETS_FOUND,
+    HEADER_AVAILABLE_ANALYSIS_TARGETS,
+    FOOTER_SECTION_SEPARATOR,
+    LABEL_APP_PACKAGE,
+    LABEL_DB_FILE,
+    LABEL_SESSION_DIR,
+    MSG_FOUND_ANALYSIS_TARGETS,
+    CMD_LIST_RUNS_FOR_TARGET_DESC,
+    ARG_HELP_TARGET_INDEX,
+    ARG_HELP_TARGET_APP_PACKAGE,
+    MSG_RUNS_LISTED_SUCCESS,
+    ERR_FAILED_LIST_RUNS_FOR_TARGET,
+    CMD_GENERATE_ANALYSIS_PDF_DESC,
+    ARG_HELP_PDF_OUTPUT_NAME,
+    MSG_PDF_GENERATION_SUCCESS,
+    ERR_PDF_GENERATION_FAILED,
+    CMD_PRINT_ANALYSIS_SUMMARY_DESC,
+    MSG_ANALYSIS_SUMMARY_SUCCESS,
+    ERR_ANALYSIS_SUMMARY_FAILED,
+)
 
 
 class ListAnalysisTargetsCommand(CommandHandler):
@@ -21,7 +45,7 @@ class ListAnalysisTargetsCommand(CommandHandler):
     @property
     def description(self) -> str:
         """Get command description."""
-        return "List available analysis targets"
+        return CMD_LIST_ANALYSIS_TARGETS_DESC
     
     def register(self, subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
         """Register the command with the argument parser."""
@@ -31,6 +55,7 @@ class ListAnalysisTargetsCommand(CommandHandler):
             description=self.description
         )
         self.add_common_arguments(parser)
+        parser.set_defaults(handler=self)
         return parser
     
     def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
@@ -43,25 +68,25 @@ class ListAnalysisTargetsCommand(CommandHandler):
         if not success:
             return CommandResult(
                 success=False,
-                message="Error: Could not discover analysis targets.",
+                message=ERR_ANALYSIS_TARGET_DISCOVERY_FAILED,
                 exit_code=1
             )
         
         if not targets:
-            print("No analysis targets found.")
-            return CommandResult(success=True, message="No analysis targets found")
+            print(INFO_NO_ANALYSIS_TARGETS_FOUND)
+            return CommandResult(success=True, message=INFO_NO_ANALYSIS_TARGETS_FOUND)
         
-        print("\n=== Available Analysis Targets ===")
+        print(f"\n{HEADER_AVAILABLE_ANALYSIS_TARGETS}")
         for target in targets:
-            print(f"{target['index']}. App Package: {target['app_package']}")
-            print(f"   DB File: {target['db_filename']}")
-            print(f"   Session Dir: {target['session_dir']}")
+            print(f"{target['index']}. {LABEL_APP_PACKAGE} {target['app_package']}")
+            print(f"   {LABEL_DB_FILE} {target['db_filename']}")
+            print(f"   {LABEL_SESSION_DIR} {target['session_dir']}")
             print()
-        print("================================")
+        print(FOOTER_SECTION_SEPARATOR)
         
         return CommandResult(
             success=True,
-            message=f"Found {len(targets)} analysis targets"
+            message=MSG_FOUND_ANALYSIS_TARGETS.format(count=len(targets))
         )
 
 
@@ -76,7 +101,7 @@ class ListRunsForTargetCommand(CommandHandler):
     @property
     def description(self) -> str:
         """Get command description."""
-        return "List runs for a specific analysis target"
+        return CMD_LIST_RUNS_FOR_TARGET_DESC
     
     def register(self, subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
         """Register the command with the argument parser."""
@@ -91,13 +116,14 @@ class ListRunsForTargetCommand(CommandHandler):
         target_group.add_argument(
             "--target-index",
             type=int,
-            help="Target index from list-analysis-targets"
+            help=ARG_HELP_TARGET_INDEX
         )
         target_group.add_argument(
             "--target-app-package",
-            help="Target app package name"
+            help=ARG_HELP_TARGET_APP_PACKAGE
         )
         
+        parser.set_defaults(handler=self)
         return parser
     
     def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
@@ -113,11 +139,11 @@ class ListRunsForTargetCommand(CommandHandler):
         success = service.list_runs_for_target(identifier, is_index)
         
         if success:
-            return CommandResult(success=True, message="Runs listed successfully")
+            return CommandResult(success=True, message=MSG_RUNS_LISTED_SUCCESS)
         else:
             return CommandResult(
                 success=False,
-                message="Failed to list runs for target",
+                message=ERR_FAILED_LIST_RUNS_FOR_TARGET,
                 exit_code=1
             )
 
@@ -133,7 +159,7 @@ class GenerateAnalysisPDFCommand(CommandHandler):
     @property
     def description(self) -> str:
         """Get command description."""
-        return "Generate PDF report for analysis target"
+        return CMD_GENERATE_ANALYSIS_PDF_DESC
     
     def register(self, subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
         """Register the command with the argument parser."""
@@ -148,17 +174,18 @@ class GenerateAnalysisPDFCommand(CommandHandler):
         pdf_target_group.add_argument(
             "--target-index",
             type=int,
-            help="Target index from list-analysis-targets"
+            help=ARG_HELP_TARGET_INDEX
         )
         pdf_target_group.add_argument(
             "--target-app-package",
-            help="Target app package name"
+            help=ARG_HELP_TARGET_APP_PACKAGE
         )
         parser.add_argument(
             "--pdf-output-name",
-            help="Custom PDF filename (optional)"
+            help=ARG_HELP_PDF_OUTPUT_NAME
         )
         
+        parser.set_defaults(handler=self)
         return parser
     
     def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
@@ -178,11 +205,11 @@ class GenerateAnalysisPDFCommand(CommandHandler):
         )
         
         if success:
-            return CommandResult(success=True, message="PDF generation completed successfully")
+            return CommandResult(success=True, message=MSG_PDF_GENERATION_SUCCESS)
         else:
             return CommandResult(
                 success=False,
-                message="PDF generation failed",
+                message=ERR_PDF_GENERATION_FAILED,
                 exit_code=1
             )
 
@@ -198,7 +225,7 @@ class PrintAnalysisSummaryCommand(CommandHandler):
     @property
     def description(self) -> str:
         """Get command description."""
-        return "Print summary metrics for analysis target"
+        return CMD_PRINT_ANALYSIS_SUMMARY_DESC
     
     def register(self, subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
         """Register the command with the argument parser."""
@@ -213,13 +240,14 @@ class PrintAnalysisSummaryCommand(CommandHandler):
         summary_target_group.add_argument(
             "--target-index",
             type=int,
-            help="Target index from list-analysis-targets"
+            help=ARG_HELP_TARGET_INDEX
         )
         summary_target_group.add_argument(
             "--target-app-package",
-            help="Target app package name"
+            help=ARG_HELP_TARGET_APP_PACKAGE
         )
         
+        parser.set_defaults(handler=self)
         return parser
     
     def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
@@ -235,11 +263,11 @@ class PrintAnalysisSummaryCommand(CommandHandler):
         success = service.print_analysis_summary(identifier, is_index)
         
         if success:
-            return CommandResult(success=True, message="Analysis summary printed successfully")
+            return CommandResult(success=True, message=MSG_ANALYSIS_SUMMARY_SUCCESS)
         else:
             return CommandResult(
                 success=False,
-                message="Failed to print analysis summary",
+                message=ERR_ANALYSIS_SUMMARY_FAILED,
                 exit_code=1
             )
 
@@ -249,7 +277,7 @@ class AnalysisCommandGroup(CommandGroup):
     
     def __init__(self):
         """Initialize Analysis command group."""
-        super().__init__("analysis", "Analysis and reporting commands")
+        super().__init__("analysis", ANALYSIS_GROUP_DESC)
     
     def get_commands(self) -> List[CommandHandler]:
         """Get commands in this group."""

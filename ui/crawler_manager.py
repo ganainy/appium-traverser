@@ -573,17 +573,58 @@ class CrawlerManager(QObject):
             
             # Use the same Python executable that's running this script
             python_exe = sys.executable
-            # Run main.py as a module so Python can properly import traverser_ai_api
-            module_name = "traverser_ai_api.main"
-            
-            # Set working directory to project root
+            # Determine project root and set working directory
             project_root = os.path.dirname(self.config.BASE_DIR)
             self.crawler_process.setWorkingDirectory(project_root)
             
-            # Start the process
-            self.main_controller.log_message(f"Starting crawler with: {python_exe} -m {module_name}", 'blue')
-            # Start Python in unbuffered mode to stream stdout in real-time
-            self.crawler_process.start(python_exe, ["-u", "-m", module_name])
+            # Choose entrypoint dynamically:
+            # - Prefer package module (traverser_ai_api.main or app.main) if importable with -m
+            # - Otherwise fall back to running a known script file (app/main.py, traverser_ai_api/main.py, main.py, run_cli.py)
+            try:
+                import importlib.util
+            except Exception:
+                importlib = None  # type: ignore
+            
+            module_to_run = None
+            script_to_run = None
+            
+            try:
+                if importlib and importlib.util.find_spec("traverser_ai_api.main"):
+                    module_to_run = "traverser_ai_api.main"
+            except Exception:
+                pass
+            try:
+                if importlib and importlib.util.find_spec("app.main"):
+                    module_to_run = module_to_run or "app.main"
+            except Exception:
+                pass
+            
+            if module_to_run is None:
+                possible_scripts = [
+                    os.path.join(project_root, "app", "main.py"),
+                    os.path.join(project_root, "traverser_ai_api", "main.py"),
+                    os.path.join(project_root, "main.py"),
+                    os.path.join(project_root, "run_cli.py"),
+                ]
+                for p in possible_scripts:
+                    if os.path.isfile(p):
+                        script_to_run = p
+                        break
+            
+            if module_to_run:
+                self.main_controller.log_message(f"Starting crawler with: {python_exe} -m {module_to_run}", 'blue')
+                # Start Python in unbuffered mode to stream stdout in real-time
+                self.crawler_process.start(python_exe, ["-u", "-m", module_to_run])
+            elif script_to_run:
+                self.main_controller.log_message(f"Starting crawler with: {python_exe} {script_to_run}", 'blue')
+                # Run the script directly if module import is not available
+                self.crawler_process.start(python_exe, ["-u", script_to_run])
+            else:
+                self.main_controller.log_message(
+                    "ERROR: Could not locate crawler entrypoint (traverser_ai_api.main or app.main).",
+                    'red'
+                )
+                return
             self.update_progress()
         else:
             self.main_controller.log_message("Crawler is already running.", 'orange')
@@ -595,14 +636,27 @@ class CrawlerManager(QObject):
             self.main_controller.log_message("Stopping crawler...", 'blue')
             self.main_controller.status_label.setText("Status: Stopping...")
             
+            # DIAGNOSTIC: Check if shutdown flag path exists
+            self.main_controller.log_message(f"DIAGNOSTIC: Shutdown flag path: {self._shutdown_flag_file_path}", 'blue')
+            if os.path.exists(self._shutdown_flag_file_path):
+                self.main_controller.log_message("DIAGNOSTIC: Shutdown flag already exists!", 'orange')
+            
             # Create shutdown flag for graceful termination
             try:
                 with open(self._shutdown_flag_file_path, 'w') as f:
                     f.write("shutdown requested")
                 self.main_controller.log_message("Created shutdown flag. Waiting for crawler to exit...", 'blue')
+                self.main_controller.log_message(f"DIAGNOSTIC: Shutdown flag created at: {self._shutdown_flag_file_path}", 'blue')
+                
+                # DIAGNOSTIC: Verify flag was created
+                if os.path.exists(self._shutdown_flag_file_path):
+                    self.main_controller.log_message("DIAGNOSTIC: Shutdown flag verified to exist", 'green')
+                else:
+                    self.main_controller.log_message("DIAGNOSTIC: ERROR - Shutdown flag not found after creation!", 'red')
                 
                 # Start a timer to force termination if graceful shutdown takes too long
                 self.shutdown_timer.start(10000)  # 10 seconds timeout
+                self.main_controller.log_message("DIAGNOSTIC: Started 10-second shutdown timer", 'blue')
             except Exception as e:
                 self.main_controller.log_message(f"Error creating shutdown flag: {e}", 'red')
                 # Fallback to termination
@@ -614,9 +668,20 @@ class CrawlerManager(QObject):
     @Slot()
     def force_stop_crawler_on_timeout(self) -> None:
         """Force stop the crawler process if it doesn't respond to graceful shutdown."""
+        self.main_controller.log_message("DIAGNOSTIC: Shutdown timeout triggered - checking process state", 'orange')
         if self.crawler_process and self.crawler_process.state() == QProcess.ProcessState.Running:
             self.main_controller.log_message("Crawler did not exit gracefully. Forcing termination...", 'red')
+            self.main_controller.log_message(f"DIAGNOSTIC: Process PID: {self.crawler_process.processId()}", 'orange')
+            self.main_controller.log_message(f"DIAGNOSTIC: Process state: {self.crawler_process.state()}", 'orange')
+            
+            # DIAGNOSTIC: Check if shutdown flag still exists
+            if os.path.exists(self._shutdown_flag_file_path):
+                self.main_controller.log_message("DIAGNOSTIC: Shutdown flag still exists - crawler not checking it!", 'red')
+            else:
+                self.main_controller.log_message("DIAGNOSTIC: Shutdown flag was removed - crawler ignoring it!", 'red')
+            
             self.crawler_process.kill()
+            self.main_controller.log_message("DIAGNOSTIC: Sent kill signal to process", 'red')
         else:
             self.main_controller.log_message("Crawler process already exited.", 'green')
     

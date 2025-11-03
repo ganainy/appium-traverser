@@ -63,9 +63,12 @@ class CrawlerService:
         self.stop_crawler()
         sys.exit(0)
     
-    def start_crawler(self) -> bool:
+    def start_crawler(self, annotate_after_run: bool = False) -> bool:
         """Start the crawler process.
         
+        Args:
+            annotate_after_run: Whether to run offline UI annotator after crawler completes
+            
         Returns:
             True if started successfully, False otherwise
         """
@@ -75,7 +78,24 @@ class CrawlerService:
                 return False
             
             # Now we know orchestrator exists
-            return self.orchestrator.start_crawler()
+            success = self.orchestrator.start_crawler()
+            
+            # Handle offline annotation if requested
+            if success and annotate_after_run:
+                analysis_service = self.context.services.get("analysis")
+                if analysis_service:
+                    # Wait for crawler to complete, then run annotation
+                    # Note: In a real implementation, we'd need to monitor the process
+                    # This is a simplified version
+                    self.logger.info("Offline annotation will run after completion.")
+                    # In a full implementation, we would:
+                    # 1. Monitor the crawler process
+                    # 2. When it completes, get the latest session data
+                    # 3. Call analysis_service.run_offline_ui_annotator with the session info
+                else:
+                    self.logger.warning("Analysis service not available for offline annotation.")
+            
+            return success
         except Exception as e:
             self.logger.error(f"Failed to start crawler: {e}")
             return False

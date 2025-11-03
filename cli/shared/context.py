@@ -96,7 +96,6 @@ class CLIContext:
         
         try:
             self._config = Config(
-                defaults_module_path=default_config_path,
                 user_config_json_path=user_config_path,
             )
             

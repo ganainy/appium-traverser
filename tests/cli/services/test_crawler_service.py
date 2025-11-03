@@ -46,6 +46,22 @@ def test_crawler_service_start_crawler_success(cli_context, mock_crawler_orchest
 
 
 @pytest.mark.cli
+def test_crawler_service_start_crawler_with_annotation(cli_context, mock_crawler_orchestrator: Mock):
+    """Test crawler start with annotation."""
+    service = CrawlerService(cli_context)
+    service.orchestrator = mock_crawler_orchestrator
+    
+    # Mock analysis service
+    mock_analysis_service = Mock()
+    cli_context.services.register("analysis", mock_analysis_service)
+    
+    result = service.start_crawler(annotate_after_run=True)
+    
+    assert result is True
+    mock_crawler_orchestrator.start_crawler.assert_called_once()
+
+
+@pytest.mark.cli
 def test_crawler_service_start_crawler_failure(cli_context, mock_crawler_orchestrator: Mock):
     """Test failed crawler start."""
     service = CrawlerService(cli_context)

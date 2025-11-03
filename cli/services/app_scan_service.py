@@ -253,3 +253,57 @@ class AppScanService:
             config_service.save_all_changes()
         
         return True, selected_app
+    
+    def get_all_cached_apps(self) -> Tuple[bool, List[Dict], Optional[str]]:
+        """Get all apps from the latest cache file.
+        
+        Returns:
+            Tuple of (success, apps_list, error_message)
+        """
+        cache_path = self.resolve_latest_cache_file("all")
+        if not cache_path:
+            return False, [], "No app cache found. Run 'apps scan-all' or 'apps scan-health' first."
+        
+        try:
+            with open(cache_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            
+            if isinstance(data, dict) and "all_apps" in data and isinstance(data["all_apps"], list):
+                apps = data["all_apps"]
+            else:
+                # Fallback to default loading
+                success, apps = self.load_apps_from_file(cache_path)
+                if not success:
+                    return False, [], "Failed to load apps from cache"
+            
+            return True, apps, None
+            
+        except Exception as e:
+            return False, [], f"Failed to load apps from cache: {e}"
+    
+    def get_health_cached_apps(self) -> Tuple[bool, List[Dict], Optional[str]]:
+        """Get health apps from the latest cache file.
+        
+        Returns:
+            Tuple of (success, apps_list, error_message)
+        """
+        cache_path = self.resolve_latest_cache_file("health")
+        if not cache_path:
+            return False, [], "No app cache found. Run 'apps scan-all' or 'apps scan-health' first."
+        
+        try:
+            with open(cache_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            
+            if isinstance(data, dict) and "health_apps" in data and isinstance(data["health_apps"], list):
+                apps = data["health_apps"]
+            else:
+                # Fallback to default loading
+                success, apps = self.load_apps_from_file(cache_path)
+                if not success:
+                    return False, [], "Failed to load apps from cache"
+            
+            return True, apps, None
+            
+        except Exception as e:
+            return False, [], f"Failed to load apps from cache: {e}"

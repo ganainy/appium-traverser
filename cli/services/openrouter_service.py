@@ -44,12 +44,12 @@ class OpenRouterService:
             self.logger.error(f"Error refreshing OpenRouter models: {e}", exc_info=True)
             return False
     
-    def list_models(self, free_only: Optional[bool] = None) -> Tuple[bool, Optional[List[Dict]]]:
+    def list_models(self, free_only: bool = False, all_models: bool = False) -> Tuple[bool, Optional[List[Dict]]]:
         """List available OpenRouter models.
         
         Args:
-            free_only: If True, only show free models. If False, show all models.
-                      If None, use the OPENROUTER_SHOW_FREE_ONLY config setting.
+            free_only: If True, only show free models
+            all_models: If True, show all models (ignores OPENROUTER_SHOW_FREE_ONLY config)
                       
         Returns:
             Tuple of (success, models_list)
@@ -67,15 +67,17 @@ class OpenRouterService:
             return False, None
         
         # Determine if we should filter to free-only models
-        if free_only is None:
+        should_filter_free = free_only
+        if not should_filter_free and not all_models:
+            # Use config setting only if neither free_only nor all_models is specified
             config_service = self.context.services.get("config")
             if config_service:
-                free_only = config_service.get_config_value("OPENROUTER_SHOW_FREE_ONLY", False)
+                should_filter_free = config_service.get_config_value("OPENROUTER_SHOW_FREE_ONLY", False)
             else:
-                free_only = False
+                should_filter_free = False
         
-        # Filter models if free_only is True
-        if free_only:
+        # Filter models if should_filter_free is True
+        if should_filter_free:
             filtered_models = [m for m in models if is_openrouter_model_free(m)]
             if not filtered_models:
                 self.logger.error("No free models found in cache. Run refresh to update.")

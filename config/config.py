@@ -34,6 +34,29 @@ class Config:
         # For backward compatibility, set up path-related attributes from defaults
         self.BASE_DIR = os.path.abspath(os.path.dirname(__file__))
         self.SHUTDOWN_FLAG_PATH = os.path.abspath(os.path.join(self.BASE_DIR, "..", "shutdown.flag"))
+        # Cache for resolved session context
+        self._session_context: Dict[str, Any] = {}
+
+    def _project_root(self) -> str:
+        """Return absolute project root (one level up from config module)."""
+        return os.path.abspath(os.path.join(self.BASE_DIR, ".."))
+
+    def _resolve_output_dir_value(self, value: Optional[str]) -> Optional[str]:
+        """Resolve OUTPUT_DATA_DIR to an absolute path under project root when relative."""
+        if not value:
+            return value
+        if os.path.isabs(value):
+            return value
+        return os.path.abspath(os.path.join(self._project_root(), value))
+
+    def _resolve_output_dir_placeholder(self, template: Optional[str]) -> Optional[str]:
+        """Replace the {OUTPUT_DATA_DIR} placeholder with the resolved OUTPUT_DATA_DIR path."""
+        if not template or not isinstance(template, str):
+            return template
+        placeholder = f"{{{OUTPUT_DATA_DIR_KEY}}}"
+        if placeholder in template:
+            return template.replace(placeholder, self.OUTPUT_DATA_DIR or "output_data")
+        return template
 
     def _is_secret(self, key: str) -> bool:
         return key.upper() in self._secrets or key.lower().endswith("_key")
@@ -76,7 +99,50 @@ class Config:
     # For backward compatibility, expose some common config attributes as properties
     @property
     def OUTPUT_DATA_DIR(self):
-        return self.get(OUTPUT_DATA_DIR_KEY)
+        # Ensure OUTPUT_DATA_DIR resolves to an absolute on-disk path
+        raw = self.get(OUTPUT_DATA_DIR_KEY)
+        return self._resolve_output_dir_value(raw)
+
+    @property
+    def SESSION_DIR(self):
+        """Resolve and cache the concrete session directory path.
+
+        Expands:
+        - {OUTPUT_DATA_DIR} -> resolved OUTPUT_DATA_DIR path
+        - {device_id}, {app_package}, {timestamp}
+        If a session was already resolved this run, reuse it for stability.
+        """
+        # Reuse cached session path if present
+        if "SESSION_DIR" in self._session_context:
+            return self._session_context["SESSION_DIR"]
+
+        template = self.get("SESSION_DIR")
+        template = self._resolve_output_dir_placeholder(template)
+
+        # Build session variables
+        device_id = self.get("TARGET_DEVICE_UDID") or "unknown_device"
+        app_package = (self.get("APP_PACKAGE") or "unknown.app").replace(".", "_")
+        # Stable timestamp per process
+        ts = self._session_context.get("SESSION_TIMESTAMP")
+        if not ts:
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            self._session_context["SESSION_TIMESTAMP"] = ts
+
+        # Fallback if template missing
+        if not template:
+            base = self.OUTPUT_DATA_DIR or self._project_root()
+            session_dir = os.path.join(base, f"{device_id}_{app_package}_{ts}")
+        else:
+            # Replace variables in template string
+            session_dir = template
+            session_dir = session_dir.replace("{device_id}", device_id)
+            session_dir = session_dir.replace("{app_package}", app_package)
+            session_dir = session_dir.replace("{timestamp}", ts)
+
+        # Normalize and cache
+        session_dir = os.path.abspath(session_dir)
+        self._session_context["SESSION_DIR"] = session_dir
+        return session_dir
 
     @property
     def ENABLE_IMAGE_CONTEXT(self):
@@ -91,6 +157,79 @@ class Config:
     @property
     def LOG_LEVEL(self):
         return self.get("log_level")
+
+    @property
+    def LOG_DIR(self):
+        # Resolve template with session variables
+        template = self.get("LOG_DIR")
+        template = self._resolve_output_dir_placeholder(template)
+        if template and "{session_dir}" in template:
+            session_dir = self.SESSION_DIR
+            if session_dir:
+                return template.replace("{session_dir}", session_dir)
+        return template
+
+    @property
+    def LOG_FILE_NAME(self):
+        return self.get("LOG_FILE_NAME")
+
+    @property
+    def CONTINUE_EXISTING_RUN(self):
+        return self.get("CONTINUE_EXISTING_RUN")
+
+    @property
+    def DB_NAME(self):
+        # Resolve template with session variables
+        template = self.get("DB_NAME")
+        template = self._resolve_output_dir_placeholder(template)
+        if template and "{session_dir}" in template:
+            session_dir = self.SESSION_DIR
+            if session_dir:
+                template = template.replace("{session_dir}", session_dir)
+        if template and "{package}" in template:
+            package = self.get("APP_PACKAGE", "").replace(".", "_")
+            template = template.replace("{package}", package)
+        return template
+
+    @property
+    def SCREENSHOTS_DIR(self):
+        # Resolve template with session variables
+        template = self.get("SCREENSHOTS_DIR")
+        template = self._resolve_output_dir_placeholder(template)
+        if template and "{session_dir}" in template:
+            session_dir = self.SESSION_DIR
+            if session_dir:
+                return template.replace("{session_dir}", session_dir)
+        return template
+
+    @property
+    def ANNOTATED_SCREENSHOTS_DIR(self):
+        # Resolve template with session variables
+        template = self.get("ANNOTATED_SCREENSHOTS_DIR")
+        template = self._resolve_output_dir_placeholder(template)
+        if template and "{session_dir}" in template:
+            session_dir = self.SESSION_DIR
+            if session_dir:
+                return template.replace("{session_dir}", session_dir)
+        return template
+
+    @property
+    def TRAFFIC_CAPTURE_OUTPUT_DIR(self):
+        # Resolve template with session variables
+        template = self.get("TRAFFIC_CAPTURE_OUTPUT_DIR")
+        template = self._resolve_output_dir_placeholder(template)
+        if template and "{session_dir}" in template:
+            session_dir = self.SESSION_DIR
+            if session_dir:
+                return template.replace("{session_dir}", session_dir)
+        return template
+
+    @property
+    def CRAWLER_PID_PATH(self):
+        """Resolve OUTPUT_DATA_DIR in the crawler PID path template."""
+        template = self.get("CRAWLER_PID_PATH")
+        resolved = self._resolve_output_dir_placeholder(template)
+        return os.path.abspath(resolved) if resolved else resolved
 
     @property
     def AI_PROVIDER(self):

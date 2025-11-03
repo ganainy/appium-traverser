@@ -3,11 +3,14 @@
 Crawler control commands.
 """
 
+
 import argparse
 from typing import List
 
 from cli.commands.base import CommandGroup, CommandHandler, CommandResult
 from cli.shared.context import CLIContext
+from cli.constants import messages as MSG
+from cli.constants import keys as KEY
 
 
 class StartCrawlerCommand(CommandHandler):
@@ -16,12 +19,12 @@ class StartCrawlerCommand(CommandHandler):
     @property
     def name(self) -> str:
         """Get command name."""
-        return "start"
-    
+        return MSG.START_CMD_NAME
+
     @property
     def description(self) -> str:
         """Get command description."""
-        return "Start the crawler process"
+        return MSG.START_CMD_DESC
     
     def register(self, subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
         """Register the command with the argument parser."""
@@ -32,43 +35,34 @@ class StartCrawlerCommand(CommandHandler):
         )
         self.add_common_arguments(parser)
         parser.add_argument(
-            "--annotate-offline-after-run",
+            MSG.START_CMD_ANNOTATE_ARG,
             action="store_true",
-            help="Run offline UI annotator after crawler exits"
+            help=MSG.START_CMD_ANNOTATE_HELP
         )
+        parser.set_defaults(handler=self)
         return parser
     
     def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
         """Execute the command."""
-        crawler_service = context.services.get("crawler")
+        crawler_service = context.services.get(KEY.CRAWLER_SERVICE)
         if not crawler_service:
             return CommandResult(
                 success=False,
-                message="Crawler service not available",
+                message=MSG.SERVICE_NOT_AVAILABLE.format(service=KEY.CRAWLER_SERVICE.title()),
                 exit_code=1
             )
-        
-        success = crawler_service.start_crawler()
-        
+
+        success = crawler_service.start_crawler(annotate_after_run=args.annotate_offline_after_run)
+
         if success:
-            result_msg = "Crawler started successfully"
-            
-            # Handle offline annotation if requested
+            result_msg = MSG.START_SUCCESS
             if args.annotate_offline_after_run:
-                analysis_service = context.services.get("analysis")
-                if analysis_service:
-                    # Wait for crawler to complete, then run annotation
-                    # Note: In a real implementation, we'd need to monitor the process
-                    # This is a simplified version
-                    result_msg += ". Offline annotation will run after completion."
-                else:
-                    result_msg += ". Analysis service not available for offline annotation."
-            
+                result_msg += MSG.START_ANNOTATE_WILL_RUN
             return CommandResult(success=True, message=result_msg)
         else:
             return CommandResult(
                 success=False,
-                message="Failed to start crawler",
+                message=MSG.START_FAIL,
                 exit_code=1
             )
 
@@ -79,12 +73,12 @@ class StopCrawlerCommand(CommandHandler):
     @property
     def name(self) -> str:
         """Get command name."""
-        return "stop"
-    
+        return MSG.STOP_CMD_NAME
+
     @property
     def description(self) -> str:
         """Get command description."""
-        return "Stop the crawler process"
+        return MSG.STOP_CMD_DESC
     
     def register(self, subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
         """Register the command with the argument parser."""
@@ -94,29 +88,30 @@ class StopCrawlerCommand(CommandHandler):
             description=self.description
         )
         self.add_common_arguments(parser)
+        parser.set_defaults(handler=self)
         return parser
     
     def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
         """Execute the command."""
-        crawler_service = context.services.get("crawler")
+        crawler_service = context.services.get(KEY.CRAWLER_SERVICE)
         if not crawler_service:
             return CommandResult(
                 success=False,
-                message="Crawler service not available",
+                message=MSG.SERVICE_NOT_AVAILABLE.format(service=KEY.CRAWLER_SERVICE.title()),
                 exit_code=1
             )
-        
+
         success = crawler_service.stop_crawler()
-        
+
         if success:
             return CommandResult(
                 success=True,
-                message="Stop signal sent to crawler"
+                message=MSG.STOP_SUCCESS
             )
         else:
             return CommandResult(
                 success=False,
-                message="Failed to stop crawler",
+                message=MSG.STOP_FAIL,
                 exit_code=1
             )
 
@@ -127,12 +122,12 @@ class PauseCrawlerCommand(CommandHandler):
     @property
     def name(self) -> str:
         """Get command name."""
-        return "pause"
-    
+        return MSG.PAUSE_CMD_NAME
+
     @property
     def description(self) -> str:
         """Get command description."""
-        return "Pause the crawler process"
+        return MSG.PAUSE_CMD_DESC
     
     def register(self, subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
         """Register the command with the argument parser."""
@@ -142,29 +137,30 @@ class PauseCrawlerCommand(CommandHandler):
             description=self.description
         )
         self.add_common_arguments(parser)
+        parser.set_defaults(handler=self)
         return parser
     
     def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
         """Execute the command."""
-        crawler_service = context.services.get("crawler")
+        crawler_service = context.services.get(KEY.CRAWLER_SERVICE)
         if not crawler_service:
             return CommandResult(
                 success=False,
-                message="Crawler service not available",
+                message=MSG.SERVICE_NOT_AVAILABLE.format(service=KEY.CRAWLER_SERVICE.title()),
                 exit_code=1
             )
-        
+
         success = crawler_service.pause_crawler()
-        
+
         if success:
             return CommandResult(
                 success=True,
-                message="Pause signal sent to crawler"
+                message=MSG.PAUSE_SUCCESS
             )
         else:
             return CommandResult(
                 success=False,
-                message="Failed to pause crawler",
+                message=MSG.PAUSE_FAIL,
                 exit_code=1
             )
 
@@ -175,12 +171,12 @@ class ResumeCrawlerCommand(CommandHandler):
     @property
     def name(self) -> str:
         """Get command name."""
-        return "resume"
-    
+        return MSG.RESUME_CMD_NAME
+
     @property
     def description(self) -> str:
         """Get command description."""
-        return "Resume the crawler process"
+        return MSG.RESUME_CMD_DESC
     
     def register(self, subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
         """Register the command with the argument parser."""
@@ -190,29 +186,30 @@ class ResumeCrawlerCommand(CommandHandler):
             description=self.description
         )
         self.add_common_arguments(parser)
+        parser.set_defaults(handler=self)
         return parser
     
     def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
         """Execute the command."""
-        crawler_service = context.services.get("crawler")
+        crawler_service = context.services.get(KEY.CRAWLER_SERVICE)
         if not crawler_service:
             return CommandResult(
                 success=False,
-                message="Crawler service not available",
+                message=MSG.SERVICE_NOT_AVAILABLE.format(service=KEY.CRAWLER_SERVICE.title()),
                 exit_code=1
             )
-        
+
         success = crawler_service.resume_crawler()
-        
+
         if success:
             return CommandResult(
                 success=True,
-                message="Resume signal sent to crawler"
+                message=MSG.RESUME_SUCCESS
             )
         else:
             return CommandResult(
                 success=False,
-                message="Failed to resume crawler",
+                message=MSG.RESUME_FAIL,
                 exit_code=1
             )
 
@@ -223,12 +220,12 @@ class StatusCrawlerCommand(CommandHandler):
     @property
     def name(self) -> str:
         """Get command name."""
-        return "status"
-    
+        return MSG.STATUS_CMD_NAME
+
     @property
     def description(self) -> str:
         """Get command description."""
-        return "Show crawler status"
+        return MSG.STATUS_CMD_DESC
     
     def register(self, subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
         """Register the command with the argument parser."""
@@ -238,30 +235,36 @@ class StatusCrawlerCommand(CommandHandler):
             description=self.description
         )
         self.add_common_arguments(parser)
+        parser.set_defaults(handler=self)
         return parser
     
     def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
         """Execute the command."""
-        crawler_service = context.services.get("crawler")
+        crawler_service = context.services.get(KEY.CRAWLER_SERVICE)
         if not crawler_service:
             return CommandResult(
                 success=False,
-                message="Crawler service not available",
+                message=MSG.SERVICE_NOT_AVAILABLE.format(service=KEY.CRAWLER_SERVICE.title()),
                 exit_code=1
             )
-        
+
         status = crawler_service.get_status()
         
-        print("\n=== Crawler Status ===")
-        print(f"  Process: {status['process']}") 
-        print(f"  State: {status['state']}")
-        print(f"  Target App: {status['target_app']}")
-        print(f"  Output Data Dir: {status['output_dir']}")
-        print("=======================")
-        
+        telemetry_service = context.services.get("telemetry")
+        if telemetry_service:
+            telemetry_service.print_crawler_status(status)
+        else:
+            # Fallback to basic printing if telemetry service is not available
+            print(MSG.STATUS_HEADER)
+            print(MSG.STATUS_PROCESS.format(process=status[KEY.PROCESS_KEY]))
+            print(MSG.STATUS_STATE.format(state=status[KEY.STATE_KEY]))
+            print(MSG.STATUS_TARGET_APP.format(target_app=status[KEY.TARGET_APP_KEY]))
+            print(MSG.STATUS_OUTPUT_DIR.format(output_dir=status[KEY.OUTPUT_DIR_KEY]))
+            print(MSG.STATUS_FOOTER)
+
         return CommandResult(
             success=True,
-            message="Status retrieved"
+            message=MSG.STATUS_SUCCESS
         )
 
 

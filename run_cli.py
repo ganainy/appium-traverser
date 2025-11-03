@@ -13,8 +13,11 @@ def main():
     args, unknown = parser.parse_known_args()
 
     # Determine config file path
-    api_dir = os.path.join(os.path.dirname(__file__), "traverser_ai_api")
-    user_config_path = os.path.join(api_dir, "user_config.json")
+    # Support refactor: user_config.json moved to project root, fallback to traverser_ai_api/user_config.json for backwards compatibility
+    user_config_path = os.path.join(os.path.dirname(__file__), "user_config.json")
+    if not os.path.isfile(user_config_path):
+        api_dir = os.path.join(os.path.dirname(__file__), "traverser_ai_api")
+        user_config_path = os.path.join(api_dir, "user_config.json")
 
     # Load or create user_config.json
     user_config = {}

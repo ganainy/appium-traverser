@@ -4,9 +4,11 @@ Configuration service for CLI operations.
 
 import json
 import logging
-from typing import Any, Dict, Optional, get_type_hints
+from typing import Any, Dict, List, Optional, get_type_hints
 
 from cli.shared.context import CLIContext
+from cli.commands.base import CommandResult
+from cli.constants.keys import VALID_AI_PROVIDERS
 
 
 class ConfigService:
@@ -81,6 +83,41 @@ class ConfigService:
         except Exception as e:
             logging.error(f"Failed to save configuration: {e}", exc_info=True)
             return False
+    
+    def set_and_save_from_pairs(self, kv_pairs: List[str]) -> bool:
+        """
+        Set and save configuration values from a list of KEY=VALUE pairs.
+        
+        Args:
+            kv_pairs: List of key=value pairs
+            
+        Returns:
+            True if all pairs were processed successfully, False otherwise
+        """
+        telemetry = self.context.services.get("telemetry")
+        success_count = 0
+        total_count = len(kv_pairs)
+        
+        for kv_pair in kv_pairs:
+            if "=" not in kv_pair:
+                telemetry.print_error(f"Invalid format: {kv_pair}. Use KEY=VALUE format.")
+                continue
+            
+            key, value = kv_pair.split("=", 1)
+            if self.set_config_value(key.strip(), value.strip()):
+                success_count += 1
+                telemetry.print_success(f"Set {key} = {value}")
+            else:
+                telemetry.print_error(f"Failed to set {key}")
+        
+        # Save all changes
+        if success_count > 0:
+            if self.save_all_changes():
+                telemetry.print_success("Configuration saved successfully")
+            else:
+                telemetry.print_warning("Configuration updated but failed to save")
+        
+        return success_count == total_count
     
     def _parse_value(self, key: str, value_str: str) -> Any:
         """
@@ -175,6 +212,28 @@ class ConfigService:
         """
         return getattr(self.config, key, default)
     
+    def get_deserialized_config_value(self, key: str, default: Any = None) -> Any:
+        """
+        Get a configuration value and deserialize it from JSON if it's a string.
+        
+        Args:
+            key: Configuration key
+            default: Default value if not found
+            
+        Returns:
+            Deserialized configuration value or default
+        """
+        value = getattr(self.config, key, default)
+        
+        # Handle case where value might be stored as JSON string
+        if value and isinstance(value, str):
+            try:
+                return json.loads(value)
+            except json.JSONDecodeError:
+                return value
+        
+        return value
+    
     def validate_config(self) -> Dict[str, Any]:
         """
         Validate current configuration.
@@ -213,3 +272,47 @@ class ConfigService:
             'issues': issues,
             'warnings': warnings
         }
+    
+    def switch_ai_provider(self, provider: str, model: Optional[str] = None) -> CommandResult:
+        """
+        Switch the AI provider and optionally set the model.
+        
+        Args:
+            provider: AI provider to use (gemini, openrouter, ollama)
+            model: Optional model name/alias to use
+            
+        Returns:
+            CommandResult indicating success or failure
+        """
+        # Validate provider
+        if provider not in VALID_AI_PROVIDERS:
+            return CommandResult(
+                success=False,
+                message=f"[ERROR] Invalid provider: {provider}",
+                exit_code=1
+            )
+        
+        try:
+            # Update provider
+            self.config.set("AI_PROVIDER", provider)
+            
+            # Update model if provided
+            if model:
+                self.config.set("DEFAULT_MODEL_TYPE", model)
+            
+            # Save configuration (no-op for SQLite-backed config, but kept for compatibility)
+            self.config.save_user_config()
+            
+            return CommandResult(
+                success=True,
+                message=f"Provider switched to '{provider}'. Please restart session/command if required.",
+                exit_code=0
+            )
+            
+        except Exception as e:
+            logging.error(f"Failed to switch AI provider: {e}", exc_info=True)
+            return CommandResult(
+                success=False,
+                message=f"[ERROR] Failed to switch provider: {str(e)}",
+                exit_code=1
+            )

@@ -251,7 +251,151 @@ class TelemetryService:
         """
         return self.events[-count:] if self.events else []
     
-    def clear_events(self) -> None:
-        """Clear all events."""
-        self.events.clear()
-        self.log_event('session_reset', "Telemetry events cleared")
+    def print_crawler_status(self, status: Dict[str, Any]) -> None:
+        """
+        Print formatted crawler status.
+        
+        Args:
+            status: Status dictionary from crawler service
+        """
+        print("\n=== Crawler Status ===")
+        print(f"  Process: {status.get('process', 'Unknown')}")
+        print(f"  State: {status.get('state', 'Unknown')}")
+        print(f"  Target App: {status.get('target_app', 'Unknown')}")
+        print(f"  Output Data Dir: {status.get('output_dir', 'Unknown')}")
+        print("=======================")
+    
+    def print_device_list(self, devices: List[str]) -> None:
+        """
+        Print a formatted list of connected devices.
+        
+        Args:
+            devices: List of device identifiers
+        """
+        from cli.constants import messages as MSG
+        
+        if not devices:
+            print(MSG.NO_CONNECTED_DEVICES_FOUND)
+            return
+        
+        print(MSG.CONNECTED_DEVICES_HEADER)
+        for i, device in enumerate(devices):
+            print(MSG.CONNECTED_DEVICE_ITEM.format(index=i+1, device=device))
+        print(MSG.CONNECTED_DEVICES_FOOTER)
+    
+    def print_focus_areas(self, areas: List[dict]) -> None:
+        """
+        Print a formatted list of focus areas.
+        
+        Args:
+            areas: List of focus area dictionaries with consistent properties
+        """
+        if not areas:
+            print("No focus areas configured.")
+            return
+        
+        print("\n=== Focus Areas ===")
+        for i, area in enumerate(areas):
+            name = area.get("display_name", f"Area {i+1}")
+            enabled = area.get("enabled", True)
+            priority = area.get("priority", i)
+            print(f"{i+1:2d}. {name} | enabled={enabled} | priority={priority}")
+        print("===================")
+    
+    def print_model_list(self, models: List[Dict[str, Any]]) -> None:
+        """
+        Print a formatted list of OpenRouter models.
+        
+        Args:
+            models: List of model dictionaries
+        """
+        if not models:
+            print("No models available.")
+            return
+        
+        print(f"\n=== OpenRouter Models ({len(models)}) ===")
+        for i, model in enumerate(models):
+            model_id = model.get("id", "Unknown")
+            model_name = model.get("name", "Unknown")
+            pricing = model.get("pricing", {})
+            
+            # Check if free
+            is_free = (pricing.get("prompt", "0") == "0" and
+                      pricing.get("completion", "0") == "0")
+            
+            free_marker = "[FREE]" if is_free else ""
+            print(f"{i+1:2d}. {model_name} {free_marker}")
+            print(f"    ID: {model_id}")
+            print(f"    Prompt: {pricing.get('prompt', 'N/A')} | Completion: {pricing.get('completion', 'N/A')}")
+            print()
+        
+        print("==============================")
+    
+    def print_selected_model(self, selected_model: Optional[Dict[str, Any]]) -> None:
+        """
+        Print the currently selected OpenRouter model.
+        
+        Args:
+            selected_model: Model dictionary or None if no model is selected
+        """
+        if selected_model:
+            model_id = selected_model.get("id", "Unknown")
+            model_name = selected_model.get("name", "Unknown")
+            print(f"\n=== Selected OpenRouter Model ===")
+            print(f"Name: {model_name}")
+            print(f"ID: {model_id}")
+            print("==============================")
+        else:
+            print("No OpenRouter model selected.")
+    
+    def print_json(self, data: Dict[str, Any]) -> None:
+        """
+        Print data as JSON.
+        
+        Args:
+            data: Data to print as JSON
+        """
+        import json
+        print(json.dumps(data, indent=2))
+        self.log_event('json_output', "Output data as JSON")
+    
+    def print_package_list(self, packages: List[str]) -> None:
+        """
+        Print a formatted list of packages.
+        
+        Args:
+            packages: List of package names
+        """
+        from cli.constants import messages as MSG
+        
+        if not packages:
+            self.print_info(MSG.LIST_PACKAGES_NO_PKGS)
+        else:
+            self.print_info(MSG.LIST_PACKAGES_HEADER.format(count=len(packages)))
+            for i, pkg in enumerate(packages, 1):
+                self.print_info(MSG.LIST_PACKAGES_ITEM.format(index=i, package=pkg))
+        
+        def confirm_action(self, prompt_message: str) -> bool:
+            """
+            Prompt user for confirmation with a yes/no question.
+            
+            Args:
+                prompt_message: Message to display to the user
+                
+            Returns:
+                True if user confirms (yes/y), False if user cancels
+            """
+            from cli.constants import keys as KEYS
+            from cli.constants import messages as MSG
+            
+            self.print_warning(prompt_message)
+            response = input(MSG.CLEAR_PACKAGES_PROMPT).strip().lower()
+            if response not in (KEYS.INPUT_YES, KEYS.INPUT_Y):
+                self.print_info(MSG.CLEAR_PACKAGES_CANCELLED)
+                return False
+            return True
+        
+        def clear_events(self) -> None:
+            """Clear all events."""
+            self.events.clear()
+            self.log_event('session_reset', "Telemetry events cleared")

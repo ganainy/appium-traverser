@@ -124,6 +124,7 @@ if __name__ == "__main__":
     if cfg.get('SHUTDOWN_FLAG_PATH') and os.path.exists(cfg.get('SHUTDOWN_FLAG_PATH')):
         bootstrap_logger.warning(f"Found existing shutdown flag at startup: {cfg.get('SHUTDOWN_FLAG_PATH')}. Removing it.")
         remove_with_retry(cfg.get('SHUTDOWN_FLAG_PATH'))
+    
     if not cfg.get('APP_PACKAGE'):
         bootstrap_logger.critical("APP_PACKAGE is not defined in configuration. Cannot proceed. Exiting.")
         sys.exit(1)
@@ -213,12 +214,13 @@ if __name__ == "__main__":
 
 
     root_logger = logger_manager_global.setup_logging(log_level_str=cfg.LOG_LEVEL, log_file=target_log_file_path)
-    root_logger.info(f"Main application logging re-initialized by LoggerManager. Level: {cfg.LOG_LEVEL.upper()}. File: '{target_log_file_path}'")
+    log_level_display = cfg.LOG_LEVEL.upper() if cfg.LOG_LEVEL else "INFO"
+    root_logger.info(f"Main application logging re-initialized by LoggerManager. Level: {log_level_display}. File: '{target_log_file_path}'")
     # Re-log critical info with the new logger
-    root_logger.info(f"Using configuration from: Defaults='{cfg.DEFAULTS_MODULE_PATH}', User='{cfg.USER_CONFIG_FILE_PATH}'")
+    root_logger.info(f"Using configuration from: User='{cfg.USER_CONFIG_FILE_PATH}'")
     # Removed preparation of legacy JSONL AI interactions log (ai_interactions.log)
-    root_logger.info(f"Effective APP_PACKAGE: {cfg.APP_PACKAGE}")
-    root_logger.info(f"Effective APP_ACTIVITY: {cfg.APP_ACTIVITY}")
+    root_logger.info(f"Effective APP_PACKAGE: {cfg.get('APP_PACKAGE')}")
+    root_logger.info(f"Effective APP_ACTIVITY: {cfg.get('APP_ACTIVITY')}")
     root_logger.info(f"Shutdown flag file path set to: {cfg.SHUTDOWN_FLAG_PATH}")
     root_logger.info(f"Log directory for this run: {target_log_directory}")
 
@@ -244,13 +246,49 @@ if __name__ == "__main__":
         if _current_script_dir not in sys.path:
             sys.path.insert(0, _current_script_dir) 
         try:
-            from legacy_code.crawler import AppCrawler  
+            from interfaces.cli import create_cli_interface
         except ImportError:
-            from legacy_code.crawler import AppCrawler 
-        crawler_instance = AppCrawler(app_config=cfg)
-        root_logger.info("AppCrawler initialized. Starting crawl...")
-        crawler_instance.run() # This internally calls asyncio.run()
-        root_logger.info("AppCrawler crawl process finished normally.")
+            from interfaces.cli import create_cli_interface
+        cli_interface = create_cli_interface()
+        
+        root_logger.debug("DIAGNOSTIC: About to start crawler session")
+        session_id = cli_interface.start_crawler_session()
+        if session_id:
+            root_logger.info(f"CLI crawler session started: {session_id}")
+            root_logger.debug(f"DIAGNOSTIC: Starting polling loop for session {session_id}")
+            
+            # Wait for session to complete or handle status updates
+            import time
+            poll_count = 0
+            while True:
+                poll_count += 1
+                root_logger.debug(f"DIAGNOSTIC: Poll #{poll_count} for session {session_id}")
+               
+                # Check shutdown flag
+                if cfg.SHUTDOWN_FLAG_PATH and os.path.exists(cfg.SHUTDOWN_FLAG_PATH):
+                    root_logger.warning(f"DIAGNOSTIC: Shutdown flag detected at {cfg.SHUTDOWN_FLAG_PATH}")
+                
+                # FIX: Check if shutdown was requested by monitor
+                if 'shutdown_requested' in locals() and shutdown_requested.is_set():
+                    root_logger.warning("FIX: Shutdown requested by monitor, breaking polling loop")
+                    break
+               
+                status = cli_interface.get_session_status(session_id)
+                if status:
+                    root_logger.debug(f"DIAGNOSTIC: Session {session_id} status: {status.get('status')}")
+                    if status.get('status') in ['completed', 'failed', 'stopped']:
+                        root_logger.info(f"DIAGNOSTIC: Session {session_id} finished with status: {status.get('status')}")
+                        break
+                else:
+                    root_logger.warning(f"DIAGNOSTIC: No status returned for session {session_id}")
+               
+                if poll_count > 30:  # After 30 seconds, warn about potential deadlock
+                    root_logger.warning(f"DIAGNOSTIC: Session {session_id} still running after {poll_count} seconds - possible deadlock!")
+               
+                time.sleep(1)  # Poll every second
+            root_logger.info("CLI crawler session finished.")
+        else:
+            root_logger.error("Failed to start CLI crawler session.")
 
         # --- Auto-run UI Element Annotation after each crawl (provider-agnostic) ---
         try:

@@ -151,6 +151,8 @@ class LoggerManager:
                 logging.debug("UIColoredLogHandler added to existing logger configuration")
 
     def setup_logging(self, log_level_str: str, log_file: Optional[str] = None) -> logging.Logger:
+        if log_level_str is None:
+            log_level_str = "INFO"
         numeric_level = getattr(logging, log_level_str.upper(), None)
         if not isinstance(numeric_level, int):
             raise ValueError(f"Invalid log level string: {log_level_str}")

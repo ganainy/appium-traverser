@@ -182,8 +182,10 @@ def main():
     args = parser.parse_args()
 
     # Instantiate Config similar to main.py behavior
-    defaults_module_path = os.path.join(PROJECT_ROOT, 'traverser_ai_api', 'config.py')
-    user_config_json_path = os.path.join(PROJECT_ROOT, 'traverser_ai_api', 'user_config.json')
+    # Support refactor: config module moved out of traverser_ai_api into config/config.py (or project root config.py).
+    defaults_module_path = os.path.join(PROJECT_ROOT, 'config', 'config.py') if os.path.isfile(os.path.join(PROJECT_ROOT, 'config', 'config.py')) else os.path.join(PROJECT_ROOT, 'config.py')
+    # Prefer project-root user_config.json, fallback to traverser_ai_api/user_config.json for backwards compatibility
+    user_config_json_path = os.path.join(PROJECT_ROOT, 'user_config.json') if os.path.isfile(os.path.join(PROJECT_ROOT, 'user_config.json')) else os.path.join(PROJECT_ROOT, 'traverser_ai_api', 'user_config.json')
     cfg = Config(defaults_module_path=defaults_module_path, user_config_json_path=user_config_json_path)
 
     # Prefer using the latest existing session DB rather than a fresh session

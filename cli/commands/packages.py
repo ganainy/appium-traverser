@@ -8,6 +8,8 @@ from typing import Optional
 
 from cli.commands.base import CommandGroup, CommandHandler, CommandResult
 from cli.shared.context import CLIContext
+from cli.constants import messages as MSG
+from cli.constants import keys as KEYS
 
 
 class ListPackagesCommand(CommandHandler):
@@ -15,11 +17,11 @@ class ListPackagesCommand(CommandHandler):
     
     @property
     def name(self) -> str:
-        return "list-packages"
-    
+        return MSG.LIST_PACKAGES_NAME
+
     @property
     def description(self) -> str:
-        return "List all allowed external packages"
+        return MSG.LIST_PACKAGES_DESC
     
     def register(self, subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
         parser = subparsers.add_parser(
@@ -27,38 +29,33 @@ class ListPackagesCommand(CommandHandler):
             help=self.description,
             description=self.description
         )
-        
+
         parser.add_argument(
             "-j", "--json",
             action="store_true",
-            help="Output as JSON"
+            help=MSG.LIST_PACKAGES_JSON_HELP
         )
-        
+
         self.add_common_arguments(parser)
+        parser.set_defaults(handler=self)
         return parser
     
     def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
         from cli.services.packages_service import PackagesService
-        
+
         packages_service = PackagesService(context)
         packages = packages_service.list_packages()
-        
-        telemetry = context.services.get("telemetry")
-        
+
+        telemetry = context.services.get(KEYS.TELEMETRY_SERVICE)
+
         if args.json:
-            import json
-            telemetry.print_json({"packages": packages, "count": len(packages)})
+            telemetry.print_json({KEYS.JSON_KEY_PACKAGES: packages, KEYS.JSON_KEY_COUNT: len(packages)})
         else:
-            if not packages:
-                telemetry.print_info("No allowed external packages configured.")
-            else:
-                telemetry.print_info(f"Allowed external packages ({len(packages)}):")
-                for i, pkg in enumerate(packages, 1):
-                    telemetry.print_info(f"  {i}. {pkg}")
-        
+            telemetry.print_package_list(packages)
+
         return CommandResult(
             success=True,
-            message=f"Listed {len(packages)} allowed packages"
+            message=MSG.LIST_PACKAGES_RESULT.format(count=len(packages))
         )
 
 
@@ -67,11 +64,11 @@ class AddPackageCommand(CommandHandler):
     
     @property
     def name(self) -> str:
-        return "add-package"
-    
+        return MSG.ADD_PACKAGE_NAME
+
     @property
     def description(self) -> str:
-        return "Add a package to allowed external packages"
+        return MSG.ADD_PACKAGE_DESC
     
     def register(self, subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
         parser = subparsers.add_parser(
@@ -79,27 +76,28 @@ class AddPackageCommand(CommandHandler):
             help=self.description,
             description=self.description
         )
-        
+
         parser.add_argument(
             "package_name",
-            help="Package name to add (e.g., com.example.app)"
+            help=MSG.ADD_PACKAGE_ARG_HELP
         )
-        
+
         self.add_common_arguments(parser)
+        parser.set_defaults(handler=self)
         return parser
     
     def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
         from cli.services.packages_service import PackagesService
-        
+
         packages_service = PackagesService(context)
-        telemetry = context.services.get("telemetry")
-        
+        telemetry = context.services.get(KEYS.TELEMETRY_SERVICE)
+
         if packages_service.add_package(args.package_name):
-            telemetry.print_success(f"Added package: {args.package_name}")
-            return CommandResult(success=True, message=f"Package added: {args.package_name}")
+            telemetry.print_success(MSG.ADD_PACKAGE_SUCCESS.format(package_name=args.package_name))
+            return CommandResult(success=True, message=MSG.ADD_PACKAGE_RESULT.format(package_name=args.package_name))
         else:
-            telemetry.print_error(f"Failed to add package: {args.package_name}")
-            return CommandResult(success=False, message=f"Failed to add package: {args.package_name}")
+            telemetry.print_error(MSG.ADD_PACKAGE_FAIL.format(package_name=args.package_name))
+            return CommandResult(success=False, message=MSG.ADD_PACKAGE_RESULT_FAIL.format(package_name=args.package_name))
 
 
 class RemovePackageCommand(CommandHandler):
@@ -107,11 +105,11 @@ class RemovePackageCommand(CommandHandler):
     
     @property
     def name(self) -> str:
-        return "remove-package"
-    
+        return MSG.REMOVE_PACKAGE_NAME
+
     @property
     def description(self) -> str:
-        return "Remove a package from allowed external packages"
+        return MSG.REMOVE_PACKAGE_DESC
     
     def register(self, subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
         parser = subparsers.add_parser(
@@ -119,27 +117,28 @@ class RemovePackageCommand(CommandHandler):
             help=self.description,
             description=self.description
         )
-        
+
         parser.add_argument(
             "package_name",
-            help="Package name to remove"
+            help=MSG.REMOVE_PACKAGE_ARG_HELP
         )
-        
+
         self.add_common_arguments(parser)
+        parser.set_defaults(handler=self)
         return parser
     
     def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
         from cli.services.packages_service import PackagesService
-        
+
         packages_service = PackagesService(context)
-        telemetry = context.services.get("telemetry")
-        
+        telemetry = context.services.get(KEYS.TELEMETRY_SERVICE)
+
         if packages_service.remove_package(args.package_name):
-            telemetry.print_success(f"Removed package: {args.package_name}")
-            return CommandResult(success=True, message=f"Package removed: {args.package_name}")
+            telemetry.print_success(MSG.REMOVE_PACKAGE_SUCCESS.format(package_name=args.package_name))
+            return CommandResult(success=True, message=MSG.REMOVE_PACKAGE_RESULT.format(package_name=args.package_name))
         else:
-            telemetry.print_error(f"Failed to remove package: {args.package_name}")
-            return CommandResult(success=False, message=f"Failed to remove package: {args.package_name}")
+            telemetry.print_error(MSG.REMOVE_PACKAGE_FAIL.format(package_name=args.package_name))
+            return CommandResult(success=False, message=MSG.REMOVE_PACKAGE_RESULT_FAIL.format(package_name=args.package_name))
 
 
 class ClearPackagesCommand(CommandHandler):
@@ -147,11 +146,11 @@ class ClearPackagesCommand(CommandHandler):
     
     @property
     def name(self) -> str:
-        return "clear-packages"
-    
+        return MSG.CLEAR_PACKAGES_NAME
+
     @property
     def description(self) -> str:
-        return "Clear all allowed external packages"
+        return MSG.CLEAR_PACKAGES_DESC
     
     def register(self, subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
         parser = subparsers.add_parser(
@@ -159,36 +158,34 @@ class ClearPackagesCommand(CommandHandler):
             help=self.description,
             description=self.description
         )
-        
+
         parser.add_argument(
             "-y", "--yes",
             action="store_true",
-            help="Skip confirmation prompt"
+            help=MSG.CLEAR_PACKAGES_YES_HELP
         )
-        
+
         self.add_common_arguments(parser)
+        parser.set_defaults(handler=self)
         return parser
     
     def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
         from cli.services.packages_service import PackagesService
-        
-        telemetry = context.services.get("telemetry")
+
+        telemetry = context.services.get(KEYS.TELEMETRY_SERVICE)
         
         if not args.yes:
-            telemetry.print_warning("This will clear all allowed external packages.")
-            response = input("Are you sure? (yes/no): ").strip().lower()
-            if response not in ("yes", "y"):
-                telemetry.print_info("Cancelled.")
-                return CommandResult(success=False, message="Operation cancelled")
-        
+            if not telemetry.confirm_action(MSG.CLEAR_PACKAGES_CONFIRM):
+                return CommandResult(success=False, message=MSG.CLEAR_PACKAGES_RESULT_CANCEL)
+
         packages_service = PackagesService(context)
-        
+
         if packages_service.clear_packages():
-            telemetry.print_success("Cleared all allowed packages")
-            return CommandResult(success=True, message="All packages cleared")
+            telemetry.print_success(MSG.CLEAR_PACKAGES_SUCCESS)
+            return CommandResult(success=True, message=MSG.CLEAR_PACKAGES_RESULT)
         else:
-            telemetry.print_error("Failed to clear packages")
-            return CommandResult(success=False, message="Failed to clear packages")
+            telemetry.print_error(MSG.CLEAR_PACKAGES_FAIL)
+            return CommandResult(success=False, message=MSG.CLEAR_PACKAGES_RESULT_FAIL)
 
 
 class UpdatePackageCommand(CommandHandler):
@@ -196,11 +193,11 @@ class UpdatePackageCommand(CommandHandler):
     
     @property
     def name(self) -> str:
-        return "update-package"
-    
+        return MSG.UPDATE_PACKAGE_NAME
+
     @property
     def description(self) -> str:
-        return "Update (rename) an allowed external package"
+        return MSG.UPDATE_PACKAGE_DESC
     
     def register(self, subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
         parser = subparsers.add_parser(
@@ -208,37 +205,38 @@ class UpdatePackageCommand(CommandHandler):
             help=self.description,
             description=self.description
         )
-        
+
         parser.add_argument(
             "old_name",
-            help="Current package name"
+            help=MSG.UPDATE_PACKAGE_OLD_ARG
         )
-        
+
         parser.add_argument(
             "new_name",
-            help="New package name"
+            help=MSG.UPDATE_PACKAGE_NEW_ARG
         )
-        
+
         self.add_common_arguments(parser)
+        parser.set_defaults(handler=self)
         return parser
     
     def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
         from cli.services.packages_service import PackagesService
-        
+
         packages_service = PackagesService(context)
-        telemetry = context.services.get("telemetry")
-        
+        telemetry = context.services.get(KEYS.TELEMETRY_SERVICE)
+
         if packages_service.update_package(args.old_name, args.new_name):
-            telemetry.print_success(f"Updated package: {args.old_name} -> {args.new_name}")
+            telemetry.print_success(MSG.UPDATE_PACKAGE_SUCCESS.format(old_name=args.old_name, new_name=args.new_name))
             return CommandResult(
                 success=True,
-                message=f"Package updated: {args.old_name} -> {args.new_name}"
+                message=MSG.UPDATE_PACKAGE_RESULT.format(old_name=args.old_name, new_name=args.new_name)
             )
         else:
-            telemetry.print_error(f"Failed to update package: {args.old_name}")
+            telemetry.print_error(MSG.UPDATE_PACKAGE_FAIL.format(old_name=args.old_name))
             return CommandResult(
                 success=False,
-                message=f"Failed to update package: {args.old_name}"
+                message=MSG.UPDATE_PACKAGE_RESULT_FAIL.format(old_name=args.old_name)
             )
 
 
@@ -247,15 +245,7 @@ class PackagesCommandGroup(CommandGroup):
     
     def __init__(self):
         """Initialize packages command group."""
-        super().__init__("packages", "Manage allowed external packages")
-    
-    @property
-    def name(self) -> str:
-        return "packages"
-    
-    @property
-    def description(self) -> str:
-        return "Manage allowed external packages"
+        super().__init__("packages", "Manage allowed external packages")  # Group name/desc not externalized for backward compat
     
     def get_commands(self) -> list:
         return [
