@@ -38,8 +38,7 @@ class SwitchProviderCommand(CommandHandler):
         return parser
 
     def run(self, args, context: CLIContext):
-        config_service = context.services.get('config')
-        result = config_service.switch_ai_provider(args.provider.strip().lower(), args.model)
+        result = context.config.switch_ai_provider(args.provider.strip().lower(), args.model)
         # Optionally wrap result in CommandResult with user-facing message
         if getattr(result, 'success', True):
             return CommandResult(success=True, message=MSG.SWITCH_PROVIDER_SUCCESS.format(provider=args.provider))

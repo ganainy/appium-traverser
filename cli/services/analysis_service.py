@@ -3,15 +3,19 @@
 Analysis service for managing crawl analysis and reporting.
 """
 
+
 import logging
 import os
 import sqlite3
-import subprocess
-import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from cli.shared.context import CLIContext
+from cli.shared.command_result import CommandResult
+from cli.constants import keys as CKeys
+from cli.constants import config as CConfig
+from cli.constants import messages as CMsg
+from utils.paths import SessionPathManager
 
 
 class AnalysisService:
@@ -31,51 +35,35 @@ class AnalysisService:
         Returns:
             True if successful, False otherwise
         """
-        config_service = self.context.services.get("config")
+        config_service = self.context.services.get(CKeys.SERVICE_CONFIG)
         if not config_service:
-            self.logger.error("Config service not available")
+            self.logger.error(CMsg.ERR_CONFIG_SERVICE_NOT_AVAILABLE)
             return False
-        
-        output_data_dir = config_service.get_config_value("OUTPUT_DATA_DIR")
+
+        output_data_dir = config_service.get_config_value(CKeys.CONFIG_OUTPUT_DATA_DIR)
         if not output_data_dir:
             if not quiet:
-                self.logger.error("OUTPUT_DATA_DIR is not configured.")
+                self.logger.error(CMsg.ERR_OUTPUT_DATA_DIR_NOT_CONFIGURED)
             return False
-        
+
         db_output_root = Path(output_data_dir)
         if not db_output_root.is_dir():
             if not quiet:
-                self.logger.error(f"Output directory not found: {db_output_root}")
+                self.logger.error(CMsg.ERR_OUTPUT_DIRECTORY_NOT_FOUND.format(db_output_root=db_output_root))
             return False
-        
+
         self.discovered_analysis_targets = []
         target_idx = 1
-        
-        # Look for database files in session directories
+        # Use the already fetched config_service
         for session_dir in db_output_root.iterdir():
-            if (
-                session_dir.is_dir() and "_" in session_dir.name
-            ):  # Session dirs have format device_package_timestamp
-                db_dir = session_dir / "database"
-                if db_dir.exists():
-                    for db_file in db_dir.glob("*_crawl_data.db"):
-                        # Extract app package from session directory name
-                        session_parts = session_dir.name.split("_")
-                        if len(session_parts) >= 2:
-                            app_package_name = session_parts[
-                                1
-                            ]  # Second part is the app package
-                            
-                            self.discovered_analysis_targets.append(
-                                {
-                                    "index": target_idx,
-                                    "app_package": app_package_name,
-                                    "db_path": str(db_file.resolve()),
-                                    "db_filename": db_file.name,
-                                    "session_dir": str(session_dir),
-                                }
-                            )
-                            target_idx += 1
+            if not session_dir.is_dir():
+                continue
+            # Use the new robust parser!
+            target_info = SessionPathManager.parse_session_dir(session_dir, config_service.config)
+            if target_info:
+                target_info[CKeys.KEY_INDEX] = target_idx  # type: ignore
+                self.discovered_analysis_targets.append(target_info)  # type: ignore
+                target_idx += 1
         return True
     
     def list_analysis_targets(self) -> Tuple[bool, List[Dict]]:
@@ -85,268 +73,265 @@ class AnalysisService:
             Tuple of (success, targets_list)
         """
         if not self.discover_analysis_targets(quiet=True):
-            self.logger.error(
-                "Could not discover analysis targets. Check OUTPUT_DATA_DIR and database_output structure."
-            )
+            self.logger.error(CMsg.ERR_ANALYSIS_TARGET_DISCOVERY_FAILED)
             return False, []
-        
-        config_service = self.context.services.get("config")
-        if not config_service:
-            return False, []
-        
-        output_data_dir = config_service.get_config_value("OUTPUT_DATA_DIR")
-        if not output_data_dir:
-            self.logger.error("OUTPUT_DATA_DIR is not set in the configuration.")
-            return False, []
-        
-        db_output_root = Path(output_data_dir)
         
         if not self.discovered_analysis_targets:
             return True, []
         
         return True, self.discovered_analysis_targets
     
-    def get_target_by_identifier(self, identifier: str, is_index: bool) -> Optional[Dict]:
-        """Get analysis target by index or package name.
+    def get_target_by_index(self, index: int) -> Optional[Dict]:
+        """Get analysis target by index.
         
         Args:
-            identifier: Target index or package name
-            is_index: True if identifier is an index, False if package name
+            index: Target index
             
         Returns:
             Target dictionary or None if not found
         """
         if not self.discover_analysis_targets(quiet=True):
-            self.logger.error("Could not discover analysis targets.")
+            self.logger.error(CMsg.ERR_COULD_NOT_DISCOVER_ANALYSIS_TARGETS)
             return None
         
-        if is_index:
-            try:
-                target_index_val = int(identifier)
-                selected_target = next(
-                    (
-                        t
-                        for t in self.discovered_analysis_targets
-                        if t["index"] == target_index_val
-                    ),
-                    None,
-                )
-                if not selected_target:
-                    self.logger.error(f"Target index {identifier} not found.")
-                return selected_target
-            except ValueError:
-                self.logger.error(f"Invalid target index: '{identifier}'. Must be a number.")
-                return None
-        else:
-            selected_target = next(
-                (
-                    t
-                    for t in self.discovered_analysis_targets
-                    if t["app_package"] == identifier
-                ),
-                None,
-            )
-            if not selected_target:
-                self.logger.error(f"Target app package '{identifier}' not found.")
-            return selected_target
+        selected_target = next(
+            (
+                t
+                for t in self.discovered_analysis_targets
+                if t[CKeys.KEY_INDEX] == index
+            ),
+            None,
+        )
+        if not selected_target:
+            self.logger.error(CMsg.ERR_TARGET_INDEX_NOT_FOUND.format(index=index))
+        return selected_target
     
-    def list_runs_for_target(self, target_identifier: str, is_index: bool) -> bool:
+    def get_target_by_package(self, package_name: str) -> Optional[Dict]:
+        """Get analysis target by package name.
+        
+        Args:
+            package_name: Target package name
+            
+        Returns:
+            Target dictionary or None if not found
+        """
+        if not self.discover_analysis_targets(quiet=True):
+            self.logger.error(CMsg.ERR_COULD_NOT_DISCOVER_ANALYSIS_TARGETS)
+            return None
+        
+        selected_target = next(
+            (
+                t
+                for t in self.discovered_analysis_targets
+                if t[CKeys.KEY_APP_PACKAGE] == package_name
+            ),
+            None,
+        )
+        if not selected_target:
+            self.logger.error(CMsg.ERR_TARGET_APP_PACKAGE_NOT_FOUND.format(package=package_name))
+        return selected_target
+    
+    def list_runs_for_target(self, target: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
         """List runs for a specific analysis target.
         
         Args:
-            target_identifier: Target index or package name
-            is_index: True if identifier is an index, False if package name
+            target: Target dictionary containing target information
             
         Returns:
-            True if successful, False otherwise
+            Tuple of (success, data) where data contains:
+            - target_info: dict with target information
+            - runs: list of run dictionaries
+            - message: optional message
         """
-        selected_target = self.get_target_by_identifier(target_identifier, is_index)
-        if not selected_target:
-            return False
+        if not target:
+            return False, {CKeys.KEY_ERROR: CMsg.ERR_TARGET_NOT_FOUND}
         
         try:
             from analysis_viewer import RunAnalyzer
         except ImportError as e:
-            self.logger.error(f"Failed to import RunAnalyzer: {e}")
-            return False
+            self.logger.error(CMsg.ERR_RUN_ANALYZER_IMPORT_FAILED.format(error=e))
+            return False, {CKeys.KEY_ERROR: CMsg.ERR_RUN_ANALYZER_IMPORT_FAILED.format(error=e)}
         
-        config_service = self.context.services.get("config")
+        config_service = self.context.services.get(CKeys.SERVICE_CONFIG)
         if not config_service:
-            return False
+            return False, {CKeys.KEY_ERROR: CMsg.ERR_CONFIG_SERVICE_NOT_AVAILABLE}
         
-        output_data_dir = config_service.get_config_value("OUTPUT_DATA_DIR")
+        output_data_dir = config_service.get_config_value(CKeys.CONFIG_OUTPUT_DATA_DIR)
         if not output_data_dir:
-            self.logger.error("OUTPUT_DATA_DIR is not configured.")
-            return False
+            self.logger.error(CMsg.ERR_OUTPUT_DATA_DIR_NOT_CONFIGURED)
+            return False, {CKeys.KEY_ERROR: CMsg.ERR_OUTPUT_DATA_DIR_NOT_CONFIGURED}
         
-        print(
-            f"\n--- Runs for Target {selected_target['index']}: {selected_target['app_package']} (DB: {selected_target['db_filename']}) ---"
-        )
         try:
             analyzer = RunAnalyzer(
-                db_path=selected_target["db_path"],
+                db_path=target[CKeys.KEY_DB_PATH],
                 output_data_dir=output_data_dir,
-                app_package_for_run=selected_target["app_package"],
+                app_package_for_run=target[CKeys.KEY_APP_PACKAGE],
             )
-            analyzer.list_runs()
-            return True
+            runs_result = analyzer.list_runs()
+            
+            # Prepare the response data
+            response_data = {
+                CKeys.KEY_TARGET_INFO: {
+                    CKeys.KEY_INDEX: target[CKeys.KEY_INDEX],
+                    CKeys.KEY_APP_PACKAGE: target[CKeys.KEY_APP_PACKAGE],
+                    CKeys.KEY_DB_FILENAME: target[CKeys.KEY_DB_FILENAME]
+                },
+                CKeys.KEY_RUNS: runs_result.get(CKeys.KEY_RUNS, []),
+                CKeys.KEY_MESSAGE: runs_result.get(CKeys.KEY_MESSAGE, "")
+            }
+            
+            return runs_result["success"], response_data
         except FileNotFoundError:
-            self.logger.error(
-                f"Database file not found for target {selected_target['app_package']}: {selected_target['db_path']}"
-            )
-            print(f"Error: Database file not found: {selected_target['db_path']}")
-            return False
+            error_msg = CMsg.ERR_DATABASE_FILE_NOT_FOUND.format(operation="listing runs", db_path=target[CKeys.KEY_DB_PATH])
+            self.logger.error(error_msg)
+            return False, {CKeys.KEY_ERROR: error_msg}
         except Exception as e:
-            self.logger.error(
-                f"Error listing runs for target {selected_target['app_package']}: {e}",
-                exc_info=True,
-            )
-            print(f"Error listing runs: {e}")
-            return False
+            error_msg = CMsg.ERR_ERROR_DURING_OPERATION.format(operation="listing runs for", app_package=target[CKeys.KEY_APP_PACKAGE], run_id="N/A", error=e)
+            self.logger.error(error_msg, exc_info=True)
+            return False, {CKeys.KEY_ERROR: error_msg}
     
     def generate_analysis_pdf(
         self,
-        target_identifier: str,
-        is_index: bool,
+        target: Dict[str, Any],
         pdf_output_name: Optional[str] = None,
-    ) -> bool:
+    ) -> Tuple[bool, Dict[str, Any]]:
         """Generate PDF report for a target.
         
         Args:
-            target_identifier: Target index or package name
-            is_index: True if identifier is an index, False if package name
+            target: Target dictionary containing target information
             pdf_output_name: Optional custom PDF filename
             
         Returns:
-            True if successful, False otherwise
+            Tuple of (success, data) where data contains:
+            - pdf_path: path to generated PDF (if successful)
+            - error: error message (if unsuccessful)
         """
-        selected_target = self.get_target_by_identifier(target_identifier, is_index)
-        if not selected_target:
-            return False
+        if not target:
+            return False, {CKeys.KEY_ERROR: CMsg.ERR_TARGET_NOT_FOUND}
         
         try:
             from analysis_viewer import XHTML2PDF_AVAILABLE, RunAnalyzer
         except ImportError as e:
-            self.logger.error(f"Failed to import analysis modules: {e}")
-            return False
+            self.logger.error(CMsg.ERR_RUN_ANALYZER_IMPORT_FAILED.format(error=e))
+            return False, {CKeys.KEY_ERROR: CMsg.ERR_RUN_ANALYZER_IMPORT_FAILED.format(error=e)}
         
         if not XHTML2PDF_AVAILABLE:
-            self.logger.error("PDF library (xhtml2pdf) not available.")
-            print("Error: PDF library not available. Install with: pip install xhtml2pdf")
-            return False
+            error_msg = CMsg.ERR_XHTML2PDF_NOT_AVAILABLE
+            self.logger.error(error_msg)
+            return False, {CKeys.KEY_ERROR: error_msg}
         
-        config_service = self.context.services.get("config")
+        config_service = self.context.services.get(CKeys.SERVICE_CONFIG)
         if not config_service:
-            return False
+            return False, {CKeys.KEY_ERROR: CMsg.ERR_CONFIG_SERVICE_NOT_AVAILABLE}
         
-        output_data_dir = config_service.get_config_value("OUTPUT_DATA_DIR")
+        output_data_dir = config_service.get_config_value(CKeys.CONFIG_OUTPUT_DATA_DIR)
         if not output_data_dir:
-            self.logger.error("OUTPUT_DATA_DIR is not configured.")
-            return False
+            self.logger.error(CMsg.ERR_OUTPUT_DATA_DIR_NOT_CONFIGURED)
+            return False, {CKeys.KEY_ERROR: CMsg.ERR_OUTPUT_DATA_DIR_NOT_CONFIGURED}
         
         # Determine run ID (latest or only one)
-        actual_run_id = self._determine_run_id(selected_target["db_path"])
+        actual_run_id = self._determine_run_id(target[CKeys.KEY_DB_PATH])
         if actual_run_id is None:
-            self.logger.error(
-                f"Failed to determine a run_id for PDF generation for target {selected_target['app_package']}."
-            )
-            return False
+            error_msg = CMsg.ERR_FAILED_TO_DETERMINE_RUN_ID.format(operation="PDF generation", app_package=target[CKeys.KEY_APP_PACKAGE])
+            self.logger.error(error_msg)
+            return False, {CKeys.KEY_ERROR: error_msg}
         
-        # Create output directory
-        analysis_reports_dir = Path(selected_target["session_dir"]) / "reports"
+        # Create output directory using SessionPathManager
+        analysis_reports_dir = SessionPathManager.get_reports_dir(target[CKeys.KEY_SESSION_DIR])
         analysis_reports_dir.mkdir(parents=True, exist_ok=True)
         
-        # Generate filename
-        pdf_filename_suffix = (
-            Path(pdf_output_name).name if pdf_output_name else "analysis.pdf"
-        )
-        final_pdf_filename = f"{selected_target['app_package']}_{pdf_filename_suffix}"
-        final_pdf_path = str(analysis_reports_dir / final_pdf_filename)
+        # Generate PDF path using SessionPathManager
+        final_pdf_path = str(SessionPathManager.get_pdf_report_path(
+            analysis_reports_dir,
+            target[CKeys.KEY_APP_PACKAGE],
+            pdf_output_name
+        ))
         
         self.logger.debug(
-            f"Generating PDF for Target: {selected_target['app_package']}, Run ID: {actual_run_id}, Output: {final_pdf_path}"
+            f"Generating PDF for Target: {target[CKeys.KEY_APP_PACKAGE]}, Run ID: {actual_run_id}, Output: {final_pdf_path}"
         )
         
         try:
             analyzer = RunAnalyzer(
-                db_path=selected_target["db_path"],
+                db_path=target[CKeys.KEY_DB_PATH],
                 output_data_dir=output_data_dir,
-                app_package_for_run=selected_target["app_package"],
+                app_package_for_run=target[CKeys.KEY_APP_PACKAGE],
             )
-            analyzer.analyze_run_to_pdf(actual_run_id, final_pdf_path)
-            return True
+            pdf_result = analyzer.analyze_run_to_pdf(actual_run_id, final_pdf_path)
+            
+            if pdf_result[CKeys.KEY_SUCCESS]:
+                return True, {CKeys.KEY_PDF_PATH: final_pdf_path}
+            else:
+                return False, {CKeys.KEY_ERROR: pdf_result.get(CKeys.KEY_ERROR, "Unknown error generating PDF")}
         except FileNotFoundError:
-            self.logger.error(
-                f"Database file not found for PDF generation: {selected_target['db_path']}"
-            )
-            print(f"Error: Database file not found: {selected_target['db_path']}")
-            return False
+            error_msg = CMsg.ERR_DATABASE_FILE_NOT_FOUND.format(operation="PDF generation", db_path=target[CKeys.KEY_DB_PATH])
+            self.logger.error(error_msg)
+            return False, {CKeys.KEY_ERROR: error_msg}
         except Exception as e:
-            self.logger.error(
-                f"Error generating PDF for target {selected_target['app_package']}, run {actual_run_id}: {e}",
-                exc_info=True,
-            )
-            print(f"Error generating PDF: {e}")
-            return False
+            error_msg = CMsg.ERR_ERROR_DURING_OPERATION.format(operation="generating PDF for", app_package=target[CKeys.KEY_APP_PACKAGE], run_id=actual_run_id, error=e)
+            self.logger.error(error_msg, exc_info=True)
+            return False, {CKeys.KEY_ERROR: error_msg}
     
-    def print_analysis_summary(self, target_identifier: str, is_index: bool) -> bool:
-        """Print summary metrics for a target.
+    def get_analysis_summary(self, target: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
+        """Get summary metrics for a target.
         
         Args:
-            target_identifier: Target index or package name
-            is_index: True if identifier is an index, False if package name
+            target: Target dictionary containing target information
             
         Returns:
-            True if successful, False otherwise
+            Tuple of (success, data) where data contains:
+            - run_info: dictionary with basic run information
+            - metrics: dictionary with calculated metrics
+            - error: error message (if unsuccessful)
         """
-        selected_target = self.get_target_by_identifier(target_identifier, is_index)
-        if not selected_target:
-            return False
+        if not target:
+            return False, {CKeys.KEY_ERROR: CMsg.ERR_TARGET_NOT_FOUND}
         
         try:
             from analysis_viewer import RunAnalyzer
         except ImportError as e:
-            self.logger.error(f"Failed to import RunAnalyzer: {e}")
-            return False
+            self.logger.error(CMsg.ERR_RUN_ANALYZER_IMPORT_FAILED.format(error=e))
+            return False, {CKeys.KEY_ERROR: CMsg.ERR_RUN_ANALYZER_IMPORT_FAILED.format(error=e)}
         
-        config_service = self.context.services.get("config")
+        config_service = self.context.services.get(CKeys.SERVICE_CONFIG)
         if not config_service:
-            return False
+            return False, {CKeys.KEY_ERROR: CMsg.ERR_CONFIG_SERVICE_NOT_AVAILABLE}
         
-        output_data_dir = config_service.get_config_value("OUTPUT_DATA_DIR")
+        output_data_dir = config_service.get_config_value(CKeys.CONFIG_OUTPUT_DATA_DIR)
         if not output_data_dir:
-            self.logger.error("OUTPUT_DATA_DIR is not configured.")
-            return False
+            self.logger.error(CMsg.ERR_OUTPUT_DATA_DIR_NOT_CONFIGURED)
+            return False, {CKeys.KEY_ERROR: CMsg.ERR_OUTPUT_DATA_DIR_NOT_CONFIGURED}
         
         # Determine run ID (latest or only one)
-        actual_run_id = self._determine_run_id(selected_target["db_path"])
+        actual_run_id = self._determine_run_id(target[CKeys.KEY_DB_PATH])
         if actual_run_id is None:
-            self.logger.error(
-                f"Failed to determine a run_id for summary printing for target {selected_target['app_package']}."
-            )
-            return False
+            error_msg = CMsg.ERR_FAILED_TO_DETERMINE_RUN_ID.format(operation="summary", app_package=target[CKeys.KEY_APP_PACKAGE])
+            self.logger.error(error_msg)
+            return False, {CKeys.KEY_ERROR: error_msg}
         
         try:
             analyzer = RunAnalyzer(
-                db_path=selected_target["db_path"],
+                db_path=target[CKeys.KEY_DB_PATH],
                 output_data_dir=output_data_dir,
-                app_package_for_run=selected_target["app_package"],
+                app_package_for_run=target[CKeys.KEY_APP_PACKAGE],
             )
-            analyzer.print_run_summary(actual_run_id)
-            return True
+            summary_result = analyzer.get_run_summary(actual_run_id)
+            
+            if summary_result[CKeys.KEY_SUCCESS]:
+                return True, {
+                    CKeys.KEY_RUN_INFO: summary_result[CKeys.KEY_RUN_INFO],
+                    CKeys.KEY_METRICS: summary_result[CKeys.KEY_METRICS]
+                }
+            else:
+                return False, {CKeys.KEY_ERROR: summary_result.get(CKeys.KEY_ERROR, "Unknown error")}
         except FileNotFoundError:
-            self.logger.error(
-                f"Database file not found for summary printing: {selected_target['db_path']}"
-            )
-            print(f"Error: Database file not found: {selected_target['db_path']}")
-            return False
+            error_msg = CMsg.ERR_DATABASE_FILE_NOT_FOUND.format(operation="summary", db_path=target[CKeys.KEY_DB_PATH])
+            self.logger.error(error_msg)
+            return False, {CKeys.KEY_ERROR: error_msg}
         except Exception as e:
-            self.logger.error(
-                f"Error printing summary for target {selected_target['app_package']}, run {actual_run_id}: {e}",
-                exc_info=True,
-            )
-            print(f"Error printing summary: {e}")
-            return False
+            error_msg = CMsg.ERR_ERROR_DURING_OPERATION.format(operation="getting summary for", app_package=target[CKeys.KEY_APP_PACKAGE], run_id=actual_run_id, error=e)
+            self.logger.error(error_msg, exc_info=True)
+            return False, {CKeys.KEY_ERROR: error_msg}
     
     def _determine_run_id(self, db_path: str) -> Optional[int]:
         """Determine the run ID to use for analysis.
@@ -362,26 +347,26 @@ class AnalysisService:
             cursor_temp = conn_temp.cursor()
             
             # Try to get the highest run_id (latest)
-            cursor_temp.execute("SELECT run_id FROM runs ORDER BY run_id DESC LIMIT 1")
+            cursor_temp.execute(CConfig.SQL_SELECT_LATEST_RUN_ID)
             latest_run_row = cursor_temp.fetchone()
             
             if latest_run_row and latest_run_row[0] is not None:
                 actual_run_id = latest_run_row[0]
                 self.logger.debug(
-                    f"Using Run ID: {actual_run_id} (latest/only)"
+                    CMsg.MSG_USING_RUN_ID_LATEST.format(run_id=actual_run_id)
                 )
             else:
                 # Fallback: get any run_id
-                cursor_temp.execute("SELECT run_id FROM runs LIMIT 1")
+                cursor_temp.execute(CConfig.SQL_SELECT_ANY_RUN_ID)
                 any_run_row = cursor_temp.fetchone()
                 
                 if any_run_row and any_run_row[0] is not None:
                     actual_run_id = any_run_row[0]
                     self.logger.warning(
-                        f"Could not determine latest run, using first available Run ID: {actual_run_id}"
+                        CMsg.MSG_USING_RUN_ID_FIRST_AVAILABLE.format(run_id=actual_run_id)
                     )
                 else:
-                    self.logger.error("No runs found in the database.")
+                    self.logger.error(CMsg.MSG_NO_RUNS_FOUND)
                     conn_temp.close()
                     return None
             
@@ -389,7 +374,7 @@ class AnalysisService:
             return actual_run_id
             
         except sqlite3.Error as e:
-            self.logger.error(f"Database error determining run ID: {e}")
+            self.logger.error(CMsg.ERR_DATABASE_ERROR_DETERMINING_RUN_ID.format(error=e))
             return None
     
     def run_offline_ui_annotator(self, session_dir: str, db_path: str) -> bool:
@@ -402,39 +387,11 @@ class AnalysisService:
         Returns:
             True if successful, False otherwise
         """
-        try:
-            project_root = str(Path(__file__).resolve().parent.parent.parent.parent)
-            script_path = str(Path(project_root) / "tools" / "ui_element_annotator.py")
-            screenshots_dir = str(Path(session_dir) / "screenshots")
-            out_dir = str(Path(session_dir) / "annotated_screenshots")
-            
-            cmd = [
-                sys.executable,
-                "-u",
-                script_path,
-                "--db-path",
-                db_path,
-                "--screens-dir",
-                screenshots_dir,
-                "--out-dir",
-                out_dir,
-            ]
-            
-            self.logger.debug(f"Running offline UI annotator: {' '.join(cmd)}")
-            result = subprocess.run(cmd, cwd=project_root, capture_output=True, text=True)
-            
-            if result.returncode == 0:
-                self.logger.info("Offline UI annotation completed successfully.")
-                self.logger.debug(result.stdout)
-                if result.stderr:
-                    self.logger.debug(result.stderr)
-                return True
-            else:
-                self.logger.error(
-                    f"Offline UI annotation failed (code {result.returncode}). Output:\n{result.stdout}\n{result.stderr}"
-                )
-                return False
-                
-        except Exception as e:
-            self.logger.error(f"Failed to run offline UI annotator: {e}", exc_info=True)
+        # Get the AnnotationService from the context
+        annotation_service = self.context.services.get(CKeys.SERVICE_ANNOTATION)
+        if not annotation_service:
+            self.logger.error(CMsg.ERR_ANNOTATION_SERVICE_NOT_AVAILABLE)
             return False
+            
+        # Delegate to the AnnotationService
+        return annotation_service.run_offline_annotator(session_dir, db_path)

@@ -44,13 +44,11 @@ def run(args: Optional[List[str]] = None) -> int:
         # Register core services
         from cli.services.analysis_service import AnalysisService
         from cli.services.app_scan_service import AppScanService
-        from cli.services.config_service import ConfigService
         from cli.services.crawler_service import CrawlerService
         from cli.services.device_service import DeviceService
         from cli.services.focus_area_service import FocusAreaService
         from cli.services.openrouter_service import OpenRouterService
 
-        context.services.register("config", ConfigService(context))
         context.services.register("device", DeviceService(context))
         context.services.register("app_scan", AppScanService(context))
         context.services.register("crawler", CrawlerService(context))

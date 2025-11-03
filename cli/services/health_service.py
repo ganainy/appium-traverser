@@ -9,6 +9,7 @@ from cli.shared.context import CLIContext
 from cli.constants import messages as MSG
 from cli.constants import keys as KEYS
 from cli.constants import config as CFG
+from cli.services import process_utils
 
 
 class HealthCheckService:
@@ -62,7 +63,7 @@ class HealthCheckService:
     def check_appium_server(self) -> Dict[str, str]:
         """Check Appium server status."""
         try:
-            appium_url = getattr(self.config, KEYS.CONFIG_APPIUM_SERVER_URL, "http://127.0.0.1:4723").rstrip('/')
+            appium_url = getattr(self.config, KEYS.CONFIG_APPIUM_SERVER_URL).rstrip('/')
             response = requests.get(f"{appium_url}{KEYS.APPIUM_STATUS_PATH}", timeout=CFG.APPIUM_STATUS_TIMEOUT)
             if response.status_code == KEYS.HTTP_CODE_OK:
                 status_data = response.json()
@@ -82,11 +83,8 @@ class HealthCheckService:
     def check_mcp_server_health(self) -> Dict[str, str]:
         """Check MCP server health status using /health and /ready endpoints."""
         try:
-            mcp_url = getattr(self.config, KEYS.CONFIG_MCP_SERVER_URL, "http://localhost:3000/mcp")
-            # Health endpoints are at the root level, not under /mcp
+            mcp_url = getattr(self.config, KEYS.CONFIG_MCP_SERVER_URL)
             base_url = mcp_url.rstrip('/mcp').rstrip('/')
-            
-            # First check /ready endpoint for readiness
             try:
                 response = requests.get(f"{base_url}{KEYS.MCP_READY_PATH}", timeout=CFG.MCP_STATUS_TIMEOUT)
                 if response.status_code == KEYS.HTTP_CODE_OK:
@@ -108,7 +106,6 @@ class HealthCheckService:
                 else:
                     return {KEYS.STATUS_KEY_STATUS: KEYS.STATUS_ERROR, KEYS.STATUS_KEY_MESSAGE: MSG.PRECHECK_STATUS_MESSAGE_HTTP.format(code=response.status_code, url=f"{base_url}{KEYS.MCP_READY_PATH}")}
             except requests.exceptions.Timeout:
-                # Fall back to /health for liveness check if /ready times out
                 try:
                     response = requests.get(f"{base_url}{KEYS.MCP_HEALTH_PATH}", timeout=CFG.MCP_STATUS_TIMEOUT)
                     if response.status_code == KEYS.HTTP_CODE_OK:
@@ -128,7 +125,7 @@ class HealthCheckService:
     def check_mobsf_server(self) -> Dict[str, str]:
         """Check MobSF server status."""
         try:
-            mobsf_url = getattr(self.config, KEYS.CONFIG_MOBSF_API_URL, "http://localhost:8000/api/v1")
+            mobsf_url = getattr(self.config, KEYS.CONFIG_MOBSF_API_URL)
             response = requests.get(f"{mobsf_url}{KEYS.MOBSF_STATUS_PATH}", timeout=CFG.MOBSF_STATUS_TIMEOUT)
             if response.status_code == KEYS.HTTP_CODE_OK:
                 return {KEYS.STATUS_KEY_STATUS: KEYS.STATUS_RUNNING, KEYS.STATUS_KEY_MESSAGE: MSG.PRECHECK_STATUS_MESSAGE_REACHABLE.format(url=mobsf_url)}
@@ -139,20 +136,15 @@ class HealthCheckService:
     
     def check_ollama_service(self) -> Dict[str, str]:
         """Check Ollama service status."""
-        ollama_url = getattr(self.config, KEYS.CONFIG_OLLAMA_BASE_URL, "http://localhost:11434")
-        
-        # Try HTTP API first
+        ollama_url = getattr(self.config, KEYS.CONFIG_OLLAMA_BASE_URL)
         try:
             response = requests.get(f"{ollama_url}{KEYS.OLLAMA_TAGS_PATH}", timeout=CFG.OLLAMA_API_TIMEOUT)
             if response.status_code == KEYS.HTTP_CODE_OK:
                 return {KEYS.STATUS_KEY_STATUS: KEYS.STATUS_RUNNING, KEYS.STATUS_KEY_MESSAGE: MSG.PRECHECK_STATUS_MESSAGE_API_REACHABLE.format(url=ollama_url)}
         except Exception:
             pass
-        
-        # Try CLI command
         try:
-            from cli.services.process_utils import ProcessUtils
-            result = ProcessUtils.run_subprocess(
+            result = process_utils.run_subprocess(
                 ["ollama", "list"],
                 timeout=CFG.OLLAMA_CLI_TIMEOUT,
                 capture_output=True

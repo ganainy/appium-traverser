@@ -3,11 +3,12 @@
 Focus area service for managing privacy focus areas.
 """
 
-import json
 import logging
-import os
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
+from cli.constants import keys as KEYS
+from cli.constants import config as CONFIG
+from cli.constants import messages as MSG
 from cli.shared.context import CLIContext
 from cli.shared.service_names import DATABASE_SERVICE
 
@@ -28,7 +29,7 @@ class FocusAreaService:
         try:
             db_service = self.context.services.get(DATABASE_SERVICE)
             if not db_service:
-                self.logger.error("Database service not available")
+                self.logger.error(MSG.DATABASE_SERVICE_NOT_AVAILABLE)
                 return []
             
             # Query focus areas from database
@@ -38,27 +39,6 @@ class FocusAreaService:
             self.logger.error(f"Failed to load focus areas from database: {e}")
             return []
     
-    def list_focus_areas(self) -> List[Dict]:
-        """List configured focus areas.
-        
-        Returns:
-            List of focus area dictionaries with consistent properties
-        """
-        areas = self.get_focus_areas()
-        processed_areas = []
-        
-        for i, area in enumerate(areas):
-            # Create a new dictionary with consistent properties
-            processed_area = {
-                "id": area.get("id"),
-                "display_name": area.get("title") or area.get("name") or f"Area {i+1}",
-                "enabled": area.get("enabled", True),
-                "priority": area.get("priority", i),
-                "original_data": area  # Keep original data for reference if needed
-            }
-            processed_areas.append(processed_area)
-        
-        return processed_areas
     
     def _find_focus_area_index(self, id_or_name: str) -> Optional[int]:
         """Find focus area index by ID or name.
@@ -78,13 +58,13 @@ class FocusAreaService:
             name_lower = id_or_name.strip().lower()
             for i, area in enumerate(areas):
                 if name_lower in (
-                    str(area.get("title", "")).lower()
-                    or str(area.get("name", "")).lower()
+                    str(area.get(KEYS.FOCUS_AREA_TITLE, "")).lower()
+                    or str(area.get(KEYS.FOCUS_AREA_NAME, "")).lower()
                 ):
                     return i
         return None
     
-    def set_focus_area_enabled(self, id_or_name: str, enabled: bool) -> bool:
+    def set_focus_area_enabled(self, id_or_name: str, enabled: bool) -> Tuple[bool, Optional[str]]:
         """Enable or disable a focus area.
         
         Args:
@@ -92,33 +72,37 @@ class FocusAreaService:
             enabled: Whether to enable the focus area
             
         Returns:
-            True if successful, False otherwise
+            Tuple of (success, message)
         """
         areas = self.get_focus_areas()
         idx = self._find_focus_area_index(id_or_name)
         
         if idx is None:
-            self.logger.error(f"Focus area '{id_or_name}' not found.")
-            return False
+            error_msg = MSG.FOCUS_AREA_NOT_FOUND.format(id_or_name=id_or_name)
+            self.logger.error(error_msg)
+            return False, error_msg
         
-        area_id = areas[idx].get("id")
+        area_id = areas[idx].get(KEYS.FOCUS_AREA_ID)
         
         try:
             db_service = self.context.services.get(DATABASE_SERVICE)
             if db_service:
                 db_service.update_focus_area_enabled(area_id, enabled)
-                print(
-                    f"Focus area '{areas[idx].get('name', id_or_name)}' set enabled={enabled}"
+                success_msg = MSG.FOCUS_AREA_SET_ENABLED.format(
+                    name=areas[idx].get(KEYS.FOCUS_AREA_NAME, id_or_name),
+                    enabled=enabled
                 )
-                return True
+                return True, success_msg
             else:
-                self.logger.error("Database service not available")
-                return False
+                error_msg = MSG.DATABASE_SERVICE_NOT_AVAILABLE
+                self.logger.error(error_msg)
+                return False, error_msg
         except Exception as e:
-            self.logger.error(f"Failed to update focus area: {e}")
-            return False
+            error_msg = MSG.FAILED_TO_UPDATE_FOCUS_AREA.format(error=e)
+            self.logger.error(error_msg)
+            return False, error_msg
     
-    def move_focus_area(self, from_index_str: str, to_index_str: str) -> bool:
+    def move_focus_area(self, from_index_str: str, to_index_str: str) -> Tuple[bool, Optional[str]]:
         """Reorder focus areas.
         
         Args:
@@ -126,19 +110,21 @@ class FocusAreaService:
             to_index_str: Target index (1-based)
             
         Returns:
-            True if successful, False otherwise
+            Tuple of (success, message)
         """
         areas = self.get_focus_areas()
         try:
             from_idx = int(from_index_str) - 1
             to_idx = int(to_index_str) - 1
         except ValueError:
-            self.logger.error("--from-index and --to-index must be integers (1-based)")
-            return False
+            error_msg = MSG.INDEXES_MUST_BE_INTEGERS
+            self.logger.error(error_msg)
+            return False, error_msg
         
         if not (0 <= from_idx < len(areas)) or not (0 <= to_idx < len(areas)):
-            self.logger.error("Index out of range for focus areas list")
-            return False
+            error_msg = MSG.INDEX_OUT_OF_RANGE
+            self.logger.error(error_msg)
+            return False, error_msg
         
         item = areas.pop(from_idx)
         areas.insert(to_idx, item)
@@ -148,23 +134,25 @@ class FocusAreaService:
             if db_service:
                 # Update priorities in database
                 for i, area in enumerate(areas):
-                    db_service.update_focus_area_priority(area.get("id"), i)
-                print(f"Moved focus area to position {to_idx+1}")
-                return True
+                    db_service.update_focus_area_priority(area.get(KEYS.FOCUS_AREA_ID), i)
+                success_msg = MSG.FOCUS_AREA_MOVED.format(position=to_idx+1)
+                return True, success_msg
             else:
-                self.logger.error("Database service not available")
-                return False
+                error_msg = MSG.DATABASE_SERVICE_NOT_AVAILABLE
+                self.logger.error(error_msg)
+                return False, error_msg
         except Exception as e:
-            self.logger.error(f"Failed to reorder focus areas: {e}")
-            return False
+            error_msg = MSG.FAILED_TO_REORDER_FOCUS_AREAS.format(error=e)
+            self.logger.error(error_msg)
+            return False, error_msg
     
     def add_focus_area(
-        self, 
-        title: str, 
-        description: str = "", 
-        priority: int = 999, 
+        self,
+        title: str,
+        description: str = "",
+        priority: int = CONFIG.DEFAULT_FOCUS_PRIORITY,
         enabled: bool = True
-    ) -> bool:
+    ) -> Tuple[bool, Optional[str]]:
         """Add a new focus area.
         
         Args:
@@ -174,15 +162,15 @@ class FocusAreaService:
             enabled: Whether the focus area is enabled
             
         Returns:
-            True if successful, False otherwise
+            Tuple of (success, message)
         """
         areas = self.get_focus_areas()
         
         # Check for duplicate title
         for area in areas:
-            if area.get("name", "").lower() == title.lower():
-                print(f"Error: Focus area with title '{title}' already exists.")
-                return False
+            if area.get(KEYS.FOCUS_AREA_NAME, "").lower() == title.lower():
+                error_msg = MSG.FOCUS_AREA_ALREADY_EXISTS.format(title=title)
+                return False, error_msg
         
         try:
             db_service = self.context.services.get(DATABASE_SERVICE)
@@ -193,14 +181,15 @@ class FocusAreaService:
                     priority=priority,
                     enabled=enabled
                 )
-                print(f"✅ Successfully added focus area: {title}")
-                return True
+                success_msg = MSG.FOCUS_AREA_ADDED.format(title=title)
+                return True, success_msg
             else:
-                self.logger.error("Database service not available")
-                return False
+                error_msg = MSG.DATABASE_SERVICE_NOT_AVAILABLE
+                self.logger.error(error_msg)
+                return False, error_msg
         except Exception as e:
-            print(f"Error adding focus area: {e}")
-            return False
+            error_msg = MSG.ERROR_ADDING_FOCUS_AREA.format(error=e)
+            return False, error_msg
     
     def edit_focus_area(
         self,
@@ -209,7 +198,7 @@ class FocusAreaService:
         description: Optional[str] = None,
         priority: Optional[int] = None,
         enabled: Optional[bool] = None
-    ) -> bool:
+    ) -> Tuple[bool, Optional[str]]:
         """Edit an existing focus area.
         
         Args:
@@ -220,17 +209,17 @@ class FocusAreaService:
             enabled: New enabled state (optional)
             
         Returns:
-            True if successful, False otherwise
+            Tuple of (success, message)
         """
         areas = self.get_focus_areas()
         idx = self._find_focus_area_index(id_or_name)
         
         if idx is None:
-            print(f"Error: Focus area '{id_or_name}' not found.")
-            return False
+            error_msg = MSG.FOCUS_AREA_NOT_FOUND.format(id_or_name=id_or_name)
+            return False, error_msg
         
         area = areas[idx]
-        area_id = area.get("id")
+        area_id = area.get(KEYS.FOCUS_AREA_ID)
         
         try:
             db_service = self.context.services.get(DATABASE_SERVICE)
@@ -242,132 +231,46 @@ class FocusAreaService:
                     priority=priority,
                     enabled=enabled
                 )
-                print(f"✅ Successfully updated focus area: {area.get('name', 'Unknown')}")
-                return True
+                success_msg = MSG.FOCUS_AREA_UPDATED.format(name=area.get(KEYS.FOCUS_AREA_NAME, 'Unknown'))
+                return True, success_msg
             else:
-                self.logger.error("Database service not available")
-                return False
+                error_msg = MSG.DATABASE_SERVICE_NOT_AVAILABLE
+                self.logger.error(error_msg)
+                return False, error_msg
         except Exception as e:
-            print(f"Error updating focus area: {e}")
-            return False
+            error_msg = MSG.ERROR_UPDATING_FOCUS_AREA.format(error=e)
+            return False, error_msg
     
-    def remove_focus_area(self, id_or_name: str) -> bool:
+    def remove_focus_area(self, id_or_name: str) -> Tuple[bool, Optional[str]]:
         """Remove a focus area.
         
         Args:
             id_or_name: Focus area ID or name
             
         Returns:
-            True if successful, False otherwise
+            Tuple of (success, message)
         """
         areas = self.get_focus_areas()
         idx = self._find_focus_area_index(id_or_name)
         
         if idx is None:
-            print(f"Error: Focus area '{id_or_name}' not found.")
-            return False
+            error_msg = MSG.FOCUS_AREA_NOT_FOUND.format(id_or_name=id_or_name)
+            return False, error_msg
         
         removed_area = areas[idx]
-        area_id = removed_area.get("id")
+        area_id = removed_area.get(KEYS.FOCUS_AREA_ID)
         
         try:
             db_service = self.context.services.get(DATABASE_SERVICE)
             if db_service:
                 db_service.delete_focus_area(area_id)
-                print(f"✅ Successfully removed focus area: {removed_area.get('name', 'Unknown')}")
-                return True
+                success_msg = MSG.FOCUS_AREA_REMOVED.format(name=removed_area.get(KEYS.FOCUS_AREA_NAME, 'Unknown'))
+                return True, success_msg
             else:
-                self.logger.error("Database service not available")
-                return False
+                error_msg = MSG.DATABASE_SERVICE_NOT_AVAILABLE
+                self.logger.error(error_msg)
+                return False, error_msg
         except Exception as e:
-            print(f"Error removing focus area: {e}")
-            return False
+            error_msg = MSG.ERROR_REMOVING_FOCUS_AREA.format(error=e)
+            return False, error_msg
     
-    def import_focus_areas(self, file_path: str) -> bool:
-        """Import focus areas from a JSON file.
-        
-        Args:
-            file_path: Path to JSON file
-            
-        Returns:
-            True if successful, False otherwise
-        """
-        if not os.path.exists(file_path):
-            print(f"Error: File '{file_path}' not found.")
-            return False
-        
-        try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                imported_areas = json.load(f)
-            
-            if not isinstance(imported_areas, list):
-                print("Error: Import file must contain a JSON array of focus areas.")
-                return False
-            
-            # Validate structure
-            for i, area in enumerate(imported_areas):
-                if not isinstance(area, dict):
-                    print(f"Error: Item {i+1} is not a valid focus area object.")
-                    return False
-                if "name" not in area:
-                    print(f"Error: Item {i+1} missing required 'name' field.")
-                    return False
-            
-            db_service = self.context.services.get(DATABASE_SERVICE)
-            if not db_service:
-                self.logger.error("Database service not available")
-                return False
-            
-            # Import each area into database
-            imported_count = 0
-            for area in imported_areas:
-                try:
-                    db_service.create_focus_area(
-                        name=area.get("name"),
-                        description=area.get("description", ""),
-                        priority=area.get("priority", 999),
-                        enabled=area.get("enabled", True)
-                    )
-                    imported_count += 1
-                except Exception as e:
-                    self.logger.warning(f"Failed to import focus area '{area.get('name')}': {e}")
-            
-            print(f"✅ Successfully imported {imported_count} focus areas from '{file_path}'")
-            return imported_count > 0
-                
-        except json.JSONDecodeError as e:
-            print(f"Error parsing JSON file: {e}")
-            return False
-        except Exception as e:
-            print(f"Error importing focus areas: {e}")
-            return False
-    
-    def export_focus_areas(self, file_path: str) -> bool:
-        """Export focus areas to a JSON file.
-        
-        Args:
-            file_path: Path to output JSON file
-            
-        Returns:
-            True if successful, False otherwise
-        """
-        areas = self.get_focus_areas()
-        
-        if not areas:
-            print("No focus areas to export.")
-            return False
-        
-        try:
-            # Create directory if it doesn't exist
-            dir_path = os.path.dirname(file_path)
-            if dir_path:
-                os.makedirs(dir_path, exist_ok=True)
-            
-            with open(file_path, "w", encoding="utf-8") as f:
-                json.dump(areas, f, indent=2, ensure_ascii=False)
-            
-            print(f"✅ Successfully exported {len(areas)} focus areas to '{file_path}'")
-            return True
-        except Exception as e:
-            print(f"Error exporting focus areas: {e}")
-            return False

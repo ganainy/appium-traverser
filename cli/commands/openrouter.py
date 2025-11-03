@@ -47,16 +47,16 @@ class RefreshModelsCommand(CommandHandler):
                 message=MSG.OPENROUTER_SERVICE_NOT_AVAILABLE,
                 exit_code=1
             )
-        success = openrouter_service.refresh_models(wait_for_completion=args.wait)
+        success, cache_path = openrouter_service.refresh_models(wait_for_completion=args.wait)
         if success:
             return CommandResult(
                 success=True,
-                message=MSG.REFRESH_MODELS_SUCCESS
+                message=MSG.SUCCESS_OPENROUTER_MODELS_REFRESHED.format(cache_path=cache_path) if cache_path else MSG.SUCCESS_OPENROUTER_MODELS_REFRESHED.format(cache_path="Unknown")
             )
         else:
             return CommandResult(
                 success=False,
-                message=MSG.REFRESH_MODELS_FAIL,
+                message=MSG.ERR_OPENROUTER_REFRESH_FAILED,
                 exit_code=1
             )
 
@@ -158,15 +158,30 @@ class SelectModelCommand(CommandHandler):
                 message=MSG.OPENROUTER_SERVICE_NOT_AVAILABLE,
                 exit_code=1
             )
-        success, selected_model = openrouter_service.select_model(args.model_identifier)
+        
+        telemetry_service = context.services.get(K.TELEMETRY_SERVICE)
+        if not telemetry_service:
+            return CommandResult(
+                success=False,
+                message=MSG.TELEMETRY_SERVICE_NOT_AVAILABLE,
+                exit_code=1
+            )
+        
+        success, data = openrouter_service.select_model(args.model_identifier)
         if success:
-            model_id = selected_model.get(K.MODEL_ID, "Unknown")
-            model_name = selected_model.get(K.MODEL_NAME, "Unknown")
+            # Delegate presentation to telemetry service
+            telemetry_service.print_model_selection(data)
+            
+            model = data.get("model", {})
+            model_id = model.get("id", "Unknown")
+            model_name = model.get("name", "Unknown")
             return CommandResult(
                 success=True,
                 message=MSG.SELECT_MODEL_SUCCESS.format(name=model_name, id=model_id)
             )
         else:
+            # Handle error presentation using telemetry service
+            telemetry_service.print_error(data.get('error', 'Unknown error'))
             return CommandResult(
                 success=False,
                 message=MSG.SELECT_MODEL_FAIL.format(identifier=args.model_identifier),
@@ -218,8 +233,8 @@ class ShowSelectionCommand(CommandHandler):
         telemetry_service.print_selected_model(selected_model)
         
         if selected_model:
-            model_id = selected_model.get(K.MODEL_ID, "Unknown")
-            model_name = selected_model.get(K.MODEL_NAME, "Unknown")
+            model_id = selected_model.get(K.MODEL_ID, K.DEFAULT_UNKNOWN)
+            model_name = selected_model.get(K.MODEL_NAME, K.DEFAULT_UNKNOWN)
             return CommandResult(
                 success=True,
                 message=MSG.SHOW_SELECTION_SUCCESS.format(name=model_name, id=model_id)
@@ -261,13 +276,27 @@ class ShowModelDetailsCommand(CommandHandler):
                 message=MSG.OPENROUTER_SERVICE_NOT_AVAILABLE,
                 exit_code=1
             )
-        success = openrouter_service.show_model_details()
+        
+        telemetry_service = context.services.get(K.TELEMETRY_SERVICE)
+        if not telemetry_service:
+            return CommandResult(
+                success=False,
+                message=MSG.TELEMETRY_SERVICE_NOT_AVAILABLE,
+                exit_code=1
+            )
+        
+        success, data = openrouter_service.show_model_details()
+        
         if success:
+            # Delegate presentation to telemetry service
+            telemetry_service.print_model_details(data)
             return CommandResult(
                 success=True,
                 message=MSG.SHOW_MODEL_DETAILS_SUCCESS
             )
         else:
+            # Handle error presentation using telemetry service
+            telemetry_service.print_error(data.get('error', 'Unknown error'))
             return CommandResult(
                 success=False,
                 message=MSG.SHOW_MODEL_DETAILS_FAIL,
@@ -319,6 +348,15 @@ class ConfigureImageContextCommand(CommandHandler):
                 message=MSG.OPENROUTER_SERVICE_NOT_AVAILABLE,
                 exit_code=1
             )
+        
+        telemetry_service = context.services.get(K.TELEMETRY_SERVICE)
+        if not telemetry_service:
+            return CommandResult(
+                success=False,
+                message=MSG.TELEMETRY_SERVICE_NOT_AVAILABLE,
+                exit_code=1
+            )
+        
         # Validate arguments
         if args.enable and args.disable:
             return CommandResult(
@@ -331,17 +369,23 @@ class ConfigureImageContextCommand(CommandHandler):
             enabled = True
         elif args.disable:
             enabled = False
-        success = openrouter_service.configure_image_context(
+        
+        success, data = openrouter_service.configure_image_context(
             model_identifier=args.model,
             enabled=enabled
         )
+        
         if success:
-            action = "enabled" if args.enable else ("disabled" if args.disable else "checked")
+            # Delegate presentation to telemetry service
+            telemetry_service.print_image_context_configuration(data)
+            action = data.get("action", "configured")
             return CommandResult(
                 success=True,
                 message=MSG.CONFIGURE_IMAGE_CONTEXT_SUCCESS.format(action=action)
             )
         else:
+            # Handle error presentation using telemetry service
+            telemetry_service.print_error(data.get('error', 'Unknown error'))
             return CommandResult(
                 success=False,
                 message=MSG.CONFIGURE_IMAGE_CONTEXT_FAIL,

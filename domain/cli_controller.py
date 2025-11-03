@@ -1448,7 +1448,7 @@ class CLIController:
             print("Error: OUTPUT_DATA_DIR is not configured.")
             return False
 
-        selected_target: Optional[Dict[str, Any]] = None
+        # Get the target using the appropriate method
         if is_index:
             try:
                 target_index_val = int(target_identifier)
@@ -1531,7 +1531,13 @@ class CLIController:
                 output_data_dir=self.cfg.OUTPUT_DATA_DIR,
                 app_package_for_run=selected_target["app_package"],
             )
-            analyzer.print_run_summary(actual_run_id)
+            summary_result = analyzer.get_run_summary(actual_run_id)
+            if summary_result["success"]:
+                return True
+            else:
+                logging.error(f"Failed to get run summary: {summary_result.get('error', 'Unknown error')}")
+                print(f"Error: Failed to get run summary: {summary_result.get('error', 'Unknown error')}")
+                return False
             return True
         except FileNotFoundError:
             logging.error(

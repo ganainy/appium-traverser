@@ -7,6 +7,9 @@ import sys
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from cli.constants import keys as KEYS
+from cli.constants import messages as MSG
+
 
 class TelemetryService:
     """Service for managing telemetry and status reporting."""
@@ -26,10 +29,10 @@ class TelemetryService:
             data: Optional event data
         """
         event = {
-            'timestamp': datetime.now().isoformat(),
-            'type': event_type,
-            'message': message,
-            'data': data or {}
+            KEYS.KEY_TIMESTAMP: datetime.now().isoformat(),
+            KEYS.KEY_TYPE: event_type,
+            KEYS.KEY_MESSAGE: message,
+            KEYS.KEY_DATA: data or {}
         }
         self.events.append(event)
         
@@ -44,7 +47,7 @@ class TelemetryService:
             command_name: Name of command
             args: Command arguments
         """
-        self.log_event('command_start', f"Starting command: {command_name}", {'args': args})
+        self.log_event(MSG.EVENT_COMMAND_START, MSG.LOG_STARTING_COMMAND.format(command_name=command_name), {KEYS.KEY_ARGS: args})
     
     def log_command_end(self, command_name: str, success: bool, duration: Optional[float] = None) -> None:
         """
@@ -55,12 +58,12 @@ class TelemetryService:
             success: Whether command succeeded
             duration: Command duration in seconds
         """
-        data: Dict[str, Any] = {'success': success}
+        data: Dict[str, Any] = {KEYS.KEY_SUCCESS: success}
         if duration is not None:
-            data['duration_seconds'] = duration
+            data[KEYS.KEY_DURATION_SECONDS] = duration
         
-        status = "completed successfully" if success else "failed"
-        self.log_event('command_end', f"Command {command_name} {status}", data)
+        status = MSG.LOG_COMMAND_COMPLETED_SUCCESSFULLY.format(command_name=command_name) if success else MSG.LOG_COMMAND_FAILED.format(command_name=command_name)
+        self.log_event(MSG.EVENT_COMMAND_END, status, data)
     
     def log_error(self, error: Exception, context: Optional[str] = None) -> None:
         """
@@ -71,13 +74,13 @@ class TelemetryService:
             context: Optional context information
         """
         data = {
-            'error_type': type(error).__name__,
-            'error_message': str(error)
+            KEYS.KEY_ERROR_TYPE: type(error).__name__,
+            KEYS.KEY_ERROR_MESSAGE: str(error)
         }
         if context:
-            data['context'] = context
+            data[KEYS.KEY_CONTEXT] = context
         
-        self.log_event('error', f"Error occurred: {error}", data)
+        self.log_event(MSG.EVENT_ERROR, MSG.LOG_ERROR_OCCURRED.format(error=error), data)
     
     def log_service_check(self, service_name: str, status: str, details: Optional[Dict[str, Any]] = None) -> None:
         """
@@ -88,7 +91,7 @@ class TelemetryService:
             status: Service status ('running', 'stopped', 'error')
             details: Optional service details
         """
-        self.log_event('service_check', f"Service {service_name} is {status}", details)
+        self.log_event(MSG.EVENT_SERVICE_CHECK, MSG.LOG_SERVICE_IS_STATUS.format(service_name=service_name, status=status), details)
     
     def get_session_summary(self) -> Dict[str, Any]:
         """
@@ -100,17 +103,17 @@ class TelemetryService:
         end_time = datetime.now()
         duration = (end_time - self.start_time).total_seconds()
         
-        command_count = len([e for e in self.events if e['type'] == 'command_start'])
-        error_count = len([e for e in self.events if e['type'] == 'error'])
+        command_count = len([e for e in self.events if e[KEYS.KEY_TYPE] == MSG.EVENT_COMMAND_START])
+        error_count = len([e for e in self.events if e[KEYS.KEY_TYPE] == MSG.EVENT_ERROR])
         
         return {
-            'start_time': self.start_time.isoformat(),
-            'end_time': end_time.isoformat(),
-            'duration_seconds': duration,
-            'total_events': len(self.events),
-            'commands_executed': command_count,
-            'errors_encountered': error_count,
-            'success_rate': (command_count - error_count) / max(command_count, 1) * 100
+            KEYS.KEY_START_TIME: self.start_time.isoformat(),
+            KEYS.KEY_END_TIME: end_time.isoformat(),
+            KEYS.KEY_DURATION_SECONDS: duration,
+            KEYS.KEY_TOTAL_EVENTS: len(self.events),
+            KEYS.KEY_COMMANDS_EXECUTED: command_count,
+            KEYS.KEY_ERRORS_ENCOUNTERED: error_count,
+            KEYS.KEY_SUCCESS_RATE: (command_count - error_count) / max(command_count, 1) * 100
         }
     
     def print_status_table(self, services: Dict[str, Dict[str, Any]]) -> None:
@@ -120,22 +123,22 @@ class TelemetryService:
         Args:
             services: Dictionary of service information
         """
-        print("\n🔍 Service Status Summary:")
+        print(f"\n{MSG.ICON_SEARCH} {MSG.UI_SERVICE_STATUS_SUMMARY}:")
         print("=" * 50)
         
         for service_name, service_info in services.items():
-            status = service_info.get('status', 'unknown')
-            message = service_info.get('message', '')
+            status = service_info.get(KEYS.STATUS_KEY_STATUS, MSG.STATUS_UNKNOWN)
+            message = service_info.get(KEYS.STATUS_KEY_MESSAGE, '')
             
             # Choose appropriate icon
-            if status == 'running':
-                icon = "✅"
-            elif status == 'warning':
-                icon = "⚠️"
-            elif status == 'error':
-                icon = "❌"
+            if status == MSG.STATUS_RUNNING:
+                icon = MSG.ICON_SUCCESS
+            elif status == MSG.STATUS_WARNING:
+                icon = MSG.ICON_WARNING
+            elif status == MSG.STATUS_ERROR:
+                icon = MSG.ICON_ERROR
             else:
-                icon = "❓"
+                icon = MSG.ICON_QUESTION
             
             print(f"{icon} {service_name}: {message}")
         
@@ -149,7 +152,7 @@ class TelemetryService:
             config: Configuration dictionary
             filter_key: Optional key to filter by
         """
-        print("\n=== Current Configuration ===")
+        print(f"\n=== {MSG.UI_CURRENT_CONFIGURATION} ===")
         
         for key, value in sorted(config.items()):
             if filter_key and filter_key.lower() not in key.lower():
@@ -158,47 +161,6 @@ class TelemetryService:
         
         print("============================")
     
-    def print_list_table(self, items: List[Dict[str, Any]], title: str, key_mapping: Optional[Dict[str, str]] = None) -> None:
-        """
-        Print a formatted list table.
-        
-        Args:
-            items: List of items to display
-            title: Table title
-            key_mapping: Optional mapping of internal keys to display names
-        """
-        if not items:
-            print(f"\n=== {title} ===")
-            print("No items found.")
-            print("=" * (len(title) + 10))
-            return
-        
-        print(f"\n=== {title} ({len(items)}) ===")
-        
-        key_mapping = key_mapping or {}
-        
-        for i, item in enumerate(items, 1):
-            print(f"{i:2d}. ", end="")
-            
-            # Display item based on key mapping or default keys
-            if 'name' in item:
-                print(item['name'])
-            elif 'title' in item:
-                print(item['title'])
-            elif 'app_name' in item:
-                print(f"App: {item['app_name']}")
-                if 'package_name' in item:
-                    print(f"     Pkg: {item['package_name']}")
-                if 'activity_name' in item:
-                    print(f"     Act: {item['activity_name']}")
-            else:
-                # Default to showing first few key-value pairs
-                first_items = list(item.items())[:3]
-                details = ", ".join([f"{k}: {v}" for k, v in first_items])
-                print(details)
-        
-        print("=" * (len(title) + 10))
-    
     def print_success(self, message: str) -> None:
         """
         Print a success message.
@@ -206,8 +168,8 @@ class TelemetryService:
         Args:
             message: Success message
         """
-        print(f"✅ {message}")
-        self.log_event('success', message)
+        print(f"{MSG.ICON_SUCCESS} {message}")
+        self.log_event(MSG.EVENT_SUCCESS, message)
     
     def print_warning(self, message: str) -> None:
         """
@@ -216,8 +178,8 @@ class TelemetryService:
         Args:
             message: Warning message
         """
-        print(f"⚠️  {message}")
-        self.log_event('warning', message)
+        print(f"{MSG.ICON_WARNING}  {message}")
+        self.log_event(MSG.EVENT_WARNING, message)
     
     def print_error(self, message: str) -> None:
         """
@@ -226,8 +188,8 @@ class TelemetryService:
         Args:
             message: Error message
         """
-        print(f"❌ {message}")
-        self.log_event('error', message)
+        print(f"{MSG.ICON_ERROR} {message}")
+        self.log_event(MSG.EVENT_ERROR, message)
     
     def print_info(self, message: str) -> None:
         """
@@ -236,8 +198,8 @@ class TelemetryService:
         Args:
             message: Info message
         """
-        print(f"ℹ️  {message}")
-        self.log_event('info', message)
+        print(f"{MSG.ICON_INFO}  {message}")
+        self.log_event(MSG.EVENT_INFO, message)
     
     def get_recent_events(self, count: int = 10) -> List[Dict[str, Any]]:
         """
@@ -258,11 +220,11 @@ class TelemetryService:
         Args:
             status: Status dictionary from crawler service
         """
-        print("\n=== Crawler Status ===")
-        print(f"  Process: {status.get('process', 'Unknown')}")
-        print(f"  State: {status.get('state', 'Unknown')}")
-        print(f"  Target App: {status.get('target_app', 'Unknown')}")
-        print(f"  Output Data Dir: {status.get('output_dir', 'Unknown')}")
+        print(f"\n=== {MSG.UI_CRAWLER_STATUS} ===")
+        print(f"  Process: {status.get(KEYS.PROCESS_KEY, MSG.UI_UNKNOWN)}")
+        print(f"  State: {status.get(KEYS.STATE_KEY, MSG.UI_UNKNOWN)}")
+        print(f"  Target App: {status.get(KEYS.TARGET_APP_KEY, MSG.UI_UNKNOWN)}")
+        print(f"  Output Data Dir: {status.get(KEYS.OUTPUT_DIR_KEY, MSG.UI_UNKNOWN)}")
         print("=======================")
     
     def print_device_list(self, devices: List[str]) -> None:
@@ -288,18 +250,19 @@ class TelemetryService:
         Print a formatted list of focus areas.
         
         Args:
-            areas: List of focus area dictionaries with consistent properties
+            areas: List of focus area dictionaries from get_focus_areas()
         """
         if not areas:
-            print("No focus areas configured.")
+            print(MSG.UI_NO_FOCUS_AREAS_CONFIGURED)
             return
         
-        print("\n=== Focus Areas ===")
+        print(f"\n=== {MSG.UI_FOCUS_AREAS} ===")
         for i, area in enumerate(areas):
-            name = area.get("display_name", f"Area {i+1}")
-            enabled = area.get("enabled", True)
-            priority = area.get("priority", i)
-            print(f"{i+1:2d}. {name} | enabled={enabled} | priority={priority}")
+            # Create display_name from raw data
+            display_name = area.get(KEYS.FOCUS_AREA_TITLE) or area.get(KEYS.FOCUS_AREA_NAME) or MSG.FOCUS_AREA_FALLBACK_NAME.format(index=i+1)
+            enabled = area.get(KEYS.FOCUS_AREA_ENABLED, True)
+            priority = area.get(KEYS.FOCUS_AREA_PRIORITY, i)
+            print(f"{i+1:2d}. {display_name} | enabled={enabled} | priority={priority}")
         print("===================")
     
     def print_model_list(self, models: List[Dict[str, Any]]) -> None:
@@ -310,23 +273,23 @@ class TelemetryService:
             models: List of model dictionaries
         """
         if not models:
-            print("No models available.")
+            print(MSG.UI_NO_MODELS_AVAILABLE)
             return
         
-        print(f"\n=== OpenRouter Models ({len(models)}) ===")
+        print(f"\n=== {MSG.UI_OPENROUTER_MODELS} ({len(models)}) ===")
         for i, model in enumerate(models):
-            model_id = model.get("id", "Unknown")
-            model_name = model.get("name", "Unknown")
-            pricing = model.get("pricing", {})
-            
+            model_id = model.get(KEYS.MODEL_ID, MSG.UI_UNKNOWN)
+            model_name = model.get(KEYS.MODEL_NAME, MSG.UI_UNKNOWN)
+            pricing = model.get(KEYS.MODEL_PRICING, {})
+           
             # Check if free
-            is_free = (pricing.get("prompt", "0") == "0" and
-                      pricing.get("completion", "0") == "0")
+            is_free = (pricing.get(KEYS.MODEL_PROMPT_PRICE, "0") == "0" and
+                      pricing.get(KEYS.MODEL_COMPLETION_PRICE, "0") == "0")
             
-            free_marker = "[FREE]" if is_free else ""
+            free_marker = MSG.UI_FREE_MARKER if is_free else ""
             print(f"{i+1:2d}. {model_name} {free_marker}")
             print(f"    ID: {model_id}")
-            print(f"    Prompt: {pricing.get('prompt', 'N/A')} | Completion: {pricing.get('completion', 'N/A')}")
+            print(f"    {MSG.UI_PROMPT}: {pricing.get(KEYS.MODEL_PROMPT_PRICE, MSG.UI_NOT_AVAILABLE)} | {MSG.UI_COMPLETION}: {pricing.get(KEYS.MODEL_COMPLETION_PRICE, MSG.UI_NOT_AVAILABLE)}")
             print()
         
         print("==============================")
@@ -339,14 +302,14 @@ class TelemetryService:
             selected_model: Model dictionary or None if no model is selected
         """
         if selected_model:
-            model_id = selected_model.get("id", "Unknown")
-            model_name = selected_model.get("name", "Unknown")
-            print(f"\n=== Selected OpenRouter Model ===")
-            print(f"Name: {model_name}")
-            print(f"ID: {model_id}")
+            model_id = selected_model.get(KEYS.MODEL_ID, MSG.UI_UNKNOWN)
+            model_name = selected_model.get(KEYS.MODEL_NAME, MSG.UI_UNKNOWN)
+            print(f"\n=== {MSG.UI_SELECTED_OPENROUTER_MODEL} ===")
+            print(f"{MSG.UI_MODEL_NAME}: {model_name}")
+            print(f"{MSG.UI_MODEL_ID}: {model_id}")
             print("==============================")
         else:
-            print("No OpenRouter model selected.")
+            print(MSG.UI_NO_OPENROUTER_MODEL_SELECTED)
     
     def print_json(self, data: Dict[str, Any]) -> None:
         """
@@ -357,7 +320,7 @@ class TelemetryService:
         """
         import json
         print(json.dumps(data, indent=2))
-        self.log_event('json_output', "Output data as JSON")
+        self.log_event(MSG.EVENT_JSON_OUTPUT, MSG.LOG_OUTPUT_DATA_AS_JSON)
     
     def print_package_list(self, packages: List[str]) -> None:
         """
@@ -375,27 +338,128 @@ class TelemetryService:
             for i, pkg in enumerate(packages, 1):
                 self.print_info(MSG.LIST_PACKAGES_ITEM.format(index=i, package=pkg))
         
-        def confirm_action(self, prompt_message: str) -> bool:
-            """
-            Prompt user for confirmation with a yes/no question.
-            
-            Args:
-                prompt_message: Message to display to the user
-                
-            Returns:
-                True if user confirms (yes/y), False if user cancels
-            """
-            from cli.constants import keys as KEYS
-            from cli.constants import messages as MSG
-            
-            self.print_warning(prompt_message)
-            response = input(MSG.CLEAR_PACKAGES_PROMPT).strip().lower()
-            if response not in (KEYS.INPUT_YES, KEYS.INPUT_Y):
-                self.print_info(MSG.CLEAR_PACKAGES_CANCELLED)
-                return False
-            return True
+    def confirm_action(self, prompt_message: str) -> bool:
+        """
+        Prompt user for confirmation with a yes/no question.
         
-        def clear_events(self) -> None:
-            """Clear all events."""
-            self.events.clear()
-            self.log_event('session_reset', "Telemetry events cleared")
+        Args:
+            prompt_message: Message to display to the user
+            
+        Returns:
+            True if user confirms (yes/y), False if user cancels
+        """
+        from cli.constants import keys as KEYS
+        from cli.constants import messages as MSG
+        
+        self.print_warning(prompt_message)
+        response = input(MSG.CLEAR_PACKAGES_PROMPT).strip().lower()
+        if response not in (KEYS.INPUT_YES, KEYS.INPUT_Y):
+            self.print_info(MSG.CLEAR_PACKAGES_CANCELLED)
+            return False
+        return True
+    
+    def clear_events(self) -> None:
+        """Clear all events."""
+        self.events.clear()
+        self.log_event(MSG.EVENT_SESSION_RESET, MSG.LOG_TELEMETRY_EVENTS_CLEARED)
+    
+    def print_image_context_configuration(self, data: Dict[str, Any]) -> None:
+        """
+        Print image context configuration information.
+        
+        Args:
+            data: Dictionary containing image context configuration data
+        """
+        model_name = data.get("model_name", MSG.UI_UNKNOWN)
+        model_identifier = data.get("model_identifier", MSG.UI_UNKNOWN)
+        supports_image = data.get(KEYS.KEY_SUPPORTS_IMAGE)
+        current_setting = data.get(KEYS.KEY_CURRENT_SETTING)
+        enabled = data.get(KEYS.KEY_ENABLED)
+        action = data.get(KEYS.KEY_ACTION, "configured")
+        
+        print(f"\n=== {MSG.UI_OPENROUTER_IMAGE_CONTEXT_CONFIGURATION} ===")
+        print(f"{MSG.UI_MODEL}: {model_name} ({model_identifier})")
+        print(f"{MSG.UI_IMAGE_SUPPORT}: {MSG.UI_YES if supports_image else MSG.UI_NO}")
+        
+        if supports_image is True:
+            # Model supports images
+            if action == "checked":
+                print(f"{MSG.UI_CURRENT_IMAGE_CONTEXT_SETTING}: {MSG.UI_ENABLED if current_setting else MSG.UI_DISABLED}")
+                print(MSG.UI_THIS_MODEL_SUPPORTS_IMAGE_INPUTS)
+            else:
+                print(f"{MSG.ICON_SUCCESS} {MSG.UI_IMAGE_CONTEXT_ENABLED_FOR_MODEL} {model_name}" if enabled else f"{MSG.ICON_SUCCESS} {MSG.UI_IMAGE_CONTEXT_DISABLED_FOR_MODEL} {model_name}")
+        elif supports_image is False:
+            # Model doesn't support images
+            if enabled is True:
+                print(f"{MSG.ICON_WARNING} {MSG.UI_WARNING_MODEL_NO_IMAGE_SUPPORT}")
+            print(f"{MSG.ICON_SUCCESS} {MSG.UI_IMAGE_CONTEXT_DISABLED_MODEL_NO_SUPPORT}")
+        else:
+            # Unknown capability - using heuristic
+            heuristic_supports_image = data.get(KEYS.KEY_HEURISTIC_SUPPORTS_IMAGE, False)
+            if action == "checked":
+                print(f"{MSG.UI_CURRENT_IMAGE_CONTEXT_SETTING}: {MSG.UI_ENABLED if current_setting else MSG.UI_DISABLED}")
+                print(f"{MSG.UI_MODEL_CAPABILITY_UNKNOWN}; {MSG.UI_HEURISTIC_SUGGESTS_SUPPORTS_IMAGES}." if heuristic_supports_image else f"{MSG.UI_MODEL_CAPABILITY_UNKNOWN}; {MSG.UI_HEURISTIC_SUGGESTS_NO_SUPPORT}.")
+            else:
+                if enabled is True and not heuristic_supports_image:
+                    print(f"{MSG.ICON_WARNING} {MSG.UI_MODEL_CAPABILITY_UNKNOWN}; {MSG.UI_HEURISTIC_SUGGESTS_NO_SUPPORT}.")
+                print(f"{MSG.ICON_SUCCESS} {MSG.UI_IMAGE_CONTEXT_ENABLED_FOR_MODEL if enabled else MSG.UI_IMAGE_CONTEXT_DISABLED_FOR_MODEL} {MSG.UI_HEURISTIC_BASED}")
+    
+    def print_model_details(self, data: Dict[str, Any]) -> None:
+        """
+        Print detailed model information.
+        
+        Args:
+            data: Dictionary containing model details data
+        """
+        model = data.get(KEYS.KEY_MODEL, {})
+        
+        # Display detailed information
+        print(f"\n=== {MSG.UI_OPENROUTER_MODEL_DETAILS} ===")
+        print(f"{MSG.UI_MODEL_ID}: {model.get(KEYS.MODEL_ID, MSG.UI_NOT_AVAILABLE)}")
+        print(f"{MSG.UI_MODEL_NAME}: {model.get(KEYS.MODEL_NAME, MSG.UI_NOT_AVAILABLE)}")
+        print(f"{MSG.UI_DESCRIPTION}: {model.get(KEYS.MODEL_DESCRIPTION, MSG.UI_NOT_AVAILABLE)}")
+        print(f"{MSG.UI_CONTEXT_LENGTH}: {model.get(KEYS.MODEL_CONTEXT_LENGTH, MSG.UI_NOT_AVAILABLE)}")
+        
+        # Pricing information
+        pricing = model.get(KEYS.MODEL_PRICING, {})
+        if pricing:
+            print(f"\n{MSG.UI_PRICING}:")
+            print(f"  {MSG.UI_PROMPT}: {pricing.get(KEYS.MODEL_PROMPT_PRICE, MSG.UI_NOT_AVAILABLE)}")
+            print(f"  {MSG.UI_COMPLETION}: {pricing.get(KEYS.MODEL_COMPLETION_PRICE, MSG.UI_NOT_AVAILABLE)}")
+            print(f"  {MSG.UI_IMAGE}: {pricing.get(KEYS.MODEL_IMAGE_PRICE, MSG.UI_NOT_AVAILABLE)}")
+            
+            # Free status
+            is_free = data.get(KEYS.KEY_IS_FREE, False)
+            print(f"  {MSG.UI_FREE_MODEL}: {MSG.UI_YES if is_free else MSG.UI_NO}")
+        else:
+            print(f"\n{MSG.UI_PRICING}: {MSG.UI_PRICING_NOT_AVAILABLE}")
+        
+        # Capabilities
+        architecture = model.get(KEYS.MODEL_ARCHITECTURE, {})
+        if architecture:
+            print(f"\n{MSG.UI_CAPABILITIES}:")
+            input_modalities = architecture.get(KEYS.MODEL_INPUT_MODALITIES, [])
+            output_modalities = architecture.get(KEYS.MODEL_OUTPUT_MODALITIES, [])
+            print(f"  {MSG.UI_INPUT_MODALITIES}: {', '.join(input_modalities) if input_modalities else MSG.UI_NOT_AVAILABLE}")
+            print(f"  {MSG.UI_OUTPUT_MODALITIES}: {', '.join(output_modalities) if output_modalities else MSG.UI_NOT_AVAILABLE}")
+            
+            supports_image = model.get(KEYS.MODEL_SUPPORTS_IMAGE)
+            print(f"  {MSG.UI_IMAGE_SUPPORT}: {MSG.UI_YES if supports_image else MSG.UI_NO}")
+            
+            supported_parameters = architecture.get(KEYS.MODEL_SUPPORTED_PARAMETERS, [])
+            if supported_parameters:
+                print(f"  {MSG.UI_SUPPORTED_PARAMETERS}: {', '.join(supported_parameters)}")
+        
+        # Provider information
+        top_provider = model.get(KEYS.MODEL_TOP_PROVIDER, {})
+        if top_provider:
+            print(f"\n{MSG.UI_PROVIDER_INFORMATION}:")
+            print(f"  {MSG.UI_PROVIDER_NAME}: {top_provider.get(KEYS.MODEL_PROVIDER_NAME, MSG.UI_NOT_AVAILABLE)}")
+            print(f"  {MSG.UI_MODEL_FORMAT}: {top_provider.get(KEYS.MODEL_MODEL_FORMAT, MSG.UI_NOT_AVAILABLE)}")
+        
+        # Current configuration
+        current_image_context = data.get(KEYS.KEY_CURRENT_IMAGE_CONTEXT, False)
+        print(f"\n{MSG.UI_CURRENT_CONFIGURATION}:")
+        print(f"  {MSG.UI_IMAGE_CONTEXT}: {MSG.UI_ENABLED if current_image_context else MSG.UI_DISABLED}")
+        
+        print("=================================")

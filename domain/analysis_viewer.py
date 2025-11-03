@@ -57,34 +57,55 @@ class RunAnalyzer:
             logger.info(f"Database connection closed: {self.db_path}")
             self.conn = None
 
-    def list_runs(self):
+    def list_runs(self) -> Dict[str, Any]:
+        """
+        Get a list of all runs in the database.
+        
+        Returns:
+            Dictionary containing:
+            - success: bool indicating if operation was successful
+            - runs: list of run dictionaries
+            - message: optional message for display
+        """
+        result = {
+            "success": False,
+            "runs": [],
+            "message": ""
+        }
+        
         if not self.conn:
             logger.error("No database connection available to list runs.")
-            self._connect_db() 
-            if not self.conn: return
+            self._connect_db()
+            if not self.conn:
+                result["message"] = "Failed to connect to database"
+                return result
 
         cursor = self.conn.cursor()
         try:
             cursor.execute("SELECT run_id, app_package, start_activity, start_time, end_time, status FROM runs ORDER BY run_id DESC")
             runs = cursor.fetchall()
+            result["success"] = True
         except sqlite3.Error as e:
             logger.error(f"Error fetching runs from database: {e}")
             self._close_db_connection()
-            return
+            result["message"] = f"Error fetching runs: {e}"
+            return result
 
         if not runs:
-            print("No runs found in the database.")
+            result["message"] = "No runs found in the database."
         else:
-            print("\nAvailable Runs:")
-            print("---------------------------------------------------------------------------------------------------")
-            print(f"{'ID':<5} {'App Package':<35} {'Start Activity':<35} {'Start Time':<20} {'Status':<10}")
-            print("---------------------------------------------------------------------------------------------------")
             for run_item in runs:
                 start_time_str = run_item['start_time'][:19] if run_item['start_time'] else "N/A"
-                print(f"{run_item['run_id']:<5} {truncate_text(run_item['app_package'], 33):<35} {truncate_text(run_item['start_activity'], 33):<35} {start_time_str:<20} {run_item['status']:<10}")
-            print("---------------------------------------------------------------------------------------------------")
-        print("Use 'analyze-run <ID>' to see details for a specific run (CLI) or 'analyze-run <ID> --pdf-output <file.pdf>' for PDF.")
+                result["runs"].append({
+                    "run_id": run_item['run_id'],
+                    "app_package": run_item['app_package'],
+                    "start_activity": run_item['start_activity'],
+                    "start_time": start_time_str,
+                    "status": run_item['status']
+                })
+        
         self._close_db_connection()
+        return result
 
     def _get_screenshot_full_path(self, db_screenshot_path: Optional[str]) -> Optional[str]:
         if not db_screenshot_path:
@@ -275,20 +296,41 @@ class RunAnalyzer:
             logger.error(f"Error encoding image {image_path} to base64: {e}", exc_info=True)
             return None
 
-    def analyze_run_to_pdf(self, run_id: int, pdf_filepath: str):
+    def analyze_run_to_pdf(self, run_id: int, pdf_filepath: str) -> Dict[str, Any]:
+        """
+        Generate PDF report for a run.
+        
+        Args:
+            run_id: The ID of the run to analyze
+            pdf_filepath: Path where the PDF should be saved
+            
+        Returns:
+            Dictionary containing:
+            - success: bool indicating if operation was successful
+            - pdf_path: path to generated PDF (if successful)
+            - error: optional error message
+        """
+        result = {
+            "success": False,
+            "pdf_path": None,
+            "error": None
+        }
+        
         if not XHTML2PDF_AVAILABLE:
-            logger.error("xhtml2pdf library is not installed. Cannot generate PDF. Please install it using: pip install xhtml2pdf")
-            print("xhtml2pdf library is not installed. PDF generation aborted. Install with: pip install xhtml2pdf")
+            error_msg = "xhtml2pdf library is not installed. Cannot generate PDF. Please install it using: pip install xhtml2pdf"
+            logger.error(error_msg)
+            result["error"] = error_msg
             self._close_db_connection()
-            return
+            return result
 
         run_data, steps = self._fetch_run_and_steps_data(run_id)
 
         if not run_data:
-            print(f"Run ID {run_id} not found. PDF will not be generated.")
-            logger.info(f"Run ID {run_id} not found. PDF generation aborted.")
+            error_msg = f"Run ID {run_id} not found. PDF will not be generated."
+            logger.info(error_msg)
+            result["error"] = error_msg
             self._close_db_connection()
-            return
+            return result
 
         steps = steps or []
 
@@ -431,16 +473,21 @@ class RunAnalyzer:
                     # Check if the status object was created and if it has a non-zero error code
                     if pisa_status and not pisa_status.err: # type: ignore
                         logger.info(f"Successfully generated PDF report: {pdf_filepath}")
-                        print(f"PDF report generated: {pdf_filepath}")
+                        result["success"] = True
+                        result["pdf_path"] = pdf_filepath
                     else:
                         error_code = getattr(pisa_status, 'err', -1) # Safely get error code
-                        logger.error(f"Error generating PDF. Error code: {error_code}")
-                        print(f"Error generating PDF (code: {error_code}). Check logs for details.")
+                        error_msg = f"Error generating PDF. Error code: {error_code}"
+                        logger.error(error_msg)
+                        result["error"] = error_msg
                 else:
-                    logger.error("xhtml2pdf is not available.")
-                    print("Error: xhtml2pdf is not available. PDF not generated.")
+                    error_msg = "xhtml2pdf is not available."
+                    logger.error(error_msg)
+                    result["error"] = error_msg
         except Exception as e:
-            logger.error(f"Unexpected error during PDF generation: {e}", exc_info=True)
+            error_msg = f"Unexpected error during PDF generation: {e}"
+            logger.error(error_msg, exc_info=True)
+            result["error"] = error_msg
             # Try to save debug HTML even on unexpected errors
             html_debug_filepath = os.path.splitext(pdf_filepath)[0] + "_debug.html"
             try:
@@ -451,49 +498,56 @@ class RunAnalyzer:
                 logger.error(f"Failed to save debug HTML file: {e_debug}")
         finally:
             self._close_db_connection()
+            
+        return result
 
-    def print_run_summary(self, run_id: int):
-        """Compute summary metrics for a run and print them to the console.
-
-        This provides a quick CLI-friendly overview without generating a PDF.
+    def get_run_summary(self, run_id: int) -> Dict[str, Any]:
         """
+        Compute summary metrics for a run and return them as structured data.
+
+        This provides a programmatic overview without generating a PDF.
+        
+        Args:
+            run_id: The ID of the run to analyze
+            
+        Returns:
+            Dictionary containing:
+            - success: bool indicating if operation was successful
+            - run_info: dictionary with basic run information
+            - metrics: dictionary with calculated metrics
+            - error: optional error message
+        """
+        result = {
+            "success": False,
+            "run_info": {},
+            "metrics": {},
+            "error": None
+        }
+        
         run_data, steps = self._fetch_run_and_steps_data(run_id)
 
         if not run_data:
-            print(f"Run ID {run_id} not found. No summary available.")
-            logger.info(f"Run ID {run_id} not found. Summary printing aborted.")
+            error_msg = f"Run ID {run_id} not found. No summary available."
+            logger.info(error_msg)
+            result["error"] = error_msg
             self._close_db_connection()
-            return
+            return result
 
         steps = steps or []
-
         metrics_data = self._calculate_summary_metrics(run_id, run_data, steps)
-
-        # Pretty-print summary
-        print("\n=== Run Summary ===")
-        print(f"Run ID: {run_id}")
-        print(f"App Package: {run_data['app_package']}")
-        print(f"Start Activity: {run_data['start_activity']}")
-        print(f"Start Time: {run_data['start_time'] or 'N/A'}")
-        print(f"End Time: {run_data['end_time'] or 'N/A'}")
-        print("-------------------")
-        print("General:")
-        print(f"  Total Duration: {metrics_data.get('Total Duration', 'N/A')}")
-        print(f"  Final Status: {metrics_data.get('Final Status', 'N/A')}")
-        print(f"  Total Steps: {metrics_data.get('Total Steps', 'N/A')}")
-        print("Coverage:")
-        print(f"  Unique Screens Discovered: {metrics_data.get('Unique Screens Discovered', 'N/A')}")
-        print(f"  Unique Transitions: {metrics_data.get('Unique Transitions', 'N/A')}")
-        print(f"  Activity Coverage: {metrics_data.get('Activity Coverage', 'N/A')}")
-        print(f"  Action Distribution: {metrics_data.get('Action Distribution', 'N/A')}")
-        print("Efficiency:")
-        print(f"  Steps per New Screen: {metrics_data.get('Steps per New Screen', 'N/A')}")
-        print(f"  Avg AI Response Time: {metrics_data.get('Avg AI Response Time', 'N/A')}")
-        print(f"  Total Token Usage: {metrics_data.get('Total Token Usage', 'N/A')}")
-        print("Robustness:")
-        print(f"  Action Success Rate: {metrics_data.get('Action Success Rate', 'N/A')}")
-        print(f"  Execution Failures: {metrics_data.get('Execution Failures', 'N/A')}")
-        print(f"  Stuck Steps (No-Op): {metrics_data.get('Stuck Steps (No-Op)', 'N/A')}")
-        print("====================\n")
+        
+        # Structure the run information
+        result["run_info"] = {
+            "run_id": run_id,
+            "app_package": run_data['app_package'],
+            "start_activity": run_data['start_activity'],
+            "start_time": run_data['start_time'] or 'N/A',
+            "end_time": run_data['end_time'] or 'N/A'
+        }
+        
+        # Include all metrics
+        result["metrics"] = metrics_data
+        result["success"] = True
 
         self._close_db_connection()
+        return result

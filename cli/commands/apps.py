@@ -320,6 +320,22 @@ class SelectAppCommand(CommandHandler):
         success, selected_app = app_service.select_app(getattr(args, ARG_APP_IDENTIFIER))
         
         if success:
+            # Get config service to save app details
+            config_service = context.services.get(SERVICE_CONFIG)
+            if config_service:
+                pkg = selected_app.get(PACKAGE_NAME)
+                act = selected_app.get(ACTIVITY_NAME)
+                name = selected_app.get(APP_NAME, "Unknown")
+                
+                # Save to config
+                config_service.set_config_value(CONFIG_APP_PACKAGE, pkg)
+                config_service.set_config_value(CONFIG_APP_ACTIVITY, act)
+                config_service.set_config_value(
+                    CONFIG_LAST_SELECTED_APP,
+                    {"package_name": pkg, "activity_name": act, "app_name": name},
+                )
+                config_service.save_all_changes()
+            
             name = selected_app.get(APP_NAME, DEFAULT_UNKNOWN)
             package = selected_app.get(PACKAGE_NAME, DEFAULT_UNKNOWN)
             return CommandResult(

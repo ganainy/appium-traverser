@@ -15,7 +15,7 @@ import logging
 import os
 import threading
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
@@ -70,7 +70,7 @@ def save_openrouter_models_to_cache(models: List[Dict[str, Any]]) -> None:
         traceback.print_exc()
 
 
-def background_refresh_openrouter_models(wait_for_completion: bool = False) -> bool:
+def background_refresh_openrouter_models(wait_for_completion: bool = False) -> Tuple[bool, Optional[str]]:
     """Start a background thread to refresh OpenRouter models cache.
     
     Args:
@@ -82,11 +82,14 @@ def background_refresh_openrouter_models(wait_for_completion: bool = False) -> b
     try:
         completion_event = threading.Event()
         success_flag = {"success": False}
+        cache_path_ref: Dict[str, Optional[str]] = {"cache_path": None}
         
         def worker_with_event():
             try:
                 result = _worker()
                 success_flag["success"] = True
+                if result is not None:
+                    cache_path_ref["cache_path"] = result
                 completion_event.set()
                 return result
             except Exception as e:
@@ -101,27 +104,27 @@ def background_refresh_openrouter_models(wait_for_completion: bool = False) -> b
         if wait_for_completion:
             completion_event.wait(timeout=30)  # 30 second timeout
             if completion_event.is_set():
-                return success_flag["success"]
+                return success_flag["success"], cache_path_ref.get("cache_path")
             else:
                 logging.warning("Background refresh timed out after 30 seconds")
-                return False
+                return False, None
         
-        return True
-        
+        return True, None
+    
     except Exception as e:
         logging.error(f"Failed to start background refresh thread: {e}", exc_info=True)
-        return False
-def _worker() -> bool:
+        return False, None
+def _worker() -> Optional[str]:
     """Background thread worker for refreshing OpenRouter models.
     
     Returns:
-        True if successful, False on error
+        Cache path if successful, None on error
     """
     try:
         api_key = os.getenv("OPENROUTER_API_KEY")
         if not api_key:
             logging.warning("No OPENROUTER_API_KEY found for background refresh")
-            return False
+            return None
 
         url = "https://openrouter.ai/api/v1/models"
         headers = {
@@ -134,14 +137,14 @@ def _worker() -> bool:
 
         if response.status_code != 200:
             logging.warning(f"Non-200 response from OpenRouter: {response.status_code}")
-            return False
+            return None
 
         data = response.json()
         models = data.get("data", [])
 
         if not models:
             logging.warning("No models received from OpenRouter API")
-            return False
+            return None
         
         # Normalize and add metadata
         normalized_models = []
@@ -149,12 +152,13 @@ def _worker() -> bool:
             normalized = normalize_openrouter_model(model)
             normalized_models.append(normalized)
         
+        cache_path = get_openrouter_cache_path()
         save_openrouter_models_to_cache(normalized_models)
-        return True
+        return cache_path
 
     except Exception as e:
         logging.error(f"Error in background OpenRouter refresh: {e}", exc_info=True)
-        return False
+        return None
 
 
 def load_openrouter_models_cache() -> Optional[List[Dict[str, Any]]]:

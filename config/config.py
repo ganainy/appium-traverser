@@ -2,9 +2,11 @@
 OUTPUT_DATA_DIR_KEY = "OUTPUT_DATA_DIR"
 import os
 import logging
-from typing import Any, Callable, Dict, Optional
+from pathlib import Path
+from typing import Any, Callable, Dict, Optional, List
 from datetime import datetime
 from infrastructure.user_config_store import UserConfigStore
+from utils.paths import SessionPathManager
 
 # --- Refactored Centralized Configuration Class ---
 class Config:
@@ -29,6 +31,7 @@ class Config:
             logging.warning(f"Error loading .env: {e}")
         self._secrets = {"OPENROUTER_API_KEY", "GEMINI_API_KEY", "OLLAMA_BASE_URL", "MOBSF_API_KEY"}
         self._init_paths()
+        self._path_manager = SessionPathManager(self)
 
     def _init_paths(self):
         # For backward compatibility, set up path-related attributes from defaults
@@ -40,6 +43,11 @@ class Config:
     def _project_root(self) -> str:
         """Return absolute project root (one level up from config module)."""
         return os.path.abspath(os.path.join(self.BASE_DIR, ".."))
+
+    @property
+    def PROJECT_ROOT(self):
+        """Return absolute project root path."""
+        return self._project_root()
 
     def _resolve_output_dir_value(self, value: Optional[str]) -> Optional[str]:
         """Resolve OUTPUT_DATA_DIR to an absolute path under project root when relative."""
@@ -96,53 +104,21 @@ class Config:
         # No-op: config is loaded dynamically from SQLite and env
         pass
 
-    # For backward compatibility, expose some common config attributes as properties
+    # Path-related properties delegated to SessionPathManager
     @property
     def OUTPUT_DATA_DIR(self):
-        # Ensure OUTPUT_DATA_DIR resolves to an absolute on-disk path
+        # Currently using direct access to config since it's a bootstrap dependency
         raw = self.get(OUTPUT_DATA_DIR_KEY)
-        return self._resolve_output_dir_value(raw)
+        if not raw:
+            return raw
+        if os.path.isabs(raw):
+            return raw
+        return os.path.abspath(os.path.join(self.BASE_DIR, "..", raw))
 
     @property
     def SESSION_DIR(self):
-        """Resolve and cache the concrete session directory path.
-
-        Expands:
-        - {OUTPUT_DATA_DIR} -> resolved OUTPUT_DATA_DIR path
-        - {device_id}, {app_package}, {timestamp}
-        If a session was already resolved this run, reuse it for stability.
-        """
-        # Reuse cached session path if present
-        if "SESSION_DIR" in self._session_context:
-            return self._session_context["SESSION_DIR"]
-
-        template = self.get("SESSION_DIR")
-        template = self._resolve_output_dir_placeholder(template)
-
-        # Build session variables
-        device_id = self.get("TARGET_DEVICE_UDID") or "unknown_device"
-        app_package = (self.get("APP_PACKAGE") or "unknown.app").replace(".", "_")
-        # Stable timestamp per process
-        ts = self._session_context.get("SESSION_TIMESTAMP")
-        if not ts:
-            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            self._session_context["SESSION_TIMESTAMP"] = ts
-
-        # Fallback if template missing
-        if not template:
-            base = self.OUTPUT_DATA_DIR or self._project_root()
-            session_dir = os.path.join(base, f"{device_id}_{app_package}_{ts}")
-        else:
-            # Replace variables in template string
-            session_dir = template
-            session_dir = session_dir.replace("{device_id}", device_id)
-            session_dir = session_dir.replace("{app_package}", app_package)
-            session_dir = session_dir.replace("{timestamp}", ts)
-
-        # Normalize and cache
-        session_dir = os.path.abspath(session_dir)
-        self._session_context["SESSION_DIR"] = session_dir
-        return session_dir
+        """Returns the absolute path to the session directory."""
+        return str(self._path_manager.get_session_path())
 
     @property
     def ENABLE_IMAGE_CONTEXT(self):
@@ -160,14 +136,8 @@ class Config:
 
     @property
     def LOG_DIR(self):
-        # Resolve template with session variables
-        template = self.get("LOG_DIR")
-        template = self._resolve_output_dir_placeholder(template)
-        if template and "{session_dir}" in template:
-            session_dir = self.SESSION_DIR
-            if session_dir:
-                return template.replace("{session_dir}", session_dir)
-        return template
+        """Returns the absolute path to the log directory."""
+        return str(self._path_manager.get_log_dir())
 
     @property
     def LOG_FILE_NAME(self):
@@ -179,57 +149,32 @@ class Config:
 
     @property
     def DB_NAME(self):
-        # Resolve template with session variables
-        template = self.get("DB_NAME")
-        template = self._resolve_output_dir_placeholder(template)
-        if template and "{session_dir}" in template:
-            session_dir = self.SESSION_DIR
-            if session_dir:
-                template = template.replace("{session_dir}", session_dir)
-        if template and "{package}" in template:
-            package = self.get("APP_PACKAGE", "").replace(".", "_")
-            template = template.replace("{package}", package)
-        return template
+        """Returns the absolute path to the database file."""
+        return str(self._path_manager.get_db_path())
 
     @property
     def SCREENSHOTS_DIR(self):
-        # Resolve template with session variables
-        template = self.get("SCREENSHOTS_DIR")
-        template = self._resolve_output_dir_placeholder(template)
-        if template and "{session_dir}" in template:
-            session_dir = self.SESSION_DIR
-            if session_dir:
-                return template.replace("{session_dir}", session_dir)
-        return template
+        """Returns the absolute path to the screenshots directory."""
+        return str(self._path_manager.get_screenshots_dir())
 
     @property
     def ANNOTATED_SCREENSHOTS_DIR(self):
-        # Resolve template with session variables
-        template = self.get("ANNOTATED_SCREENSHOTS_DIR")
-        template = self._resolve_output_dir_placeholder(template)
-        if template and "{session_dir}" in template:
-            session_dir = self.SESSION_DIR
-            if session_dir:
-                return template.replace("{session_dir}", session_dir)
-        return template
+        """Returns the absolute path to the annotated screenshots directory."""
+        return str(self._path_manager.get_annotated_screenshots_dir())
 
     @property
     def TRAFFIC_CAPTURE_OUTPUT_DIR(self):
-        # Resolve template with session variables
-        template = self.get("TRAFFIC_CAPTURE_OUTPUT_DIR")
-        template = self._resolve_output_dir_placeholder(template)
-        if template and "{session_dir}" in template:
-            session_dir = self.SESSION_DIR
-            if session_dir:
-                return template.replace("{session_dir}", session_dir)
-        return template
+        """Returns the absolute path to the traffic capture output directory."""
+        return str(self._path_manager.get_traffic_capture_dir())
 
     @property
     def CRAWLER_PID_PATH(self):
-        """Resolve OUTPUT_DATA_DIR in the crawler PID path template."""
+        """Returns the absolute path to the crawler PID file."""
+        # This is a special case that we handle directly since it's not session-based
         template = self.get("CRAWLER_PID_PATH")
-        resolved = self._resolve_output_dir_placeholder(template)
-        return os.path.abspath(resolved) if resolved else resolved
+        if template and f"{{{OUTPUT_DATA_DIR_KEY}}}" in template:
+            template = template.replace(f"{{{OUTPUT_DATA_DIR_KEY}}}", self.OUTPUT_DATA_DIR or "output_data")
+        return str(Path(template).resolve()) if template else None
 
     @property
     def AI_PROVIDER(self):
@@ -284,6 +229,22 @@ class Config:
     def OLLAMA_MODELS(self):
         return self.get("OLLAMA_MODELS")
 
+    @property
+    def CONFIG_APPIUM_SERVER_URL(self):
+        return self.get("CONFIG_APPIUM_SERVER_URL", "http://127.0.0.1:4723")
+
+    @property
+    def CONFIG_MCP_SERVER_URL(self):
+        return self.get("CONFIG_MCP_SERVER_URL", "http://localhost:3000/mcp")
+
+    @property
+    def CONFIG_MOBSF_API_URL(self):
+        return self.get("CONFIG_MOBSF_API_URL", "http://localhost:8000/api/v1")
+
+    @property
+    def CONFIG_OLLAMA_BASE_URL(self):
+        return self.get("CONFIG_OLLAMA_BASE_URL", "http://localhost:11434")
+
     def update_setting_and_save(self, key: str, value: Any, callback: Optional[Callable] = None) -> None:
         """
         Backwards-compatible helper used throughout the codebase.
@@ -320,6 +281,231 @@ class Config:
                 except Exception:
                     result[k] = v
         return result
+    
+    def set_and_save_from_pairs(self, kv_pairs: List[str], telemetry_service=None) -> bool:
+        """
+        Set and save configuration values from a list of KEY=VALUE pairs.
+        
+        Args:
+            kv_pairs: List of key=value pairs
+            telemetry_service: Optional telemetry service for user feedback
+            
+        Returns:
+            True if all pairs were processed successfully, False otherwise
+        """
+        success_count = 0
+        total_count = len(kv_pairs)
+        
+        for kv_pair in kv_pairs:
+            if "=" not in kv_pair:
+                if telemetry_service:
+                    telemetry_service.print_error(f"Invalid format: {kv_pair}. Use KEY=VALUE format.")
+                continue
+            
+            key, value = kv_pair.split("=", 1)
+            if self._set_config_value(key.strip(), value.strip()):
+                success_count += 1
+                if telemetry_service:
+                    telemetry_service.print_success(f"Set {key} = {value}")
+            else:
+                if telemetry_service:
+                    telemetry_service.print_error(f"Failed to set {key}")
+        
+        # Save all changes
+        if success_count > 0:
+            try:
+                self.save_user_config()
+                if telemetry_service:
+                    telemetry_service.print_success("Configuration saved successfully")
+            except Exception:
+                if telemetry_service:
+                    telemetry_service.print_warning("Configuration updated but failed to save")
+        
+        return success_count == total_count
+    
+    def _set_config_value(self, key: str, value_str: str) -> bool:
+        """
+        Set a configuration value from a string.
+        
+        Args:
+            key: Configuration key
+            value_str: Value as string
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            import json
+            import logging
+            from typing import get_type_hints
+            
+            logging.debug(f"Setting config: {key} = '{value_str}'")
+            
+            # Try smarter parsing for complex types
+            parsed_value = self._parse_value(key, value_str)
+            
+            self.update_setting_and_save(key, parsed_value)
+            return True
+            
+        except Exception as e:
+            logging.error(f"Failed to set config for {key}: {e}", exc_info=True)
+            return False
+    
+    def _parse_value(self, key: str, value_str: str) -> Any:
+        """
+        Parse a value string to the appropriate type.
+        
+        Args:
+            key: Configuration key
+            value_str: Value as string
+            
+        Returns:
+            Parsed value
+        """
+        import json
+        import logging
+        from typing import get_type_hints
+        
+        # Default to string
+        parsed_value = value_str
+        
+        try:
+            # Get type hints for the config
+            type_hints = get_type_hints(type(self))
+            target_hint = type_hints.get(key)
+            
+            if target_hint:
+                origin_type = getattr(target_hint, "__origin__", None)
+                
+                # If value looks like JSON or target expects list/dict, attempt JSON parse
+                looks_like_json = value_str.strip().startswith(("[", "{", '"'))
+                if looks_like_json or origin_type in (list, dict):
+                    try:
+                        parsed_value = json.loads(value_str)
+                        logging.debug(f"Parsed JSON for {key}: type={type(parsed_value)}")
+                    except Exception:
+                        # Fall back to raw string if JSON parsing fails
+                        logging.debug(f"JSON parsing failed for {key}, using string value")
+                        parsed_value = value_str
+                else:
+                    # Try to parse as basic types
+                    parsed_value = self._parse_basic_type(value_str, target_hint)
+            
+        except Exception as e:
+            logging.debug(f"Error parsing value for {key}: {e}, using string")
+            parsed_value = value_str
+        
+        return parsed_value
+    
+    def _parse_basic_type(self, value_str: str, target_type: type) -> Any:
+        """
+        Parse a string to a basic type.
+        
+        Args:
+            value_str: Value as string
+            target_type: Target type
+            
+        Returns:
+            Parsed value
+        """
+        # Handle boolean values
+        if target_type == bool:
+            lower_val = value_str.lower()
+            if lower_val in ('true', '1', 'yes', 'on'):
+                return True
+            elif lower_val in ('false', '0', 'no', 'off'):
+                return False
+            else:
+                return bool(value_str)
+        
+        # Handle integer values
+        if target_type == int:
+            try:
+                return int(value_str)
+            except ValueError:
+                return value_str
+        
+        # Handle float values
+        if target_type == float:
+            try:
+                return float(value_str)
+            except ValueError:
+                return value_str
+        
+        # Default to string
+        return value_str
+    
+    def get_deserialized_config_value(self, key: str, default: Any = None) -> Any:
+        """
+        Get a configuration value and deserialize it from JSON if it's a string.
+        
+        Args:
+            key: Configuration key
+            default: Default value if not found
+            
+        Returns:
+            Deserialized configuration value or default
+        """
+        import json
+        
+        value = self.get(key, default)
+        
+        # Handle case where value might be stored as JSON string
+        if value and isinstance(value, str):
+            try:
+                return json.loads(value)
+            except json.JSONDecodeError:
+                return value
+        
+        return value
+    
+    def switch_ai_provider(self, provider: str, model: Optional[str] = None) -> 'CommandResult':
+        """
+        Switch the AI provider and optionally set the model.
+        
+        Args:
+            provider: AI provider to use (gemini, openrouter, ollama)
+            model: Optional model name/alias to use
+            
+        Returns:
+            CommandResult indicating success or failure
+        """
+        import logging
+        from cli.constants.keys import VALID_AI_PROVIDERS
+        from cli.commands.base import CommandResult
+        
+        # Validate provider
+        if provider not in VALID_AI_PROVIDERS:
+            return CommandResult(
+                success=False,
+                message=f"[ERROR] Invalid provider: {provider}",
+                exit_code=1
+            )
+        
+        try:
+            # Update provider
+            self.set("AI_PROVIDER", provider)
+            
+            # Update model if provided
+            if model:
+                self.set("DEFAULT_MODEL_TYPE", model)
+            
+            # Save configuration (no-op for SQLite-backed config, but kept for compatibility)
+            self.save_user_config()
+            
+            return CommandResult(
+                success=True,
+                message=f"Provider switched to '{provider}'. Please restart session/command if required.",
+                exit_code=0
+            )
+            
+        except Exception as e:
+            logging.error(f"Failed to switch AI provider: {e}", exc_info=True)
+            return CommandResult(
+                success=False,
+                message=f"[ERROR] Failed to switch provider: {str(e)}",
+                exit_code=1
+            )
 
 # --- Default values (loaded if not in user_config.json or .env) ---
 # --- These are loaded by _load_from_defaults_module by exec-ing this file ---
@@ -583,23 +769,7 @@ OLLAMA_MODELS = {
             "max_output_tokens": 1024,
         },
         "online": False,
-        "vision_supported": True,
-    },
-    "qwen2.5vl": {
-        "name": "qwen2.5vl",
-        "description": "Qwen 2.5 VL model for vision-language tasks.",
-        "generation_config": {
-            "temperature": 0.7,
-            "top_p": 0.95,
-            "max_output_tokens": 1024,
-        },
-        "online": False,
-        "vision_supported": True,
-    },
-    "granite3.2-vision": {
-        "name": "granite3.2-vision",
-        "description": "Granite 3.2 Vision model with multimodal capabilities.",
-        "generation_config": {
+        "vision_supported":
             "temperature": 0.7,
             "top_p": 0.95,
             "max_output_tokens": 1024,

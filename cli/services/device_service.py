@@ -4,10 +4,10 @@ Device service for ADB device management.
 """
 
 import logging
-import subprocess
 from typing import List, Optional
 
 from cli.shared.context import CLIContext
+from utils.adb_utils import AdbAdapter
 
 
 class DeviceService:
@@ -16,6 +16,7 @@ class DeviceService:
     def __init__(self, context: CLIContext):
         self.context = context
         self.logger = logging.getLogger(__name__)
+        self.adb_adapter = AdbAdapter()
     
     def list_devices(self) -> List[str]:
         """List all connected ADB devices.
@@ -23,64 +24,25 @@ class DeviceService:
         Returns:
             List of device UDIDs
         """
-        try:
-            result = subprocess.run(
-                ["adb", "devices"], 
-                capture_output=True, 
-                text=True, 
-                check=True
-            )
-            devices = []
-            for line in result.stdout.strip().split("\n")[1:]:
-                if "\tdevice" in line:
-                    devices.append(line.split("\t")[0])
-            return devices
-        except FileNotFoundError:
-            self.logger.error("ADB command not found. Is Android SDK platform-tools in your PATH?")
-            return []
-        except Exception as e:
-            self.logger.error(f"Error listing devices: {e}")
-            return []
+        return self.adb_adapter.get_connected_devices()
     
-    def select_device(self, device_udid: str) -> bool:
-        """Select a device by UDID and save to configuration.
+    def is_device_connected(self, device_udid: str) -> bool:
+        """Check if a device with the given UDID is connected.
         
         Args:
-            device_udid: Device UDID to select
+            device_udid: Device UDID to check
             
         Returns:
-            True if successful, False otherwise
+            True if device is connected, False otherwise
         """
-        # Verify device exists
         devices = self.list_devices()
-        if device_udid not in devices:
-            self.logger.error(f"Device '{device_udid}' not found in connected devices.")
-            return False
-        
-        # Save to configuration
-        try:
-            config_service = self.context.services.get("config")
-            if config_service:
-                config_service.set_config_value("DEVICE_UDID", device_udid)
-                config_service.save_all_changes()
-                self.logger.info(f"Successfully selected device: {device_udid}")
-                return True
-            else:
-                self.logger.error("Config service not available")
-                return False
-        except Exception as e:
-            self.logger.error(f"Error saving device selection: {e}")
-            return False
+        return device_udid in devices
     
-    def auto_select_device(self) -> bool:
-        """Automatically select the first available device.
+    def auto_select_device(self) -> Optional[str]:
+        """Get the UDID of the first available device.
         
         Returns:
-            True if successful, False otherwise
+            First device UDID if available, None otherwise
         """
         devices = self.list_devices()
-        if not devices:
-            self.logger.error("No connected devices found.")
-            return False
-        
-        return self.select_device(devices[0])
+        return devices[0] if devices else None

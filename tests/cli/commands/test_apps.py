@@ -139,11 +139,24 @@ def test_select_app_command_by_index(cli_context, sample_app_data: dict):
     mock_app_scan_service.select_app.return_value = (True, selected_app)
     cli_context.services.register("app_scan", mock_app_scan_service)
     
+    # Mock config service
+    mock_config_service = Mock()
+    cli_context.services.register("config", mock_config_service)
+    
     result = command.run(args, cli_context)
     
     assert result.success is True
     assert selected_app['app_name'] in result.message
     mock_app_scan_service.select_app.assert_called_once_with("0")
+    
+    # Verify config service was called to save app details
+    mock_config_service.set_config_value.assert_any_call("APP_PACKAGE", selected_app['package_name'])
+    mock_config_service.set_config_value.assert_any_call("APP_ACTIVITY", selected_app.get('activity_name'))
+    mock_config_service.set_config_value.assert_any_call(
+        "LAST_SELECTED_APP",
+        {"package_name": selected_app['package_name'], "activity_name": selected_app.get('activity_name'), "app_name": selected_app['app_name']}
+    )
+    mock_config_service.save_all_changes.assert_called_once()
 
 
 @pytest.mark.cli
@@ -159,11 +172,24 @@ def test_select_app_command_by_name(cli_context, sample_app_data: dict):
     mock_app_scan_service.select_app.return_value = (True, selected_app)
     cli_context.services.register("app_scan", mock_app_scan_service)
     
+    # Mock config service
+    mock_config_service = Mock()
+    cli_context.services.register("config", mock_config_service)
+    
     result = command.run(args, cli_context)
     
     assert result.success is True
     assert selected_app['app_name'] in result.message
     mock_app_scan_service.select_app.assert_called_once_with("Example App 1")
+    
+    # Verify config service was called to save app details
+    mock_config_service.set_config_value.assert_any_call("APP_PACKAGE", selected_app['package_name'])
+    mock_config_service.set_config_value.assert_any_call("APP_ACTIVITY", selected_app.get('activity_name'))
+    mock_config_service.set_config_value.assert_any_call(
+        "LAST_SELECTED_APP",
+        {"package_name": selected_app['package_name'], "activity_name": selected_app.get('activity_name'), "app_name": selected_app['app_name']}
+    )
+    mock_config_service.save_all_changes.assert_called_once()
 
 
 @pytest.mark.cli

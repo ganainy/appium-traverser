@@ -54,6 +54,12 @@ class ValidationService:
         if not getattr(self.config, 'APP_PACKAGE', None):
             all_issues.append("❌ No target app selected")
         
+        # Check required configuration by iterating over default constants
+        required_keys = self._get_required_config_keys()
+        for key in required_keys:
+            if not getattr(self.config, key, None):
+                all_issues.append(f"❌ Missing required configuration: {key}")
+        
         # Check optional MobSF server
         mobsf_running = self._check_mobsf_server()
         if not mobsf_running:
@@ -276,3 +282,24 @@ class ValidationService:
                 return False, "Could not import model_adapters module"
         
         return check_dependencies(ai_provider)
+    
+    def _get_required_config_keys(self) -> List[str]:
+        """
+        Get list of required configuration keys by checking default constants.
+        
+        Returns:
+            List of required configuration keys
+        """
+        # Import config module to access default constants
+        import config.config as config_module
+        
+        required_keys = []
+        # Check module-level constants for required keys
+        for name, value in vars(config_module).items():
+            # Only consider uppercase constants that are not complex objects
+            if name.isupper() and not callable(value) and not name.startswith('_'):
+                # Skip complex objects and lists
+                if isinstance(value, (str, int, float, bool)):
+                    required_keys.append(name)
+        
+        return required_keys

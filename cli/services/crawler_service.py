@@ -12,6 +12,14 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 
 from cli.shared.context import CLIContext
+from cli.constants.keys import (
+    PROCESS_STATUS_KEY, PROCESS_ID_KEY, STATE_KEY,
+    TARGET_APP_KEY, OUTPUT_DIR_KEY
+)
+from cli.constants.messages import (
+    CRAWLER_STATUS_STOPPED, CRAWLER_STATUS_UNKNOWN,
+    CRAWLER_STATUS_ERROR, CRAWLER_STATUS_RUNNING
+)
 from interfaces.cli import CLICrawlerInterface, create_cli_interface
 from core.controller import CrawlerOrchestrator
 from core.adapters import create_process_backend
@@ -40,15 +48,10 @@ class CrawlerService:
         if self.orchestrator:
             return True
         
-        config_service = self.context.services.get("config")
-        if not config_service:
-            self.logger.error("Config service not available")
-            return False
-            
         try:
             # Set up orchestrator and backend
             self.backend = create_process_backend()
-            self.orchestrator = CrawlerOrchestrator(config_service.config, self.backend)
+            self.orchestrator = CrawlerOrchestrator(self.context.config, self.backend)
             self.logger.info("Crawler service initialized")
             return True
         except Exception as e:
@@ -61,7 +64,6 @@ class CrawlerService:
             f"\nSignal {signal.Signals(signum).name} received. Initiating crawler shutdown..."
         )
         self.stop_crawler()
-        sys.exit(0)
     
     def start_crawler(self, annotate_after_run: bool = False) -> bool:
         """Start the crawler process.
@@ -155,42 +157,46 @@ class CrawlerService:
         """Get crawler status.
         
         Returns:
-            Dictionary with status information
+            Dictionary with raw status information
         """
         try:
             # Not failing if not initialized, return stopped status
             if not self.orchestrator:
                 return {
-                    "process": "Stopped",
-                    "state": "Unknown",
-                    "target_app": "Unknown",
-                    "output_dir": "Unknown"
+                    PROCESS_STATUS_KEY: CRAWLER_STATUS_STOPPED,
+                    PROCESS_ID_KEY: None,
+                    STATE_KEY: CRAWLER_STATUS_UNKNOWN,
+                    TARGET_APP_KEY: None,
+                    OUTPUT_DIR_KEY: None
                 }
                 
             status = self.orchestrator.get_status()
             
             if status:
-                # Convert orchestrator status to CLI format
+                # Return raw status data without formatting
                 return {
-                    "process": f"Running (PID {status.get('process_id', '?')}, CLI-managed)",
-                    "state": status.get("state", "Running"),
-                    "target_app": status.get("app_package", "Unknown"),
-                    "output_dir": status.get("output_dir", "Unknown")
+                    PROCESS_STATUS_KEY: CRAWLER_STATUS_RUNNING,
+                    PROCESS_ID_KEY: status.get("process_id"),
+                    STATE_KEY: status.get("state", CRAWLER_STATUS_RUNNING),
+                    TARGET_APP_KEY: status.get("app_package"),
+                    OUTPUT_DIR_KEY: status.get("output_dir")
                 }
             else:
                 return {
-                    "process": "Stopped",
-                    "state": "Unknown",
-                    "target_app": "Unknown",
-                    "output_dir": "Unknown"
+                    PROCESS_STATUS_KEY: CRAWLER_STATUS_STOPPED,
+                    PROCESS_ID_KEY: None,
+                    STATE_KEY: CRAWLER_STATUS_UNKNOWN,
+                    TARGET_APP_KEY: None,
+                    OUTPUT_DIR_KEY: None
                 }
         except Exception as e:
             self.logger.error(f"Failed to get crawler status: {e}")
             return {
-                "process": "Error",
-                "state": "Unknown",
-                "target_app": "Unknown",
-                "output_dir": "Unknown"
+                PROCESS_STATUS_KEY: CRAWLER_STATUS_ERROR,
+                PROCESS_ID_KEY: None,
+                STATE_KEY: CRAWLER_STATUS_UNKNOWN,
+                TARGET_APP_KEY: None,
+                OUTPUT_DIR_KEY: None
             }
     
     def cleanup(self):

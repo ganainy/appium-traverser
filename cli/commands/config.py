@@ -42,10 +42,15 @@ class ShowConfigCommand(CommandHandler):
         return parser
 
     def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
-        from cli.services.config_service import ConfigService
-
-        config_service = ConfigService(context)
-        config_data = config_service.show_config(args.filter)
+        config_data = context.config._get_user_savable_config()
+        
+        # Filter if needed
+        if args.filter:
+            filtered_config = {
+                k: v for k, v in config_data.items()
+                if args.filter.lower() in k.lower()
+            }
+            config_data = filtered_config
 
         context.services.get(KEYS.TELEMETRY_SERVICE).print_config_table(config_data, args.filter)
 

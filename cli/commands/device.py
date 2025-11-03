@@ -103,17 +103,28 @@ class SelectDeviceCommand(CommandHandler):
                 exit_code=1
             )
 
-        success = device_service.select_device(getattr(args, MSG.SELECT_DEVICE_ARG_NAME))
+        device_udid = getattr(args, MSG.SELECT_DEVICE_ARG_NAME)
+        success = device_service.is_device_connected(device_udid)
 
         if success:
-            return CommandResult(
-                success=True,
-                message=MSG.SELECT_DEVICE_SUCCESS.format(udid=getattr(args, MSG.SELECT_DEVICE_ARG_NAME))
-            )
+            try:
+                # Set the config in the command
+                context.config.set(KEY.CONFIG_DEVICE_UDID, device_udid)
+                context.config.save_user_config()
+                return CommandResult(
+                    success=True,
+                    message=MSG.SELECT_DEVICE_SUCCESS.format(udid=device_udid)
+                )
+            except Exception as e:
+                return CommandResult(
+                    success=False,
+                    message=f"Error saving device selection: {e}",
+                    exit_code=1
+                )
         else:
             return CommandResult(
                 success=False,
-                message=MSG.SELECT_DEVICE_FAIL.format(udid=getattr(args, MSG.SELECT_DEVICE_ARG_NAME)),
+                message=MSG.SELECT_DEVICE_FAIL.format(udid=device_udid),
                 exit_code=1
             )
 
@@ -152,13 +163,23 @@ class AutoSelectDeviceCommand(CommandHandler):
                 exit_code=1
             )
 
-        success = device_service.auto_select_device()
+        udid = device_service.auto_select_device()
 
-        if success:
-            return CommandResult(
-                success=True,
-                message=MSG.AUTO_SELECT_DEVICE_SUCCESS
-            )
+        if udid is not None:
+            try:
+                # Set the config in the command
+                context.config.set(KEY.CONFIG_DEVICE_UDID, udid)
+                context.config.save_user_config()
+                return CommandResult(
+                    success=True,
+                    message=MSG.AUTO_SELECT_DEVICE_SUCCESS
+                )
+            except Exception as e:
+                return CommandResult(
+                    success=False,
+                    message=f"Error saving device selection: {e}",
+                    exit_code=1
+                )
         else:
             return CommandResult(
                 success=False,

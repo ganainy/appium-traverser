@@ -132,18 +132,45 @@ class ListRunsForTargetCommand(CommandHandler):
         
         service = AnalysisService(context)
         
-        # Determine if we're using index or package name
-        is_index = args.target_index is not None
-        identifier = str(args.target_index if is_index else args.target_app_package)
+        # Get the target using the appropriate method
+        if args.target_index is not None:
+            target = service.get_target_by_index(args.target_index)
+        else:
+            target = service.get_target_by_package(args.target_app_package)
         
-        success = service.list_runs_for_target(identifier, is_index)
+        if not target:
+            return CommandResult(
+                success=False,
+                message=ERR_FAILED_LIST_RUNS_FOR_TARGET,
+                exit_code=1
+            )
+        
+        success, result_data = service.list_runs_for_target(target)
         
         if success:
+            # Print the runs information
+            print(f"\nTarget: {result_data['target_info']['app_package']} (Index: {result_data['target_info']['index']})")
+            print(f"Database: {result_data['target_info']['db_filename']}")
+            
+            if result_data.get('message'):
+                print(f"\n{result_data['message']}")
+            
+            if result_data['runs']:
+                print("\nAvailable runs:")
+                for run in result_data['runs']:
+                    print(f"  Run ID: {run.get('run_id', 'N/A')}")
+                    print(f"  Start Time: {run.get('start_time', 'N/A')}")
+                    print(f"  End Time: {run.get('end_time', 'N/A')}")
+                    print(f"  Status: {run.get('status', 'N/A')}")
+                    print()
+            else:
+                print("No runs found for this target.")
+            
             return CommandResult(success=True, message=MSG_RUNS_LISTED_SUCCESS)
         else:
             return CommandResult(
                 success=False,
-                message=ERR_FAILED_LIST_RUNS_FOR_TARGET,
+                message=result_data.get('error', ERR_FAILED_LIST_RUNS_FOR_TARGET),
                 exit_code=1
             )
 
@@ -194,22 +221,34 @@ class GenerateAnalysisPDFCommand(CommandHandler):
         
         service = AnalysisService(context)
         
-        # Determine if we're using index or package name
-        is_index = args.target_index is not None
-        identifier = str(args.target_index if is_index else args.target_app_package)
+        # Get the target using the appropriate method
+        if args.target_index is not None:
+            target = service.get_target_by_index(args.target_index)
+        else:
+            target = service.get_target_by_package(args.target_app_package)
         
-        success = service.generate_analysis_pdf(
-            identifier,
-            is_index,
+        if not target:
+            return CommandResult(
+                success=False,
+                message=ERR_PDF_GENERATION_FAILED,
+                exit_code=1
+            )
+        
+        success, result_data = service.generate_analysis_pdf(
+            target,
             args.pdf_output_name
         )
         
         if success:
-            return CommandResult(success=True, message=MSG_PDF_GENERATION_SUCCESS)
+            pdf_path = result_data.get('pdf_path', 'Unknown location')
+            return CommandResult(
+                success=True,
+                message=f"{MSG_PDF_GENERATION_SUCCESS} PDF saved to: {pdf_path}"
+            )
         else:
             return CommandResult(
                 success=False,
-                message=ERR_PDF_GENERATION_FAILED,
+                message=result_data.get('error', ERR_PDF_GENERATION_FAILED),
                 exit_code=1
             )
 
@@ -256,18 +295,44 @@ class PrintAnalysisSummaryCommand(CommandHandler):
         
         service = AnalysisService(context)
         
-        # Determine if we're using index or package name
-        is_index = args.target_index is not None
-        identifier = str(args.target_index if is_index else args.target_app_package)
+        # Get the target using the appropriate method
+        if args.target_index is not None:
+            target = service.get_target_by_index(args.target_index)
+        else:
+            target = service.get_target_by_package(args.target_app_package)
         
-        success = service.print_analysis_summary(identifier, is_index)
+        if not target:
+            return CommandResult(
+                success=False,
+                message=ERR_ANALYSIS_SUMMARY_FAILED,
+                exit_code=1
+            )
+        
+        success, result_data = service.get_analysis_summary(target)
         
         if success:
+            # Print the analysis summary
+            run_info = result_data.get('run_info', {})
+            metrics = result_data.get('metrics', {})
+            
+            print(f"\nAnalysis Summary for: {target['app_package']} (Index: {target['index']})")
+            print(f"Database: {target['db_filename']}")
+            
+            if run_info:
+                print("\nRun Information:")
+                for key, value in run_info.items():
+                    print(f"  {key}: {value}")
+            
+            if metrics:
+                print("\nMetrics:")
+                for key, value in metrics.items():
+                    print(f"  {key}: {value}")
+            
             return CommandResult(success=True, message=MSG_ANALYSIS_SUMMARY_SUCCESS)
         else:
             return CommandResult(
                 success=False,
-                message=ERR_ANALYSIS_SUMMARY_FAILED,
+                message=result_data.get('error', ERR_ANALYSIS_SUMMARY_FAILED),
                 exit_code=1
             )
 
