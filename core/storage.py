@@ -10,13 +10,29 @@ from .config import Configuration
 
 logger = logging.getLogger(__name__)
 
+# Module-level constant for default database path
+DEFAULT_DB_PATH = "crawler.db"
+
 
 class Storage:
     """
     Handles persistence of crawler sessions and parsed data.
     """
+    
+    # Table Names
+    TABLE_CONFIGS = "configurations"
+    TABLE_SESSIONS = "crawler_sessions"
+    TABLE_DATA = "parsed_data"
+    
+    # Column Lists
+    COLS_CONFIG = ("config_id", "name", "settings", "created_at", "updated_at", "is_default")
+    COLS_SESSION = ("session_id", "config_id", "status", "progress", "start_time", "end_time", "error_message")
+    COLS_DATA = ("data_id", "session_id", "element_type", "identifier", "bounding_box", "properties", "confidence_score", "timestamp")
 
-    def __init__(self, db_path: str = "crawler.db"):
+    def __init__(self, db_path: str = DEFAULT_DB_PATH):
+        """
+        Initialize storage with database path.
+        """
         self.db_path = db_path
         logger.info(f"Initializing storage with database path: {self.db_path}")
         self._init_db()
@@ -28,8 +44,9 @@ class Storage:
         logger.debug("Initializing database tables")
         try:
             with sqlite3.connect(self.db_path) as conn:
-                conn.execute("""
-                    CREATE TABLE IF NOT EXISTS configurations (
+                # Create configurations table
+                conn.execute(f"""
+                    CREATE TABLE IF NOT EXISTS {self.TABLE_CONFIGS} (
                         config_id TEXT PRIMARY KEY,
                         name TEXT NOT NULL,
                         settings TEXT NOT NULL,
@@ -39,8 +56,9 @@ class Storage:
                     )
                 """)
 
-                conn.execute("""
-                    CREATE TABLE IF NOT EXISTS crawler_sessions (
+                # Create crawler_sessions table
+                conn.execute(f"""
+                    CREATE TABLE IF NOT EXISTS {self.TABLE_SESSIONS} (
                         session_id TEXT PRIMARY KEY,
                         config_id TEXT NOT NULL,
                         status TEXT NOT NULL,
@@ -48,12 +66,13 @@ class Storage:
                         start_time TEXT,
                         end_time TEXT,
                         error_message TEXT,
-                        FOREIGN KEY (config_id) REFERENCES configurations (config_id)
+                        FOREIGN KEY (config_id) REFERENCES {self.TABLE_CONFIGS} (config_id)
                     )
                 """)
 
-                conn.execute("""
-                    CREATE TABLE IF NOT EXISTS parsed_data (
+                # Create parsed_data table
+                conn.execute(f"""
+                    CREATE TABLE IF NOT EXISTS {self.TABLE_DATA} (
                         data_id TEXT PRIMARY KEY,
                         session_id TEXT NOT NULL,
                         element_type TEXT NOT NULL,
@@ -62,7 +81,7 @@ class Storage:
                         properties TEXT,
                         confidence_score REAL NOT NULL,
                         timestamp TEXT NOT NULL,
-                        FOREIGN KEY (session_id) REFERENCES crawler_sessions (session_id)
+                        FOREIGN KEY (session_id) REFERENCES {self.TABLE_SESSIONS} (session_id)
                     )
                 """)
             logger.info("Database tables initialized successfully")
@@ -77,11 +96,10 @@ class Storage:
         logger.debug(f"Saving configuration: {config.config_id}")
         try:
             with sqlite3.connect(self.db_path) as conn:
-                conn.execute("""
-                    INSERT OR REPLACE INTO configurations
-                    (config_id, name, settings, created_at, updated_at, is_default)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, (
+                cols = ', '.join(self.COLS_CONFIG)
+                placeholders = ', '.join(['?'] * len(self.COLS_CONFIG))
+                sql = f"INSERT OR REPLACE INTO {self.TABLE_CONFIGS} ({cols}) VALUES ({placeholders})"
+                conn.execute(sql, (
                     config.config_id,
                     config.name,
                     json.dumps(config.settings),
@@ -101,10 +119,9 @@ class Storage:
         logger.debug(f"Retrieving configuration: {config_id}")
         try:
             with sqlite3.connect(self.db_path) as conn:
-                row = conn.execute("""
-                    SELECT config_id, name, settings, created_at, updated_at, is_default
-                    FROM configurations WHERE config_id = ?
-                """, (config_id,)).fetchone()
+                cols = ', '.join(self.COLS_CONFIG)
+                sql = f"SELECT {cols} FROM {self.TABLE_CONFIGS} WHERE config_id = ?"
+                row = conn.execute(sql, (config_id,)).fetchone()
 
                 if row:
                     config = Configuration(
@@ -113,6 +130,9 @@ class Storage:
                         settings=json.loads(row[2]),
                         is_default=bool(row[5])
                     )
+                    # Fix data loss bug: manually set timestamps from database row
+                    config.created_at = datetime.fromisoformat(row[3])
+                    config.updated_at = datetime.fromisoformat(row[4])
                     logger.info(f"Configuration retrieved successfully: {config_id}")
                     return config
                 else:
@@ -129,11 +149,10 @@ class Storage:
         logger.debug(f"Saving session: {session.session_id}")
         try:
             with sqlite3.connect(self.db_path) as conn:
-                conn.execute("""
-                    INSERT OR REPLACE INTO crawler_sessions
-                    (session_id, config_id, status, progress, start_time, end_time, error_message)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                """, (
+                cols = ', '.join(self.COLS_SESSION)
+                placeholders = ', '.join(['?'] * len(self.COLS_SESSION))
+                sql = f"INSERT OR REPLACE INTO {self.TABLE_SESSIONS} ({cols}) VALUES ({placeholders})"
+                conn.execute(sql, (
                     session.session_id,
                     session.config_id,
                     session.status,
@@ -154,10 +173,9 @@ class Storage:
         logger.debug(f"Retrieving session: {session_id}")
         try:
             with sqlite3.connect(self.db_path) as conn:
-                row = conn.execute("""
-                    SELECT session_id, config_id, status, progress, start_time, end_time, error_message
-                    FROM crawler_sessions WHERE session_id = ?
-                """, (session_id,)).fetchone()
+                cols = ', '.join(self.COLS_SESSION)
+                sql = f"SELECT {cols} FROM {self.TABLE_SESSIONS} WHERE session_id = ?"
+                row = conn.execute(sql, (session_id,)).fetchone()
 
                 if row:
                     # Import here to avoid circular import
@@ -189,11 +207,10 @@ class Storage:
         try:
             with sqlite3.connect(self.db_path) as conn:
                 for data in data_list:
-                    conn.execute("""
-                        INSERT INTO parsed_data
-                        (data_id, session_id, element_type, identifier, bounding_box, properties, confidence_score, timestamp)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (
+                    cols = ', '.join(self.COLS_DATA)
+                    placeholders = ', '.join(['?'] * len(self.COLS_DATA))
+                    sql = f"INSERT INTO {self.TABLE_DATA} ({cols}) VALUES ({placeholders})"
+                    conn.execute(sql, (
                         data.data_id,
                         data.session_id,
                         data.element_type,
@@ -214,8 +231,27 @@ class Storage:
         """
         logger.debug(f"Retrieving session results for: {session_id}")
         try:
-            # Implementation would return list of ParsedData
+            from .data import ParsedData  # Import here to avoid circular import
             results = []
+
+            with sqlite3.connect(self.db_path) as conn:
+                cols = ', '.join(self.COLS_DATA)
+                sql = f"SELECT {cols} FROM {self.TABLE_DATA} WHERE session_id = ?"
+                rows = conn.execute(sql, (session_id,)).fetchall()
+
+                for row in rows:
+                    data = ParsedData(
+                        data_id=row[0],
+                        session_id=row[1],
+                        element_type=row[2],
+                        identifier=row[3],
+                        bounding_box=json.loads(row[4]),
+                        properties=json.loads(row[5]) if row[5] else None,
+                        confidence_score=row[6]
+                    )
+                    data.timestamp = datetime.fromisoformat(row[7])
+                    results.append(data)
+
             logger.info(f"Retrieved {len(results)} results for session: {session_id}")
             return results
         except Exception as e:

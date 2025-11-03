@@ -19,6 +19,13 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union, TYPE_CHECK
 if TYPE_CHECKING:
     from config.config import Config
 
+# Module-level constants for default fallback strings
+DEFAULT_SHUTDOWN_FLAG = 'crawler_shutdown.flag'
+DEFAULT_PAUSE_FLAG = 'crawler_pause.flag'
+DEFAULT_OUTPUT_DIR = 'output_data'
+DEFAULT_LOG_SUBDIR = 'logs'
+DEFAULT_LOG_FILE = 'crawler.log'
+
 
 @dataclass
 class CrawlerLaunchPlan:
@@ -57,6 +64,9 @@ class CrawlerLaunchPlan:
 class FlagController:
     """Manages flag files for crawler process control."""
     
+    SHUTDOWN_FLAG_CONTENT = "shutdown"
+    PAUSE_FLAG_CONTENT = "pause"
+    
     def __init__(self, shutdown_flag_path: str, pause_flag_path: str):
         self.shutdown_flag_path = shutdown_flag_path
         self.pause_flag_path = pause_flag_path
@@ -65,7 +75,7 @@ class FlagController:
     def create_shutdown_flag(self) -> bool:
         """Create a shutdown flag to signal the crawler to stop."""
         try:
-            Path(self.shutdown_flag_path).write_text("shutdown")
+            Path(self.shutdown_flag_path).write_text(self.SHUTDOWN_FLAG_CONTENT)
             self.logger.debug(f"Created shutdown flag: {self.shutdown_flag_path}")
             return True
         except Exception as e:
@@ -75,7 +85,7 @@ class FlagController:
     def create_pause_flag(self) -> bool:
         """Create a pause flag to signal the crawler to pause."""
         try:
-            Path(self.pause_flag_path).write_text("pause")
+            Path(self.pause_flag_path).write_text(self.PAUSE_FLAG_CONTENT)
             self.logger.debug(f"Created pause flag: {self.pause_flag_path}")
             return True
         except Exception as e:
@@ -144,16 +154,18 @@ class ProcessBackend(ABC):
 class OutputParser:
     """Handles parsing of crawler output for standardized callbacks."""
     
+    EVENT_PREFIX_MAP = {
+        'step': 'UI_STEP:',
+        'action': 'UI_ACTION:',
+        'screenshot': 'UI_SCREENSHOT:',
+        'status': 'UI_STATUS:',
+        'focus': 'UI_FOCUS:',
+        'end': 'UI_END:',
+    }
+    
     def __init__(self):
-        self.callbacks = {
-            'step': [],
-            'action': [],
-            'screenshot': [],
-            'status': [],
-            'focus': [],
-            'end': [],
-            'log': []
-        }
+        self.callbacks = {key: [] for key in self.EVENT_PREFIX_MAP}
+        self.callbacks['log'] = []
     
     def register_callback(self, event_type: str, callback: Callable):
         """Register a callback for a specific event type."""
@@ -166,64 +178,30 @@ class OutputParser:
         if not line:
             return
         
-        # Check for UI_STEP_PREFIX:step
-        if "UI_STEP:" in line:
-            try:
-                step_num = int(line.split("UI_STEP:")[1].strip())
-                for cb in self.callbacks['step']:
-                    cb(step_num)
-            except (ValueError, IndexError):
-                pass
+        # Iterate through event types and their prefixes
+        for event_type, prefix in self.EVENT_PREFIX_MAP.items():
+            if line.startswith(prefix):
+                try:
+                    value = line.split(prefix, 1)[1].strip()
+                    
+                    # Handle step case specifically to cast to int
+                    if event_type == 'step':
+                        try:
+                            value = int(value)
+                        except ValueError:
+                            return  # Skip if step value is not a valid integer
+                    
+                    # Trigger all registered callbacks for this event type
+                    for cb in self.callbacks[event_type]:
+                        cb(value)
+                    
+                    return  # Successfully parsed and dispatched
+                except IndexError:
+                    continue  # Try next event type if split fails
         
-        # Check for UI_ACTION_PREFIX:action
-        elif "UI_ACTION:" in line:
-            try:
-                action = line.split("UI_ACTION:")[1].strip()
-                for cb in self.callbacks['action']:
-                    cb(action)
-            except IndexError:
-                pass
-        
-        # Check for UI_SCREENSHOT_PREFIX:path
-        elif "UI_SCREENSHOT:" in line:
-            try:
-                path = line.split("UI_SCREENSHOT:")[1].strip()
-                for cb in self.callbacks['screenshot']:
-                    cb(path)
-            except IndexError:
-                pass
-        
-        # Check for UI_STATUS_PREFIX:status
-        elif "UI_STATUS:" in line:
-            try:
-                status = line.split("UI_STATUS:")[1].strip()
-                for cb in self.callbacks['status']:
-                    cb(status)
-            except IndexError:
-                pass
-        
-        # Check for UI_FOCUS_PREFIX:focus_info
-        elif "UI_FOCUS:" in line:
-            try:
-                focus_data = line.split("UI_FOCUS:")[1].strip()
-                for cb in self.callbacks['focus']:
-                    cb(focus_data)
-            except IndexError:
-                pass
-        
-        # Check for UI_END_PREFIX:final_status
-        elif "UI_END:" in line:
-            try:
-                end_status = line.split("UI_END:")[1].strip()
-                for cb in self.callbacks['end']:
-                    cb(end_status)
-            except IndexError:
-                pass
-        
-        # Regular log line
-        else:
-            for cb in self.callbacks['log']:
-                cb(line)
+        # If no matches found, treat as a log line
+        for cb in self.callbacks['log']:
+            cb(line)
 
 
 class CrawlerOrchestrator:
@@ -239,25 +217,25 @@ class CrawlerOrchestrator:
         
         # Set up flag paths from config
         shutdown_flag_path = getattr(config, 'SHUTDOWN_FLAG_PATH',
-                                os.path.join(config.BASE_DIR or '.', 'crawler_shutdown.flag'))
+                                os.path.join(config.BASE_DIR or '.', DEFAULT_SHUTDOWN_FLAG))
         pause_flag_path = getattr(config, 'PAUSE_FLAG_PATH',
-                                os.path.join(config.BASE_DIR or '.', 'crawler_pause.flag'))
+                                os.path.join(config.BASE_DIR or '.', DEFAULT_PAUSE_FLAG))
         
         self.flag_controller = FlagController(shutdown_flag_path, pause_flag_path)
     
     def prepare_plan(self) -> CrawlerLaunchPlan:
         """Prepare a launch plan with validation."""
-        # Get paths from config
-        api_dir = os.path.dirname(__file__)  # traverser_ai_api/core/
-        project_root = os.path.dirname(api_dir)  # traverser_ai_api/
-        main_script = os.path.join(project_root, "main.py")  # traverser_ai_api/main.py
+        # Get paths from configuration
+        project_root = getattr(self.config, 'PROJECT_ROOT')
+        main_script_name = getattr(self.config, 'MAIN_SCRIPT_NAME', 'main.py')
+        main_script = os.path.join(project_root, main_script_name)
         
         # Resolve paths
-        output_data_dir = getattr(self.config, 'OUTPUT_DATA_DIR', 
-                                os.path.join(project_root, 'output_data'))
-        log_dir = getattr(self.config, 'LOG_DIR', 
-                        os.path.join(output_data_dir, 'logs'))
-        log_file_path = os.path.join(log_dir, getattr(self.config, 'LOG_FILE_NAME', 'crawler.log'))
+        output_data_dir = getattr(self.config, 'OUTPUT_DATA_DIR',
+                                os.path.join(project_root, DEFAULT_OUTPUT_DIR))
+        log_dir = getattr(self.config, 'LOG_DIR',
+                        os.path.join(output_data_dir, DEFAULT_LOG_SUBDIR))
+        log_file_path = os.path.join(log_dir, getattr(self.config, 'LOG_FILE_NAME', DEFAULT_LOG_FILE))
         
         # PID file path (use property to resolve placeholders)
         pid_file_path = getattr(self.config, 'CRAWLER_PID_PATH')
@@ -335,9 +313,8 @@ class CrawlerOrchestrator:
                 except Exception as e:
                     self.logger.error(f"Failed to write PID file: {e}")
             
-            # Start output monitoring if backend supports it
-            if hasattr(self.backend, 'start_output_monitoring'):
-                self.backend.start_output_monitoring(self.output_parser)
+            # Start output monitoring
+            self.backend.start_output_monitoring(self.output_parser)
         else:
             self.logger.error("Failed to start crawler process")
         

@@ -19,6 +19,20 @@ from .controller import ProcessBackend
 if TYPE_CHECKING:
     from core.controller import CrawlerLaunchPlan, OutputParser, ProcessBackend
 
+# Module-level constants for Qt callback names
+QT_CALLBACK_NAMES = ('step', 'action', 'screenshot', 'status', 'focus', 'end', 'log')
+
+# Timeout constants (in seconds/milliseconds)
+SUBPROCESS_GRACEFUL_TIMEOUT_SEC = 5
+QT_START_TIMEOUT_MS = 5000
+QT_GRACEFUL_FINISH_TIMEOUT_MS = 5000
+QT_KILL_FINISH_TIMEOUT_MS = 3000
+
+# Process/Encoding constants
+PYTHON_EXEC_ARGS = ["-u"]
+DEFAULT_ENCODING = "utf-8"
+DEFAULT_ENCODING_ERRORS = "replace"
+
 
 class SubprocessBackend(ProcessBackend):
     """Process backend using subprocess for CLI environments."""
@@ -33,15 +47,15 @@ class SubprocessBackend(ProcessBackend):
         """Start a process using subprocess."""
         try:
             self.process = subprocess.Popen(
-                [plan.python_executable, "-u", plan.script_path],
+                [plan.python_executable] + PYTHON_EXEC_ARGS + [plan.script_path],
                 cwd=plan.working_directory,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
                 universal_newlines=True,
-                encoding="utf-8",
-                errors="replace",
+                encoding=DEFAULT_ENCODING,
+                errors=DEFAULT_ENCODING_ERRORS,
                 env=plan.environment,
             )
             
@@ -63,7 +77,7 @@ class SubprocessBackend(ProcessBackend):
             
             # Wait a bit for graceful termination
             try:
-                self.process.wait(timeout=5)
+                self.process.wait(timeout=SUBPROCESS_GRACEFUL_TIMEOUT_SEC)
                 self.logger.debug("Subprocess terminated gracefully")
             except subprocess.TimeoutExpired:
                 # Force kill if it doesn't terminate gracefully
@@ -135,6 +149,7 @@ class QtProcessBackend(ProcessBackend):
         self._output_parser = None
         self._qt_ready_read_connection = None
         self._qt_finished_connection = None
+        self._output_buffer = ""
         
         # Create a QObject to host signals
         class ProcessSignals(QObject):
@@ -167,9 +182,9 @@ class QtProcessBackend(ProcessBackend):
             self.process.setWorkingDirectory(plan.working_directory)
             
             # Start the process
-            self.process.start(plan.python_executable, ["-u", plan.script_path])
+            self.process.start(plan.python_executable, PYTHON_EXEC_ARGS + [plan.script_path])
             
-            if self.process.waitForStarted(5000):  # Wait up to 5 seconds for start
+            if self.process.waitForStarted(QT_START_TIMEOUT_MS):  # Wait up to 5 seconds for start
                 self.logger.debug(f"Started QProcess with PID {self.process.processId()}")
                 return True
             else:
@@ -190,12 +205,12 @@ class QtProcessBackend(ProcessBackend):
             self.process.terminate()
             
             # Wait a bit for graceful termination
-            if self.process.waitForFinished(5000):
+            if self.process.waitForFinished(QT_GRACEFUL_FINISH_TIMEOUT_MS):
                 self.logger.debug("QProcess terminated gracefully")
             else:
                 # Force kill if it doesn't terminate gracefully
                 self.process.kill()
-                self.process.waitForFinished(3000)
+                self.process.waitForFinished(QT_KILL_FINISH_TIMEOUT_MS)
                 self.logger.debug("QProcess killed forcefully")
             
             # Clean up signal connections
@@ -227,31 +242,42 @@ class QtProcessBackend(ProcessBackend):
             self._handle_output
         )
         
-        # Set up callbacks to emit Qt signals
-        output_parser.register_callback('step', self.signals.step_updated.emit)
-        output_parser.register_callback('action', self.signals.action_updated.emit)
-        output_parser.register_callback('screenshot', self.signals.screenshot_updated.emit)
-        output_parser.register_callback('status', self.signals.status_updated.emit)
-        output_parser.register_callback('focus', self.signals.focus_updated.emit)
-        output_parser.register_callback('end', self.signals.end_updated.emit)
-        output_parser.register_callback('log', self.signals.log_updated.emit)
+        # Set up callbacks to emit Qt signals dynamically
+        for name in QT_CALLBACK_NAMES:
+            try:
+                signal = getattr(self.signals, f"{name}_updated")
+                output_parser.register_callback(name, signal.emit)
+            except AttributeError:
+                self.logger.warning(f"Signal '{name}_updated' not found in ProcessSignals.")
     
     def _handle_output(self):
-        """Handle QProcess output and parse it."""
+        """Handle QProcess output and parse it line by line."""
         if not self.process:
             return
         
         try:
+            # Read all available data
             raw_data = self.process.readAllStandardOutput().data()
             if not raw_data:
                 return
             
-            output = bytes(raw_data).decode('utf-8', errors='replace')
+            # Decode the data using the default encoding
+            output = bytes(raw_data).decode(DEFAULT_ENCODING, errors=DEFAULT_ENCODING_ERRORS)
             
-            if self._output_parser:
-                for line in output.strip().split('\n'):
-                    if line.strip():
-                        self._output_parser.parse_line(line)
+            # Append to the buffer
+            self._output_buffer += output
+            
+            # Process complete lines
+            while '\n' in self._output_buffer:
+                # Split at the first newline
+                line, remainder = self._output_buffer.split('\n', 1)
+                
+                # Update the buffer to the remainder
+                self._output_buffer = remainder
+                
+                # Parse the line if it's not empty
+                if line.strip() and self._output_parser:
+                    self._output_parser.parse_line(line)
                         
         except Exception as e:
             self.logger.error(f"Error handling QProcess output: {e}")

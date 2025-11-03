@@ -13,6 +13,15 @@ class Configuration:
     """
     Represents shared settings for crawling behavior.
     """
+    
+    # Default fallback name
+    DEFAULT_CONFIG_NAME = "default"
+    # --- Schema Definition ---
+    REQUIRED_SETTINGS = ["max_depth", "timeout", "platform"]
+    VALID_PLATFORMS = ["android", "ios"]
+    # --- Validation Rules ---
+    MIN_DEPTH = 1
+    MIN_TIMEOUT_SEC = 30
 
     def __init__(self, name: str, settings: Dict[str, Any], config_id: Optional[str] = None, is_default: bool = False):
         self.config_id = config_id or str(uuid.uuid4())
@@ -33,20 +42,18 @@ class Configuration:
             if not isinstance(self.settings, dict):
                 raise ValueError("Settings must be a dictionary")
 
-            required_keys = ["max_depth", "timeout", "platform"]
-            for key in required_keys:
+            for key in self.REQUIRED_SETTINGS:
                 if key not in self.settings:
                     raise ValueError(f"Required setting '{key}' is missing")
 
-            if not isinstance(self.settings.get("max_depth"), int) or self.settings["max_depth"] < 1:
-                raise ValueError("max_depth must be a positive integer")
+            if not isinstance(self.settings.get("max_depth"), int) or self.settings["max_depth"] < self.MIN_DEPTH:
+                raise ValueError(f"max_depth must be at least {self.MIN_DEPTH}")
 
-            if not isinstance(self.settings.get("timeout"), int) or self.settings["timeout"] < 30:
-                raise ValueError("timeout must be at least 30 seconds")
+            if not isinstance(self.settings.get("timeout"), int) or self.settings["timeout"] < self.MIN_TIMEOUT_SEC:
+                raise ValueError(f"timeout must be at least {self.MIN_TIMEOUT_SEC} seconds")
 
-            valid_platforms = ["android", "ios"]
-            if self.settings.get("platform") not in valid_platforms:
-                raise ValueError(f"platform must be one of {valid_platforms}")
+            if self.settings.get("platform") not in self.VALID_PLATFORMS:
+                raise ValueError(f"platform must be one of {self.VALID_PLATFORMS}")
 
             logger.debug(f"Configuration '{self.name}' validated successfully")
         except Exception as e:
@@ -59,7 +66,7 @@ class Configuration:
         Create Configuration from dictionary.
         """
         return cls(
-            name=data.get("name", "default"),
+            name=data.get("name", cls.DEFAULT_CONFIG_NAME),
             settings=data.get("settings", {}),
             config_id=data.get("config_id"),
             is_default=data.get("is_default", False)

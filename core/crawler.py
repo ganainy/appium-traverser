@@ -5,10 +5,19 @@ import uuid
 import logging
 from datetime import datetime
 from typing import List, Optional
+from enum import Enum
 from .config import Configuration
 from .storage import Storage
 
 logger = logging.getLogger(__name__)
+
+
+class SessionStatus(str, Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    STOPPED = "stopped"
 
 
 class CrawlerSession:
@@ -19,7 +28,7 @@ class CrawlerSession:
     def __init__(self, config: Optional[Configuration] = None, session_id: Optional[str] = None):
         self.session_id = session_id or str(uuid.uuid4())
         self.config_id = config.config_id if config else None
-        self.status = "pending"
+        self.status: SessionStatus = SessionStatus.PENDING
         self.progress = 0.0
         self.start_time: Optional[datetime] = None
         self.end_time: Optional[datetime] = None
@@ -30,7 +39,7 @@ class CrawlerSession:
         """
         Validate session state.
         """
-        valid_statuses = ["pending", "running", "completed", "failed", "stopped"]
+        valid_statuses = [s.value for s in SessionStatus]
         if self.status not in valid_statuses:
             raise ValueError(f"Invalid status: {self.status}")
 
@@ -40,27 +49,27 @@ class CrawlerSession:
         if self.end_time and self.start_time and self.end_time < self.start_time:
             raise ValueError("End time cannot be before start time")
 
-        if self.status == "failed" and not self.error_message:
+        if self.status == SessionStatus.FAILED and not self.error_message:
             raise ValueError("Error message required for failed sessions")
 
     def start(self) -> None:
         """
         Start the crawling session.
         """
-        if self.status != "pending":
+        if self.status != SessionStatus.PENDING:
             raise ValueError("Can only start pending sessions")
 
-        self.status = "running"
+        self.status = SessionStatus.RUNNING
         self.start_time = datetime.now()
 
     def complete(self) -> None:
         """
         Mark session as completed.
         """
-        if self.status != "running":
+        if self.status != SessionStatus.RUNNING:
             raise ValueError("Can only complete running sessions")
 
-        self.status = "completed"
+        self.status = SessionStatus.COMPLETED
         self.progress = 1.0
         self.end_time = datetime.now()
 
@@ -68,7 +77,7 @@ class CrawlerSession:
         """
         Mark session as failed.
         """
-        self.status = "failed"
+        self.status = SessionStatus.FAILED
         self.error_message = error_message
         self.end_time = datetime.now()
 
@@ -76,10 +85,10 @@ class CrawlerSession:
         """
         Stop the crawling session.
         """
-        if self.status not in ["running", "pending"]:
+        if self.status not in [SessionStatus.RUNNING, SessionStatus.PENDING]:
             raise ValueError("Can only stop running or pending sessions")
 
-        self.status = "stopped"
+        self.status = SessionStatus.STOPPED
         self.end_time = datetime.now()
 
 
@@ -97,18 +106,11 @@ class Crawler:
         Start a new crawling session.
         """
         try:
-            logger.debug("DIAGNOSTIC: About to validate config")
             self.config.validate()
-            logger.debug("DIAGNOSTIC: Config validated successfully")
             session = CrawlerSession(self.config)
-            logger.debug(f"DIAGNOSTIC: Created session object with status: {session.status}")
+            session.start()
             self.storage.save_session(session)
-            logger.debug(f"DIAGNOSTIC: Session saved to storage, status after save: {session.status}")
             logger.info(f"Started crawler session {session.session_id} with config {self.config.name}")
-            
-            # DIAGNOSTIC: Critical issue - session remains in 'pending' state
-            logger.warning("DIAGNOSTIC: Session created but never transitioned to 'running' - this is likely the root cause!")
-            logger.debug(f"DIAGNOSTIC: Session details: {session}")
             
             return session
         except Exception as e:
@@ -120,19 +122,13 @@ class Crawler:
         Get the current status of a crawling session.
         """
         try:
-            logger.debug(f"DIAGNOSTIC: Retrieving session {session_id} from storage")
             session = self.storage.get_session(session_id)
             if session:
-                logger.debug(f"DIAGNOSTIC: Retrieved session {session_id} with status: {session.status}")
-                logger.debug(f"DIAGNOSTIC: Session start_time: {session.start_time}, end_time: {session.end_time}")
-                if session.status == "pending":
-                    logger.warning(f"DIAGNOSTIC: Session {session_id} still in 'pending' state - no crawling logic executed!")
                 return session
             else:
                 # Session not found, create a new one (for backward compatibility)
-                logger.warning(f"DIAGNOSTIC: Session {session_id} not found in storage, creating new one")
+                logger.warning(f"Session {session_id} not found in storage, creating new one")
                 session = CrawlerSession(self.config, session_id)
-                logger.debug(f"DIAGNOSTIC: Created new session for {session_id}: {session.status}")
                 return session
         except Exception as e:
             logger.error(f"Failed to get status for session {session_id}: {e}")

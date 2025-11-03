@@ -13,6 +13,18 @@ class ParsedData:
     """
     Represents structured data extracted during crawling.
     """
+    
+    # Schema Definition
+    VALID_ELEMENT_TYPES = ["button", "text", "input", "image", "container"]
+    # Bounding Box Schema
+    BBOX_TOP_LEFT_KEY = "top_left"
+    BBOX_BOTTOM_RIGHT_KEY = "bottom_right"
+    BBOX_REQUIRED_KEYS = [BBOX_TOP_LEFT_KEY, BBOX_BOTTOM_RIGHT_KEY]
+    BBOX_COORD_LENGTH = 2
+    MIN_COORD_VALUE = 0
+    # Validation Rules
+    MIN_CONFIDENCE = 0.0
+    MAX_CONFIDENCE = 1.0
 
     def __init__(
         self,
@@ -38,8 +50,7 @@ class ParsedData:
         Validate parsed data.
         """
         logger.debug(f"Validating ParsedData: {self.data_id}")
-        valid_types = ["button", "text", "input", "image", "container"]
-        if self.element_type not in valid_types:
+        if self.element_type not in self.VALID_ELEMENT_TYPES:
             logger.error(f"Invalid element type: {self.element_type}")
             raise ValueError(f"Invalid element type: {self.element_type}")
 
@@ -51,28 +62,27 @@ class ParsedData:
             logger.error("Bounding box must be a dictionary")
             raise ValueError("Bounding box must be a dictionary")
 
-        required_keys = ["top_left", "bottom_right"]
-        for key in required_keys:
+        for key in self.BBOX_REQUIRED_KEYS:
             if key not in self.bounding_box:
                 logger.error(f"Bounding box missing {key}")
                 raise ValueError(f"Bounding box missing {key}")
 
-            if not isinstance(self.bounding_box[key], list) or len(self.bounding_box[key]) != 2:
+            if not isinstance(self.bounding_box[key], list) or len(self.bounding_box[key]) != self.BBOX_COORD_LENGTH:
                 logger.error(f"{key} must be a list of 2 integers")
                 raise ValueError(f"{key} must be a list of 2 integers")
 
-            if not all(isinstance(coord, int) and coord >= 0 for coord in self.bounding_box[key]):
+            if not all(isinstance(coord, int) and coord >= self.MIN_COORD_VALUE for coord in self.bounding_box[key]):
                 logger.error(f"{key} coordinates must be non-negative integers")
                 raise ValueError(f"{key} coordinates must be non-negative integers")
 
         # Validate bounding box geometry
-        tl = self.bounding_box["top_left"]
-        br = self.bounding_box["bottom_right"]
+        tl = self.bounding_box[self.BBOX_TOP_LEFT_KEY]
+        br = self.bounding_box[self.BBOX_BOTTOM_RIGHT_KEY]
         if tl[0] >= br[0] or tl[1] >= br[1]:
             logger.error("Invalid bounding box: top_left must be above and left of bottom_right")
             raise ValueError("Invalid bounding box: top_left must be above and left of bottom_right")
 
-        if not (0.0 <= self.confidence_score <= 1.0):
+        if not (self.MIN_CONFIDENCE <= self.confidence_score <= self.MAX_CONFIDENCE):
             logger.error("Confidence score must be between 0.0 and 1.0")
             raise ValueError("Confidence score must be between 0.0 and 1.0")
 

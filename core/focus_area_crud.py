@@ -20,7 +20,10 @@ import json
 
 _focus_areas = []
 _focus_areas_lock = threading.Lock()
-_STORAGE_PATH = os.path.join(os.path.dirname(__file__), 'focus_areas.json')
+_DEFAULT_STORAGE_FILENAME = 'focus_areas.json'
+_MAX_FOCUS_AREAS = 10
+_STORAGE_PATH = os.path.join(os.path.dirname(__file__), _DEFAULT_STORAGE_FILENAME)
+_data_loaded = False
 
 def _load_focus_areas():
     global _focus_areas
@@ -72,7 +75,10 @@ def list_focus_areas() -> List[dict]:
         List of dicts representing focus areas.
     """
     with _focus_areas_lock:
-        _load_focus_areas()
+        global _data_loaded
+        if not _data_loaded:
+            _load_focus_areas()
+            _data_loaded = True
         return [fa.to_dict() for fa in _focus_areas]
 
 
@@ -88,9 +94,12 @@ def add_focus_area(name: str, description: Optional[str] = None) -> dict:
         ValueError if name is not unique or max areas reached.
     """
     with _focus_areas_lock:
-        _load_focus_areas()
-        if len(_focus_areas) >= 10:
-            raise ValueError("Maximum of 10 focus areas allowed.")
+        global _data_loaded
+        if not _data_loaded:
+            _load_focus_areas()
+            _data_loaded = True
+        if len(_focus_areas) >= _MAX_FOCUS_AREAS:
+            raise ValueError(f"Maximum of {_MAX_FOCUS_AREAS} focus areas allowed.")
         if any(fa.name == name for fa in _focus_areas):
             raise ValueError("Focus area name must be unique.")
         new_id = max([fa.id for fa in _focus_areas], default=0) + 1
@@ -109,7 +118,10 @@ def remove_focus_area(id: int) -> None:
         ValueError if not found.
     """
     with _focus_areas_lock:
-        _load_focus_areas()
+        global _data_loaded
+        if not _data_loaded:
+            _load_focus_areas()
+            _data_loaded = True
         idx = next((i for i, fa in enumerate(_focus_areas) if fa.id == id), None)
         if idx is None:
             raise ValueError("Focus area not found.")
@@ -130,7 +142,10 @@ def update_focus_area(id: int, name: Optional[str] = None, description: Optional
         ValueError if not found or name not unique.
     """
     with _focus_areas_lock:
-        _load_focus_areas()
+        global _data_loaded
+        if not _data_loaded:
+            _load_focus_areas()
+            _data_loaded = True
         fa = next((fa for fa in _focus_areas if fa.id == id), None)
         if fa is None:
             raise ValueError("Focus area not found.")
