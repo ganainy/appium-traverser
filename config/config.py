@@ -11,13 +11,13 @@ from utils.paths import SessionPathManager
 # --- Refactored Centralized Configuration Class ---
 class Config:
     """
-    Central configuration class with four-layer precedence:
-    cache > user storage (SQLite) > environment > Pydantic defaults
+    Central configuration class with three-layer precedence:
+    user storage (SQLite) > environment > module defaults
     """
     def __init__(self, user_config_json_path: Optional[str] = None):
         self._defaults = type('Defaults', (), {})()  # Empty defaults object as placeholder
         self._user_store = UserConfigStore()
-        self._cache: Dict[str, Any] = {}
+        self._volatile_overrides: Dict[str, Any] = {}
         self._env = os.environ
         # Load .env file if it exists
         try:
@@ -37,7 +37,7 @@ class Config:
         # For backward compatibility, set up path-related attributes from defaults
         self.BASE_DIR = os.path.abspath(os.path.dirname(__file__))
         self.SHUTDOWN_FLAG_PATH = os.path.abspath(os.path.join(self.BASE_DIR, "..", "shutdown.flag"))
-        # Cache for resolved session context
+        # Placeholder for session-specific metadata (non-persistent)
         self._session_context: Dict[str, Any] = {}
 
     def _project_root(self) -> str:
@@ -70,31 +70,58 @@ class Config:
         return key.upper() in self._secrets or key.lower().endswith("_key")
 
     def get(self, key: str, default: Any = None) -> Any:
-        # 1. Check runtime cache
-        if key in self._cache:
-            return self._cache[key]
-        # 2. Check user storage (SQLite)
-        val = self._user_store.get(key)
-        if val is not None and val != "":  # Skip empty strings to allow fallback to defaults
-            self._cache[key] = val
-            return val
-        # 3. Check environment variables
-        if key in self._env:
-            val = self._env[key]
-            self._cache[key] = val
-            return val
-        # 4. Fallback to hardcoded defaults (module-level constants)
+        # Layer 1a: runtime-only overrides set with persist=False
+        if key in self._volatile_overrides:
+            return self._volatile_overrides[key]
+
+        # Layer 1b: user storage (SQLite)
+        user_value = self._user_store.get(key)
+        if user_value is not None and user_value != "":
+            return user_value
+        normalized_key = key.upper()
+        if normalized_key != key:
+            if normalized_key in self._volatile_overrides:
+                return self._volatile_overrides[normalized_key]
+            alt_user_value = self._user_store.get(normalized_key)
+            if alt_user_value is not None and alt_user_value != "":
+                return alt_user_value
+
+        # Layer 2: environment variables
+        env_value = self._env.get(key)
+        if env_value is None and normalized_key != key:
+            env_value = self._env.get(normalized_key)
+        if env_value is not None:
+            return env_value
+
+        # Layer 3: module defaults
         module = globals()
         if key in module:
-            val = module[key]
-            self._cache[key] = val
-            return val
+            return module[key]
+        if normalized_key in module:
+            return module[normalized_key]
         return default
 
     def set(self, key: str, value: Any, persist: bool = True) -> None:
-        self._cache[key] = value
-        if persist and not self._is_secret(key):
-            self._user_store.set(key, value)
+        if not persist:
+            if value is None:
+                self._volatile_overrides.pop(key, None)
+                self._volatile_overrides.pop(key.upper(), None)
+            else:
+                self._volatile_overrides[key] = value
+            return
+
+        if self._is_secret(key):
+            if value is None:
+                self._env.pop(key.upper(), None)
+            else:
+                self._env[key.upper()] = str(value)
+            self._volatile_overrides.pop(key, None)
+            self._volatile_overrides.pop(key.upper(), None)
+            return
+
+        self._volatile_overrides.pop(key, None)
+        self._volatile_overrides.pop(key.upper(), None)
+        self._user_store.set(key, value)
 
     def save_user_config(self):
         # No-op: user config is now persisted in SQLite
@@ -248,7 +275,7 @@ class Config:
     def update_setting_and_save(self, key: str, value: Any, callback: Optional[Callable] = None) -> None:
         """
         Backwards-compatible helper used throughout the codebase.
-        Persists the value to the runtime cache and user store (unless secret),
+        Persists the value following the standard precedence rules,
         then invokes an optional callback (used to sync UI/API files).
         """
         try:

@@ -876,7 +876,7 @@ class CrawlerManager(QObject):
                 except Exception:
                     pass
                 
-            # Check for UI_FOCUS_PREFIX:focus_info
+            # Check for UI_FOCUS output lines
             focus_match = re.search(r'UI_FOCUS:(.*?)($|\n)', output)
             if focus_match:
                 try:

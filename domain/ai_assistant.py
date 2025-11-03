@@ -8,7 +8,6 @@ from collections import OrderedDict
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-import google.generativeai as genai
 from google.ai import generativelanguage as glm
 from google.ai.generativelanguage import Content, Part, Schema
 from google.ai.generativelanguage import Type as GLMType

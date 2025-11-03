@@ -14,10 +14,6 @@ class AppiumDriver:
     def connect(self) -> bool:
         """Initialize MCP client connection."""
         try:
-            # Import here to avoid circular imports
-            from mcp import ClientSession
-            import websockets
-
             # For now, assume MCP server is running locally
             # In production, this would connect to the MCP server
             # self.mcp_client = ClientSession(...)

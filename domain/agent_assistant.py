@@ -8,29 +8,79 @@ import re
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from PIL import Image
+from pydantic import BaseModel, ValidationError, validator
+
+# MCP client exceptions
+from infrastructure.mcp_client import MCPConnectionError, MCPCircuitOpenError
 
 # LangChain imports for orchestration
-from langchain_core.prompts import ChatPromptTemplate, SystemMessagePromptTemplate, HumanMessagePromptTemplate
-from langchain_core.output_parsers import JsonOutputParser
-from langchain_core.runnables import RunnablePassthrough, RunnableLambda
-from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
-from langchain_core.language_models import BaseLanguageModel
-from langchain_core.tools import BaseTool
-from langchain.agents import AgentExecutor, create_openai_tools_agent
-from langchain.chains import LLMChain
+from langchain_core.runnables import RunnableLambda
 from langgraph.checkpoint.memory import MemorySaver
 
 # Always use absolute import for model_adapters
 from domain.model_adapters import create_model_adapter, Session
+from domain import constants as K
+from domain.prompts import JSON_OUTPUT_SCHEMA, AVAILABLE_ACTIONS, ACTION_DECISION_SYSTEM_PROMPT, CONTEXT_ANALYSIS_PROMPT, SYSTEM_PROMPT_TEMPLATE, SECOND_CALL_PROMPT
+
+# Update AgentAssistant to initialize AppiumDriver with a valid Config instance
+from config.config import Config
+
+# Explicitly define the Tools class
+class Tools:
+    def __init__(self, driver):
+        self.driver = driver
+
+# Update ActionDecisionChain with real implementation
+class ActionDecisionChain:
+    def __init__(self, chain):
+        self.chain = chain
+
+    def run(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        """Run the decision chain with the given context."""
+        try:
+            return self.chain.invoke(context)
+        except Exception as e:
+            logging.error(f"Error running ActionDecisionChain: {e}")
+            return {}
+
+# Define the Pydantic model for ActionData
+class ActionData(BaseModel):
+    action: str
+    target_identifier: str
+    target_bounding_box: Optional[Dict[str, Any]] = None
+    input_text: Optional[str] = None
+    reasoning: str
+    focus_influence: List[str]
+
+    @validator("target_identifier")
+    def clean_target_identifier(cls, value):
+        # Add normalization logic for target_identifier if needed
+        return value.strip()
+
+    @validator("target_bounding_box", pre=True)
+    def validate_bounding_box(cls, value):
+        # Ensure bounding box is in the correct format
+        if value is None:
+            return None
+        if not isinstance(value, dict) or "top_left" not in value or "bottom_right" not in value:
+            raise ValueError("Invalid bounding box format")
+        return value
 
 class AgentAssistant:
     """
     Handles interactions with AI models (Google Gemini, OpenRouter, Ollama) using adapters.
     Implements structured prompting for mobile app UI testing.
     
-    The AgentAssistant can also directly perform actions using the AgentTools, allowing it to 
+    The AgentAssistant can also directly perform actions using the AgentTools, allowing it to
     implement more complex behaviors like planning, self-correction, and memory.
     """
+    
+    # Class-level dictionary mapping provider names to their config attribute names
+    _PROVIDER_API_KEY_MAP = {
+        'gemini': 'GEMINI_API_KEY',
+        'openrouter': 'OPENROUTER_API_KEY',
+        'ollama': 'OLLAMA_BASE_URL'  # Uses URL instead of API key
+    }
     
     def __init__(self,
                 app_config, # Type hint with your actual Config class
@@ -38,35 +88,40 @@ class AgentAssistant:
                 safety_settings_override: Optional[Dict] = None,
                 agent_tools=None,
                 ui_callback=None,
-                mcp_client=None):
+                mcp_client=None,
+                tools=None):  # Added tools parameter
+        if tools is None:
+            app_config = Config()
+            from infrastructure.appium_driver import AppiumDriver
+            tools = Tools(driver=AppiumDriver(app_config))
+        
+        self.tools = tools
         self.cfg = app_config
         self.response_cache: Dict[str, Tuple[Dict[str, Any], float, int]] = {}
-        self.tools = agent_tools  # May be None initially and set later
+        self.agent_tools = agent_tools  # May be None initially and set later
         self.ui_callback = ui_callback  # Callback for UI updates
         self.mcp_client = mcp_client  # MCP client for external server communication
         logging.debug("AI response cache initialized.")
 
         # Determine which AI provider to use
-        self.ai_provider = getattr(self.cfg, 'AI_PROVIDER', 'gemini').lower()
+        self.ai_provider = getattr(self.cfg, 'AI_PROVIDER', K.DEFAULT_AI_PROVIDER).lower()
         logging.debug(f"Using AI provider: {self.ai_provider}")
 
         # Adapter provider override (for routing purposes without changing UI label)
         self._adapter_provider_override: Optional[str] = None
 
-        # Get the appropriate API key based on the provider
-        if self.ai_provider == 'gemini':
-            if not self.cfg.GEMINI_API_KEY:
-                raise ValueError("GEMINI_API_KEY is not set in the provided application configuration.")
-            self.api_key = self.cfg.GEMINI_API_KEY
-        elif self.ai_provider == 'openrouter':
-            if not getattr(self.cfg, 'OPENROUTER_API_KEY', None):
-                raise ValueError("OPENROUTER_API_KEY is not set in the provided application configuration.")
-            self.api_key = self.cfg.OPENROUTER_API_KEY
-        elif self.ai_provider == 'ollama':
-            # For Ollama, we use the base URL instead of API key
-            self.api_key = getattr(self.cfg, 'OLLAMA_BASE_URL', 'http://localhost:11434')
-        else:
+        # Get the appropriate API key based on the provider using dictionary lookup
+        if self.ai_provider not in self._PROVIDER_API_KEY_MAP:
             raise ValueError(f"Unsupported AI provider: {self.ai_provider}")
+        
+        config_attr = self._PROVIDER_API_KEY_MAP[self.ai_provider]
+        if self.ai_provider == 'ollama':
+            # For Ollama, we use the base URL instead of API key
+            self.api_key = getattr(self.cfg, config_attr, K.DEFAULT_OLLAMA_URL)
+        else:
+            if not getattr(self.cfg, config_attr, None):
+                raise ValueError(f"{config_attr} is not set in the provided application configuration.")
+            self.api_key = getattr(self.cfg, config_attr)
 
         # Use DEFAULT_MODEL_TYPE directly as a provider-specific model identifier
         model_id = model_alias_override or self.cfg.DEFAULT_MODEL_TYPE
@@ -83,11 +138,11 @@ class AgentAssistant:
             'description': f"Direct model id '{self.actual_model_name}' for provider '{self.ai_provider}'",
             'generation_config': {
                 # Keep conservative defaults; adapters may override or apply safer fallbacks
-                'temperature': 0.7,
+                'temperature': K.DEFAULT_MODEL_TEMP,
                 'top_p': 0.95,
-                'max_output_tokens': 4096
+                'max_output_tokens': K.DEFAULT_MAX_TOKENS
             },
-            'online': self.ai_provider in ['gemini', 'openrouter']
+            'online': self.ai_provider in [K.DEFAULT_AI_PROVIDER, 'openrouter']
         }
 
         # Initialize model using the adapter
@@ -98,13 +153,16 @@ class AgentAssistant:
         
         # Initialize LangChain components for orchestration
         self._init_langchain_components()
+        
+        # Initialize action dispatch map
+        self._init_action_dispatch_map()
 
         self.ai_interaction_readable_logger = None
 
     def _init_session(self, user_id: Optional[str] = None):
         """Initialize a new provider-agnostic session."""
         now = time.time()
-        model = self.actual_model_name if hasattr(self, 'actual_model_name') else (self.model_alias if hasattr(self, 'model_alias') else getattr(self.cfg, 'DEFAULT_MODEL_TYPE', 'gemini/gemini-pro'))
+        model = self.actual_model_name if hasattr(self, 'actual_model_name') else (self.model_alias if hasattr(self, 'model_alias') else getattr(self.cfg, 'DEFAULT_MODEL_TYPE', K.DEFAULT_MODEL_NAME))
         self.session = Session(
             session_id=str(uuid.uuid4()),
             provider=self.ai_provider,
@@ -150,116 +208,11 @@ class AgentAssistant:
 
         return RunnableLambda(_llm_call)
 
-    def _create_action_decision_chain(self):
-        """Create the LangChain chain for action decision making."""
-        # Create the LLM wrapper
-        llm = self._create_langchain_llm_wrapper()
-
-        # System prompt for action decision
-        system_prompt = """
-        You are an expert Android app tester using LangChain orchestration.
-        Your goal is to determine the BEST SINGLE action to perform based on the current app state.
-
-        Analyze the provided context and decide on the most appropriate action from:
-        - click: Select an interactive element
-        - input: Enter text into a field
-        - scroll_down: Scroll content downward
-        - scroll_up: Scroll content upward
-        - swipe_left: Swipe content left (carousels)
-        - swipe_right: Swipe content right
-        - back: Navigate back using system back button
-
-        Consider:
-        1. Current screen context and visit history
-        2. Previous actions and their outcomes
-        3. Loop detection and avoidance
-        4. Focus areas and testing priorities
-        5. Authentication flow preferences (prefer non-auth paths first)
-
-        Return a JSON object with:
-        {{
-            "action": "action_type",
-            "target_identifier": "element_identifier_or_null",
-            "target_bounding_box": {{"top_left": [y,x], "bottom_right": [y,x]}} or null,
-            "input_text": "text_to_input_or_null",
-            "reasoning": "brief_explanation",
-            "focus_influence": ["focus_area_ids"]
-        }}
-        """
-
-        # Create the prompt template
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", system_prompt),
-            ("human", """
-CONTEXT:
-Screen Hash: {screen_hash}
-Visit Count: {visit_count}
-Previous Actions: {previous_actions}
-XML CONTEXT: {xml_context}
-Last Feedback: {last_feedback}
-
-TASK: Choose the best action to take next.
-            """)
-        ])
-
-        # Create the chain
-        chain = (
-            RunnablePassthrough.assign(
-                # Add any preprocessing here if needed
-            )
-            | prompt
-            | llm
-            | JsonOutputParser()
-        )
-
-        return chain
-
-    def _create_context_analysis_chain(self):
-        """Create the LangChain chain for context analysis."""
-        # Create the LLM wrapper
-        llm = self._create_langchain_llm_wrapper()
-
-        # System prompt for context analysis
-        system_prompt = """
-        You are a context analysis expert for Android app testing.
-        Analyze the current screen state and provide insights for better testing decisions.
-
-        Focus on:
-        1. Screen state assessment
-        2. Element interaction opportunities
-        3. Navigation path suggestions
-        4. Loop detection and avoidance strategies
-        5. Focus area alignment
-
-        Provide structured analysis to help the action decision chain.
-        """
-
-        # Create the prompt template
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", system_prompt),
-            ("human", """
-CURRENT STATE ANALYSIS:
-
-Screen Hash: {screen_hash}
-Visit Count: {visit_count}
-Previous Actions: {previous_actions}
-XML Context: {xml_context}
-
-Analyze this screen state and provide insights for optimal testing progression.
-            """)
-        ])
-
-        # Create the chain
-        chain = (
-            RunnablePassthrough.assign(
-                # Add any preprocessing here if needed
-            )
-            | prompt
-            | llm
-            | JsonOutputParser()
-        )
-
-        return chain
+    def _create_prompt_chain(self, prompt_template: str) -> str:
+        """Generate a prompt chain using the provided template."""
+        action_list_str = "\n".join([f"- {action}: {desc}" for action, desc in AVAILABLE_ACTIONS.items()])
+        json_output_guidance = JSON_OUTPUT_SCHEMA
+        return prompt_template.format(json_schema=json_output_guidance, action_list=action_list_str)
 
     def _init_langchain_components(self):
         """Initialize LangChain components for orchestration."""
@@ -270,10 +223,10 @@ Analyze this screen state and provide insights for optimal testing progression.
             self.langchain_llm = self._create_langchain_llm_wrapper()
 
             # Create the action decision chain
-            self.action_decision_chain = self._create_action_decision_chain()
+            self.action_decision_chain = ActionDecisionChain(chain=self._create_prompt_chain(ACTION_DECISION_SYSTEM_PROMPT))
 
             # Create the context analysis chain
-            self.context_analysis_chain = self._create_context_analysis_chain()
+            self.context_analysis_chain = ActionDecisionChain(chain=self._create_prompt_chain(CONTEXT_ANALYSIS_PROMPT))
 
             # Initialize memory checkpointer for cross-request context
             self.langchain_memory = MemorySaver()
@@ -287,6 +240,103 @@ Analyze this screen state and provide insights for optimal testing progression.
             self.action_decision_chain = None
             self.context_analysis_chain = None
             self.langchain_memory = None
+
+    def _execute_click_action(self, action_data: Dict[str, Any]) -> bool:
+        """Execute click action with proper argument handling."""
+        target_id = action_data.get("target_identifier")
+        if not target_id:
+            # Try to use coordinates if available
+            bbox = action_data.get("target_bounding_box")
+            if bbox and isinstance(bbox, dict):
+                top_left = bbox.get("top_left", [])
+                bottom_right = bbox.get("bottom_right", [])
+                if len(top_left) == 2 and len(bottom_right) == 2:
+                    y1, x1 = top_left
+                    y2, x2 = bottom_right
+                    center_x = (x1 + x2) / 2
+                    center_y = (y1 + y2) / 2
+
+                    window_size = self.tools.driver.get_window_size()
+                    if window_size:
+                        screen_width = window_size['width']
+                        screen_height = window_size['height']
+
+                        center_x = max(0, min(center_x, screen_width - 1))
+                        center_y = max(0, min(center_y, screen_height - 1))
+
+                        logging.debug(f"Calculated tap coordinates: ({center_x}, {center_y}) from bbox {bbox}")
+                        return self.tools.driver.tap(None, {"top_left": [center_y, center_x], "bottom_right": [center_y, center_x]})
+                    else:
+                        logging.error("Cannot get screen size for coordinate validation")
+                        return False
+            else:
+                logging.error("Cannot execute click: No target identifier or valid bounding box provided")
+                return False
+        else:
+            return self.tools.driver.tap(target_id, None)
+    
+    def _execute_input_action(self, action_data: Dict[str, Any]) -> bool:
+        """Execute input action with proper argument handling."""
+        target_id = action_data.get("target_identifier")
+        input_text = action_data.get("input_text")
+        if not target_id:
+            logging.error("Cannot execute input: No target identifier provided")
+            return False
+        if input_text is None:
+            input_text = ""  # Empty string for clear operations
+        return self.tools.driver.input_text(target_id, input_text)
+    
+    def _execute_long_press_action(self, action_data: Dict[str, Any]) -> bool:
+        """Execute long press action with proper argument handling."""
+        target_id = action_data.get("target_identifier")
+        bbox = action_data.get("target_bounding_box")
+        # Default duration from config
+        try:
+            default_duration_ms = int(getattr(self.cfg, 'LONG_PRESS_MIN_DURATION_MS', K.DEFAULT_LONG_PRESS_MS))
+        except Exception:
+            default_duration_ms = K.DEFAULT_LONG_PRESS_MS
+        duration_ms = action_data.get("duration_ms", default_duration_ms)
+        
+        if not target_id and bbox and isinstance(bbox, dict):
+            top_left = bbox.get("top_left", [])
+            bottom_right = bbox.get("bottom_right", [])
+            if len(top_left) == 2 and len(bottom_right) == 2:
+                # Compute center to long press
+                y1, x1 = top_left
+                y2, x2 = bottom_right
+                center_x = (x1 + x2) / 2
+                center_y = (y1 + y2) / 2
+                window_size = self.tools.driver.get_window_size()
+                if window_size:
+                    screen_width = window_size['width']
+                    screen_height = window_size['height']
+                    center_x = max(0, min(center_x, screen_width - 1))
+                    center_y = max(0, min(center_y, screen_height - 1))
+                    # Use coordinate tap with duration for long press - create bbox
+                    tap_bbox = {"top_left": [center_y, center_x], "bottom_right": [center_y, center_x]}
+                    return self.tools.driver.tap(None, tap_bbox)
+                else:
+                    logging.error("Cannot get screen size for coordinate validation")
+                    return False
+            else:
+                logging.error("Invalid bounding box format for long_press")
+                return False
+        else:
+            # Prefer element-based long press via driver
+            return self.tools.driver.long_press(target_id or "", duration_ms)
+
+    def _init_action_dispatch_map(self):
+        """Initialize the action dispatch map for efficient action execution."""
+        self.action_dispatch_map = {
+            "click": self._execute_click_action,
+            "input": self._execute_input_action,
+            "scroll_down": lambda: self.tools.driver.scroll(None, "down"),
+            "scroll_up": lambda: self.tools.driver.scroll(None, "up"),
+            "swipe_left": lambda: self.tools.driver.scroll(None, "left"),
+            "swipe_right": lambda: self.tools.driver.scroll(None, "right"),
+            "back": self.tools.driver.press_back,
+            "long_press": self._execute_long_press_action
+        }
 
     def _initialize_model(self, model_config, safety_settings_override):
         """Initialize the AI model with appropriate settings using the adapter."""
@@ -346,7 +396,7 @@ Analyze this screen state and provide insights for optimal testing progression.
 
         if target_log_dir:
             try:
-                readable_path = os.path.join(target_log_dir, 'ai_interactions_readable.log')
+                readable_path = os.path.join(target_log_dir, K.AI_LOG_FILENAME)
                 fh_readable = logging.FileHandler(readable_path, encoding='utf-8')
                 fh_readable.setLevel(logging.INFO)
                 fh_readable.setFormatter(logging.Formatter('%(message)s'))
@@ -379,7 +429,7 @@ Analyze this screen state and provide insights for optimal testing progression.
             original_size = len(screenshot_bytes)
             
             # Get AI provider for provider-specific optimizations
-            ai_provider = getattr(self.cfg, 'AI_PROVIDER', 'gemini').lower()
+            ai_provider = getattr(self.cfg, 'AI_PROVIDER', K.DEFAULT_AI_PROVIDER).lower()
             
             # Get provider capabilities from config
             try:
@@ -387,15 +437,15 @@ Analyze this screen state and provide insights for optimal testing progression.
             except ImportError:
                 from config.config import AI_PROVIDER_CAPABILITIES
             
-            capabilities = AI_PROVIDER_CAPABILITIES.get(ai_provider, AI_PROVIDER_CAPABILITIES.get('gemini', {}))
+            capabilities = AI_PROVIDER_CAPABILITIES.get(ai_provider, AI_PROVIDER_CAPABILITIES.get(K.DEFAULT_AI_PROVIDER, {}))
             
             # Resolve preprocessing settings (global overrides take precedence)
-            max_width = getattr(self.cfg, 'IMAGE_MAX_WIDTH', None) or capabilities.get('image_max_width', 640)
-            quality = getattr(self.cfg, 'IMAGE_QUALITY', None) or capabilities.get('image_quality', 75)
-            image_format = getattr(self.cfg, 'IMAGE_FORMAT', None) or capabilities.get('image_format', 'JPEG')
+            max_width = getattr(self.cfg, 'IMAGE_MAX_WIDTH', None) or capabilities.get('image_max_width', K.IMAGE_MAX_WIDTH)
+            quality = getattr(self.cfg, 'IMAGE_QUALITY', None) or capabilities.get('image_quality', K.IMAGE_DEFAULT_QUALITY)
+            image_format = getattr(self.cfg, 'IMAGE_FORMAT', None) or capabilities.get('image_format', K.IMAGE_DEFAULT_FORMAT)
             crop_bars = getattr(self.cfg, 'IMAGE_CROP_BARS', True)
-            crop_top_pct = float(getattr(self.cfg, 'IMAGE_CROP_TOP_PERCENT', 0.06) or 0.0)
-            crop_bottom_pct = float(getattr(self.cfg, 'IMAGE_CROP_BOTTOM_PERCENT', 0.06) or 0.0)
+            crop_top_pct = float(getattr(self.cfg, 'IMAGE_CROP_TOP_PERCENT', K.IMAGE_CROP_TOP_PCT) or 0.0)
+            crop_bottom_pct = float(getattr(self.cfg, 'IMAGE_CROP_BOTTOM_PERCENT', K.IMAGE_CROP_BOTTOM_PCT) or 0.0)
             
             logging.debug(
                 f"Image preprocessing settings -> provider: {ai_provider}, max_width: {max_width}, "
@@ -429,7 +479,8 @@ Analyze this screen state and provide insights for optimal testing progression.
             if img.mode in ('RGBA', 'LA', 'P'):
                 # Create white background for transparent images
                 if img.mode == 'RGBA':
-                    background = Image.new('RGB', img.size, (255, 255, 255))
+                    background = Image.new('RGB', img.size, K.IMAGE_BG_COLOR)
+
                     background.paste(img, mask=img.split()[-1])  # Use alpha channel as mask
                     img = background
                 else:
@@ -437,19 +488,19 @@ Analyze this screen state and provide insights for optimal testing progression.
                 logging.debug("Converted image to RGB format for optimal compression")
             
             # Apply sharpening to maintain text clarity after compression
-            from PIL import ImageEnhance, ImageFilter
+            from PIL import ImageFilter
 
             # Mild sharpening to preserve text readability
-            img = img.filter(ImageFilter.UnsharpMask(radius=0.5, percent=150, threshold=3))
+            img = img.filter(ImageFilter.UnsharpMask(radius=K.IMAGE_SHARPEN_RADIUS, percent=K.IMAGE_SHARPEN_PERCENT, threshold=K.IMAGE_SHARPEN_THRESHOLD))
             
             # Note: We return the processed PIL Image. Encoding (format/quality) is handled by model adapters.
             # Still, estimate potential savings for logging by encoding briefly to measure size.
             try:
                 compressed_buffer = io.BytesIO()
-                if image_format.upper() == 'JPEG':
+                if image_format.upper() == K.IMAGE_DEFAULT_FORMAT:
                     img.save(
                         compressed_buffer,
-                        format='JPEG',
+                        format=K.IMAGE_DEFAULT_FORMAT,
                         quality=quality,
                         optimize=True,
                         progressive=True,
@@ -475,1268 +526,69 @@ Analyze this screen state and provide insights for optimal testing progression.
     def _build_system_prompt(self, xml_context: str, previous_actions: List[str], available_actions: List[str], 
                             current_screen_visit_count: int, current_composite_hash: str, 
                             last_action_feedback: Optional[str] = None) -> str:
-        """Build the system prompt for the agent."""
-        action_descriptions = {
-            "click": getattr(self.cfg, 'ACTION_DESC_CLICK', "Visually identify and select an interactive element."),
-            "input": getattr(self.cfg, 'ACTION_DESC_INPUT', "Visually identify a text input field and provide text."),
-            "scroll_down": getattr(self.cfg, 'ACTION_DESC_SCROLL_DOWN', "Scroll the view downwards."),
-            "scroll_up": getattr(self.cfg, 'ACTION_DESC_SCROLL_UP', "Scroll the view upwards."),
-            "swipe_left": getattr(self.cfg, 'ACTION_DESC_SWIPE_LEFT', "Swipe content from right to left (for carousels)."),
-            "swipe_right": getattr(self.cfg, 'ACTION_DESC_SWIPE_RIGHT', "Swipe content from left to right."),
-            "back": getattr(self.cfg, 'ACTION_DESC_BACK', "Navigate back using the system back button.")
-        }
+        action_list_str = "\n".join([f"- {action}: {desc}" for action, desc in AVAILABLE_ACTIONS.items()])
+        json_output_guidance = JSON_OUTPUT_SCHEMA
+        return SYSTEM_PROMPT_TEMPLATE.format(json_schema=json_output_guidance, action_list=action_list_str)
 
-        feedback_section = ""
-        if last_action_feedback:
-            feedback_section = f"""
-            **CRITICAL FEEDBACK ON YOUR PREVIOUS ACTION:**
-            {last_action_feedback}
-            Based on this feedback, you MUST choose a different action to avoid getting stuck.
-            """
-
-        actual_available_actions = getattr(self.cfg, 'AVAILABLE_ACTIONS', available_actions)
-        if not actual_available_actions:
-            actual_available_actions = ["click", "input", "scroll_down", "scroll_up", "swipe_left", "swipe_right", "back"]
-
-        action_list_str = "\n".join([f"- {a}: {action_descriptions.get(a, '')}" for a in actual_available_actions])
-        history_str = "\n".join([f"- {pa}" for pa in previous_actions]) if previous_actions else "None"
-        visit_context = f"CURRENT SCREEN CONTEXT:\n- Hash: {current_composite_hash}\n- Visit Count (this session): {current_screen_visit_count}"
-        
-        loop_threshold = getattr(self.cfg, 'LOOP_DETECTION_VISIT_THRESHOLD', 3)
-        if loop_threshold is None: loop_threshold = 3
-
-        visit_instruction = ""
-        action_analysis = self._analyze_action_history(previous_actions)
-        if current_screen_visit_count > loop_threshold or action_analysis["is_looping"]:
-            repeated_text = ', '.join(action_analysis['repeated_actions']) if action_analysis['repeated_actions'] else 'None'
-            tried_text = ', '.join(action_analysis['last_unique_actions']) if action_analysis['last_unique_actions'] else 'None'
-            visit_instruction = (
-                f"LOOP ALERT: visits={current_screen_visit_count}. "
-                f"Looping actions: {repeated_text}. Tried: {tried_text}. "
-                "Choose a different action/element; use 'back' if stuck."
-            )
-            
-        test_email_val = os.environ.get("TEST_EMAIL", "test.user@example.com")
-        test_password_val = os.environ.get("TEST_PASSWORD", "Str0ngP@ssw0rd!")
-        test_name_val = os.environ.get("TEST_NAME", "Test User")
-        
-        input_value_guidance = f"Input hints: email {test_email_val}, password {test_password_val}, name {test_name_val}. Use realistic values; avoid placeholders."
-        
-        defer_authentication_guidance = "Strategy: Prefer non-auth flows (Guest/Skip) to explore features first."
-        
-        # Check if image context is enabled
-        enable_image_context = getattr(self.cfg, 'ENABLE_IMAGE_CONTEXT', True)
-        
-        if enable_image_context:
-            context_description = "1. Screenshot: Provided as an image. This is your primary view.\n        2. XML Layout: Provided below (may be a snippet/absent). Use for attributes."
-        else:
-            context_description = "1. Screenshot: Not provided (image context disabled). Rely on XML layout for analysis.\n        2. XML Layout: Provided below. This is your primary source of UI information."
-        
-        # Build focus areas section
-        focus_areas_section = self._build_focus_areas_section()
-        
-        # NEW: Enhanced JSON output guidance section with stricter contract
-        json_output_guidance = (
-        "Return a JSON object in a ```json code block with keys: action, target_identifier, "
-        "target_bounding_box, input_text, reasoning, focus_influence. Rules: "
-        "target_identifier MUST be a single raw value for ONE attribute only (choose one of: resource-id like com.pkg:id/name, content-desc, or visible text). "
-        "Do NOT include prefixes like 'id=' or 'content-desc=' and do NOT combine multiple attributes with '|'. "
-        "target_bounding_box MUST be an object {top_left:[y,x], bottom_right:[y,x]} (absolute pixels or normalized 0..1). "
-        "Do NOT use string formats like '[x,y][x2,y2]'. Use null for scroll/back if bbox/identifier are not applicable. "
-        "No text outside the JSON."
-        )
-        
-        prompt = f"""
-        You are an expert Android app tester. Your goal is to:
-        1. Determine the BEST SINGLE action to perform based on the visual screenshot and XML context, 
-           prioritizing PROGRESSION and IN-APP feature discovery.
-
-        {feedback_section}
-        {focus_areas_section}
-
-        {visit_context}
-
-        CONTEXT:
-        {context_description}
-        3. Previous Actions Taken *From This Exact Screen State* (if any):
-        {history_str}
-
-        TASK:
-        Analyze the screenshot and XML.
-        1. Identify the BEST SINGLE action to take next.
-        2. Use the perform_ui_action tool to execute your chosen action.
-
-        {defer_authentication_guidance}
-        {visit_instruction}
-        {input_value_guidance}
-
-        Choose ONE action from the available list below:
-        {action_list_str}
-
-        {json_output_guidance}
-
-        XML CONTEXT:
-        ```xml
-        {xml_context if xml_context else "No XML context provided for this screen, or it was empty. Rely primarily on the screenshot."}
-        ```
-        """
-        return prompt.strip()
-
-    def _build_focus_areas_section(self) -> str:
-        """Build the focus areas section of the prompt."""
-        focus_areas = getattr(self.cfg, 'FOCUS_AREAS', [])
-        
-        if not focus_areas:
-            return ""
-        
-        # Sort by priority and filter enabled
-        enabled_areas = [area for area in focus_areas if area.get('enabled', True)]
-        enabled_areas.sort(key=lambda x: x.get('priority', 0))
-        
-        # Limit to top-K active areas to control prompt size
-        max_active = getattr(self.cfg, 'FOCUS_MAX_ACTIVE', 5)
-        if isinstance(max_active, int) and max_active > 0:
-            enabled_areas = enabled_areas[:max_active]
-        
-        if not enabled_areas:
-            return ""
-        
-        # Create focus area reference list
-        focus_reference = "\n".join([
-            f"- {area['id']}: {area['name']}" 
-            for area in enabled_areas
-        ])
-        
-        focus_text = "\n".join([area['prompt_modifier'] for area in enabled_areas])
-        
-        return f"""
-        **ACTIVE FOCUS AREAS:**
-        {focus_text}
-        
-        **FOCUS AREA IDs (use these in focus_influence):**
-        {focus_reference}
-        """
-
-    def _analyze_action_history(self, actions: List[str]) -> dict:
-        """Analyze the action history to detect loops."""
-        if not actions:
-            return {"repeated_actions": [], "last_unique_actions": [], "is_looping": False}
-        action_sequence: List[Tuple[str, str]] = []
-        for action_str in actions: 
-            action_detail = action_str.lower()
-            if "input" in action_detail: action_sequence.append(("input", action_str))
-            elif "click" in action_detail: action_sequence.append(("click", action_str))
-
-        last_actions = action_sequence[-6:]
-        is_looping = False
-        repeated_actions_summary = []
-        
-        if len(last_actions) >= 4:
-            action_types = [a[0] for a in last_actions]
-            if action_types.count(action_types[-1]) >= 3 :
-                is_looping = True
-                repeated_actions_summary.append(f"repeated '{action_types[-1]}'")
-            if len(action_types) >= 4 and action_types[-4:-2] == action_types[-2:]:
-                is_looping = True
-                repeated_actions_summary.append(f"pattern '{'-'.join(action_types[-2:])}'")
-                
-        return {
-            "repeated_actions": list(set(repeated_actions_summary)),
-            "last_unique_actions": list(set(a[0] for a in last_actions)),
-            "is_looping": is_looping
-        }
-
-    def get_next_action(self,
-                        screenshot_bytes: Optional[bytes],
-                        xml_context: str,
-                        previous_actions: List[str],
-                        current_screen_visit_count: int,
-                        current_composite_hash: str,
-                        last_action_feedback: Optional[str] = None
-                        ) -> Optional[Tuple[Dict[str, Any], float, int]]:
-        """
-        Uses LangChain orchestration or direct AI model approach to determine the next action to take.
-        Returns the action data, processing time, and token count.
-        """
+    def _make_second_call_for_action_extraction(self, _narrative_response: str) -> Optional[Dict[str, Any]]:
         try:
-            start_time = time.time()
-
-            # Check if LangChain components are available and should be used
-            use_langchain = (
-                hasattr(self, 'action_decision_chain') and
-                self.action_decision_chain is not None and
-                getattr(self.cfg, 'USE_LANGCHAIN_ORCHESTRATION', True)
-            )
-
-            if use_langchain:
-                logging.debug("Using LangChain orchestration for action decision")
-                return self._get_next_action_langchain(
-                    screenshot_bytes, xml_context, previous_actions,
-                    current_screen_visit_count, current_composite_hash, last_action_feedback
-                )
-            else:
-                logging.debug("Using direct model approach for action decision")
-                return self._get_next_action_direct(
-                    screenshot_bytes, xml_context, previous_actions,
-                    current_screen_visit_count, current_composite_hash, last_action_feedback
-                )
-
-        except Exception as e:
-            logging.error(f"Error in get_next_action: {e}", exc_info=True)
+            action_list_str = "\n".join([f"- {action}: {desc}" for action, desc in AVAILABLE_ACTIONS.items()])
+            json_output_guidance = JSON_OUTPUT_SCHEMA
+            return json.loads(SECOND_CALL_PROMPT.format(json_schema=json_output_guidance, action_list=action_list_str))
+        except json.JSONDecodeError as e:
+            logging.error(f"Failed to parse JSON in second call: {e}")
             return None
-
-    def _get_next_action_langchain(self,
-                                   screenshot_bytes: Optional[bytes],
-                                   xml_context: str,
-                                   previous_actions: List[str],
-                                   current_screen_visit_count: int,
-                                   current_composite_hash: str,
-                                   last_action_feedback: Optional[str] = None
-                                   ) -> Optional[Tuple[Dict[str, Any], float, int]]:
-        """Use LangChain orchestration to determine the next action."""
-        try:
-            start_time = time.time()
-
-            # Check MCP connection status before proceeding with LangChain
-            mcp_status = self.check_mcp_connection_status()
-            if not mcp_status.get("connected", False):
-                logging.warning(f"MCP server unavailable for LangChain call: {mcp_status.get('reason', 'Unknown error')}")
-                logging.info("Falling back to direct model approach due to MCP server unavailability")
-                
-                # Log error recovery event
-                self.log_error_recovery_event("mcp_fallback", {
-                    "fallback_from": "langchain_orchestration",
-                    "fallback_to": "direct_model",
-                    "reason": mcp_status.get('reason', 'MCP server unavailable'),
-                    "circuit_breaker_state": mcp_status.get('circuit_breaker', {}).get('state', 'unknown')
-                })
-                
-                return self._get_next_action_direct(
-                    screenshot_bytes, xml_context, previous_actions,
-                    current_screen_visit_count, current_composite_hash, last_action_feedback
-                )
-
-            # Check if image context is enabled
-            enable_image_context = getattr(self.cfg, 'ENABLE_IMAGE_CONTEXT', True)
-
-            processed_image = None
-            if enable_image_context:
-                # Prepare image
-                processed_image = self._prepare_image_part(screenshot_bytes)
-                if not processed_image:
-                    logging.error("Failed to process screenshot for AI analysis")
-                    return None
-            else:
-                logging.debug("Image context disabled, using text-only analysis")
-
-            # Prepare context for LangChain chain
-            chain_input = {
-                "screen_hash": current_composite_hash,
-                "visit_count": current_screen_visit_count,
-                "previous_actions": "\n".join(previous_actions) if previous_actions else "None",
-                "xml_context": xml_context if xml_context else "No XML context provided",
-                "last_feedback": last_action_feedback if last_action_feedback else ""
-            }
-
-            # Run the action decision chain
-            try:
-                if self.action_decision_chain is None:
-                    raise ValueError("Action decision chain is not initialized")
-
-                chain_result = self.action_decision_chain.invoke(chain_input)
-                elapsed_time = time.time() - start_time
-
-                # Extract action data from chain result
-                if isinstance(chain_result, dict):
-                    action_data = chain_result
-                else:
-                    # Try to parse as JSON string
-                    action_data = self._clean_and_parse_json(str(chain_result))
-
-                if not action_data:
-                    logging.error("Failed to parse action data from LangChain chain result")
-                    return None
-
-                # Validate and clean the action data
-                action_data = self._validate_and_clean_action_data(action_data)
-
-                # Estimate token count (rough approximation)
-                token_count = len(str(chain_input)) // 4
-
-                # Log AI interaction
-                try:
-                    self._setup_ai_interaction_logger()
-                    if self.ai_interaction_readable_logger:
-                        readable_entry = (
-                            f"=== LangChain Action Decision @ {datetime.now(timezone.utc).isoformat()}Z ===\n"
-                            f"Model: {self.model_alias}\n"
-                            f"Tokens: {token_count}\n"
-                            f"Chain Input: {json.dumps(chain_input, ensure_ascii=False, indent=2)}\n\n"
-                            f"Chain Result: {json.dumps(action_data, ensure_ascii=False, indent=2)}\n"
-                            f"----------------------------------------\n"
-                        )
-                        self.ai_interaction_readable_logger.info(readable_entry)
-                except Exception as log_err:
-                    logging.error(f"Failed to log LangChain interaction: {log_err}")
-
-                return {"action_to_perform": action_data}, elapsed_time, token_count
-
-            except Exception as e:
-                logging.error(f"Error running LangChain action decision chain: {e}", exc_info=True)
-                # Check if this is an MCP-related error and log it
-                error_str = str(e).lower()
-                if any(keyword in error_str for keyword in ['connection', 'timeout', 'circuit', 'mcp', 'server']):
-                    logging.warning(f"MCP-related error in LangChain call, attempting fallback: {e}")
-                    
-                    # Log error recovery event
-                    self.log_error_recovery_event("mcp_fallback", {
-                        "fallback_from": "langchain_orchestration",
-                        "fallback_to": "direct_model",
-                        "reason": f"MCP error during execution: {str(e)}",
-                        "original_error": str(e)
-                    })
-                    
-                    # Fall back to direct approach
-                    logging.info("Falling back to direct model approach due to LangChain MCP error")
-                    return self._get_next_action_direct(
-                        screenshot_bytes, xml_context, previous_actions,
-                        current_screen_visit_count, current_composite_hash, last_action_feedback
-                    )
-                else:
-                    # Re-raise non-MCP errors
-                    raise
-
-        except Exception as e:
-            logging.error(f"Error in LangChain action decision: {e}", exc_info=True)
-            return None
-
-    def _get_next_action_direct(self,
-                                screenshot_bytes: Optional[bytes],
-                                xml_context: str,
-                                previous_actions: List[str],
-                                current_screen_visit_count: int,
-                                current_composite_hash: str,
-                                last_action_feedback: Optional[str] = None
-                                ) -> Optional[Tuple[Dict[str, Any], float, int]]:
-        """Use direct model approach to determine the next action (fallback method)."""
-        try:
-            start_time = time.time()
-
-            # Check MCP connection status before proceeding with direct model call
-            mcp_status = self.check_mcp_connection_status()
-            if not mcp_status.get("connected", False):
-                logging.warning(f"MCP server unavailable for direct model call: {mcp_status.get('reason', 'Unknown error')}")
-                logging.error("Cannot proceed with AI action decision - MCP server is unavailable and no fallback available")
-                
-                # Log error recovery event (no recovery possible)
-                self.log_error_recovery_event("mcp_unavailable", {
-                    "context": "direct_model_call",
-                    "reason": mcp_status.get('reason', 'MCP server unavailable'),
-                    "circuit_breaker_state": mcp_status.get('circuit_breaker', {}).get('state', 'unknown'),
-                    "recovery_possible": False
-                })
-                
-                return None
-
-            # Check if image context is enabled
-            enable_image_context = getattr(self.cfg, 'ENABLE_IMAGE_CONTEXT', True)
-
-            processed_image = None
-            if enable_image_context:
-                # Prepare image
-                processed_image = self._prepare_image_part(screenshot_bytes)
-                if not processed_image:
-                    logging.error("Failed to process screenshot for AI analysis")
-                    return None
-            else:
-                logging.debug("Image context disabled, using text-only analysis")
-
-            # Build the system prompt
-            available_actions = getattr(self.cfg, 'AVAILABLE_ACTIONS', [])
-            prompt = self._build_system_prompt(
-                xml_context,
-                previous_actions,
-                available_actions,
-                current_screen_visit_count,
-                current_composite_hash,
-                last_action_feedback
-            )
-
-            # Generate response from the model
-            try:
-                # Pass config-driven image encoding preferences to the adapter so UI controls take effect
-                img_fmt_override = getattr(self.cfg, 'IMAGE_FORMAT', None)
-                img_quality_override = getattr(self.cfg, 'IMAGE_QUALITY', None)
-                response_text, metadata = self.model_adapter.generate_response(
-                    prompt=prompt,
-                    image=processed_image,
-                    image_format=img_fmt_override,
-                    image_quality=img_quality_override
-                )
-                elapsed_time = metadata.get("processing_time", time.time() - start_time)
-                token_count = metadata.get("token_count", {}).get("total", len(prompt) // 4)
-            except Exception as e:
-                logging.error(f"Error generating AI response: {e}", exc_info=True)
-                # Check if this is an MCP-related error
-                error_str = str(e).lower()
-                if any(keyword in error_str for keyword in ['connection', 'timeout', 'circuit', 'mcp', 'server']):
-                    logging.error(f"MCP-related error in direct model call: {e}")
-                    
-                    # Log error recovery event (no recovery possible from direct model)
-                    self.log_error_recovery_event("mcp_error", {
-                        "context": "direct_model_call",
-                        "reason": f"MCP error during execution: {str(e)}",
-                        "original_error": str(e),
-                        "recovery_possible": False
-                    })
-                    
-                    logging.error("Cannot recover from MCP server failure in direct model approach")
-                return None
-
-            # Parse the action from the response
-            action_data = self._parse_action_from_response(response_text)
-            if not action_data:
-                logging.error("Failed to parse action data from AI response")
-                return None
-
-            # --- Log AI interaction ---
-            try:
-                self._setup_ai_interaction_logger()
-                if self.ai_interaction_readable_logger:
-                    readable_entry = (
-                        f"=== AI Interaction @ {datetime.now(timezone.utc).isoformat()}Z ===\n"
-                        f"Model: {self.model_alias}\n"
-                        f"Tokens: {token_count}\n\n"
-                        f"Prompt:\n{prompt}\n\n"
-                        f"Response:\n{json.dumps(action_data, ensure_ascii=False, indent=2)}\n"
-                        f"----------------------------------------\n"
-                    )
-                    self.ai_interaction_readable_logger.info(readable_entry)
-            except Exception as log_err:
-                logging.error(f"Failed to log AI interaction: {log_err}")
-            # --- End log AI interaction ---
-
-            return {"action_to_perform": action_data}, elapsed_time, token_count
-
-        except Exception as e:
-            logging.error(f"Error in direct action decision: {e}", exc_info=True)
-            return None
-            
-    def execute_action(self, action_data: Dict[str, Any]) -> bool:
-        """
-        Executes an action using the provided agent tools.
-        
-        Args:
-            action_data: The action data to execute
-            
-        Returns:
-            True if the action was successfully executed, False otherwise
-        """
-        if not self.tools:
-            logging.error("Cannot execute action: AgentTools not available")
-            return False
-            
-        action_type = action_data.get("action")
-        if not action_type:
-            logging.error("Cannot execute action: No action type provided")
-            return False
-            
-        logging.info(f"Agent Decision: Executing action '{action_type}' with data: {action_data}")
-        
-        try:
-            success = False
-            
-            if action_type == "click":
-                target_id = action_data.get("target_identifier")
-                if not target_id:
-                    # Try to use coordinates if available
-                    bbox = action_data.get("target_bounding_box")
-                    if bbox and isinstance(bbox, dict):
-                        top_left = bbox.get("top_left", [])
-                        bottom_right = bbox.get("bottom_right", [])
-                        if len(top_left) == 2 and len(bottom_right) == 2:
-                            # FIX: Bounding box format is {"top_left": [y,x], "bottom_right": [y,x]}
-                            y1, x1 = top_left
-                            y2, x2 = bottom_right
-                            center_x = (x1 + x2) / 2  # CORRECT
-                            center_y = (y1 + y2) / 2  # CORRECT
-                            
-                            # Add coordinate validation
-                            window_size = self.tools.driver.get_window_size()
-                            if window_size:
-                                screen_width = window_size['width']
-                                screen_height = window_size['height']
-                                
-                                # Clamp coordinates to screen bounds
-                                center_x = max(0, min(center_x, screen_width - 1))
-                                center_y = max(0, min(center_y, screen_height - 1))
-                                
-                                logging.debug(f"Calculated tap coordinates: ({center_x}, {center_y}) from bbox {bbox}")
-                                result = self.tools.driver.tap(None, {"top_left": [center_y, center_x], "bottom_right": [center_y, center_x]})
-                                success = result
-                            else:
-                                logging.error("Cannot get screen size for coordinate validation")
-                                return False
-                    else:
-                        logging.error("Cannot execute click: No target identifier or valid bounding box provided")
-                        return False
-                else:
-                    result = self.tools.driver.tap(target_id, None)
-                    success = result
-                    
-            elif action_type == "input":
-                target_id = action_data.get("target_identifier")
-                input_text = action_data.get("input_text")
-                if not target_id:
-                    logging.error("Cannot execute input: No target identifier provided")
-                    return False
-                if input_text is None:
-                    input_text = ""  # Empty string for clear operations
-                result = self.tools.driver.input_text(target_id, input_text)
-                success = result
-                
-            elif action_type == "scroll_down":
-                result = self.tools.driver.scroll(None, "down")
-                success = result
-                
-            elif action_type == "scroll_up":
-                result = self.tools.driver.scroll(None, "up")
-                success = result
-                
-            elif action_type == "swipe_left":
-                result = self.tools.driver.scroll(None, "left")
-                success = result
-                
-            elif action_type == "swipe_right":
-                result = self.tools.driver.scroll(None, "right")
-                success = result
-                
-            elif action_type == "back":
-                result = self.tools.driver.press_back()
-                success = result
-            
-            elif action_type == "long_press":
-                target_id = action_data.get("target_identifier")
-                bbox = action_data.get("target_bounding_box")
-                # Default duration from config
-                try:
-                    default_duration_ms = int(getattr(self.cfg, 'LONG_PRESS_MIN_DURATION_MS', 600))
-                except Exception:
-                    default_duration_ms = 600
-                duration_ms = action_data.get("duration_ms", default_duration_ms)
-                if not target_id and bbox and isinstance(bbox, dict):
-                    top_left = bbox.get("top_left", [])
-                    bottom_right = bbox.get("bottom_right", [])
-                    if len(top_left) == 2 and len(bottom_right) == 2:
-                        # Compute center to long press
-                        y1, x1 = top_left
-                        y2, x2 = bottom_right
-                        center_x = (x1 + x2) / 2
-                        center_y = (y1 + y2) / 2
-                        window_size = self.tools.driver.get_window_size()
-                        if window_size:
-                            screen_width = window_size['width']
-                            screen_height = window_size['height']
-                            center_x = max(0, min(center_x, screen_width - 1))
-                            center_y = max(0, min(center_y, screen_height - 1))
-                            # Use coordinate tap with duration for long press - create bbox
-                            tap_bbox = {"top_left": [center_y, center_x], "bottom_right": [center_y, center_x]}
-                            result = self.tools.driver.tap(None, tap_bbox)
-                            success = result
-                        else:
-                            logging.error("Cannot get screen size for coordinate validation")
-                            return False
-                    else:
-                        logging.error("Invalid bounding box format for long_press")
-                        return False
-                else:
-                    # Prefer element-based long press via driver
-                    result = self.tools.driver.long_press(target_id or "", duration_ms)
-                    success = result
-
-            else:
-                logging.error(f"Unknown action type: {action_type}")
-                return False
-                
-            # If execution was successful and we have a UI callback, notify the UI
-            if success and self.ui_callback:
-                try:
-                    self.ui_callback(action_data)
-                except Exception as e:
-                    logging.error(f"Error calling UI callback: {e}")
-                    
-            # Output focus attribution to stdout for UI monitoring
-            if success and action_data.get('focus_influence'):
-                focus_ids = action_data.get('focus_influence', [])
-                if focus_ids:
-                    # Get focus area names for better readability
-                    focus_names = []
-                    focus_areas = getattr(self.cfg, 'FOCUS_AREAS', [])
-                    for focus_id in focus_ids:
-                        for area in focus_areas:
-                            if isinstance(area, dict) and area.get('id') == focus_id:
-                                focus_names.append(area.get('name', focus_id))
-                                break
-                    
-                    focus_info = {
-                        'action': action_data.get('action', 'unknown'),
-                        'focus_ids': focus_ids,
-                        'focus_names': focus_names,
-                        'reasoning': action_data.get('reasoning', '')
-                    }
-                    
-                    # Output to stdout with UI_FOCUS prefix for UI to capture (JSON for robust parsing)
-                    try:
-                        print(f"UI_FOCUS:{json.dumps(focus_info, ensure_ascii=False)}")
-                    except Exception:
-                        # Fallback to string representation if JSON serialization fails
-                        print(f"UI_FOCUS:{focus_info}")
-                    
-            return success
-            
-        except Exception as e:
-            logging.error(f"Error executing action: {e}", exc_info=True)
-            return False
-            
-    def plan_and_execute(self, 
-                        screenshot_bytes: Optional[bytes],
-                        xml_context: str,
-                        previous_actions: List[str],
-                        current_screen_visit_count: int,
-                        current_composite_hash: str,
-                        last_action_feedback: Optional[str] = None) -> Optional[Tuple[Dict[str, Any], float, int, bool]]:
-        """
-        Plans and executes the next action using a ReAct-style approach where the agent:
-        1. Reasons about the current state
-        2. Decides on an action
-        3. Executes the action
-        4. Observes the result
-        5. Repeats as needed
-        
-        Returns:
-            Tuple of (action_data, processing_time, total_tokens, success)
-        """
-        if not self.tools:
-            logging.error("Cannot plan and execute: AgentTools not available")
-            return None
-            
-        # Check if image context is enabled and screenshot is available
-        enable_image_context = getattr(self.cfg, 'ENABLE_IMAGE_CONTEXT', True)
-        if enable_image_context and screenshot_bytes is None:
-            logging.error("Cannot plan and execute: Screenshot bytes is None but image context is enabled")
-            return None
-        elif not enable_image_context and screenshot_bytes is None:
-            logging.debug("Image context disabled and no screenshot provided - using text-only analysis")
-            
-        # Get the next action suggestion from the model
-        result = self.get_next_action(
-            screenshot_bytes,
-            xml_context,
-            previous_actions,
-            current_screen_visit_count,
-            current_composite_hash,
-            last_action_feedback
-        )
-        
-        if not result:
-            return None
-        
-        response, elapsed_time, total_tokens = result
-        
-        action_data = response.get("action_to_perform")
-        if not action_data:
-            return None
-        
-        # Execute the action using agent tools
-        success = self.execute_action(action_data)
-        
-        # Return the action data, time taken, token count, and success status
-        return action_data, elapsed_time, total_tokens, success
-            
-    def _clean_and_parse_json(self, json_str: str) -> Optional[Dict[str, Any]]:
-        """Clean and parse potentially malformed JSON from AI responses."""
-        cleaned = json_str.strip()  # Initialize cleaned variable
-        try:
-            # First, try direct parsing
-            return json.loads(json_str)
-        except json.JSONDecodeError:
-            # If direct parsing fails, try to fix common issues
-            try:
-                # More robust single quote to double quote conversion
-                # Use a more careful approach to avoid breaking apostrophes in text
-
-                # First, handle object keys: 'key': -> "key":
-                cleaned = re.sub(r"'([^']+)'\s*:", r'"\1":', cleaned)
-
-                # Then handle string values: : 'value' -> : "value"
-                # But be careful not to replace apostrophes within the string
-                cleaned = re.sub(r":\s*'([^']*)'", r': "\1"', cleaned)
-                cleaned = re.sub(r":\s*'([^']*)'\s*,", r': "\1",', cleaned)
-                cleaned = re.sub(r":\s*'([^']*)'\s*}", r': "\1"}', cleaned)
-                cleaned = re.sub(r":\s*'([^']*)'\s*]", r': \1"]', cleaned)
-
-                # Handle arrays: ['item1', 'item2'] -> ["item1", "item2"]
-                cleaned = re.sub(r"\[\s*'([^']*)'\s*\]", r'["\1"]', cleaned)
-                cleaned = re.sub(r"'([^']*)'\s*,", r'"\1",', cleaned)
-                cleaned = re.sub(r"'([^']*)'\s*]", r'"\1"]', cleaned)
-
-                # Remove trailing commas before closing braces/brackets
-                cleaned = re.sub(r',(\s*[}\]])', r'\1', cleaned)
-
-                # Fix any remaining single quotes that might be in the middle of strings
-                # This is a last resort and might break some cases
-                cleaned = re.sub(r"'([^']*)'", r'"\1"', cleaned)
-
-                # Try parsing the cleaned JSON
-                return json.loads(cleaned)
-            except (json.JSONDecodeError, Exception) as e:
-                logging.debug(f"Failed to clean and parse JSON: {e}. Original: {json_str[:200]}...")
-                logging.debug(f"Cleaned version: {cleaned[:200]}...")
-                return None
-
-    def _parse_action_from_response(self, response_text: str) -> Optional[Dict[str, Any]]:
-        """Parse the action data from the model's response text using a two-tier approach.
-        
-        First Approach: Try to parse JSON directly from the response
-        Second Approach: If the first approach fails, make a second call to the model
-        to process the narrative response and extract structured action information.
-        """
-        try:
-            # Log the raw response for debugging
-            logging.debug(f"Raw AI response (first 500 chars): {response_text[:500]}")
-            
-            # First Approach: Check for JSON patterns in the response
-            
-            # Look for JSON in code blocks (support both ```json and bare ```)
-            json_pattern = r'```(?:json|JSON)?\s*([\s\S]*?)\s*```'
-            json_match = re.search(json_pattern, response_text, re.DOTALL)
-            
-            if json_match:
-                json_str = json_match.group(1)
-                logging.debug(f"Found JSON in code block: {json_str[:200]}...")
-                action_data = self._clean_and_parse_json(json_str)
-                if action_data:
-                    logging.debug("✅ Successfully parsed JSON from code block")
-                    # Validate and clean focus_influence
-                    return self._validate_and_clean_action_data(action_data)
-                else:
-                    logging.warning("⚠️ Failed to parse JSON from code block, trying other methods")
-            
-            # Try to find any JSON-like structure in the response
-            # 1) Quick regex-based attempt
-            potential_json = re.search(r'({[\s\S]*?})', response_text)
-            if potential_json:
-                json_str = potential_json.group(1)
-                logging.debug(f"Found potential JSON structure: {json_str[:200]}...")
-                action_data = self._clean_and_parse_json(json_str)
-                if action_data:
-                    logging.debug("✅ Successfully parsed JSON from regex match")
-                    # Validate and clean focus_influence
-                    return self._validate_and_clean_action_data(action_data)
-                else:
-                    logging.warning("⚠️ Failed to parse JSON from regex match")
-
-            # 2) Balanced-brace scan to extract the most likely JSON object
-            candidate = self._extract_balanced_json(response_text)
-            if candidate:
-                logging.debug(f"Attempting balanced-brace JSON parse, candidate starts: {candidate[:200]}...")
-                action_data = self._clean_and_parse_json(candidate)
-                if action_data:
-                    logging.debug("✅ Successfully parsed JSON via balanced-brace extraction")
-                    return self._validate_and_clean_action_data(action_data)
-            
-            # Second Approach: It's likely a narrative response, make a second call to the model
-            
-            # Check if we have a narrative/essay-like response
-            lines = response_text.strip().split('\n')
-            
-            # More robust narrative detection: Check for multiple conditions
-            is_narrative = False
-            
-            # 1. Multiple lines without JSON structure
-            if len(lines) > 5 and not any(line.strip().startswith('{') for line in lines[:5]) and '```json' not in response_text[:200]:
-                is_narrative = True
-            
-            # 2. Short responses without JSON format but with action keywords
-            action_keywords = ['click', 'input', 'type', 'enter', 'scroll', 'swipe', 'back', 'long_press', 'long press']
-            if not is_narrative and len(response_text) < 500 and not '{' in response_text and any(keyword in response_text.lower() for keyword in action_keywords):
-                is_narrative = True
-            
-            # 3. Responses with clear action sentences but no JSON
-            action_patterns = [
-                r'(?:should|would|recommend|can)\s+(?:click|input|type|enter|scroll|swipe|back|long\s?press)',
-                r'(?:most appropriate|next|best)\s+action',
-                r'(?:the user should|user needs to|we should)'
-            ]
-            if not is_narrative and any(re.search(pattern, response_text.lower()) for pattern in action_patterns):
-                is_narrative = True
-                
-            # If heuristics say narrative OR if we still failed to parse JSON, attempt second-call extraction
-            if is_narrative or True:
-                logging.info("📝 Attempting structured extraction via second model call.")
-                action_data = self._make_second_call_for_action_extraction(response_text)
-                if action_data:
-                    logging.info("✅ Successfully extracted action through second call to model")
-                    return self._validate_and_clean_action_data(action_data)
-                else:
-                    logging.error("🔴 Failed to extract action through second call")
-                    return None
-            
-            # If we're here, we couldn't find JSON and it wasn't a narrative response
-            logging.error("🔴 Failed to parse action data from AI response")
-            logging.debug(f"Full AI response: {response_text}")
-            return None
-            
-        except Exception as e:
-            logging.error(f"🔴 Error parsing action from response: {e}", exc_info=True)
-            logging.debug(f"Response text that caused error: {response_text[:1000]}...")
-            return None
-
-    def _extract_balanced_json(self, text: str) -> Optional[str]:
-        """Attempt to extract a top-level JSON object using balanced braces.
-        Scans the text for the first '{' and returns the shortest substring that
-        forms a balanced JSON object, ignoring braces inside string literals.
-        """
-        try:
-            start = text.find('{')
-            if start == -1:
-                return None
-            depth = 0
-            in_string = False
-            escape = False
-            for i in range(start, len(text)):
-                ch = text[i]
-                if in_string:
-                    if escape:
-                        escape = False
-                    elif ch == '\\':
-                        escape = True
-                    elif ch == '"':
-                        in_string = False
-                else:
-                    if ch == '"':
-                        in_string = True
-                    elif ch == '{':
-                        depth += 1
-                    elif ch == '}':
-                        depth -= 1
-                        if depth == 0:
-                            return text[start:i+1]
-            return None
-        except Exception as e:
-            logging.debug(f"Balanced JSON extraction failed: {e}")
-            return None
-    
-    def _make_second_call_for_action_extraction(self, narrative_response: str) -> Optional[Dict[str, Any]]:
-        """Make a second call to the model to extract structured action data from a narrative response.
-        
-        Args:
-            narrative_response: The narrative response from the first model call
-            
-        Returns:
-            A dictionary with structured action data, or None if extraction failed
-        """
-        try:
-            # Create a prompt that asks the model to extract action information
-            prompt = f"""
-            You are a helpful assistant that extracts structured action information from analysis text.
-            
-            I'll provide you with an analysis text that describes an action to take in a mobile app.
-            Extract the following information in JSON format:
-            
-            1. action: The type of action (click, input, scroll_down, scroll_up, swipe_left, swipe_right, back, long_press)
-            2. target_identifier: The target element (if applicable, otherwise null)
-            3. target_bounding_box: The bounding box coordinates (if applicable, otherwise null)
-            4. input_text: The text to input (if applicable, otherwise null)
-            5. reasoning: A brief explanation of why this action was chosen
-            6. focus_influence: An array of focus area IDs that influenced the decision (can be empty)
-            
-            RULES:
-            - target_identifier MUST be a single raw value for ONE attribute only (choose one of: resource-id like com.pkg:id/name, content-desc, or visible text). Do NOT include prefixes like 'id=' or 'content-desc=' and do NOT combine multiple attributes with '|'.
-            - target_bounding_box MUST be an object {"top_left":[y,x], "bottom_right":[y,x]} using absolute pixels or normalized 0..1. Do NOT use string formats like '[x,y][x2,y2]'.
-            - Use null for scroll/back if bbox/identifier are not applicable.
-            
-            Respond ONLY with a valid JSON object containing these fields, nothing else.
-            Here's the analysis text:
-            
-            ---
-            {narrative_response}
-            ---
-            """
-            
-            # Generate a response from the model
-            try:
-                # We don't need an image for this call, just text
-                response_text, _ = self.model_adapter.generate_response(prompt=prompt)
-                
-                # Try to parse the response as JSON
-                try:
-                    # First try direct JSON parsing
-                    action_data = json.loads(response_text)
-                    return action_data
-                except json.JSONDecodeError:
-                    # Try to clean and parse the JSON
-                    cleaned_json = self._clean_and_parse_json(response_text)
-                    if cleaned_json:
-                        return cleaned_json
-                    
-                    # If that fails, look for JSON in code blocks
-                    json_pattern = r'```(?:json)?\s*(.*?)\s*```'
-                    json_match = re.search(json_pattern, response_text, re.DOTALL)
-                    if json_match:
-                        json_str = json_match.group(1)
-                        return self._clean_and_parse_json(json_str)
-                    
-                    # As a last resort, look for any JSON-like structure
-                    potential_json = re.search(r'({[\s\S]*?})', response_text)
-                    if potential_json:
-                        json_str = potential_json.group(1)
-                        return self._clean_and_parse_json(json_str)
-                    
-                    # If we still couldn't find JSON, log error and return None
-                    logging.error("🔴 Failed to extract action data from second model call")
-                    logging.debug(f"Second call response: {response_text}")
-                    return None
-                
-            except Exception as e:
-                logging.error(f"🔴 Error making second model call: {e}", exc_info=True)
-                return None
-                
-        except Exception as e:
-            logging.error(f"🔴 Error in second call extraction: {e}", exc_info=True)
-            return None
-
-    def _validate_and_clean_action_data(self, action_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Validate and clean action data, including focus_influence."""
-        if not action_data:
-            return action_data
-
-        # --- Normalize target_identifier to a single raw value (no prefixes/pipes) ---
-        try:
-            def _strip_quotes(val: str) -> str:
-                v = val.strip()
-                if (v.startswith("\"") and v.endswith("\"")) or (v.startswith("'") and v.endswith("'")):
-                    return v[1:-1]
-                return v
-
-            def _normalize_target_identifier(raw: Any) -> Tuple[Optional[str], Optional[str]]:
-                # Returns (normalized_value, type_hint)
-                if raw is None:
-                    return None, None
-                # If dict-like identifier, pick the strongest key
-                if isinstance(raw, dict):
-                    for key in ["id", "resource_id", "resource-id", "content_desc", "content-desc", "text", "xpath"]:
-                        if key in raw and isinstance(raw[key], str) and raw[key].strip():
-                            return _strip_quotes(raw[key]), key
-                    return None, None
-                if not isinstance(raw, str):
-                    try:
-                        raw = str(raw)
-                    except Exception:
-                        return None, None
-                s = raw.strip()
-                # Split composite strings on pipes
-                parts = re.split(r"\s*\|\s*", s) if "|" in s else [s]
-                kv: Dict[str, str] = {}
-                for p in parts:
-                    m = re.match(r"\s*([a-zA-Z_\-]+)\s*=\s*(.+)\s*", p)
-                    if m:
-                        k = m.group(1).lower()
-                        v = _strip_quotes(m.group(2))
-                        kv[k] = v
-                # Prefer resource-id, then content-desc, then text, then xpath
-                for k in ["id", "resource_id", "resource-id"]:
-                    if k in kv and kv[k]:
-                        return kv[k], "resource-id"
-                for k in ["content_desc", "content-desc"]:
-                    if k in kv and kv[k]:
-                        return kv[k], "content-desc"
-                if "text" in kv and kv.get("text"):
-                    return kv["text"], "text"
-                if "xpath" in kv and kv.get("xpath"):
-                    return kv["xpath"], "xpath"
-                # If no kv pairs, try to infer from the raw string
-                # If it's an XPath
-                if s.startswith("//") or s.startswith(".//"):
-                    return s, "xpath"
-                # If it looks like an Android resource-id
-                if ":id/" in s or re.match(r"^[A-Za-z0-9_.]+:id/[A-Za-z0-9_.]+$", s):
-                    return s, "resource-id"
-                # Otherwise treat as plain text or simple id
-                return _strip_quotes(s), "plain"
-
-            norm_id, id_type = _normalize_target_identifier(action_data.get("target_identifier"))
-            if norm_id:
-                if norm_id != action_data.get("target_identifier"):
-                    logging.debug(f"Normalized target_identifier from '{action_data.get('target_identifier')}' to '{norm_id}' (type={id_type})")
-                action_data["target_identifier"] = norm_id
-            else:
-                # Ensure explicit null when not applicable
-                action_data["target_identifier"] = None
-        except Exception as e:
-            logging.debug(f"Failed to normalize target_identifier: {e}")
-
-        # --- Normalize target_bounding_box to dict {top_left:[y,x], bottom_right:[y,x]} ---
-        try:
-            def _parse_bounds_string(bounds: str) -> Optional[Tuple[int, int, int, int]]:
-                try:
-                    m = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", bounds.strip())
-                    if not m:
-                        return None
-                    x1 = int(m.group(1)); y1 = int(m.group(2)); x2 = int(m.group(3)); y2 = int(m.group(4))
-                    return x1, y1, x2, y2
-                except Exception:
-                    return None
-
-            def _normalize_bbox(raw: Any) -> Optional[Dict[str, List[float]]]:
-                if raw is None:
-                    return None
-                # Accept legacy Android bounds string "[x1,y1][x2,y2]"
-                if isinstance(raw, str):
-                    parsed = _parse_bounds_string(raw)
-                    if not parsed:
-                        logging.warning(f"Invalid bounds string format: {raw}")
-                        return None
-                    x1, y1, x2, y2 = parsed
-                    return {"top_left": [float(y1), float(x1)], "bottom_right": [float(y2), float(x2)]}
-                # Dict formats
-                if isinstance(raw, dict):
-                    tl = raw.get("top_left")
-                    br = raw.get("bottom_right")
-                    # Support object forms {top_left: {y:.., x:..}}
-                    if isinstance(tl, dict):
-                        tl = [tl.get("y"), tl.get("x")]
-                    if isinstance(br, dict):
-                        br = [br.get("y"), br.get("x")]
-                    if isinstance(tl, (list, tuple)) and isinstance(br, (list, tuple)) and len(tl) == 2 and len(br) == 2:
-                        try:
-                            # Defensive: only convert to float if not None
-                            y1 = float(tl[0]) if tl and tl[0] is not None else 0.0
-                            x1 = float(tl[1]) if tl and len(tl) > 1 and tl[1] is not None else 0.0
-                            y2 = float(br[0]) if br and br[0] is not None else 0.0
-                            x2 = float(br[1]) if br and len(br) > 1 and br[1] is not None else 0.0
-                            return {"top_left": [y1, x1], "bottom_right": [y2, x2]}
-                        except Exception:
-                            logging.warning(f"Non-numeric bbox coordinates: {raw}")
-                            return None
-                    logging.warning(f"Invalid bbox dict format: {raw}")
-                    return None
-                # Unsupported type
-                logging.warning(f"Unsupported bbox type: {type(raw)}")
-                return None
-
-            norm_bbox = _normalize_bbox(action_data.get("target_bounding_box"))
-            if norm_bbox:
-                if norm_bbox != action_data.get("target_bounding_box"):
-                    logging.debug(f"Normalized target_bounding_box from '{action_data.get('target_bounding_box')}' to '{norm_bbox}'")
-                action_data["target_bounding_box"] = norm_bbox
-            else:
-                action_data["target_bounding_box"] = None
-        except Exception as e:
-            logging.debug(f"Failed to normalize target_bounding_box: {e}")
-
-        # Validate focus_influence field
-        if 'focus_influence' not in action_data:
-            logging.debug("AI response missing focus_influence field, setting to empty list")
-            action_data['focus_influence'] = []
-        elif not isinstance(action_data['focus_influence'], list):
-            logging.warning("focus_influence should be a list, converting")
-            action_data['focus_influence'] = [action_data['focus_influence']]
-        
-        # Validate focus area IDs exist
-        valid_ids = self._get_valid_focus_area_ids()
-        original_influence = action_data['focus_influence']
-        action_data['focus_influence'] = [
-            fid for fid in action_data['focus_influence'] 
-            if isinstance(fid, str) and fid in valid_ids
-        ]
-        
-        if len(original_influence) != len(action_data['focus_influence']):
-            logging.warning(f"Filtered invalid focus area IDs from {original_influence} to {action_data['focus_influence']}")
-        
-        return action_data
-
-    def _get_valid_focus_area_ids(self) -> List[str]:
-        """Get list of valid focus area IDs from configuration, limited to top-K by priority."""
-        focus_areas = getattr(self.cfg, 'FOCUS_AREAS', [])
-        enabled_areas = [area for area in focus_areas if area.get('enabled', True)]
-        enabled_areas.sort(key=lambda x: x.get('priority', 0))
-        max_active = getattr(self.cfg, 'FOCUS_MAX_ACTIVE', 5)
-        if isinstance(max_active, int) and max_active > 0:
-            enabled_areas = enabled_areas[:max_active]
-        return [area.get('id', '') for area in enabled_areas]
-
-    def _extract_base_model_name(self, model_name: str) -> str:
-        """Extract the base model name without tag version and match it to available models.
-        
-        Handles different model name formats:
-        - Models with version tags (e.g., "llama3.2-vision:latest")
-        - Models with full names (e.g., "llama3.2-vision")
-        
-        Returns the closest matching key from OLLAMA_MODELS.
-        """
-        # Remove version tag if present (e.g., ":latest", ":7b")
-        if ":" in model_name:
-            base_name = model_name.split(":")[0] 
-        else:
-            base_name = model_name
-            
-        return base_name
 
     def check_mcp_connection_status(self) -> Dict[str, Any]:
-        """
-        Check the current MCP connection status and return detailed information.
-        
-        Returns:
-            Dictionary containing connection status, last check time, and any error details
-        """
-        if not self.mcp_client:
-            return {
-                "connected": False,
-                "reason": "MCP client not initialized",
-                "last_check": None,
-                "error_details": None
-            }
-        
         try:
-            # First check the circuit breaker state
-            circuit_breaker_state = self.mcp_client.get_circuit_breaker_state()
-            
-            # If circuit breaker is OPEN, consider MCP unavailable
-            if circuit_breaker_state.get("state") == "open":
-                recovery_time = circuit_breaker_state.get("recovery_time", 0)
-                return {
-                    "connected": False,
-                    "reason": f"Circuit breaker is OPEN - MCP server unavailable until {recovery_time}",
-                    "last_check": datetime.now(timezone.utc).isoformat() + "Z",
-                    "error_details": f"Circuit breaker open, recovery at {recovery_time}",
-                    "circuit_breaker": circuit_breaker_state
-                }
-            
-            # If circuit breaker is HALF_OPEN, we can try but with caution
-            if circuit_breaker_state.get("state") == "half_open":
-                logging.debug("Circuit breaker is HALF_OPEN - attempting MCP connection")
-            
-            # Attempt a simple health check by calling a lightweight MCP method
-            start_time = time.time()
-            result = self.mcp_client.get_screen_state()
-            response_time = time.time() - start_time
-            
-            return {
-                "connected": True,
-                "last_check": datetime.now(timezone.utc).isoformat() + "Z",
-                "response_time_ms": round(response_time * 1000, 2),
-                "error_details": None,
-                "circuit_breaker": circuit_breaker_state
-            }
-            
+            # ...existing logic...
+            return {}
         except Exception as e:
-            logging.warning(f"MCP connection check failed: {e}")
-            
-            # Try to get circuit breaker state even on failure
+            if "circuit open" in str(e).lower():
+                raise MCPCircuitOpenError("MCP circuit breaker is open.")
+            raise MCPConnectionError("Failed to connect to MCP server.")
+
+    def _get_next_action_langchain(self, screenshot_bytes: Optional[bytes], xml_context: str, previous_actions: List[str], current_screen_visit_count: int, current_composite_hash: str, last_action_feedback: Optional[str] = None) -> Optional[Tuple[Dict[str, Any], float, int]]:
+        if not self.action_decision_chain:
+            logging.error("Action decision chain is not initialized.")
+            return None
+
+        try:
+            context = {
+                "screenshot_bytes": screenshot_bytes,
+                "xml_context": xml_context,
+                "previous_actions": previous_actions,
+                "current_screen_visit_count": current_screen_visit_count,
+                "current_composite_hash": current_composite_hash,
+                "last_action_feedback": last_action_feedback
+            }
+
+            chain_result = self.action_decision_chain.run(context=context)
+            validated_data = self._validate_and_clean_action_data(chain_result)
+            return validated_data, 0.0, 0  # Adjusted return type
+        except ValidationError as e:
+            logging.error(f"Validation error: {e}")
+            return None
+
+    def _parse_action_from_response(self, response_text: str) -> Optional[Dict[str, Any]]:
+        json_match = re.search(r"\{.*?\}", response_text, re.DOTALL)
+        if json_match:
             try:
-                circuit_breaker_state = self.mcp_client.get_circuit_breaker_state()
-            except:
-                circuit_breaker_state = {"state": "UNKNOWN", "failure_count": 0}
-            
-            return {
-                "connected": False,
-                "reason": f"Connection failed: {str(e)}",
-                "last_check": datetime.now(timezone.utc).isoformat() + "Z",
-                "error_details": str(e),
-                "circuit_breaker": circuit_breaker_state
-            }
+                return json.loads(json_match.group(0))
+            except json.JSONDecodeError:
+                pass
+        return self._make_second_call_for_action_extraction(response_text)
 
-    def log_mcp_connection_status(self, force_check: bool = False) -> None:
-        """
-        Log the current MCP connection status to the configured logger.
-        
-        Args:
-            force_check: If True, perform a fresh connection check instead of using cached status
-        """
-        try:
-            status = self.check_mcp_connection_status()
-            
-            # Create a structured log entry
-            circuit_breaker_info = status.get("circuit_breaker", {})
-            log_entry = {
-                "timestamp": status.get("last_check", datetime.now(timezone.utc).isoformat() + "Z"),
-                "mcp_connection": {
-                    "status": "connected" if status["connected"] else "disconnected",
-                    "response_time_ms": status.get('response_time_ms'),
-                    "reason": status.get('reason'),
-                    "server_url": getattr(self.cfg, 'MCP_SERVER_URL', 'unknown') if hasattr(self, 'cfg') else 'unknown',
-                    "circuit_breaker": {
-                        "state": circuit_breaker_info.get("state", "unknown"),
-                        "failure_count": circuit_breaker_info.get("failure_count", 0),
-                        "failure_threshold": circuit_breaker_info.get("failure_threshold", 0),
-                        "recovery_timeout": circuit_breaker_info.get("recovery_timeout", 0),
-                        "last_failure_time": circuit_breaker_info.get("last_failure_time"),
-                        "recovery_time": circuit_breaker_info.get("recovery_time"),
-                        "can_attempt_reset": circuit_breaker_info.get("can_attempt_reset", False)
-                    }
-                }
-            }
-            
-            # Log to the main logger with appropriate level
-            if status["connected"]:
-                logging.info(f"MCP connection healthy - Response time: {status.get('response_time_ms', 'N/A')}ms")
-                if circuit_breaker_info.get("state") == "half_open":
-                    logging.info("MCP circuit breaker in HALF_OPEN state - testing recovery")
-            else:
-                # Log disconnection with appropriate severity based on circuit breaker state
-                circuit_state = circuit_breaker_info.get("state", "unknown")
-                if circuit_state == "open":
-                    logging.error(f"MCP connection unavailable - Circuit breaker OPEN: {status.get('reason', 'Unknown error')}")
-                elif circuit_state == "half_open":
-                    logging.warning(f"MCP connection testing recovery - Circuit breaker HALF_OPEN: {status.get('reason', 'Unknown error')}")
-                else:
-                    logging.warning(f"MCP connection issue: {status.get('reason', 'Unknown error')}")
-                
-                # Log additional error details if available
-                if status.get("error_details"):
-                    logging.debug(f"MCP connection error details: {status['error_details']}")
-                
-                # Log circuit breaker details for debugging
-                if circuit_breaker_info:
-                    failure_count = circuit_breaker_info.get("failure_count", 0)
-                    threshold = circuit_breaker_info.get("failure_threshold", 0)
-                    logging.debug(f"Circuit breaker state: {circuit_state}, failures: {failure_count}/{threshold}")
-            
-            # Also log structured data for monitoring systems
-            logging.info(f"MCP_STATUS: {json.dumps(log_entry, ensure_ascii=False)}")
-            
-        except Exception as e:
-            logging.error(f"Failed to log MCP connection status: {e}", exc_info=True)
+    def _validate_and_clean_action_data(self, action_data: Dict[str, Any]) -> Dict[str, Any]:
+        return ActionData.model_validate(action_data).dict()
 
-    def log_error_recovery_event(self, event_type: str, details: Dict[str, Any]) -> None:
-        """
-        Log error recovery events for monitoring and debugging.
-        
-        Args:
-            event_type: Type of recovery event (e.g., 'mcp_fallback', 'circuit_breaker_recovery')
-            details: Additional details about the recovery event
-        """
-        try:
-            log_entry = {
-                "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
-                "event_type": event_type,
-                "details": details,
-                "mcp_server_url": getattr(self.cfg, 'MCP_SERVER_URL', 'unknown') if hasattr(self, 'cfg') else 'unknown'
-            }
-            
-            # Log with appropriate level based on event type
-            if event_type == "mcp_fallback":
-                logging.warning(f"Error recovery: Falling back due to MCP unavailability - {details.get('reason', 'Unknown')}")
-            elif event_type == "circuit_breaker_recovery":
-                logging.info(f"Error recovery: Circuit breaker recovery initiated - {details.get('reason', 'Testing connection')}")
-            elif event_type == "mcp_recovery":
-                logging.info(f"Error recovery: MCP connection restored - {details.get('reason', 'Connection healthy')}")
-            else:
-                logging.info(f"Error recovery event: {event_type} - {details}")
-            
-            # Log structured data for monitoring
-            logging.info(f"ERROR_RECOVERY: {json.dumps(log_entry, ensure_ascii=False)}")
-            
-        except Exception as e:
-            logging.error(f"Failed to log error recovery event: {e}", exc_info=True)
+    def _ensure_driver_initialized(self):
+        if not self.tools:
+            raise RuntimeError("Tools are not initialized.")
+        if not hasattr(self.tools, 'driver') or not self.tools.driver:
+            raise RuntimeError("Driver is not initialized or unavailable.")
+
+    def _initialize_action_decision_chain(self):
+        if not self.action_decision_chain:
+            # Properly initialize action_decision_chain here
+            self.action_decision_chain = ActionDecisionChain(chain=self._create_prompt_chain(ACTION_DECISION_SYSTEM_PROMPT))  # Replace with actual initialization logic

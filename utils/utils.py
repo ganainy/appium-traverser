@@ -16,7 +16,7 @@ except ImportError:
 import hashlib
 import shutil
 import xml.etree.ElementTree as std_etree
-from typing import Any, Dict, List, Optional, Set, Tuple, cast
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import imagehash
 from PIL import Image, ImageDraw
@@ -36,6 +36,7 @@ SCRIPT_START_TIME = time.time()
 # --- Custom Log Formatter and Handler Manager (Moved from main.py) ---
 class ElapsedTimeFormatter(logging.Formatter):
     def formatTime(self, record, datefmt=None):
+        _ = datefmt  # Intentionally unused; required by Formatter API.
         elapsed_seconds = record.created - SCRIPT_START_TIME
         h = int(elapsed_seconds // 3600)
         m = int((elapsed_seconds % 3600) // 60)

@@ -384,11 +384,6 @@ class OpenRouterAdapter(ModelAdapter):
         """Return information about the model."""
         return self._model_info
 
-    # Fallback helpers removed per user preference to avoid automatic model selection
-
-        # 5) Fallback to first available
-        return models[0] if models else None
-
 
 # ------ Ollama Adapter ------
 

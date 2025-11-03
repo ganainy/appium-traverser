@@ -59,7 +59,7 @@ class CircuitBreaker:
                 self.state = CircuitBreakerState.HALF_OPEN
                 logger.info("Circuit breaker: Recovery timeout elapsed, state -> HALF_OPEN")
             else:
-                raise MCPConnectionError("Circuit breaker is OPEN - MCP server unavailable")
+                raise MCPCircuitOpenError("Circuit breaker is OPEN - MCP server unavailable")
 
         try:
             result = func(*args, **kwargs)
@@ -294,7 +294,7 @@ class MCPClient:
         """Context manager entry."""
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, _exc_type, _exc_val, _exc_tb):
         """Context manager exit."""
         self.close()
 
@@ -309,5 +309,9 @@ class MCPError(Exception):
 
 
 class MCPConnectionError(Exception):
-    """Exception for MCP connection failures."""
+    """Raised when there is a connection issue with the MCP server."""
+    pass
+
+class MCPCircuitOpenError(Exception):
+    """Raised when the MCP circuit breaker is open."""
     pass

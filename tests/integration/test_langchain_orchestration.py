@@ -324,14 +324,14 @@ class TestLangChainOrchestrationIntegration:
         assert isinstance(token_count, int)
         assert token_count < 1000  # Shouldn't use excessive tokens
 
-    @pytest.mark.parametrize("action_type,expected_method", [
-        ("click", "tap"),
-        ("input", "input_text"),
-        ("scroll_down", "scroll"),
-        ("scroll_up", "scroll"),
-        ("back", "press_back")
+    @pytest.mark.parametrize("action_type", [
+        "click",
+        "input",
+        "scroll_down",
+        "scroll_up",
+        "back"
     ])
-    def test_orchestration_action_execution_routing(self, agent_with_mcp, mock_mcp_client, action_type, expected_method):
+    def test_orchestration_action_execution_routing(self, agent_with_mcp, mock_mcp_client, action_type):
         """Test that different action types are routed to correct MCP methods."""
         # Create action data directly for testing execution routing
         action_data = {

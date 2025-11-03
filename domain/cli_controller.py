@@ -1538,7 +1538,6 @@ class CLIController:
                 logging.error(f"Failed to get run summary: {summary_result.get('error', 'Unknown error')}")
                 print(f"Error: Failed to get run summary: {summary_result.get('error', 'Unknown error')}")
                 return False
-            return True
         except FileNotFoundError:
             logging.error(
                 f"Database file not found for summary printing: {selected_target['db_path']}"

@@ -58,7 +58,7 @@ class CrawlerService:
             self.logger.error(f"Failed to initialize crawler service: {e}")
             return False
     
-    def _signal_handler(self, signum, frame):
+    def _signal_handler(self, signum, _frame):
         """Handle shutdown signals."""
         self.logger.warning(
             f"\nSignal {signal.Signals(signum).name} received. Initiating crawler shutdown..."

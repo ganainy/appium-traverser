@@ -10,8 +10,6 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
     QDialogButtonBox,
-    QFrame,
-    QGridLayout,
     QHBoxLayout,
     QLabel,
     QPushButton,

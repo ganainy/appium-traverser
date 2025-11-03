@@ -337,7 +337,7 @@ def setup_signal_handlers(
         shutdown_handler: Handler for shutdown signals
         reload_handler: Optional handler for reload signals
     """
-    def signal_handler(signum, frame):
+    def signal_handler(signum, _):
         signal_name = signal.Signals(signum).name
         logging.warning(SIGNAL_RECEIVED.format(signal=signal_name))
         shutdown_handler()
@@ -351,7 +351,7 @@ def setup_signal_handlers(
         if hasattr(signal, 'SIGHUP'):
             try:
                 sighup = getattr(signal, 'SIGHUP')
-                signal.signal(sighup, lambda signum, frame: reload_handler())
+                signal.signal(sighup, lambda _signum, _frame: reload_handler())
             except Exception as e:
                 logging.warning(f"Failed to register SIGHUP: {e}")
         else:

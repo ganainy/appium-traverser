@@ -21,13 +21,6 @@ except ImportError:
     pisa = None
 
 
-def truncate_text(text: Optional[str], max_length: int = 200) -> str:
-    if text is None:
-        return "N/A"
-    if len(text) > max_length:
-        return text[:max_length - 3] + "..."
-    return text
-
 class RunAnalyzer:
     def __init__(self, db_path: str, output_data_dir: str, app_package_for_run: Optional[str] = None):
         self.db_path = db_path
