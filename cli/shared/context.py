@@ -86,18 +86,10 @@ class CLIContext:
         # Config is in the parent traverser_ai_api directory, not in cli
         # We're in traverser_ai_api/cli/shared/context.py, so we need to go up three levels to reach traverser_ai_api
         api_dir = Path(__file__).resolve().parent.parent.parent
-        default_config_path = str(api_dir / "config.py")
-        user_config_path = str(api_dir / "user_config.json")
-        
-        # Debug logging to verify paths
         logging.debug(f"API directory: {api_dir}")
-        logging.debug(f"Default config path: {default_config_path}")
-        logging.debug(f"User config path: {user_config_path}")
         
         try:
-            self._config = Config(
-                user_config_json_path=user_config_path,
-            )
+            self._config = Config()
             
             # Setup final logging with file output
             self._setup_final_logging()

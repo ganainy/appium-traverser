@@ -22,14 +22,6 @@ class CommandResult:
         self.data = data
         self.error = error
     
-    def to_tuple(self) -> Tuple[bool, Any]:
-        """
-        Convert to tuple format for backward compatibility.
-        
-        Returns:
-            Tuple of (success, data)
-        """
-        return (self.success, self.data)
     
     @classmethod
     def success_result(cls, data: Any) -> "CommandResult":

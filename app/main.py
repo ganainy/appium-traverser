@@ -34,14 +34,11 @@ bootstrap_logger.info("Bootstrap logging initialized (main.py).")
 
 
 _current_script_dir = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_CONFIG_MODULE_PATH = os.path.join(_current_script_dir, 'config.py')
-USER_CONFIG_JSON_FILENAME = "user_config.json"
-USER_CONFIG_JSON_PATH = os.path.join(_current_script_dir, USER_CONFIG_JSON_FILENAME)
 
 cfg: Optional[Config] = None # Define cfg early for wider scope
 
 try:
-    cfg = Config(user_config_json_path=USER_CONFIG_JSON_PATH)
+    cfg = Config()
 except Exception as e:
     bootstrap_logger.critical(f"CRITICAL: Failed to initialize Config object during startup. Error: {e}", exc_info=True)
     sys.exit(100)

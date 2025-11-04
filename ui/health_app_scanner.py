@@ -17,7 +17,6 @@ try:
     from domain.app_discovery_utils import (
         get_device_id,
         get_app_cache_path,
-        heuristic_health_filter,
     )
 except ImportError as e:
     sys.stderr.write(
@@ -26,7 +25,6 @@ except ImportError as e:
     # These will be used later; allow graceful degradation
     get_device_id = None
     get_app_cache_path = None
-    heuristic_health_filter = None
 
 
 class HealthAppScanner(QObject):
@@ -652,7 +650,7 @@ class HealthAppScanner(QObject):
                 and "health_apps" in result_data
                 and isinstance(result_data["health_apps"], list)
             ):
-                # Apply heuristic filter if AI was requested but not effectively applied
+                # If AI filtering was requested but not effectively applied, warn user
                 use_ai_filter = bool(
                     getattr(
                         self.config, "USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY", False
@@ -661,21 +659,7 @@ class HealthAppScanner(QObject):
                 ai_filtered_effective = bool(result_data.get("ai_filtered", False))
                 if use_ai_filter and not ai_filtered_effective:
                     self.main_controller.log_message(
-                        "AI filter requested but unavailable; applying simple keyword-based health filter.",
-                        "orange",
-                    )
-                    original_count = len(result_data["health_apps"])
-                    if heuristic_health_filter is not None:
-                        filtered = heuristic_health_filter(
-                            result_data["health_apps"]
-                        )
-                    else:
-                        # Fallback if shared utility not available
-                        filtered = result_data["health_apps"]
-                    result_data["health_apps"] = filtered
-                    result_data["heuristic_filtered"] = True
-                    self.main_controller.log_message(
-                        f"Heuristic filter kept {len(filtered)} apps out of {original_count}.",
+                        "AI filter requested but unavailable; no health filtering applied.",
                         "orange",
                     )
                 # Filter out any non-dict items to prevent errors

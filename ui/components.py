@@ -531,14 +531,6 @@ class UIComponents:
         except Exception as e:
             logging.warning(f"Error retrieving {UIComponents.UI_MODE_CONFIG_KEY} from config store: {e}")
 
-        # Fallback: Check if the user_config dict has a UI_MODE (loaded from user_config.json)
-        if initial_mode == UIComponents.UI_MODE_DEFAULT and (
-            hasattr(config_handler, "user_config")
-            and UIComponents.UI_MODE_CONFIG_KEY in config_handler.user_config
-        ):
-            initial_mode = config_handler.user_config[UIComponents.UI_MODE_CONFIG_KEY]
-            logging.debug(f"Setting initial UI mode from user_config dict: {initial_mode}")
-
         logging.debug(f"Initial UI mode determined as: {initial_mode}")
 
         # Set the dropdown to the initial mode
@@ -555,6 +547,11 @@ class UIComponents:
         )
         mode_layout.addWidget(mode_label)
         mode_layout.addWidget(config_handler.ui_mode_dropdown)
+
+        reset_button = QPushButton("Reset Settings")
+        reset_button.setToolTip("Restore all configuration values to their defaults.")
+        reset_button.clicked.connect(config_handler.reset_settings)
+        mode_layout.addWidget(reset_button)
         layout.addLayout(mode_layout)
 
         # Connect UI mode dropdown to toggle UI complexity

@@ -13,6 +13,10 @@ script_setup_manual_config
 output_data/
 old-runs/
 
+# Runtime databases
+crawler.db
+crawler.db-journal
+
 # Python
 *.pyc
 dist/

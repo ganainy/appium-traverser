@@ -145,15 +145,13 @@ try:
     from config.config import Config
     from mobsf_manager import MobSFManager
     
-    # Initialize Config with properly escaped paths
-    defaults_module_path = os.path.join(r'{api_dir_path}', "config.py")
-    user_config_json_path = os.path.join(r'{api_dir_path}', "user_config.json")
-    config = Config(defaults_module_path, user_config_json_path)
+    # Initialize Config using default SQLite-backed storage
+    config = Config()
     
     # Set MobSF configuration
-    config.MOBSF_API_URL = '{api_url}'
-    config.MOBSF_API_KEY = '{api_key}'
-    config.APP_PACKAGE = '{package_name}'
+    config.set("MOBSF_API_URL", '{api_url}')
+    config.set("MOBSF_API_KEY", '{api_key}')
+    config.set("APP_PACKAGE", '{package_name}')
     
     # Initialize MobSF Manager
     mobsf_manager = MobSFManager(config)

@@ -110,10 +110,7 @@ class TrafficCaptureManager:
 
         target_app_package = str(self.cfg.get('APP_PACKAGE'))
         # PCAPdroid activity usually constructed like: com.example/.Activity
-        pcapdroid_activity = str(self.cfg.get('PCAPDROID_ACTIVITY')) 
-        if not pcapdroid_activity: # Fallback if PCAPDROID_ACTIVITY is not fully qualified
-            pcapdroid_pkg = str(self.cfg.get('PCAPDROID_PACKAGE'))
-            pcapdroid_activity = f"{pcapdroid_pkg}/.activities.CaptureCtrl"
+        pcapdroid_activity = str(self.cfg.get('PCAPDROID_ACTIVITY'))
         
         sanitized_package = re.sub(r'[^\w.-]+', '_', target_app_package)
         timestamp = time.strftime("%Y%m%d_%H%M%S")
@@ -190,9 +187,6 @@ class TrafficCaptureManager:
             return None
 
         pcapdroid_activity = str(self.cfg.get('PCAPDROID_ACTIVITY'))
-        if not pcapdroid_activity:
-             pcapdroid_pkg = str(self.cfg.get('PCAPDROID_PACKAGE'))
-             pcapdroid_activity = f"{pcapdroid_pkg}/.activities.CaptureCtrl"
 
         logging.debug("Attempting to stop PCAPdroid traffic capture...")
         stop_command_args = ['shell', 'am', 'start', '-n', pcapdroid_activity, '-e', 'action', 'stop']
@@ -263,9 +257,6 @@ class TrafficCaptureManager:
             return {"status": "disabled", "running": False, "error": "Traffic capture not enabled by config."}
 
         pcapdroid_activity = str(self.cfg.get('PCAPDROID_ACTIVITY'))
-        if not pcapdroid_activity:
-             pcapdroid_pkg = str(self.cfg.get('PCAPDROID_PACKAGE'))
-             pcapdroid_activity = f"{pcapdroid_pkg}/.activities.CaptureCtrl"
 
         logging.debug("Querying PCAPdroid capture status...")
         status_command_args = ['shell', 'am', 'start', '-n', pcapdroid_activity, '-e', 'action', 'get_status']

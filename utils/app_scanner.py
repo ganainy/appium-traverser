@@ -45,7 +45,6 @@ try:
     from domain.app_discovery_utils import (
         get_device_id,
         get_app_cache_path,
-        heuristic_health_filter,
     )
 except ImportError as e:
     sys.stderr.write(
@@ -61,10 +60,6 @@ CURRENT_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 # Assuming app_scanner.py is in the utils directory
 # We need to go up two levels to reach the project root
 PROJECT_ROOT = os.path.abspath(os.path.join(CURRENT_SCRIPT_DIR, "..", ".."))
-DEFAULT_CONFIG_MODULE_PATH_FOR_FIND_APP = os.path.join(PROJECT_ROOT, "config", "config.py")
-USER_CONFIG_JSON_PATH_FOR_FIND_APP = os.path.join(
-    PROJECT_ROOT, "user_config.json"
-)
 
 # Import the Config class itself
 try:
@@ -305,18 +300,13 @@ def get_installed_packages(
 
 def get_app_label(package_name):
     """Retrieves the user-facing application label (name) for a given package.
-    
-    Tries multiple methods with fallbacks:
-    1. dumpsys package with specific patterns
-    2. pm dump for app metadata
-    3. aapt for APK metadata
-    4. PackageManager info
-    5. Fallback to package name parsing
+
+    Uses dumpsys package to get application label.
     """
     if not package_name:
         return None
-    
-    # Method 1: Try dumpsys package first (fastest and most reliable)
+
+    # Try dumpsys package
     try:
         dumpsys_command = ["shell", "dumpsys", "package", package_name]
         dumpsys_output = run_adb_command(dumpsys_command)
@@ -330,7 +320,7 @@ def get_app_label(package_name):
                 # Pattern 3: label= without quotes (be more flexible)
                 (r"label=([^\s;]+)", re.MULTILINE),
             ]
-            
+
             for pattern, flags in patterns:
                 label_match = re.search(pattern, dumpsys_output, flags)
                 if label_match:
@@ -339,75 +329,8 @@ def get_app_label(package_name):
                     if label and not (label.startswith("0x") and len(label) > 5):
                         return label
     except Exception as e:
-        pass  # Continue to next method
-    
-    # Method 2: Try using pm command to get application info
-    try:
-        pm_command = ["shell", "cmd", "package", "list", "packages", "-3", "--show-versioncode"]
-        # This might not work on all devices, so use a simpler approach
-        pm_dump_command = ["shell", "pm", "dump", package_name]
-        pm_output = run_adb_command(pm_dump_command)
-        if pm_output:
-            # Look for label in pm dump output
-            label_match = re.search(r"label=([^\s;]+)", pm_output, re.IGNORECASE)
-            if label_match:
-                label = label_match.group(1).strip().strip("'\"")
-                if label and not (label.startswith("0x") and len(label) > 5):
-                    return label
-    except Exception as e:
-        pass  # Continue to next method
-    
-    # Method 3: Try aapt for APK metadata (slower, only if others fail)
-    try:
-        path_output = run_adb_command(["shell", "pm", "path", package_name])
-        apk_path = None
-        if path_output:
-            # Find the line starting with 'package:' which contains the base APK path
-            base_apk_line = next(
-                (line for line in path_output.splitlines() if line.startswith("package:")),
-                None,
-            )
-            if base_apk_line:
-                apk_path = base_apk_line.split(":", 1)[1]
-        
-        if apk_path:
-            aapt_command = ["shell", "aapt", "dump", "badging", apk_path]
-            aapt_output = run_adb_command(aapt_command)
-            if aapt_output:
-                label_match = re.search(
-                    r"application-label(?:-[a-zA-Z_]+)*:['\"]([^'\"]+)['\"]", aapt_output
-                )
-                if label_match:
-                    return label_match.group(1).strip()
-    except Exception as e:
-        pass  # Continue to next method
-    
-    # Method 4: Fallback - try to infer from package name
-    # Convert package name to a reasonable app name
-    # e.g., com.google.android.apps.fitness -> Google Fitness
-    # e.g., com.myfitnesspal.android -> MyFitnessPal
-    try:
-        parts = package_name.split('.')
-        # Remove common prefixes
-        if len(parts) > 1:
-            # Get the meaningful parts (skip 'com', 'android', 'apps', 'google', etc.)
-            meaningful_parts = []
-            skip_prefixes = {'com', 'org', 'net', 'android', 'apps', 'google', 'mozilla', 'apache'}
-            
-            for part in parts:
-                if part.lower() not in skip_prefixes and part:
-                    meaningful_parts.append(part)
-            
-            if meaningful_parts:
-                # Take the last meaningful part or join them
-                inferred_name = meaningful_parts[-1] if len(meaningful_parts) == 1 else ' '.join(meaningful_parts)
-                # Capitalize each word
-                inferred_name = ' '.join(word.capitalize() for word in inferred_name.split('_'))
-                if inferred_name:
-                    return inferred_name
-    except Exception as e:
         pass
-    
+
     return None
 
 
@@ -445,35 +368,6 @@ def find_main_activity(package_name):
             return (
                 f"{package_name}.{act_relative}"  # Assume it's a class in the package
             )
-
-    # Fallback to dumpsys package info
-    output_dumpsys = run_adb_command(["shell", "dumpsys", "package", package_name])
-    if not output_dumpsys:
-        return None
-    # Regex to find LAUNCHER activity in dumpsys output
-    regex = re.compile(
-        r"^\s+Activity\s+Record\{.*? "
-        + re.escape(package_name)
-        + r"/([^\s\}]+)\s*.*?\}\n"  # Capture activity name
-        r"(?:.*?\n)*?"  # Non-greedy match for any lines in between
-        r"^\s+IntentFilter\{.*?\n"  # Start of IntentFilter block
-        r"(?:.*?\n)*?"
-        r'^\s+Action: "android\.intent\.action\.MAIN"\n'  # MAIN action
-        r"(?:.*?\n)*?"
-        r'^\s+Category: "android\.intent\.category\.LAUNCHER"\n'  # LAUNCHER category
-        r"(?:.*?\n)*?"
-        r"^\s+\}",  # End of IntentFilter block
-        re.MULTILINE | re.DOTALL,
-    )
-    match = regex.search(output_dumpsys)
-    if match:
-        activity_part = match.group(1)
-        if activity_part.startswith("."):
-            return package_name + activity_part
-        elif "." in activity_part:
-            return activity_part  # Already qualified or just class name
-        else:
-            return package_name + "." + activity_part  # Prepend package name
     return None
 
 
@@ -740,10 +634,10 @@ def generate_app_info_cache(perform_ai_filtering_on_this_call: bool = False):
     if perform_ai_filtering_on_this_call:
         if not CAN_ENABLE_AI_FILTERING_GLOBALLY:
             print(
-                "Warning: AI Filtering is globally unavailable (prerequisites failed). Applying heuristic filter.",
+                "Warning: AI Filtering is globally unavailable (prerequisites failed).",
                 file=sys.stderr,
             )
-            health_apps_data = heuristic_health_filter(list(all_apps_info))
+            health_apps_data = list(all_apps_info)
         else:
             print(
                 "Attempting AI filtering to identify health apps..."
@@ -762,21 +656,21 @@ def generate_app_info_cache(perform_ai_filtering_on_this_call: bool = False):
                     if health_apps_data != all_apps_info:
                         ai_filter_was_effectively_applied = True
                     else:
-                        # No effective filtering, use heuristic fallback
+                        # No effective filtering
                         print(
-                            "AI filtering did not reduce app list. Applying heuristic filter.",
+                            "AI filtering did not reduce app list.",
                             file=sys.stderr,
                         )
-                        health_apps_data = heuristic_health_filter(list(all_apps_info))
+                        health_apps_data = list(all_apps_info)
                 print(
                     f"AI filtering identified {len(health_apps_data)} health apps."
                 )
             else:  # filter_apps_with_ai might return original list on some errors, or None if very problematic
                 print(
-                    "AI filtering process failed. Applying heuristic filter.",
+                    "AI filtering process failed.",
                     file=sys.stderr,
                 )
-                health_apps_data = heuristic_health_filter(list(all_apps_info))
+                health_apps_data = list(all_apps_info)
     else:
         # This should not happen anymore since we always attempt filtering
         health_apps_data = list(all_apps_info)

@@ -1,6 +1,8 @@
 """
 Unit tests for core Configuration class.
 """
+from datetime import datetime
+
 import pytest
 from core.config import Configuration
 
@@ -63,10 +65,14 @@ class TestConfiguration:
 
     def test_from_dict(self):
         """Test creating Configuration from dictionary."""
+        timestamp = datetime.now().isoformat()
         data = {
+            "config_id": "custom-id",
             "name": "from_dict",
             "settings": {"max_depth": 2, "timeout": 90, "platform": "ios"},
-            "is_default": True
+            "is_default": True,
+            "created_at": timestamp,
+            "updated_at": timestamp,
         }
 
         config = Configuration.from_dict(data)
@@ -74,6 +80,7 @@ class TestConfiguration:
         assert config.name == "from_dict"
         assert config.settings["platform"] == "ios"
         assert config.is_default is True
+        assert config.config_id == "custom-id"
 
     def test_to_dict(self):
         """Test converting Configuration to dictionary."""

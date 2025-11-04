@@ -328,13 +328,12 @@ class SelectAppCommand(CommandHandler):
                 name = selected_app.get(APP_NAME, "Unknown")
                 
                 # Save to config
-                config_service.set_config_value(CONFIG_APP_PACKAGE, pkg)
-                config_service.set_config_value(CONFIG_APP_ACTIVITY, act)
-                config_service.set_config_value(
+                config_service.set(CONFIG_APP_PACKAGE, pkg)
+                config_service.set(CONFIG_APP_ACTIVITY, act)
+                config_service.set(
                     CONFIG_LAST_SELECTED_APP,
                     {"package_name": pkg, "activity_name": act, "app_name": name},
                 )
-                config_service.save_all_changes()
             
             name = selected_app.get(APP_NAME, DEFAULT_UNKNOWN)
             package = selected_app.get(PACKAGE_NAME, DEFAULT_UNKNOWN)
@@ -386,8 +385,8 @@ class ShowSelectedAppCommand(CommandHandler):
         
         # Use the new method that handles JSON deserialization internally
         last_selected = config_service.get_deserialized_config_value(CONFIG_LAST_SELECTED_APP)
-        app_package = config_service.get_config_value(CONFIG_APP_PACKAGE)
-        app_activity = config_service.get_config_value(CONFIG_APP_ACTIVITY)
+        app_package = config_service.get(CONFIG_APP_PACKAGE)
+        app_activity = config_service.get(CONFIG_APP_ACTIVITY)
         
         if last_selected and isinstance(last_selected, dict):
             name = last_selected.get(APP_NAME, DEFAULT_UNKNOWN)

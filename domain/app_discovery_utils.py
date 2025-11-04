@@ -19,22 +19,18 @@ from config.config import Config
 def get_device_id() -> str:
     """
     Get the ID of the currently connected Android device via ADB.
-    
-    Attempts multiple strategies:
-    1. Try `adb get-serialno` (fastest path)
-    2. Fallback to `adb devices` parsing
-    3. On timeout, retry with longer timeout (10s)
-    4. Sanitize device ID for use in filenames (replace invalid chars with underscore)
-    
+
+    Uses `adb get-serialno` to get device ID.
+
     Returns:
         str: Sanitized device ID, or "unknown_device" if unable to detect
-        
+
     Examples:
         >>> device_id = get_device_id()
         >>> print(device_id)  # "emulator-5554" or "FA8AX1A00D" etc.
     """
     try:
-        # Try get-serialno (fast path)
+        # Try get-serialno
         result = subprocess.run(
             ["adb", "get-serialno"], capture_output=True, text=True, timeout=5
         )
@@ -45,39 +41,8 @@ def get_device_id() -> str:
         ):
             device_id = result.stdout.strip()
             return re.sub(r"[^\w\-.]", "_", device_id)
+        return "unknown_device"
 
-        # Fallback to `adb devices`
-        devices_result = subprocess.run(
-            ["adb", "devices"], capture_output=True, text=True, timeout=6
-        )
-        if devices_result.returncode == 0:
-            lines = devices_result.stdout.strip().splitlines()
-            device_lines = [
-                line for line in lines[1:] if line.strip() and "\tdevice" in line
-            ]
-            if device_lines:
-                device_id = device_lines[0].split("\t")[0].strip()
-                return re.sub(r"[^\w\-.]", "_", device_id)
-        return "unknown_device"
-        
-    except subprocess.TimeoutExpired:
-        # Retry with longer timeout on timeout
-        try:
-            devices_result = subprocess.run(
-                ["adb", "devices"], capture_output=True, text=True, timeout=10
-            )
-            if devices_result.returncode == 0:
-                lines = devices_result.stdout.strip().splitlines()
-                device_lines = [
-                    line for line in lines[1:] if line.strip() and "\tdevice" in line
-                ]
-                if device_lines:
-                    device_id = device_lines[0].split("\t")[0].strip()
-                    return re.sub(r"[^\w\-.]", "_", device_id)
-        except Exception:
-            pass
-        return "unknown_device"
-        
     except Exception:
         return "unknown_device"
 
@@ -134,82 +99,3 @@ def get_app_cache_path(
     return cache_path
 
 
-def heuristic_health_filter(
-    apps: List[Dict[str, Any]]
-) -> List[Dict[str, Any]]:
-    """
-    Fallback keyword-based filter for health-related apps.
-    
-    Filters applications whose `app_name` or `package_name` contains
-    health/fitness/wellness keywords. Used as a fallback when AI filtering
-    is unavailable or disabled.
-    
-    Args:
-        apps: List of app info dictionaries with 'app_name' and 'package_name' keys
-    
-    Returns:
-        List of filtered app dictionaries matching health/fitness criteria.
-        Returns empty list if input is None or empty.
-        
-    Examples:
-        >>> apps = [
-        ...     {"app_name": "Google Fit", "package_name": "com.google.android.apps.fitness"},
-        ...     {"app_name": "Chrome", "package_name": "com.android.chrome"},
-        ... ]
-        >>> health_apps = heuristic_health_filter(apps)
-        >>> len(health_apps)
-        1
-    """
-    if not apps:
-        return []
-    
-    # Keywords for health/fitness/wellness apps
-    health_keywords = [
-        "health",
-        "fitness",
-        "fit",
-        "wellness",
-        "med",
-        "medical",
-        "care",
-        "doctor",
-        "patient",
-        "pill",
-        "medication",
-        "pharma",
-        "drug",
-        "clinic",
-        "hosp",
-        "hospital",
-        "therapy",
-        "mental",
-        "mind",
-        "sleep",
-        "diet",
-        "calorie",
-        "nutrition",
-        "run",
-        "workout",
-        "yoga",
-        "step",
-        "heart",
-        "bp",
-        "blood",
-        "sugar",
-        "diabetes",
-    ]
-    
-    filtered = []
-    for app in apps:
-        # Get app name and package name, handling None/missing values
-        app_name = app.get("app_name") or ""
-        package_name = app.get("package_name") or ""
-        
-        # Combine for searching (case-insensitive)
-        search_text = (app_name + " " + package_name).lower()
-        
-        # Check if any keyword matches
-        if any(keyword in search_text for keyword in health_keywords):
-            filtered.append(app)
-    
-    return filtered

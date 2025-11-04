@@ -31,7 +31,6 @@ def test_gui_can_create_core_instances():
 
     # Test Configuration creation with required settings
     config = Configuration(
-        config_id="test-gui-config",
         name="GUI Test Config",
         settings={
             "max_depth": 5,
@@ -39,6 +38,7 @@ def test_gui_can_create_core_instances():
             "platform": "android"
         }
     )
+    config.config_id = "test-gui-config"
     assert config.config_id == "test-gui-config"
     assert config.name == "GUI Test Config"
     assert config.settings["max_depth"] == 5
@@ -88,7 +88,6 @@ def test_gui_core_validation_works():
 
     # Test Configuration validation with proper settings
     config = Configuration(
-        config_id="test-gui-config",
         name="GUI Test Config",
         settings={
             "max_depth": 5,
@@ -96,6 +95,7 @@ def test_gui_core_validation_works():
             "platform": "android"
         }
     )
+    config.config_id = "test-gui-config"
     config.validate()  # Should not raise
 
     # Test ParsedData validation
@@ -126,7 +126,6 @@ def test_gui_core_storage_operations():
 
         # Test saving configuration
         config = Configuration(
-            config_id="test-gui-config",
             name="GUI Test Config",
             settings={
                 "max_depth": 5,
@@ -134,6 +133,7 @@ def test_gui_core_storage_operations():
                 "platform": "android"
             }
         )
+        config.config_id = "test-gui-config"
         storage.save_configuration(config)
 
         # Test retrieving configuration
@@ -158,7 +158,6 @@ def test_gui_core_crawler_operations():
 
     # Setup config with required settings
     config = Configuration(
-        config_id="test-gui-config",
         name="GUI Test Config",
         settings={
             "max_depth": 5,
@@ -166,6 +165,7 @@ def test_gui_core_crawler_operations():
             "platform": "android"
         }
     )
+    config.config_id = "test-gui-config"
 
     # Create crawler
     crawler = Crawler(config)

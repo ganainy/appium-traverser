@@ -110,7 +110,6 @@ class SelectDeviceCommand(CommandHandler):
             try:
                 # Set the config in the command
                 context.config.set(KEY.CONFIG_DEVICE_UDID, device_udid)
-                context.config.save_user_config()
                 return CommandResult(
                     success=True,
                     message=MSG.SELECT_DEVICE_SUCCESS.format(udid=device_udid)
@@ -169,7 +168,6 @@ class AutoSelectDeviceCommand(CommandHandler):
             try:
                 # Set the config in the command
                 context.config.set(KEY.CONFIG_DEVICE_UDID, udid)
-                context.config.save_user_config()
                 return CommandResult(
                     success=True,
                     message=MSG.AUTO_SELECT_DEVICE_SUCCESS

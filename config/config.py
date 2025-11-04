@@ -1,9 +1,13 @@
 # Key for output data dir config
 OUTPUT_DATA_DIR_KEY = "OUTPUT_DATA_DIR"
 import os
+import copy
 import logging
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, List
+from typing import Any, Callable, Dict, Optional, List, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from cli.commands.base import CommandResult
 from datetime import datetime
 from infrastructure.user_config_store import UserConfigStore
 from utils.paths import SessionPathManager
@@ -14,9 +18,9 @@ class Config:
     Central configuration class with three-layer precedence:
     user storage (SQLite) > environment > module defaults
     """
-    def __init__(self, user_config_json_path: Optional[str] = None):
+    def __init__(self, user_store: Optional[UserConfigStore] = None):
         self._defaults = type('Defaults', (), {})()  # Empty defaults object as placeholder
-        self._user_store = UserConfigStore()
+        self._user_store = user_store or UserConfigStore()
         self._volatile_overrides: Dict[str, Any] = {}
         self._env = os.environ
         # Load .env file if it exists
@@ -32,9 +36,14 @@ class Config:
         self._secrets = {"OPENROUTER_API_KEY", "GEMINI_API_KEY", "OLLAMA_BASE_URL", "MOBSF_API_KEY"}
         self._init_paths()
         self._path_manager = SessionPathManager(self)
+        self._default_snapshot = self._collect_default_settings()
+        try:
+            self._user_store.initialize_defaults(self._default_snapshot)
+        except Exception:
+            logging.exception("Failed to initialize default configuration values in user store.")
 
     def _init_paths(self):
-        # For backward compatibility, set up path-related attributes from defaults
+        # Initialize path-related attributes used across the project
         self.BASE_DIR = os.path.abspath(os.path.dirname(__file__))
         self.SHUTDOWN_FLAG_PATH = os.path.abspath(os.path.join(self.BASE_DIR, "..", "shutdown.flag"))
         # Placeholder for session-specific metadata (non-persistent)
@@ -67,7 +76,10 @@ class Config:
         return template
 
     def _is_secret(self, key: str) -> bool:
-        return key.upper() in self._secrets or key.lower().endswith("_key")
+        upper_key = key.upper()
+        if upper_key in self._secrets:
+            return True
+        return key == upper_key and upper_key.endswith("_KEY")
 
     def get(self, key: str, default: Any = None) -> Any:
         # Layer 1a: runtime-only overrides set with persist=False
@@ -101,6 +113,15 @@ class Config:
             return module[normalized_key]
         return default
 
+    def to_dict(self) -> Dict[str, Any]:
+        """Return a snapshot of current configuration values suitable for display."""
+        snapshot: Dict[str, Any] = {}
+        for key in self._default_snapshot:
+            if self._is_secret(key):
+                continue
+            snapshot[key] = self.get(key)
+        return snapshot
+
     def set(self, key: str, value: Any, persist: bool = True) -> None:
         if not persist:
             if value is None:
@@ -122,14 +143,6 @@ class Config:
         self._volatile_overrides.pop(key, None)
         self._volatile_overrides.pop(key.upper(), None)
         self._user_store.set(key, value)
-
-    def save_user_config(self):
-        # No-op: user config is now persisted in SQLite
-        pass
-
-    def load_user_config(self, path: Optional[str] = None):
-        # No-op: config is loaded dynamically from SQLite and env
-        pass
 
     # Path-related properties delegated to SessionPathManager
     @property
@@ -217,8 +230,13 @@ class Config:
         # Return focus areas from user store if present, else from defaults
         focus_areas = self._user_store.get_focus_areas()
         if focus_areas:
-            return [fa["area"] for fa in focus_areas if fa["enabled"]]
-        return self.get("focus_areas")
+            return [fa["area"] for fa in focus_areas if fa.get("enabled", True)]
+
+        stored_list = self.get("FOCUS_AREAS")
+        if isinstance(stored_list, list):
+            return stored_list
+
+        return []
 
     @property
     def MAX_APPS_TO_SEND_TO_AI(self):
@@ -273,11 +291,7 @@ class Config:
         return self.get("CONFIG_OLLAMA_BASE_URL", "http://localhost:11434")
 
     def update_setting_and_save(self, key: str, value: Any, callback: Optional[Callable] = None) -> None:
-        """
-        Backwards-compatible helper used throughout the codebase.
-        Persists the value following the standard precedence rules,
-        then invokes an optional callback (used to sync UI/API files).
-        """
+        """Persist the provided value and optionally invoke a callback."""
         try:
             # Use existing set() which handles persistence and secrets
             self.set(key, value, persist=True)
@@ -288,6 +302,16 @@ class Config:
                     logging.exception("Callback in update_setting_and_save failed.")
         except Exception:
             logging.exception("Failed to update setting and save.")
+
+    def reset_settings(self) -> None:
+        """Reset persisted configuration to module defaults and clear overrides."""
+        logging.info("Resetting configuration to defaults")
+        self._volatile_overrides.clear()
+        try:
+            self._user_store.reset_preferences(self._default_snapshot)
+        except Exception:
+            logging.exception("Failed to reset user preferences to defaults.")
+            raise
 
     def _get_user_savable_config(self) -> Dict[str, Any]:
         """
@@ -308,6 +332,16 @@ class Config:
                 except Exception:
                     result[k] = v
         return result
+
+    def _collect_default_settings(self) -> Dict[str, Any]:
+        module = globals()
+        defaults: Dict[str, Any] = {}
+        for key, value in module.items():
+            if not key.isupper():
+                continue
+            if isinstance(value, (str, int, float, bool, dict, list)) or value is None:
+                defaults[key] = copy.deepcopy(value)
+        return defaults
     
     def set_and_save_from_pairs(self, kv_pairs: List[str], telemetry_service=None) -> bool:
         """
@@ -339,14 +373,8 @@ class Config:
                     telemetry_service.print_error(f"Failed to set {key}")
         
         # Save all changes
-        if success_count > 0:
-            try:
-                self.save_user_config()
-                if telemetry_service:
-                    telemetry_service.print_success("Configuration saved successfully")
-            except Exception:
-                if telemetry_service:
-                    telemetry_service.print_warning("Configuration updated but failed to save")
+        if telemetry_service and success_count > 0:
+            telemetry_service.print_success("Configuration updated successfully")
         
         return success_count == total_count
     
@@ -362,18 +390,14 @@ class Config:
             True if successful, False otherwise
         """
         try:
-            import json
-            import logging
-            from typing import get_type_hints
-            
             logging.debug(f"Setting config: {key} = '{value_str}'")
-            
+
             # Try smarter parsing for complex types
             parsed_value = self._parse_value(key, value_str)
-            
+
             self.update_setting_and_save(key, parsed_value)
             return True
-            
+
         except Exception as e:
             logging.error(f"Failed to set config for {key}: {e}", exc_info=True)
             return False
@@ -390,7 +414,6 @@ class Config:
             Parsed value
         """
         import json
-        import logging
         from typing import get_type_hints
         
         # Default to string
@@ -500,7 +523,7 @@ class Config:
         import logging
         from cli.constants.keys import VALID_AI_PROVIDERS
         from cli.commands.base import CommandResult
-        
+
         # Validate provider
         if provider not in VALID_AI_PROVIDERS:
             return CommandResult(
@@ -508,24 +531,21 @@ class Config:
                 message=f"[ERROR] Invalid provider: {provider}",
                 exit_code=1
             )
-        
+
         try:
             # Update provider
             self.set("AI_PROVIDER", provider)
-            
+
             # Update model if provided
             if model:
                 self.set("DEFAULT_MODEL_TYPE", model)
-            
-            # Save configuration (no-op for SQLite-backed config, but kept for compatibility)
-            self.save_user_config()
-            
+
             return CommandResult(
                 success=True,
                 message=f"Provider switched to '{provider}'. Please restart session/command if required.",
                 exit_code=0
             )
-            
+
         except Exception as e:
             logging.error(f"Failed to switch AI provider: {e}", exc_info=True)
             return CommandResult(

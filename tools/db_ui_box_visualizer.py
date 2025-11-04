@@ -123,17 +123,6 @@ def select_latest_run(dm: DatabaseManager) -> Optional[int]:
         return None
 
 
-def select_latest_run_from_steps(dm: DatabaseManager) -> Optional[int]:
-    """Fallback: derive latest run_id from steps_log if runs table is empty."""
-    try:
-        rows = dm.execute_query("SELECT DISTINCT run_id FROM steps_log ORDER BY run_id DESC LIMIT 1")
-        if rows:
-            # rows may be list of tuples
-            val = rows[0][0] if isinstance(rows[0], (tuple, list)) else rows[0]
-            return int(val)
-        return None
-    except Exception:
-        return None
 
 def find_latest_existing_session(cfg: Config) -> Optional[Tuple[str, str]]:
     """Find the latest session directory for the current APP_PACKAGE with an existing DB file."""
@@ -181,12 +170,8 @@ def main():
     parser.add_argument("--out-dir", type=str, default=None, help="Directory to write annotated screenshots.")
     args = parser.parse_args()
 
-    # Instantiate Config similar to main.py behavior
-    # Support refactor: config module moved out of traverser_ai_api into config/config.py (or project root config.py).
-    defaults_module_path = os.path.join(PROJECT_ROOT, 'config', 'config.py') if os.path.isfile(os.path.join(PROJECT_ROOT, 'config', 'config.py')) else os.path.join(PROJECT_ROOT, 'config.py')
-    # Prefer project-root user_config.json, fallback to traverser_ai_api/user_config.json for backwards compatibility
-    user_config_json_path = os.path.join(PROJECT_ROOT, 'user_config.json') if os.path.isfile(os.path.join(PROJECT_ROOT, 'user_config.json')) else os.path.join(PROJECT_ROOT, 'traverser_ai_api', 'user_config.json')
-    cfg = Config(defaults_module_path=defaults_module_path, user_config_json_path=user_config_json_path)
+    # Instantiate Config with SQLite-backed storage
+    cfg = Config()
 
     # Prefer using the latest existing session DB rather than a fresh session
     latest = None
@@ -213,7 +198,7 @@ def main():
     dm = DatabaseManager(cfg)
     dm.connect()
 
-    run_id = args.run_id or select_latest_run(dm) or select_latest_run_from_steps(dm)
+    run_id = args.run_id or select_latest_run(dm)
 
     if run_id is not None:
         steps = dm.get_steps_for_run(run_id)

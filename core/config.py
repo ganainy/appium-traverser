@@ -4,18 +4,13 @@ Configuration management for crawler settings.
 import uuid
 import logging
 from datetime import datetime
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 logger = logging.getLogger(__name__)
 
 
 class Configuration:
-    """
-    Represents shared settings for crawling behavior.
-    """
-    
-    # Default fallback name
-    DEFAULT_CONFIG_NAME = "default"
+    """Represents shared settings for crawling behavior."""
     # --- Schema Definition ---
     REQUIRED_SETTINGS = ["max_depth", "timeout", "platform"]
     VALID_PLATFORMS = ["android", "ios"]
@@ -23,8 +18,8 @@ class Configuration:
     MIN_DEPTH = 1
     MIN_TIMEOUT_SEC = 30
 
-    def __init__(self, name: str, settings: Dict[str, Any], config_id: Optional[str] = None, is_default: bool = False):
-        self.config_id = config_id or str(uuid.uuid4())
+    def __init__(self, name: str, settings: Dict[str, Any], *, is_default: bool = False):
+        self.config_id = str(uuid.uuid4())
         self.name = name
         self.settings = settings
         self.created_at = datetime.now()
@@ -47,7 +42,7 @@ class Configuration:
                     raise ValueError(f"Required setting '{key}' is missing")
 
             if not isinstance(self.settings.get("max_depth"), int) or self.settings["max_depth"] < self.MIN_DEPTH:
-                raise ValueError(f"max_depth must be at least {self.MIN_DEPTH}")
+                raise ValueError("max_depth must be a positive integer")
 
             if not isinstance(self.settings.get("timeout"), int) or self.settings["timeout"] < self.MIN_TIMEOUT_SEC:
                 raise ValueError(f"timeout must be at least {self.MIN_TIMEOUT_SEC} seconds")
@@ -65,12 +60,28 @@ class Configuration:
         """
         Create Configuration from dictionary.
         """
-        return cls(
-            name=data.get("name", cls.DEFAULT_CONFIG_NAME),
-            settings=data.get("settings", {}),
-            config_id=data.get("config_id"),
-            is_default=data.get("is_default", False)
+        if "name" not in data or "settings" not in data:
+            raise ValueError("Configuration data must include 'name' and 'settings'")
+
+        config = cls(
+            name=data["name"],
+            settings=data["settings"],
+            is_default=bool(data.get("is_default", False))
         )
+
+        config_id = data.get("config_id")
+        if config_id:
+            config.config_id = config_id
+
+        created_at = data.get("created_at")
+        if created_at:
+            config.created_at = datetime.fromisoformat(created_at)
+
+        updated_at = data.get("updated_at")
+        if updated_at:
+            config.updated_at = datetime.fromisoformat(updated_at)
+
+        return config
 
     def to_dict(self) -> Dict[str, Any]:
         """

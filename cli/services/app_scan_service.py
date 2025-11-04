@@ -101,8 +101,7 @@ class AppScanService:
             # Update config with health app list file
             config_service = self.context.services.get(SERVICE_CONFIG)
             if config_service:
-                config_service.set_config_value(CONFIG_CURRENT_HEALTH_APP_LIST_FILE, output_path)
-                config_service.save_all_changes()
+                config_service.set(CONFIG_CURRENT_HEALTH_APP_LIST_FILE, output_path)
             
             return True, output_path
             
@@ -207,12 +206,6 @@ class AppScanService:
             if success:
                 return apps
         
-        # Fallback to latest health_filtered cache
-        fallback = self.resolve_latest_cache_file(CACHE_KEY_HEALTH_FILTERED)
-        if fallback and os.path.exists(fallback):
-            success, apps = self.load_apps_from_file(fallback)
-            if success:
-                return apps
                 
         return []
     

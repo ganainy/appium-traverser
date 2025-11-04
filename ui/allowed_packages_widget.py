@@ -36,8 +36,11 @@ class AllowedPackagesWidget(QWidget):
         self.logger = logging.getLogger(__name__)
         
         # Import here to avoid circular imports
-        from infrastructure.allowed_packages_manager import AllowedPackagesManager
-        self.manager = AllowedPackagesManager(config)
+        from core.allowed_packages_service import AllowedPackagesService
+        from infrastructure.allowed_packages_adapter import AllowedPackagesAdapter
+        
+        adapter = AllowedPackagesAdapter(config, self.logger)
+        self.manager = AllowedPackagesService(adapter, self.logger)
         
         self.init_ui()
         self.load_packages()
@@ -304,8 +307,8 @@ class PackageInputDialog(QDialog):
             return
         
         # Validate package name
-        from infrastructure.allowed_packages_manager import AllowedPackagesManager
-        if not AllowedPackagesManager._is_valid_package_name(package_name):
+        from core.allowed_packages_service import AllowedPackagesService
+        if not AllowedPackagesService._is_valid_package_name(package_name):
             QMessageBox.warning(
                 self,
                 "Invalid Format",

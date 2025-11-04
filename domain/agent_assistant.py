@@ -10,8 +10,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from PIL import Image
 from pydantic import BaseModel, ValidationError, validator
 
-# MCP client exceptions
-from infrastructure.mcp_client import MCPConnectionError, MCPCircuitOpenError
+# MCP client exceptions removed
 
 # LangChain imports for orchestration
 from langchain_core.runnables import RunnableLambda
@@ -88,7 +87,6 @@ class AgentAssistant:
                 safety_settings_override: Optional[Dict] = None,
                 agent_tools=None,
                 ui_callback=None,
-                mcp_client=None,
                 tools=None):  # Added tools parameter
         if tools is None:
             app_config = Config()
@@ -100,7 +98,6 @@ class AgentAssistant:
         self.response_cache: Dict[str, Tuple[Dict[str, Any], float, int]] = {}
         self.agent_tools = agent_tools  # May be None initially and set later
         self.ui_callback = ui_callback  # Callback for UI updates
-        self.mcp_client = mcp_client  # MCP client for external server communication
         logging.debug("AI response cache initialized.")
 
         # Determine which AI provider to use
@@ -235,11 +232,7 @@ class AgentAssistant:
 
         except Exception as e:
             logging.error(f"Failed to initialize LangChain components: {e}", exc_info=True)
-            # Set to None so the system can fall back to direct model calls
-            self.langchain_llm = None
-            self.action_decision_chain = None
-            self.context_analysis_chain = None
-            self.langchain_memory = None
+            raise
 
     def _execute_click_action(self, action_data: Dict[str, Any]) -> bool:
         """Execute click action with proper argument handling."""
@@ -530,29 +523,8 @@ class AgentAssistant:
         json_output_guidance = JSON_OUTPUT_SCHEMA
         return SYSTEM_PROMPT_TEMPLATE.format(json_schema=json_output_guidance, action_list=action_list_str)
 
-    def _make_second_call_for_action_extraction(self, _narrative_response: str) -> Optional[Dict[str, Any]]:
-        try:
-            action_list_str = "\n".join([f"- {action}: {desc}" for action, desc in AVAILABLE_ACTIONS.items()])
-            json_output_guidance = JSON_OUTPUT_SCHEMA
-            return json.loads(SECOND_CALL_PROMPT.format(json_schema=json_output_guidance, action_list=action_list_str))
-        except json.JSONDecodeError as e:
-            logging.error(f"Failed to parse JSON in second call: {e}")
-            return None
-
-    def check_mcp_connection_status(self) -> Dict[str, Any]:
-        try:
-            # ...existing logic...
-            return {}
-        except Exception as e:
-            if "circuit open" in str(e).lower():
-                raise MCPCircuitOpenError("MCP circuit breaker is open.")
-            raise MCPConnectionError("Failed to connect to MCP server.")
 
     def _get_next_action_langchain(self, screenshot_bytes: Optional[bytes], xml_context: str, previous_actions: List[str], current_screen_visit_count: int, current_composite_hash: str, last_action_feedback: Optional[str] = None) -> Optional[Tuple[Dict[str, Any], float, int]]:
-        if not self.action_decision_chain:
-            logging.error("Action decision chain is not initialized.")
-            return None
-
         try:
             context = {
                 "screenshot_bytes": screenshot_bytes,
@@ -570,14 +542,6 @@ class AgentAssistant:
             logging.error(f"Validation error: {e}")
             return None
 
-    def _parse_action_from_response(self, response_text: str) -> Optional[Dict[str, Any]]:
-        json_match = re.search(r"\{.*?\}", response_text, re.DOTALL)
-        if json_match:
-            try:
-                return json.loads(json_match.group(0))
-            except json.JSONDecodeError:
-                pass
-        return self._make_second_call_for_action_extraction(response_text)
 
     def _validate_and_clean_action_data(self, action_data: Dict[str, Any]) -> Dict[str, Any]:
         return ActionData.model_validate(action_data).dict()

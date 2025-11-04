@@ -12,6 +12,13 @@ from cli.constants import messages as MSG
 from cli.constants import keys as KEYS
 from cli.commands.switch_provider import SwitchProviderCommand
 
+__all__ = [
+    "ShowConfigCommand",
+    "SetConfigCommand",
+    "ResetConfigCommand",
+    "ConfigCommandGroup",
+]
+
 
 class ShowConfigCommand(CommandHandler):
     """Command to show current configuration."""

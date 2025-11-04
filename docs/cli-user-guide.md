@@ -106,6 +106,16 @@ python run_cli.py focus list
 python run_cli.py focus remove <id>
 ```
 
+### Allowed external packages
+Manage external packages that the crawler can interact with outside the main target app:
+```powershell
+python run_cli.py packages list
+python run_cli.py packages add com.example.app
+python run_cli.py packages remove com.example.app
+python run_cli.py packages update old.package new.package
+python run_cli.py packages clear
+```
+
 ### Analysis and reporting
 Generate reports and inspect analysis data:
 ```powershell

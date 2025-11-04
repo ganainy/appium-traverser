@@ -66,12 +66,8 @@ class FocusArea:
 
 # CRUD API
 
-def list_focus_areas() -> List[dict]:
-    """
-    List all focus areas.
-    Returns:
-        List of dicts representing focus areas.
-    """
+def get_focus_areas() -> List[dict]:
+    """Return all focus areas persisted on disk."""
     with _focus_areas_lock:
         global _data_loaded
         if not _data_loaded:
@@ -169,19 +165,11 @@ class FocusAreaService:
         """
         try:
             # Use core implementation instead of database
-            areas = list_focus_areas()
+            areas = get_focus_areas()
             return areas if isinstance(areas, list) else []
         except Exception as e:
             self.logger.error(f"Failed to load focus areas from core storage: {e}")
             return []
-    
-    def list_focus_areas(self) -> List[Dict]:
-        """Alias for get_focus_areas for backward compatibility.
-        
-        Returns:
-            List of focus area dictionaries
-        """
-        return self.get_focus_areas()
     
     def _find_focus_area_index(self, id_or_name: str) -> Optional[int]:
         """Find focus area index by ID or name.

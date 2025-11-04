@@ -20,10 +20,13 @@ class PackagesService:
         """
         self.context = context
         self.config = context.config
-        # Import here to avoid circular imports
-        from infrastructure.allowed_packages_manager import AllowedPackagesManager
-        self.manager = AllowedPackagesManager(self.config)
         self.logger = logging.getLogger(__name__)
+        # Import here to avoid circular imports
+        from core.allowed_packages_service import AllowedPackagesService
+        from infrastructure.allowed_packages_adapter import AllowedPackagesAdapter
+        
+        adapter = AllowedPackagesAdapter(self.config, self.logger)
+        self.manager = AllowedPackagesService(adapter, self.logger)
     
     def list_packages(self) -> List[str]:
         """

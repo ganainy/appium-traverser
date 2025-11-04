@@ -259,7 +259,7 @@ class TelemetryService:
         print(f"\n=== {MSG.UI_FOCUS_AREAS} ===")
         for i, area in enumerate(areas):
             # Create display_name from raw data
-            display_name = area.get(KEYS.FOCUS_AREA_TITLE) or area.get(KEYS.FOCUS_AREA_NAME) or MSG.FOCUS_AREA_FALLBACK_NAME.format(index=i+1)
+            display_name = area.get(KEYS.FOCUS_AREA_TITLE) or area.get(KEYS.FOCUS_AREA_NAME) or f"Area {i+1}"
             enabled = area.get(KEYS.FOCUS_AREA_ENABLED, True)
             priority = area.get(KEYS.FOCUS_AREA_PRIORITY, i)
             print(f"{i+1:2d}. {display_name} | enabled={enabled} | priority={priority}")

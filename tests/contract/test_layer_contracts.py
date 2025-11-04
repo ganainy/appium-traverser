@@ -244,6 +244,10 @@ def test_crawler_contract():
     stopped = crawler.stop_session(session.session_id)
     assert stopped is not None
 
+    # Missing sessions should now raise an error instead of being recreated
+    with pytest.raises(ValueError):
+        crawler.get_status("missing-session")
+
 def test_parser_contract():
     """Test parser module maintains its contract."""
     from core.parser import parse_raw_data
@@ -318,26 +322,3 @@ def test_error_handling_contract():
     with pytest.raises(ValueError):
         data.validate()
 
-def test_backward_compatibility_contract():
-    """Test that core APIs maintain backward compatibility."""
-    from core.config import Configuration
-
-    # Test that old-style instantiation still works
-    config = Configuration(
-        name="Test",
-        settings={"max_depth": 5, "timeout": 60, "platform": "android"},
-        config_id="custom-id",
-        is_default=True
-    )
-
-    assert config.config_id == "custom-id"
-    assert config.is_default == True
-
-    # Test serialization/deserialization round-trip
-    data = config.to_dict()
-    recreated = Configuration.from_dict(data)
-
-    assert recreated.config_id == config.config_id
-    assert recreated.name == config.name
-    assert recreated.settings == config.settings
-    assert recreated.is_default == config.is_default

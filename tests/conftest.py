@@ -21,23 +21,15 @@ if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
 
-# Try to import from traverser_ai_api package first, but delay Config import to fixture
-# Support refactor: modules moved out of traverser_ai_api into cli/, utils/, etc.
 try:
     from cli.shared.context import CLIContext, ServiceRegistry
     from utils.utils import LoggerManager
     CLI_AVAILABLE = True
 except ImportError:
-    try:
-        # Fallback to old traverser_ai_api paths for backwards compatibility
-        from traverser_ai_api.cli.shared.context import CLIContext, ServiceRegistry
-        from traverser_ai_api.utils.utils import LoggerManager
-        CLI_AVAILABLE = True
-    except ImportError:
-        CLIContext = None  # type: ignore
-        ServiceRegistry = None  # type: ignore
-        LoggerManager = None  # type: ignore
-        CLI_AVAILABLE = False
+    CLIContext = None  # type: ignore
+    ServiceRegistry = None  # type: ignore
+    LoggerManager = None  # type: ignore
+    CLI_AVAILABLE = False
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -76,21 +68,7 @@ def mock_config(temp_dir: Path) -> Mock:
     config.ENABLE_TRAFFIC_CAPTURE = False
     config.ENABLE_MOBSF_ANALYSIS = False
     config.DEFAULTS_MODULE_PATH = str(temp_dir / "config.py")
-    config.USER_CONFIG_JSON_PATH = str(temp_dir / "user_config.json")
-    # Add get_value method for compatibility with config service
-    config.get_value = lambda key, default=None: {
-        "APP_PACKAGE": config.APP_PACKAGE,
-        "APP_ACTIVITY": config.APP_ACTIVITY,
-        "BASE_DIR": config.BASE_DIR,
-        "OUTPUT_DATA_DIR": config.OUTPUT_DATA_DIR,
-        "LOG_DIR": config.LOG_DIR,
-        "SHUTDOWN_FLAG_PATH": config.SHUTDOWN_FLAG_PATH,
-        "PAUSE_FLAG_PATH": config.PAUSE_FLAG_PATH,
-        "AI_PROVIDER": config.AI_PROVIDER,
-        "GEMINI_API_KEY": config.GEMINI_API_KEY,
-        "ENABLE_TRAFFIC_CAPTURE": config.ENABLE_TRAFFIC_CAPTURE,
-        "ENABLE_MOBSF_ANALYSIS": config.ENABLE_MOBSF_ANALYSIS
-    }.get(key, default)
+    config.USER_CONFIG_FILE_PATH = str(temp_dir / "config.db")
     return config
 
 

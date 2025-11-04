@@ -24,10 +24,10 @@ def teardown_function():
     with focus_area_service._focus_areas_lock:
         focus_area_service._focus_areas = []
 
-def test_add_and_list_focus_area():
+def test_add_and_get_focus_area():
     fa = focus_area_service.add_focus_area('Test', 'desc')
     assert fa['name'] == 'Test'
-    all_fa = focus_area_service.list_focus_areas()
+    all_fa = focus_area_service.get_focus_areas()
     assert len(all_fa) == 1
     assert all_fa[0]['name'] == 'Test'
 
@@ -45,12 +45,12 @@ def test_max_focus_areas():
 def test_remove_focus_area():
     fa = focus_area_service.add_focus_area('ToRemove')
     focus_area_service.remove_focus_area(fa['id'])
-    assert focus_area_service.list_focus_areas() == []
+    assert focus_area_service.get_focus_areas() == []
 
 def test_update_focus_area():
     fa = focus_area_service.add_focus_area('ToUpdate', 'desc')
     updated = focus_area_service.update_focus_area(fa['id'], name='Updated', description='newdesc')
     assert updated['name'] == 'Updated'
     assert updated['description'] == 'newdesc'
-    all_fa = focus_area_service.list_focus_areas()
+    all_fa = focus_area_service.get_focus_areas()
     assert all_fa[0]['name'] == 'Updated'

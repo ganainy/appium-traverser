@@ -819,7 +819,7 @@ class FocusAreasWidget(QWidget):
                 except Exception as e:
                     logging.error(f"Error adding focus area: {e}")
             else:
-                # Add directly if no service (for backward compatibility)
+                # Add directly if no service
                 new_area = FocusArea(
                     id=data['id'],
                     name=data['name'],

@@ -16,7 +16,7 @@ from core.config import Configuration
 from core.crawler import Crawler, CrawlerSession
 from core.storage import Storage
 from cli.services.focus_area_service import (
-    add_focus_area, remove_focus_area, update_focus_area, list_focus_areas
+    add_focus_area, remove_focus_area, update_focus_area, get_focus_areas
 )
 
 logger = logging.getLogger(__name__)
@@ -364,7 +364,7 @@ class CLICrawlerInterface:
 
     def cli_list_focus_areas(self):
         try:
-            result = list_focus_areas()
+            result = get_focus_areas()
             print(f"UI_STATUS: Focus areas: {result}")
             return result
         except Exception as e:

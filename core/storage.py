@@ -124,15 +124,15 @@ class Storage:
                 row = conn.execute(sql, (config_id,)).fetchone()
 
                 if row:
-                    config = Configuration(
-                        config_id=row[0],
-                        name=row[1],
-                        settings=json.loads(row[2]),
-                        is_default=bool(row[5])
-                    )
-                    # Fix data loss bug: manually set timestamps from database row
-                    config.created_at = datetime.fromisoformat(row[3])
-                    config.updated_at = datetime.fromisoformat(row[4])
+                    config_data = {
+                        "config_id": row[0],
+                        "name": row[1],
+                        "settings": json.loads(row[2]),
+                        "created_at": row[3],
+                        "updated_at": row[4],
+                        "is_default": bool(row[5]),
+                    }
+                    config = Configuration.from_dict(config_data)
                     logger.info(f"Configuration retrieved successfully: {config_id}")
                     return config
                 else:
@@ -231,7 +231,7 @@ class Storage:
         """
         logger.debug(f"Retrieving session results for: {session_id}")
         try:
-            from .data import ParsedData  # Import here to avoid circular import
+            from core.parser import ParsedData  # Import here to avoid circular import
             results = []
 
             with sqlite3.connect(self.db_path) as conn:

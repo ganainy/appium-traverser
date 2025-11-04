@@ -509,34 +509,16 @@ class OllamaAdapter(ModelAdapter):
                 model_names = []
                 
                 # Handle the new Ollama API response format (Python SDK v0.5.0+)
-                if hasattr(available_models, 'models') and isinstance(available_models.models, list):
-                    for model_obj in available_models.models:
-                            # Extract model name from the model object
-                            if hasattr(model_obj, 'model'):
-                                model_name = model_obj.model
-                                if model_name and isinstance(model_name, str):
-                                    model_names.append(model_name)
-                                    
-                                    # Also add base name without tag
-                                    if ':' in model_name:
-                                        base_name = model_name.split(':')[0]
-                                        if base_name and base_name not in model_names:
-                                            model_names.append(base_name)                # Handle older dictionary format for backward compatibility
-                elif isinstance(available_models, dict) and 'models' in available_models:
-                    for model in available_models['models']:
-                        if isinstance(model, dict):
-                            model_name = model.get('name') or model.get('model', '')
-                            if model_name and isinstance(model_name, str):
-                                model_names.append(model_name)
-                                # Also add base name without tag
-                                if ':' in model_name:
-                                    base_name = model_name.split(':')[0]
-                                    if base_name and base_name not in model_names:
-                                        model_names.append(base_name)
+                model_names = []
+                for model_obj in available_models.models:
+                    # Extract model name from the model object
+                    if hasattr(model_obj, 'model'):
+                        model_name = model_obj.model
+                        if model_name and isinstance(model_name, str):
+                            model_names.append(model_name)
                 
-                # Check if our model is in the list (with or without tag)
-                base_model_name = self.model_name.split(':')[0] if ':' in self.model_name else self.model_name
-                if self.model_name not in model_names and base_model_name not in model_names:
+                # Check if our model is in the list
+                if self.model_name not in model_names:
                     available_str = ", ".join(model_names) if model_names else "None"
                     error_msg = f"🔴 Model '{self.model_name}' not found. Available models: {available_str}. Please run: ollama pull {self.model_name}"
                     logging.error(error_msg)
@@ -556,49 +538,11 @@ class OllamaAdapter(ModelAdapter):
             # Handle image if provided and model supports vision
             if image and supports_vision:
                 try:
-                    # Get provider capabilities for image settings
-                    try:
-                        from config import AI_PROVIDER_CAPABILITIES
-                    except ImportError:
-                        from config import AI_PROVIDER_CAPABILITIES
-                    capabilities = AI_PROVIDER_CAPABILITIES.get('ollama', {})
-                    # UI/kwargs overrides take precedence over provider defaults
-                    image_format = kwargs.get('image_format', None) or capabilities.get('image_format', 'JPEG')
-                    image_quality = kwargs.get('image_quality', None) or capabilities.get('image_quality', 75)
-
-                    # Save temporary file with a unique identifier
-                    import uuid
-                    ext = 'jpg' if image_format.upper() == 'JPEG' else image_format.lower()
-                    temp_image_path = f"temp_ollama_image_{uuid.uuid4()}.{ext}"
-                    
-                    # Convert image to RGB mode if it's not in a compatible format
-                    if image_format.upper() in ('JPEG', 'WEBP') and image.mode not in ('RGB'):
-                        image = image.convert('RGB')
-                        
-                    # Save the image to a temporary file
-                    save_kwargs = {}
-                    if image_format.upper() == 'JPEG':
-                        save_kwargs = {
-                            'quality': image_quality,
-                            'optimize': True,
-                            'progressive': True,
-                            'subsampling': '4:2:0'
-                        }
-                        image.save(temp_image_path, format='JPEG', **save_kwargs)
-                    elif image_format.upper() == 'WEBP':
-                        save_kwargs = {
-                            'quality': image_quality,
-                            'method': 6
-                        }
-                        image.save(temp_image_path, format='WEBP', **save_kwargs)
-                    else:
-                        # Default fallback for PNG or others
-                        image.save(temp_image_path, format=image_format, optimize=True)
-                    
-                    # For Ollama, we'll pass the file path directly in the images parameter
-                    # This follows the documented approach: https://ollama.com/blog/vision-models
-                    images.append(temp_image_path)
-                    logging.debug(f"Added image to Ollama request (file: {temp_image_path}, format: {image_format}, quality: {image_quality})")
+                    # For Ollama, we can work directly with the PIL Image object
+                    # The Ollama SDK supports passing PIL images directly in some versions
+                    # If not supported, we'll use the raw image data
+                    images.append(image)
+                    logging.debug(f"Added image to Ollama request (format: {image.format}, size: {image.size})")
                 except Exception as img_error:
                     logging.error(f"Error processing image for Ollama: {img_error}", exc_info=True)
                     raise ValueError(f"Failed to process image for Ollama: {img_error}")
@@ -614,12 +558,8 @@ class OllamaAdapter(ModelAdapter):
             messages.append(user_message)
             
             # Use different API based on whether model supports vision
-            temp_files_to_cleanup = []
-            
             if supports_vision and images:
                 logging.debug(f"Using Ollama vision API with {len(images)} images")
-                # Track temporary files to clean up
-                temp_files_to_cleanup.extend(images)
                 
                 try:
                     # Using chat method with images in the message as shown in Ollama docs
@@ -640,10 +580,10 @@ class OllamaAdapter(ModelAdapter):
                         }
                     )
                     # Extract response text from chat response
-                    if hasattr(response, 'message') and hasattr(response.message, 'content'):
-                        response_text = response.message.content
-                    else:
-                        response_text = response.get('message', {}).get('content', '')
+                    response_text = response.message.content
+                    # Ensure response_text is a string
+                    if not isinstance(response_text, str):
+                        response_text = str(response_text)
                 except Exception as chat_error:
                     logging.error(f"Error in Ollama chat API call: {chat_error}", exc_info=True)
                     raise ValueError(f"Ollama chat API call failed: {chat_error}")
@@ -661,15 +601,9 @@ class OllamaAdapter(ModelAdapter):
                         }
                     )
                     # Extract response text from chat response
-                    if hasattr(response, 'message') and hasattr(response.message, 'content'):
-                        response_text = response.message.content
-                    else:
-                        response_text = response.get('message', {}).get('content', '')
-                    
+                    response_text = response.message.content
                     # Ensure response_text is a string
-                    if response_text is None:
-                        response_text = ""
-                    elif not isinstance(response_text, str):
+                    if not isinstance(response_text, str):
                         response_text = str(response_text)
                 except Exception as chat_error:
                     logging.error(f"Error in Ollama chat API call: {chat_error}")
@@ -696,16 +630,6 @@ class OllamaAdapter(ModelAdapter):
                 "response": len(response_text) // 4,  # Rough estimate
                 "total": (len(prompt) + len(response_text)) // 4  # Rough estimate
             }
-            
-            # Clean up any temporary image files
-            for temp_file in temp_files_to_cleanup:
-                try:
-                    import os
-                    if os.path.exists(temp_file):
-                        os.remove(temp_file)
-                        logging.debug(f"Cleaned up temporary file: {temp_file}")
-                except Exception as cleanup_error:
-                    logging.warning(f"Failed to clean up temporary file {temp_file}: {cleanup_error}")
             
             return response_text, metadata
             

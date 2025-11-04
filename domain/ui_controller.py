@@ -1,6 +1,5 @@
 # ui_controller.py - Main UI controller for the Appium Crawler
 
-import json
 import logging
 import os
 import re
@@ -53,77 +52,23 @@ from ui.utils import update_screenshot
 class CrawlerControllerWindow(QMainWindow):
     """Main window for the Appium Crawler Controller."""
 
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Appium Crawler Controller")
+    def __init__(self, config, api_dir, config_widgets, start_btn, stop_btn, log_output, action_history, screenshot_label, test_mobsf_conn_btn, run_mobsf_analysis_btn, clear_logs_btn, current_health_app_list_file, health_apps_data):
+        """Initialize the main UI controller window."""
+        super().__init__()
+        self.config = config
+        self.api_dir = api_dir
+        self.config_widgets = config_widgets
+        self.start_btn = start_btn
+        self.stop_btn = stop_btn
+        self.log_output = log_output
+        self.action_history = action_history
+        self.screenshot_label = screenshot_label
+        self.test_mobsf_conn_btn = test_mobsf_conn_btn
+        self.run_mobsf_analysis_btn = run_mobsf_analysis_btn
+        self.clear_logs_btn = clear_logs_btn
+        self.current_health_app_list_file = current_health_app_list_file
+        self.health_apps_data = health_apps_data
 
-        # AgentAssistant instance (initialized after config load)
-        self.agent_assistant = None
-
-        # Initialize UI elements that will be created later
-        self.health_app_dropdown = None
-        self.refresh_apps_btn = None
-        self.start_btn = None
-        self.stop_btn = None
-        self.test_mobsf_conn_btn = None
-        self.run_mobsf_analysis_btn = None
-        self.clear_logs_btn = None
-        self.log_output = None
-        self.screenshot_label = None
-        self.status_label = None
-        self.progress_bar = None
-        self.step_label = None
-        self.action_history = None
-        self.app_scan_status_label = None
-        self.logo_widget = None
-
-        # Set window properties to allow resizing
-        self.setWindowFlags(Qt.WindowType.Window)
-        self.setMinimumSize(800, 600)  # Set a reasonable minimum size
-
-        # Get screen geometry for default size if not maximized
-        screen = QApplication.primaryScreen()
-        if screen:
-            screen_geometry = screen.availableGeometry()
-            width = int(screen_geometry.width() * 0.9)  # 90% of screen width
-            height = int(screen_geometry.height() * 0.9)  # 90% of screen height
-            self.resize(width, height)
-        else:
-            self.resize(1200, 800)
-
-        # Set paths relative to the current script directory
-        self.api_dir = os.path.dirname(__file__)  # Directory containing this script
-        self.project_root = os.path.dirname(self.api_dir)  # Parent directory of api_dir
-
-        # Initialize Config instance
-        from config.config import Config
-        from ui.components import UIComponents
-        self.config = Config()
-
-        # Only set default UI_MODE if it hasn't been saved yet (check SQLite, not attributes)
-        # This ensures we don't overwrite an existing user preference
-        existing_ui_mode = self.config.get(UIComponents.UI_MODE_CONFIG_KEY)
-        if not existing_ui_mode:
-            logging.debug(f"No existing UI_MODE found in config. Setting default to {UIComponents.UI_MODE_DEFAULT}.")
-            if hasattr(self.config, "update_setting_and_save"):
-                self.config.update_setting_and_save(
-                    UIComponents.UI_MODE_CONFIG_KEY, UIComponents.UI_MODE_DEFAULT, getattr(self, "_sync_user_config_files", None)
-                )
-        else:
-            logging.debug(f"Found existing UI_MODE in config: {existing_ui_mode}")
-        
-        # Log current UI_MODE setting for debugging
-        ui_mode = self.config.get(UIComponents.UI_MODE_CONFIG_KEY, UIComponents.UI_MODE_DEFAULT)
-        logging.debug(f"Current UI_MODE setting: {ui_mode}")
-
-        # Initialize instance variables
-        self.config_widgets = {}
-        self.current_health_app_list_file = getattr(self.config, "CURRENT_HEALTH_APP_LIST_FILE", None)
-        self.health_apps_data = []
-        # Initialize last_selected_app as an empty dictionary instead of None
-        self.last_selected_app = {}
-
-        # Ensure output directories exist
         self._ensure_output_directories_exist()
 
         # Set the application icon
@@ -398,8 +343,8 @@ class CrawlerControllerWindow(QMainWindow):
             provider = self.config_widgets["AI_PROVIDER"].currentText()
             model = self.config_widgets["DEFAULT_MODEL_TYPE"].currentText()
             # Update config
-            self.config.update_setting_and_save("AI_PROVIDER", provider, self._sync_user_config_files)
-            self.config.update_setting_and_save("DEFAULT_MODEL_TYPE", model, self._sync_user_config_files)
+            self.config.update_setting_and_save("AI_PROVIDER", provider)
+            self.config.update_setting_and_save("DEFAULT_MODEL_TYPE", model)
             # Re-initialize AgentAssistant
             self._init_agent_assistant()
             self.log_message(f"AI provider switched to '{provider}', model '{model}'. AgentAssistant reloaded.", "blue")
@@ -483,7 +428,6 @@ class CrawlerControllerWindow(QMainWindow):
                 self.config.update_setting_and_save(
                     "CURRENT_HEALTH_APP_LIST_FILE",
                     rel_path,
-                    self._sync_user_config_files,
                 )
                 return
 
@@ -503,7 +447,6 @@ class CrawlerControllerWindow(QMainWindow):
             self.config.update_setting_and_save(
                 "CURRENT_HEALTH_APP_LIST_FILE",
                 rel_path,
-                self._sync_user_config_files,
             )
 
             # Clear dropdown if no valid cache
@@ -552,7 +495,7 @@ class CrawlerControllerWindow(QMainWindow):
             if output_base_dir is None:
                 output_base_dir = os.path.join(self.api_dir, "output_data")
                 self.config.update_setting_and_save(
-                    "OUTPUT_DATA_DIR", output_base_dir, self._sync_user_config_files
+                    "OUTPUT_DATA_DIR", output_base_dir
                 )
 
             # Create base output directory if it doesn't exist
@@ -566,8 +509,7 @@ class CrawlerControllerWindow(QMainWindow):
             # Update config with relative paths if using absolute paths
             self._update_relative_paths_in_config()
 
-            # Synchronize the API directory user_config.json with the root user_config.json
-            self._sync_user_config_files()
+            # Persists automatically via SQLite-backed Config
 
         except Exception as e:
             logging.error(f"Error creating output directories: {e}", exc_info=True)
@@ -597,7 +539,7 @@ class CrawlerControllerWindow(QMainWindow):
                         # Only update if it's inside the api_dir hierarchy
                         if not rel_path.startswith(".."):
                             self.config.update_setting_and_save(
-                                setting_name, rel_path, self._sync_user_config_files
+                                setting_name, rel_path
                             )
                             logging.debug(
                                 f"Updated {setting_name} to use relative path: {rel_path}"
@@ -610,77 +552,6 @@ class CrawlerControllerWindow(QMainWindow):
             logging.error(
                 f"Error updating relative paths in config: {e}", exc_info=True
             )
-
-    def _sync_user_config_files(self):
-        """Synchronize ALL settings from the root user_config.json to the API directory user_config.json file."""
-        try:
-            # Path to the API directory user_config.json
-            api_config_path = os.path.join(self.api_dir, "user_config.json")
-            # Path to the root user_config.json (already set in self.config.USER_CONFIG_FILE_PATH)
-            root_config_path = self.config.USER_CONFIG_FILE_PATH
-
-            # If both files exist, synchronize all settings from root to API
-            if os.path.exists(api_config_path) and os.path.exists(root_config_path):
-                # Read root config file
-                with open(root_config_path, "r", encoding="utf-8") as f:
-                    root_config = json.load(f)
-
-                # Read API config file
-                with open(api_config_path, "r", encoding="utf-8") as f:
-                    api_config = json.load(f)
-
-                # Synchronize ALL settings from root to API config
-                changes_made = False
-                synchronized_settings = []
-
-                for key, value in root_config.items():
-                    # Skip certain settings that should not be synchronized or are handled differently
-                    skip_keys = [
-                        "CURRENT_HEALTH_APP_LIST_FILE",  # This is device-specific and managed separately
-                        "LAST_SELECTED_APP",  # This is also managed separately
-                    ]
-
-                    if key in skip_keys:
-                        continue
-
-                    # Check if the value is different or missing in API config
-                    if key not in api_config or api_config[key] != value:
-                        api_config[key] = value
-                        synchronized_settings.append(key)
-                        changes_made = True
-
-                # Save the updated API config if changes were made
-                if changes_made:
-                    with open(api_config_path, "w", encoding="utf-8") as f:
-                        json.dump(api_config, f, indent=4, ensure_ascii=False)
-
-                    # Log the synchronization
-                    if len(synchronized_settings) <= 5:
-                        settings_str = ", ".join(synchronized_settings)
-                        self.log_message(
-                            f"Synchronized settings to API config: {settings_str}",
-                            "blue",
-                        )
-                        logging.debug(
-                            f"Synchronized settings to API config file: {settings_str}"
-                        )
-                    else:
-                        self.log_message(
-                            f"Synchronized {len(synchronized_settings)} settings to API config file",
-                            "blue",
-                        )
-                        logging.debug(
-                            f"Synchronized {len(synchronized_settings)} settings to API config file: {api_config_path}"
-                        )
-                else:
-                    logging.debug(
-                        "No settings needed synchronization between root and API config files"
-                    )
-
-        except Exception as e:
-            logging.error(f"Error synchronizing user config files: {e}", exc_info=True)
-            if hasattr(self, "log_output") and self.log_output:
-                self.log_message(f"Error synchronizing user config files: {e}", "red")
 
     def log_message(self, message: str, color: str = "white"):
         """Append a message to the log output with a specified color."""
@@ -721,26 +592,11 @@ class CrawlerControllerWindow(QMainWindow):
 
     def log_action_with_focus(self, action_data: Dict[str, Any]):
         """Log action with focus area attribution."""
-        # Handle both old format (from direct callback) and new format (from stdout parsing)
-        if "focus_ids" in action_data:
-            # New format from stdout parsing
-            action_type = action_data.get("action", "unknown")
-            reasoning = action_data.get("reasoning", "No reasoning provided")
-            focus_ids = action_data.get("focus_ids", [])
-            focus_names = action_data.get("focus_names", [])
-        else:
-            # Old format from direct callback
-            action_type = action_data.get("action", "unknown")
-            reasoning = action_data.get("reasoning", "No reasoning provided")
-            focus_influence = action_data.get("focus_influence", [])
-
-            # Get focus area names
-            focus_names = []
-            for focus_id in focus_influence:
-                focus_name = self.get_focus_area_name(focus_id)
-                if focus_name:
-                    focus_names.append(focus_name)
-            focus_ids = focus_influence
+        # New format from stdout parsing
+        action_type = action_data.get("action", "unknown")
+        reasoning = action_data.get("reasoning", "No reasoning provided")
+        focus_ids = action_data.get("focus_ids", [])
+        focus_names = action_data.get("focus_names", [])
 
         # Format display
         if focus_names:
@@ -908,138 +764,88 @@ class CrawlerControllerWindow(QMainWindow):
 
     # Delegate methods to appropriate managers
     @slot()
-    def start_crawler(self):
-        """Start the crawler process."""
-        self.crawler_manager.start_crawler()
-
-    @slot()
-    def stop_crawler(self):
-        """Stop the crawler process."""
-        self.crawler_manager.stop_crawler()
-
-    @slot()
-    def perform_pre_crawl_validation(self):
-        """Perform pre-crawl validation checks."""
-        self.crawler_manager.perform_pre_crawl_validation()
-
-    @slot()
-    def check_pre_crawl_status(self):
-        """Check and display pre-crawl validation status."""
-        self.log_message("ðŸ” Checking pre-crawl validation status...", "blue")
-        self.show_pre_crawl_validation_details()
-
-    def show_pre_crawl_validation_details(self):
-        """Show detailed pre-crawl validation status."""
-        # This method is now handled asynchronously by the crawler manager
-        # The validation results are displayed through the _display_validation_details method
-        pass
-
-    @slot()
-    def trigger_scan_for_health_apps(self):
-        """Trigger the health app scanning process."""
-        self.health_app_scanner.trigger_scan_for_health_apps()
-
-    @slot()
-    def test_mobsf_connection(self):
-        """Test the MobSF connection."""
-        self.mobsf_ui_manager.test_mobsf_connection()
-
-    @slot()
-    def run_mobsf_analysis(self):
-        """Run MobSF analysis for the selected app."""
-        self.mobsf_ui_manager.run_mobsf_analysis()
-
-    @slot()
     def generate_report(self):
-        """Generate an analysis PDF for the latest run of the current session/app.
+        """Generate a PDF report for the latest crawl run."""
+        import sqlite3
+        from pathlib import Path
 
-        This mirrors the CLI behavior: determine latest run_id from the session's database
-        and write the PDF to the session 'reports' directory.
-        """
-        try:
-            if not RunAnalyzer or not XHTML2PDF_AVAILABLE:
-                self.log_message("Error: Analysis module or PDF library (xhtml2pdf) not available.", "red")
-                return
+        app_package = getattr(self.config, "APP_PACKAGE", None)
+        output_data_dir = getattr(self.config, "OUTPUT_DATA_DIR", None)
+        session_dir = getattr(self.config, "SESSION_DIR", None)
+        db_path = getattr(self.config, "DB_NAME", None)
 
-            import sqlite3
-            from pathlib import Path
+        if not app_package:
+            self.log_message("Error: No target app selected.", "red")
+            return
+        if not output_data_dir:
+            self.log_message("Error: OUTPUT_DATA_DIR is not configured.", "red")
+            return
 
-            app_package = getattr(self.config, "APP_PACKAGE", None)
-            output_data_dir = getattr(self.config, "OUTPUT_DATA_DIR", None)
-            session_dir = getattr(self.config, "SESSION_DIR", None)
-            db_path = getattr(self.config, "DB_NAME", None)
+        # Prefer current session's DB if it exists; otherwise try to find latest session for this app
+        resolved_db_path: Path = None  # type: ignore
+        resolved_session_dir: Path = None  # type: ignore
 
-            if not app_package:
-                self.log_message("Error: No target app selected.", "red")
-                return
-            if not output_data_dir:
-                self.log_message("Error: OUTPUT_DATA_DIR is not configured.", "red")
-                return
-
-            # Prefer current session's DB if it exists; otherwise try to find latest session for this app
-            resolved_db_path: Path = None  # type: ignore
-            resolved_session_dir: Path = None  # type: ignore
-
-            if db_path and Path(db_path).exists():
-                resolved_db_path = Path(db_path)
-                resolved_session_dir = Path(session_dir) if session_dir else Path(db_path).parent.parent
-            else:
-                # Fallback: discover latest session_dir for the current app
-                try:
-                    candidates: list[Path] = []
-                    for sd in Path(output_data_dir).iterdir():
-                        if sd.is_dir() and "_" in sd.name:
-                            parts = sd.name.split("_")
-                            if len(parts) >= 2 and parts[1] == app_package:
-                                candidates.append(sd)
-                    if not candidates:
-                        self.log_message(f"Error: No session directories found for app '{app_package}'.", "red")
-                        return
-                    # Sort by timestamp inferred from name suffix; as a simple heuristic, use lexicographic desc
-                    candidates.sort(key=lambda p: p.name, reverse=True)
-                    resolved_session_dir = candidates[0]
-                    db_dir = resolved_session_dir / "database"
-                    found_dbs = list(db_dir.glob("*_crawl_data.db")) if db_dir.exists() else []
-                    if not found_dbs:
-                        self.log_message("Error: No database file found in the latest session.", "red")
-                        return
-                    resolved_db_path = found_dbs[0]
-                except Exception as e:
-                    self.log_message(f"Error discovering latest session DB: {e}", "red")
-                    return
-
-            # Determine latest run_id
+        if db_path and Path(db_path).exists():
+            resolved_db_path = Path(db_path)
+            resolved_session_dir = Path(session_dir) if session_dir else Path(db_path).parent.parent
+        else:
+            # Fallback: discover latest session_dir for the current app
             try:
-                conn = sqlite3.connect(str(resolved_db_path))
-                cur = conn.cursor()
-                cur.execute("SELECT run_id FROM runs ORDER BY run_id DESC LIMIT 1")
-                row = cur.fetchone()
-                if row and row[0] is not None:
-                    run_id = int(row[0])
-                else:
-                    cur.execute("SELECT run_id FROM runs LIMIT 1")
-                    row2 = cur.fetchone()
-                    if row2 and row2[0] is not None:
-                        run_id = int(row2[0])
-                    else:
-                        self.log_message("Error: No runs found in the database. Cannot generate report.", "red")
-                        conn.close()
-                        return
-                conn.close()
+                candidates: list[Path] = []
+                for sd in Path(output_data_dir).iterdir():
+                    if sd.is_dir() and "_" in sd.name:
+                        parts = sd.name.split("_")
+                        if len(parts) >= 2 and parts[1] == app_package:
+                            candidates.append(sd)
+                if not candidates:
+                    self.log_message(f"Error: No session directories found for app '{app_package}'.", "red")
+                    return
+                # Sort by timestamp inferred from name suffix; as a simple heuristic, use lexicographic desc
+                candidates.sort(key=lambda p: p.name, reverse=True)
+                resolved_session_dir = candidates[0]
+                db_dir = resolved_session_dir / "database"
+                found_dbs = list(db_dir.glob("*_crawl_data.db")) if db_dir.exists() else []
+                if not found_dbs:
+                    self.log_message("Error: No database file found in the latest session.", "red")
+                    return
+                resolved_db_path = found_dbs[0]
             except Exception as e:
-                self.log_message(f"Error reading database to determine run_id: {e}", "red")
+                self.log_message(f"Error discovering latest session DB: {e}", "red")
                 return
 
-            # Prepare output directory and filename
-            reports_dir = Path(getattr(self.config, "PDF_REPORT_DIR", ""))
-            if not reports_dir:
-                reports_dir = resolved_session_dir / "reports"
-            reports_dir.mkdir(parents=True, exist_ok=True)
+        # Determine latest run_id
+        try:
+            conn = sqlite3.connect(str(resolved_db_path))
+            cur = conn.cursor()
+            cur.execute("SELECT run_id FROM runs ORDER BY run_id DESC LIMIT 1")
+            row = cur.fetchone()
+            if row and row[0] is not None:
+                run_id = int(row[0])
+            else:
+                cur.execute("SELECT run_id FROM runs LIMIT 1")
+                row2 = cur.fetchone()
+                if row2 and row2[0] is not None:
+                    run_id = int(row2[0])
+                else:
+                    self.log_message("Error: No runs found in the database. Cannot generate report.", "red")
+                    conn.close()
+                    return
+            conn.close()
+        except Exception as e:
+            self.log_message(f"Error reading database to determine run_id: {e}", "red")
+            return
 
-            pdf_filename = f"{app_package}_analysis.pdf"
-            final_pdf_path = str(reports_dir / pdf_filename)
+        # Prepare output directory and filename
+        reports_dir = Path(getattr(self.config, "PDF_REPORT_DIR", ""))
+        if not reports_dir:
+            reports_dir = resolved_session_dir / "reports"
+        reports_dir.mkdir(parents=True, exist_ok=True)
 
-            # Run analysis
+        pdf_filename = f"{app_package}_analysis.pdf"
+        final_pdf_path = str(reports_dir / pdf_filename)
+
+        # Run analysis
+        if RunAnalyzer is not None:
             try:
                 self.show_busy("Generating report...")
                 analyzer = RunAnalyzer(
@@ -1050,13 +856,14 @@ class CrawlerControllerWindow(QMainWindow):
                 ok = analyzer.analyze_run_to_pdf(run_id, final_pdf_path)
             finally:
                 self.hide_busy()
+        else:
+            self.log_message("Error: PDF analysis not available.", "red")
+            ok = False
 
-            if ok:
-                self.log_message(f"✅ Report generated: {final_pdf_path}", "green")
-            else:
-                self.log_message("Error: Failed to generate report.", "red")
-        except Exception as e:
-            self.log_message(f"Error generating report: {e}", "red")
+        if ok:
+            self.log_message(f"✅ Report generated: {final_pdf_path}", "green")
+        else:
+            self.log_message("Error: Failed to generate report.", "red")
 
     def _get_connected_devices(self) -> List[str]:
         """Get a list of connected ADB devices."""
@@ -1111,7 +918,7 @@ class CrawlerControllerWindow(QMainWindow):
             device_dropdown.setCurrentIndex(0)
             try:
                 self.config.update_setting_and_save(
-                    "TARGET_DEVICE_UDID", devices[0], self._sync_user_config_files
+                    "TARGET_DEVICE_UDID", devices[0]
                 )
                 self.log_message(f"Auto-selected device UDID: {devices[0]}", "blue")
             except Exception as e:
@@ -1120,7 +927,7 @@ class CrawlerControllerWindow(QMainWindow):
             # No devices present; ensure config does not keep placeholder as a real UDID
             try:
                 self.config.update_setting_and_save(
-                    "TARGET_DEVICE_UDID", None, self._sync_user_config_files
+                    "TARGET_DEVICE_UDID", None
                 )
             except Exception:
                 pass
@@ -1133,18 +940,6 @@ if __name__ == "__main__":
     except ImportError:
         from utils.utils import LoggerManager
 
-    app = QApplication(sys.argv)
-    window = CrawlerControllerWindow()
-
-    # Set up logging with LoggerManager
-    logger_manager = LoggerManager()
-
-    # Set the UI controller reference in LoggerManager for colored logging BEFORE setup_logging
-    logger_manager.set_ui_controller(window)
-
-    logger_manager.setup_logging(log_level_str="INFO")
-
-    # Start in full screen mode but allow resizing
-    window.showMaximized()
-    sys.exit(app.exec())
+    # GUI initialization is now handled in interfaces/gui.py
+    # This file contains the controller class only
 

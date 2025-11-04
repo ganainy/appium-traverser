@@ -6,7 +6,7 @@ import pytest
 from unittest.mock import Mock, patch
 from argparse import Namespace
 
-from cli.commands.config import SetConfigCommand
+from cli.commands.config import SetConfigCommand, ResetConfigCommand
 from cli.shared.context import CLIContext
 
 
@@ -61,4 +61,44 @@ class TestSetConfigCommand:
             mock_config_service.set_and_save_from_pairs.assert_called_once_with(["KEY1=value1", "INVALID_FORMAT"])
             assert result.success is False
             assert "Set 0/2 configuration values" in result.message
+            assert result.exit_code == 1
+
+
+class TestResetConfigCommand:
+    """Test cases for ResetConfigCommand."""
+
+    def test_run_success(self):
+        command = ResetConfigCommand()
+        args = Namespace()
+
+        mock_context = Mock(spec=CLIContext)
+
+        with patch('cli.services.config_service.ConfigService') as mock_config_service_class:
+            mock_config_service = Mock()
+            mock_config_service.reset_to_defaults.return_value = True
+            mock_config_service_class.return_value = mock_config_service
+
+            result = command.run(args, mock_context)
+
+            mock_config_service.reset_to_defaults.assert_called_once_with()
+            assert result.success is True
+            assert result.message == "Configuration reset to defaults"
+            assert result.exit_code == 0
+
+    def test_run_failure(self):
+        command = ResetConfigCommand()
+        args = Namespace()
+
+        mock_context = Mock(spec=CLIContext)
+
+        with patch('cli.services.config_service.ConfigService') as mock_config_service_class:
+            mock_config_service = Mock()
+            mock_config_service.reset_to_defaults.return_value = False
+            mock_config_service_class.return_value = mock_config_service
+
+            result = command.run(args, mock_context)
+
+            mock_config_service.reset_to_defaults.assert_called_once_with()
+            assert result.success is False
+            assert result.message == "Failed to reset configuration"
             assert result.exit_code == 1

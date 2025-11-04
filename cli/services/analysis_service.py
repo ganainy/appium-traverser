@@ -40,7 +40,7 @@ class AnalysisService:
             self.logger.error(CMsg.ERR_CONFIG_SERVICE_NOT_AVAILABLE)
             return False
 
-        output_data_dir = config_service.get_config_value(CKeys.CONFIG_OUTPUT_DATA_DIR)
+        output_data_dir = config_service.get(CKeys.CONFIG_OUTPUT_DATA_DIR)
         if not output_data_dir:
             if not quiet:
                 self.logger.error(CMsg.ERR_OUTPUT_DATA_DIR_NOT_CONFIGURED)
@@ -155,8 +155,8 @@ class AnalysisService:
         config_service = self.context.services.get(CKeys.SERVICE_CONFIG)
         if not config_service:
             return False, {CKeys.KEY_ERROR: CMsg.ERR_CONFIG_SERVICE_NOT_AVAILABLE}
-        
-        output_data_dir = config_service.get_config_value(CKeys.CONFIG_OUTPUT_DATA_DIR)
+
+        output_data_dir = config_service.get(CKeys.CONFIG_OUTPUT_DATA_DIR)
         if not output_data_dir:
             self.logger.error(CMsg.ERR_OUTPUT_DATA_DIR_NOT_CONFIGURED)
             return False, {CKeys.KEY_ERROR: CMsg.ERR_OUTPUT_DATA_DIR_NOT_CONFIGURED}
@@ -223,8 +223,8 @@ class AnalysisService:
         config_service = self.context.services.get(CKeys.SERVICE_CONFIG)
         if not config_service:
             return False, {CKeys.KEY_ERROR: CMsg.ERR_CONFIG_SERVICE_NOT_AVAILABLE}
-        
-        output_data_dir = config_service.get_config_value(CKeys.CONFIG_OUTPUT_DATA_DIR)
+
+        output_data_dir = config_service.get(CKeys.CONFIG_OUTPUT_DATA_DIR)
         if not output_data_dir:
             self.logger.error(CMsg.ERR_OUTPUT_DATA_DIR_NOT_CONFIGURED)
             return False, {CKeys.KEY_ERROR: CMsg.ERR_OUTPUT_DATA_DIR_NOT_CONFIGURED}
@@ -296,8 +296,8 @@ class AnalysisService:
         config_service = self.context.services.get(CKeys.SERVICE_CONFIG)
         if not config_service:
             return False, {CKeys.KEY_ERROR: CMsg.ERR_CONFIG_SERVICE_NOT_AVAILABLE}
-        
-        output_data_dir = config_service.get_config_value(CKeys.CONFIG_OUTPUT_DATA_DIR)
+
+        output_data_dir = config_service.get(CKeys.CONFIG_OUTPUT_DATA_DIR)
         if not output_data_dir:
             self.logger.error(CMsg.ERR_OUTPUT_DATA_DIR_NOT_CONFIGURED)
             return False, {CKeys.KEY_ERROR: CMsg.ERR_OUTPUT_DATA_DIR_NOT_CONFIGURED}

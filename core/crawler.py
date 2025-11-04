@@ -125,11 +125,8 @@ class Crawler:
             session = self.storage.get_session(session_id)
             if session:
                 return session
-            else:
-                # Session not found, create a new one (for backward compatibility)
-                logger.warning(f"Session {session_id} not found in storage, creating new one")
-                session = CrawlerSession(self.config, session_id)
-                return session
+
+            raise ValueError(f"Session {session_id} not found")
         except Exception as e:
             logger.error(f"Failed to get status for session {session_id}: {e}")
             raise

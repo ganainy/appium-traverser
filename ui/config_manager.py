@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPushButton,
     QSpinBox,
     QTextEdit,
@@ -36,6 +37,7 @@ class ConfigManager(QObject):
     ui_mode_dropdown: QComboBox
     ui_groups: Dict[str, QGroupBox]
     scroll_content: QWidget
+    focus_areas_widget: Optional[Any] = None
     
     def __init__(self, config, main_controller):
         """
@@ -73,6 +75,9 @@ class ConfigManager(QObject):
                 elif isinstance(widget, QLabel):
                     widget.setText(str(value))
                 elif isinstance(widget, QSpinBox):
+                    if isinstance(value, (list, dict)):
+                        logging.warning(f"Skipping non-numeric value for spinbox '{key}': {value}")
+                        continue
                     widget.setValue(int(value))
                 elif isinstance(widget, QCheckBox):
                     widget.setChecked(bool(value))
@@ -203,6 +208,36 @@ class ConfigManager(QObject):
 
         self.main_controller.log_message("Configuration auto-saved to SQLite successfully.", 'green')
 
+    @Slot()
+    def reset_settings(self) -> None:
+        """Reset persisted configuration to defaults via Config service."""
+        parent_widget = getattr(self.main_controller, 'window', self.main_controller)
+        confirmation = QMessageBox.question(
+            parent_widget,
+            "Reset Settings",
+            "Reset all configuration settings to their default values?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+
+        if confirmation != QMessageBox.StandardButton.Yes:
+            return
+
+        try:
+            self.config.reset_settings()
+            self.load_config()
+            if hasattr(self, 'focus_areas_widget') and self.focus_areas_widget:
+                try:
+                    self.focus_areas_widget.reload_focus_areas()
+                except Exception:
+                    logging.exception("Failed to reload focus areas after reset; clearing locally.")
+                    self.focus_areas_widget.focus_areas = []
+                    self.focus_areas_widget.create_focus_items()
+            self.main_controller.log_message("Configuration reset to defaults.", 'green')
+        except Exception as exc:
+            logging.exception("Failed to reset configuration from UI.")
+            QMessageBox.critical(parent_widget, "Reset Failed", f"Could not reset configuration:\n{exc}")
+
     def _get_widget_value(self, key: str, widget: QWidget) -> Any:
         """Extracts the value from a given widget."""
         # Handle AllowedPackagesWidget
@@ -262,6 +297,9 @@ class ConfigManager(QObject):
                     elif isinstance(widget, QLabel):
                         widget.setText(str(value))
                     elif isinstance(widget, QSpinBox):
+                        if isinstance(value, (list, dict)):
+                            logging.warning(f"Skipping non-numeric value for spinbox '{key}': {value}")
+                            continue
                         widget.setValue(int(value))
                     elif isinstance(widget, QCheckBox):
                         widget.setChecked(bool(value))

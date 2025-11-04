@@ -115,8 +115,8 @@ class ScreenshotAnnotator:
                     
                     self.logger.debug(f"Processed AI BBox for action target (x1,y1,x2,y2): ({x1},{y1},{x2},{y2}) from raw: {bbox_data}")
 
-                    abs_x1, abs_y1 = min(x1, x2), min(y1, y2)
-                    abs_x2, abs_y2 = max(x1, x2), max(y1, y2)
+                    abs_x1, abs_y1 = x1, y1
+                    abs_x2, abs_y2 = x2, y2
                     
                     clipped_x1, clipped_y1 = max(0, abs_x1), max(0, abs_y1)
                     clipped_x2, clipped_y2 = min(img_width, abs_x2), min(img_height, abs_y2)
@@ -142,33 +142,6 @@ class ScreenshotAnnotator:
                                     self.logger.error("utils.draw_rectangle_on_image failed on retry. Using original.")
                                     filename_suffix = f"_action_{action_type}_target_draw_error.png"
                                     target_log_info += "_draw_error"
-                            else:
-                                # Final fallback: assume input order was [x,y] instead of [y,x]
-                                alt_x1_raw, alt_y1_raw = bbox_data.get("top_left", [0, 0])
-                                alt_x2_raw, alt_y2_raw = bbox_data.get("bottom_right", [0, 0])
-                                # Interpret directly as pixel coordinates
-                                ax1, ay1 = int(float(alt_x1_raw)), int(float(alt_y1_raw))
-                                ax2, ay2 = int(float(alt_x2_raw)), int(float(alt_y2_raw))
-                                ax1, ay1 = min(ax1, ax2), min(ay1, ay2)
-                                ax2, ay2 = max(ax1, ax2), max(ay1, ay2)
-                                ax1, ay1 = max(0, min(ax1, img_w_retry)), max(0, min(ay1, img_h_retry))
-                                ax2, ay2 = max(0, min(ax2, img_w_retry)), max(0, min(ay2, img_h_retry))
-                                if ax1 < ax2 and ay1 < ay2:
-                                    draw_box_coords = (ax1, ay1, ax2, ay2)
-                                    filename_suffix = f"_action_{action_type}_target_bbox_{'_'.join(map(str, draw_box_coords))}.png"
-                                    target_log_info = f"action_{action_type}_target_bbox=({draw_box_coords})_fallback_swapped"
-                                    self.logger.debug(f"Fallback swapped x/y draw; coords: {draw_box_coords}")
-                                    drawn_bytes = utils.draw_rectangle_on_image(original_screenshot_bytes, draw_box_coords)
-                                    if isinstance(drawn_bytes, bytes):
-                                        annotated_bytes_to_save = drawn_bytes
-                                    else:
-                                        self.logger.error("utils.draw_rectangle_on_image failed on swapped fallback. Using original.")
-                                        filename_suffix = f"_action_{action_type}_target_draw_error.png"
-                                        target_log_info += "_draw_error"
-                                else:
-                                    self.logger.warning("BBox still invalid after swapped-coords fallback. Will not draw.")
-                                    filename_suffix = f"_action_{action_type}_no_target_bbox.png"
-                                    target_log_info = f"action_{action_type}_no_target_bbox"
                         except Exception as retry_err:
                             self.logger.debug(f"BBox retry using image dimensions failed: {retry_err}")
                             self.logger.warning(f"Action target BBox is zero-size or invalid. Original: {bbox_data}, Clipped: ({clipped_x1},{clipped_y1},{clipped_x2},{clipped_y2}). Will not draw.")

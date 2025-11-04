@@ -19,7 +19,6 @@ def analyze_databases(output_dir: Path):
 
     # --- Aggregated Metrics Initialization ---
     total_identifier_successes = 0
-    total_coordinate_fallbacks = 0
     total_targeted_clicks = 0
     
     total_stuck_events = 0
@@ -41,22 +40,18 @@ def analyze_databases(output_dir: Path):
             click_steps = cursor.fetchall()
             
             app_id_success = 0
-            app_coord_fallback = 0
 
             for step in click_steps:
                 if not step['mapped_action_json']:
                     continue
                 try:
                     mapped_action = json.loads(step['mapped_action_json'])
-                    if mapped_action.get('type') == 'tap_coords':
-                        app_coord_fallback += 1
-                    elif mapped_action.get('type') == 'click':
+                    if mapped_action.get('type') == 'click':
                         app_id_success += 1
                 except (json.JSONDecodeError, TypeError):
                     continue
-            
+
             total_identifier_successes += app_id_success
-            total_coordinate_fallbacks += app_coord_fallback
             total_targeted_clicks += len(click_steps)
 
             # --- Metric 2: AI Self-Correction Rate ---
@@ -101,7 +96,6 @@ def analyze_databases(output_dir: Path):
             continue
 
     # --- Final Calculations ---
-    fallback_reliance_rate = (total_coordinate_fallbacks / total_targeted_clicks * 100) if total_targeted_clicks > 0 else 0
     self_correction_rate = (total_successful_corrections / total_stuck_events * 100) if total_stuck_events > 0 else 0
 
     # --- Generate LaTeX Output ---
@@ -125,27 +119,25 @@ Successful Self-Corrections (Next Step) & {total_successful_corrections} \\\\ \\
 \\end{{table}}
 """
 
-    # LaTeX Table for Mapper Fallback
-    latex_table_mapper_fallback = f"""
+    # LaTeX Table for Identifier Success
+    latex_table_identifier_success = f"""
 \\begin{{table}}[h!]
 \\centering
-\\caption{{Aggregated Action Mapper Performance for Targeted Clicks}}
-\\label{{tab:mapper_fallback_agg}}
+\\caption{{Aggregated Identifier-Based Mapping Success for Targeted Clicks}}
+\\label{{tab:identifier_success_agg}}
 \\begin{{tabular}}{{|l|c|}}
 \\hline
-\\textbf{{Mapping Method}} & \\textbf{{Total Count}} \\\\ \\hline
+\\textbf{{Metric}} & \\textbf{{Value}} \\\\ \\hline
 Successful Identifier-Based Mapping & {total_identifier_successes} \\\\ \\hline
-Required Coordinate-Based Fallback & {total_coordinate_fallbacks} \\\\ \\hline
 \\textbf{{Total Targeted Clicks}} & \\textbf{{{total_targeted_clicks}}} \\\\ \\hline
-\\textbf{{Fallback Reliance Rate}} & \\textbf{{{fallback_reliance_rate:.1f}\\%}} \\\\ \\hline
 \\end{{tabular}}
 \\end{{table}}
 """
 
     print("--- Table for AI Self-Correction ---")
     print(latex_table_self_correction)
-    print("\n" + "--- Table for Mapper Fallback Reliance ---")
-    print(latex_table_mapper_fallback)
+    print("\n" + "--- Table for Identifier Success ---")
+    print(latex_table_identifier_success)
 
 
 if __name__ == '__main__':

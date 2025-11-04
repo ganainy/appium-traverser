@@ -12,52 +12,18 @@ class UserConfigStore:
             os.makedirs(config_dir, exist_ok=True)
             db_path = os.path.join(config_dir, "config.db")
         self.db_path = db_path
-        self._conn = sqlite3.connect(self.db_path)
+        self._conn: Optional[sqlite3.Connection] = sqlite3.connect(self.db_path)
         self._init_db()
 
+    def _ensure_conn(self) -> sqlite3.Connection:
+        if self._conn is None:
+            raise RuntimeError("Database connection is not initialized")
+        return self._conn
+
     def _init_db(self):
-        conn = self._conn
+        conn = self._ensure_conn()
         conn.execute("PRAGMA journal_mode=WAL;")
-        
-        # Check if the table exists and has the old CHECK constraint
-        try:
-            cur = conn.execute(
-                "SELECT sql FROM sqlite_master WHERE type='table' AND name='user_preferences'"
-            )
-            existing_table_sql = cur.fetchone()
-            
-            if existing_table_sql and "CHECK" in existing_table_sql[0]:
-                # Old schema with CHECK constraint detected - need to recreate the table
-                try:
-                    # Backup existing data
-                    conn.execute(
-                        "CREATE TABLE user_preferences_backup AS SELECT * FROM user_preferences"
-                    )
-                    # Drop old table
-                    conn.execute("DROP TABLE user_preferences")
-                    # Create new table without CHECK constraint
-                    conn.execute("""
-                        CREATE TABLE user_preferences (
-                            key TEXT PRIMARY KEY,
-                            value TEXT NOT NULL,
-                            type TEXT NOT NULL,
-                            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                        );
-                    """)
-                    # Restore data from backup
-                    conn.execute(
-                        "INSERT INTO user_preferences SELECT * FROM user_preferences_backup"
-                    )
-                    # Clean up backup
-                    conn.execute("DROP TABLE user_preferences_backup")
-                    conn.commit()
-                    logging.info("Successfully migrated user_preferences table schema")
-                except Exception as e:
-                    logging.error(f"Error migrating schema: {e}")
-                    conn.rollback()
-        except Exception as e:
-            logging.debug(f"Could not check for schema migration: {e}")
-        
+
         # Create table if it doesn't exist (for fresh databases)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS user_preferences (
@@ -77,7 +43,8 @@ class UserConfigStore:
         """)
 
     def get(self, key: str, default: Any = None) -> Any:
-        cur = self._conn.execute("SELECT value, type FROM user_preferences WHERE key = ?", (key,))
+        conn = self._ensure_conn()
+        cur = conn.execute("SELECT value, type FROM user_preferences WHERE key = ?", (key,))
         row = cur.fetchone()
         if row is None:
             return default
@@ -88,35 +55,86 @@ class UserConfigStore:
         if type_ is None:
             type_ = self._infer_type(value)
         value_str = self._to_storage_str(value, type_)
-        self._conn.execute(
+        conn = self._ensure_conn()
+        conn.execute(
             "REPLACE INTO user_preferences (key, value, type, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)",
             (key, value_str, type_)
         )
-        self._conn.commit()
+        conn.commit()
 
     def get_focus_areas(self) -> List[Dict[str, Any]]:
-        cur = self._conn.execute("SELECT area, enabled FROM focus_areas ORDER BY sort_order ASC, id ASC")
+        conn = self._ensure_conn()
+        cur = conn.execute("SELECT area, enabled FROM focus_areas ORDER BY sort_order ASC, id ASC")
         return [{"area": area, "enabled": bool(enabled)} for area, enabled in cur.fetchall()]
 
     def add_focus_area(self, area: str) -> None:
-        cur = self._conn.execute("SELECT MAX(sort_order) FROM focus_areas")
+        conn = self._ensure_conn()
+        cur = conn.execute("SELECT MAX(sort_order) FROM focus_areas")
         max_order = cur.fetchone()[0] or 0
         try:
-            self._conn.execute(
+            conn.execute(
                 "INSERT INTO focus_areas (area, enabled, sort_order) VALUES (?, ?, ?)",
                 (area, True, max_order + 1)
             )
-            self._conn.commit()
+            conn.commit()
         except sqlite3.IntegrityError:
             raise ValueError(f"Focus area '{area}' already exists.")
 
     def remove_focus_area(self, area: str) -> None:
-        self._conn.execute("DELETE FROM focus_areas WHERE area = ?", (area,))
-        self._conn.commit()
+        conn = self._ensure_conn()
+        conn.execute("DELETE FROM focus_areas WHERE area = ?", (area,))
+        conn.commit()
+
     def close(self):
         if hasattr(self, '_conn') and self._conn:
             self._conn.close()
             self._conn = None
+
+    def initialize_defaults(self, defaults: Dict[str, Any]) -> None:
+        """Populate missing preference keys using provided defaults."""
+        conn = self._ensure_conn()
+        if not defaults:
+            return
+
+        try:
+            cur = conn.execute("SELECT key FROM user_preferences")
+            existing_keys = {row[0] for row in cur.fetchall()}
+
+            records: List[tuple] = []
+            for key, value in defaults.items():
+                if key in existing_keys or value is None:
+                    continue
+                type_ = self._infer_type(value)
+                value_str = self._to_storage_str(value, type_)
+                records.append((key, value_str, type_))
+
+            if records:
+                conn.executemany(
+                    "INSERT INTO user_preferences (key, value, type, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)",
+                    records,
+                )
+                conn.commit()
+        except sqlite3.Error as exc:
+            logging.error(f"Failed to initialize default preferences: {exc}")
+            conn.rollback()
+            raise
+
+    def reset_preferences(self, defaults: Dict[str, Any]) -> None:
+        """Clear stored preferences/focus areas and reapply defaults."""
+        conn = self._ensure_conn()
+
+        try:
+            conn.execute("DELETE FROM user_preferences")
+            try:
+                conn.execute("DELETE FROM focus_areas")
+            except sqlite3.OperationalError:
+                logging.debug("focus_areas table missing during reset; skipping deletion")
+            conn.commit()
+        except sqlite3.Error as exc:
+            logging.error(f"Failed to reset preferences: {exc}")
+            conn.rollback()
+            raise
+        self.initialize_defaults(defaults)
 
     def _coerce_type(self, value: str, type_: str) -> Any:
         if type_ == 'int':
@@ -151,18 +169,3 @@ class UserConfigStore:
         return str(value)
     
     
-    # Backwards-compatible methods expected by tests and older code
-    def set_config(self, key: str, value: Any) -> None:
-        """
-        Backward-compatible wrapper for legacy API `set_config`.
-        Delegates to the newer `set` method which handles type inference.
-        """
-        self.set(key, value)
-    
-    
-    def get_config_value(self, key: str, default: Any = None) -> Any:
-        """
-        Backward-compatible wrapper for legacy API `get_config_value`.
-        Delegates to the newer `get` method.
-        """
-        return self.get(key, default)

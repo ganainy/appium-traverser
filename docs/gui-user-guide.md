@@ -59,6 +59,11 @@ python run_ui.py
   - Generate PDF reports for completed crawls
   - View analysis runs and target summaries
 
+- Allowed External Packages
+  - Manage external packages that the crawler can interact with outside the main target app
+  - Add, remove, edit, and clear packages with validation
+  - Packages are persisted in the configuration and shared between GUI and CLI
+
 ## Validation & Pre-crawl checks
 
 Before starting a crawl, the UI performs validation checks:

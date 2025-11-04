@@ -12,8 +12,9 @@ import tempfile
 import os
 from typing import List
 
-# Test the manager directly
-from infrastructure.allowed_packages_manager import AllowedPackagesManager
+# Test the new architecture directly
+from core.allowed_packages_service import AllowedPackagesService
+from infrastructure.allowed_packages_adapter import AllowedPackagesAdapter
 from config.config import Config
 
 
@@ -27,8 +28,11 @@ class TestAllowedPackagesManager:
     
     @pytest.fixture
     def manager(self, config):
-        """Create a manager instance for testing."""
-        return AllowedPackagesManager(config)
+        """Create a manager instance for testing using the new architecture."""
+        import logging
+        logger = logging.getLogger("test")
+        adapter = AllowedPackagesAdapter(config, logger)
+        return AllowedPackagesService(adapter, logger)
     
     def test_add_valid_package(self, manager):
         """Test adding a valid package."""
@@ -183,7 +187,7 @@ class TestAllowedPackagesManager:
         ]
         
         for name in valid_names:
-            assert AllowedPackagesManager._is_valid_package_name(name) is True, f"{name} should be valid"
+            assert AllowedPackagesService._is_valid_package_name(name) is True, f"{name} should be valid"
         
         # Invalid names
         invalid_names = [
@@ -199,7 +203,7 @@ class TestAllowedPackagesManager:
         ]
         
         for name in invalid_names:
-            assert AllowedPackagesManager._is_valid_package_name(name) is False, f"{name} should be invalid"
+            assert AllowedPackagesService._is_valid_package_name(name) is False, f"{name} should be invalid"
 
 
 class TestPackagesService:
@@ -247,13 +251,38 @@ class TestPackagesService:
 def test_integration_persistence():
     """Test that packages persist across manager instances."""
     config = Config()
-    manager1 = AllowedPackagesManager(config)
+    import logging
+    logger = logging.getLogger("test")
+    
+    # Create first manager instance
+    adapter1 = AllowedPackagesAdapter(config, logger)
+    manager1 = AllowedPackagesService(adapter1, logger)
     manager1.clear()
     manager1.add("com.persistent.package")
     
     # Create a new manager with same config
-    manager2 = AllowedPackagesManager(config)
+    adapter2 = AllowedPackagesAdapter(config, logger)
+    manager2 = AllowedPackagesService(adapter2, logger)
     assert manager2.exists("com.persistent.package") is True
+
+
+def test_new_architecture_direct_usage():
+    """Test that the new architecture works when used directly."""
+    from core.allowed_packages_service import AllowedPackagesService
+    from infrastructure.allowed_packages_adapter import AllowedPackagesAdapter
+    from config.config import Config
+    
+    config = Config()
+    import logging
+    logger = logging.getLogger("test")
+    adapter = AllowedPackagesAdapter(config, logger)
+    manager = AllowedPackagesService(adapter, logger)
+    
+    # Test that it behaves like the old manager
+    assert manager.clear() is True
+    assert manager.add("com.test.package") is True
+    assert manager.exists("com.test.package") is True
+    assert manager.get_count() == 1
 
 
 if __name__ == "__main__":
