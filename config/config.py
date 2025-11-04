@@ -796,12 +796,6 @@ OLLAMA_MODELS = {
             "max_output_tokens": 1024,
         },
         "online": False,
-        "vision_supported":
-            "temperature": 0.7,
-            "top_p": 0.95,
-            "max_output_tokens": 1024,
-        },
-        "online": False,
         "vision_supported": True,
     },
     "mistral-small3.1": {

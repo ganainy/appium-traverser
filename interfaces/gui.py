@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional
 from core.config import Configuration
 from core.storage import Storage
 from core.crawler import Crawler, CrawlerSession
-from core.focus_area_crud import (
+from cli.services.focus_area_service import (
     add_focus_area, remove_focus_area, update_focus_area, list_focus_areas
 )
 

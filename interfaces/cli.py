@@ -1,3 +1,4 @@
+
 #!/usr/bin/env python3
 """
 CLI Interface for Core Crawler Modules.
@@ -14,7 +15,7 @@ from typing import Dict, Any, Optional
 from core.config import Configuration
 from core.crawler import Crawler, CrawlerSession
 from core.storage import Storage
-from core.focus_area_crud import (
+from cli.services.focus_area_service import (
     add_focus_area, remove_focus_area, update_focus_area, list_focus_areas
 )
 

@@ -199,10 +199,8 @@ if CAN_ENABLE_AI_FILTERING_GLOBALLY:
     else:
         # Not fatal for non-Gemini providers
         if AI_PROVIDER == "gemini":
-            print(
-                "Warning: AI_SAFETY_SETTINGS missing or invalid. Proceeding without explicit safety settings.",
-                file=sys.stderr,
-            )
+            # Suppressed warning about missing AI_SAFETY_SETTINGS per configuration preference
+            pass
 
 if not CAN_ENABLE_AI_FILTERING_GLOBALLY:
     print(

@@ -192,14 +192,6 @@ if CAN_ENABLE_AI_FILTERING_GLOBALLY:
     if hasattr(cfg, "AI_SAFETY_SETTINGS") and isinstance(cfg.get('AI_SAFETY_SETTINGS'), dict):
         AI_MODEL_SAFETY_SETTINGS = cfg.get('AI_SAFETY_SETTINGS')
         print(f"Using AI Safety Settings from Config: {AI_MODEL_SAFETY_SETTINGS}")
-    else:
-        # Not fatal for non-Gemini providers
-        if AI_PROVIDER == "gemini":
-            print(
-                "Warning: AI_SAFETY_SETTINGS missing or invalid. Proceeding without explicit safety settings.",
-                file=sys.stderr,
-            )
-
 if not CAN_ENABLE_AI_FILTERING_GLOBALLY:
     print(
         "Warning: AI filtering is GLOBALLY UNAVAILABLE for this script run due to missing prerequisites or configuration.",
