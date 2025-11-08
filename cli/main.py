@@ -8,7 +8,7 @@ import sys
 from typing import List, Optional
 
 from cli.commands.base import CommandRegistry
-from cli.parser import build_parser
+from cli.argument_parser import build_parser
 from cli.shared.context import CLIContext
 
 
@@ -47,6 +47,7 @@ def run(args: Optional[List[str]] = None) -> int:
         from cli.services.crawler_service import CrawlerService
         from cli.services.device_service import DeviceService
         from cli.services.focus_area_service import FocusAreaService
+        from cli.services.mobsf_service import MobSFService
         from cli.services.openrouter_service import OpenRouterService
 
         context.services.register("device", DeviceService(context))
@@ -54,6 +55,7 @@ def run(args: Optional[List[str]] = None) -> int:
         context.services.register("crawler", CrawlerService(context))
         context.services.register("analysis", AnalysisService(context))
         context.services.register("focus", FocusAreaService(context))
+        context.services.register("mobsf", MobSFService(context))
         context.services.register("openrouter", OpenRouterService(context))
 
         # Execute command
@@ -94,6 +96,7 @@ def _register_commands(registry: CommandRegistry) -> None:
             crawler,
             device,
             focus,
+            mobsf,
             openrouter,
             packages,
             services_check,
@@ -113,6 +116,7 @@ def _register_commands(registry: CommandRegistry) -> None:
         apps_group = apps.AppsCommandGroup()
         crawler_group = crawler.CrawlerCommandGroup()
         focus_group = focus.FocusCommandGroup()
+        mobsf_group = mobsf.MobSFCommandGroup()
         openrouter_group = openrouter.OpenRouterCommandGroup()
         analysis_group = analysis.AnalysisCommandGroup()
         packages_group = packages.PackagesCommandGroup()
@@ -122,6 +126,7 @@ def _register_commands(registry: CommandRegistry) -> None:
         registry.add_group(apps_group)
         registry.add_group(crawler_group)
         registry.add_group(focus_group)
+        registry.add_group(mobsf_group)
         registry.add_group(openrouter_group)
         registry.add_group(analysis_group)
         registry.add_group(packages_group)

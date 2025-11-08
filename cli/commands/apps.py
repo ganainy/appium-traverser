@@ -12,10 +12,9 @@ from cli.shared.context import CLIContext
 from cli.constants.keys import (
     SERVICE_APP_SCAN, SERVICE_CONFIG,
     CACHE_KEY_ALL, CACHE_KEY_HEALTH,
-    JSON_KEY_ALL_APPS, JSON_KEY_HEALTH_APPS,
     APP_NAME, PACKAGE_NAME, ACTIVITY_NAME,
     CONFIG_LAST_SELECTED_APP, CONFIG_APP_PACKAGE, CONFIG_APP_ACTIVITY,
-    CMD_SCAN_ALL, CMD_SCAN_HEALTH, CMD_LIST_ALL, CMD_LIST_HEALTH,
+    CMD_SCAN_ALL, CMD_LIST_ALL, CMD_LIST_HEALTH,
     CMD_SELECT, CMD_SHOW_SELECTED,
     ARG_FORCE_RESCAN, ARG_APP_IDENTIFIER, ARG_METAVAR_ID_OR_NAME,
     DEFAULT_UNKNOWN
@@ -23,7 +22,6 @@ from cli.constants.keys import (
 from cli.constants.messages import (
     APPS_GROUP_DESC,
     CMD_SCAN_ALL_DESC, ARG_HELP_FORCE_RESCAN, MSG_SCAN_ALL_SUCCESS, ERR_SCAN_APPS_FAILED,
-    CMD_SCAN_HEALTH_DESC, MSG_SCAN_HEALTH_SUCCESS,
     CMD_LIST_ALL_DESC, CMD_LIST_HEALTH_DESC,
     CMD_SELECT_DESC, ARG_HELP_APP_IDENTIFIER, MSG_SELECT_APP_SUCCESS, ERR_SELECT_APP_FAILED,
     CMD_SHOW_SELECTED_DESC, HEADER_SELECTED_APP, LABEL_NAME, LABEL_PACKAGE, LABEL_ACTIVITY,
@@ -42,12 +40,6 @@ class BaseListAppsCommand(CommandHandler):
     @abstractmethod
     def _cache_key_type(self) -> str:
         """Cache key type ('all' or 'health')."""
-        pass
-    
-    @property
-    @abstractmethod
-    def _json_key(self) -> str:
-        """JSON key in the cache file ('all_apps' or 'health_apps')."""
         pass
     
     @property
@@ -108,8 +100,8 @@ class BaseListAppsCommand(CommandHandler):
         )
 
 
-class ScanAllAppsCommand(CommandHandler):
-    """Scan device and cache ALL installed apps with AI health filtering."""
+class ScanAppsCommand(CommandHandler):
+    """Scan device and cache all installed apps with AI health filtering."""
 
     @property
     def name(self) -> str:
@@ -147,70 +139,13 @@ class ScanAllAppsCommand(CommandHandler):
                 exit_code=1
             )
 
-        # Now scan_all_apps actually performs AI filtering too (merged approach)
-        success, cache_path = app_service.scan_all_apps(force_rescan=args.force_rescan)
+        # Unified scan with AI filtering always enabled
+        success, cache_path = app_service.scan_apps(force_rescan=args.force_rescan)
 
         if success:
             return CommandResult(
                 success=True,
                 message=MSG_SCAN_ALL_SUCCESS.format(cache_path=cache_path)
-            )
-        else:
-            return CommandResult(
-                success=False,
-                message=ERR_SCAN_APPS_FAILED,
-                exit_code=1
-            )
-
-
-
-
-class ScanHealthAppsCommand(CommandHandler):
-    """Scan device and cache apps with AI health filtering (alias for scan-all)."""
-
-    @property
-    def name(self) -> str:
-        """Get command name."""
-        return CMD_SCAN_HEALTH
-
-    @property
-    def description(self) -> str:
-        """Get command description."""
-        return CMD_SCAN_HEALTH_DESC
-
-    def register(self, subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
-        """Register the command with the argument parser."""
-        parser = subparsers.add_parser(
-            self.name,
-            help=self.description,
-            description=self.description
-        )
-        self.add_common_arguments(parser)
-        parser.add_argument(
-            ARG_FORCE_RESCAN,
-            action="store_true",
-            help=ARG_HELP_FORCE_RESCAN
-        )
-        parser.set_defaults(handler=self)
-        return parser
-
-    def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
-        """Execute the command."""
-        app_service = context.services.get(SERVICE_APP_SCAN)
-        if not app_service:
-            return CommandResult(
-                success=False,
-                message=ERR_APP_SCAN_SERVICE_NOT_AVAILABLE,
-                exit_code=1
-            )
-
-        # Use the same scan method as scan-all (both perform AI filtering now)
-        success, cache_path = app_service.scan_all_apps(force_rescan=args.force_rescan)
-
-        if success:
-            return CommandResult(
-                success=True,
-                message=MSG_SCAN_HEALTH_SUCCESS.format(cache_path=cache_path)
             )
         else:
             return CommandResult(
@@ -239,11 +174,6 @@ class ListAllAppsCommand(BaseListAppsCommand):
         return CACHE_KEY_ALL
     
     @property
-    def _json_key(self) -> str:
-        """JSON key in the cache file."""
-        return JSON_KEY_ALL_APPS
-    
-    @property
     def _header_title(self) -> str:
         """Header title for display."""
         return HEADER_ALL_APPS
@@ -266,11 +196,6 @@ class ListHealthAppsCommand(BaseListAppsCommand):
     def _cache_key_type(self) -> str:
         """Cache key type."""
         return CACHE_KEY_HEALTH
-    
-    @property
-    def _json_key(self) -> str:
-        """JSON key in the cache file."""
-        return JSON_KEY_HEALTH_APPS
     
     @property
     def _header_title(self) -> str:
@@ -432,8 +357,7 @@ class AppsCommandGroup(CommandGroup):
     def get_commands(self) -> List[CommandHandler]:
         """Get commands in this group."""
         return [
-            ScanAllAppsCommand(),
-            ScanHealthAppsCommand(),
+            ScanAppsCommand(),
             ListAllAppsCommand(),
             ListHealthAppsCommand(),
             SelectAppCommand(),

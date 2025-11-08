@@ -39,14 +39,14 @@ except Exception:
     except Exception:
         RunAnalyzer = None
         XHTML2PDF_AVAILABLE = False
-from ui.components import UIComponents
-from ui.config_manager import ConfigManager
-from ui.crawler_manager import CrawlerManager
+from ui.ui_components import UIComponents
+from ui.config_ui_manager import ConfigManager
+from ui.crawler_ui_manager import CrawlerManager
 from ui.custom_widgets import BusyDialog
-from ui.health_app_scanner import HealthAppScanner
-from ui.logo import LogoWidget
+from ui.app_scanner_ui import HealthAppScanner
+from ui.logo_widget import LogoWidget
 from ui.mobsf_ui_manager import MobSFUIManager
-from ui.utils import update_screenshot
+from ui.ui_utils import update_screenshot
 
 
 class CrawlerControllerWindow(QMainWindow):
@@ -697,14 +697,6 @@ class CrawlerControllerWindow(QMainWindow):
                     self.action_history.verticalScrollBar().setValue(self.action_history.verticalScrollBar().maximum())
                 except Exception:
                     pass
-
-    def get_focus_area_name(self, focus_id: str) -> Optional[str]:
-        """Get human-readable name for focus area ID."""
-        focus_areas = getattr(self.config, "FOCUS_AREAS", [])
-        for area in focus_areas:
-            if isinstance(area, dict) and area.get("id") == focus_id:
-                return area.get("name", focus_id)
-        return None
 
     def update_screenshot(self, file_path: str) -> None:
         """Update the screenshot displayed in the UI."""

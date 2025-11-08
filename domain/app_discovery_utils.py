@@ -2,9 +2,9 @@
 """
 Shared utilities for Android app discovery via ADB.
 
-This module provides common functionality used by both the standalone CLI script
-(find_app_info.py) and the UI wrapper (health_app_scanner.py) for discovering
-and filtering Android applications.
+This module provides common functionality used by both the app discovery script
+(domain/find_app_info.py) and the UI wrapper (ui/app_scanner_ui.py) for discovering
+and managing Android applications.
 """
 
 import os
@@ -80,8 +80,10 @@ def get_app_cache_path(
     
     # Determine base directory
     if base_dir is None:
-        # Default: parent of config.BASE_DIR (typically project root)
-        base_dir = os.path.abspath(os.path.join(config.BASE_DIR, ".."))
+        # Default: project root found using marker files
+        from pathlib import Path
+        from utils.paths import find_project_root
+        base_dir = str(find_project_root(Path(config.BASE_DIR)))
     
     # Get output data directory from config
     output_data_dir = getattr(config, "OUTPUT_DATA_DIR", "output_data")

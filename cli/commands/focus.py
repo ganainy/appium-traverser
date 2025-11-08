@@ -5,8 +5,6 @@ Focus area management commands.
 
 
 import argparse
-import json
-import os
 from typing import List
 
 from cli.commands.base import CommandGroup, CommandHandler, CommandResult
@@ -291,108 +289,6 @@ class RemoveFocusAreaCommand(CommandHandler):
                 exit_code=1
             )
 
-class ImportFocusAreasCommand(CommandHandler):
-    """Import focus areas from a JSON file."""
-    
-    @property
-    def name(self) -> str:
-        return MSG.IMPORT_FOCUS_CMD_NAME
-
-    @property
-    def description(self) -> str:
-        return MSG.IMPORT_FOCUS_CMD_DESC
-    
-    def register(self, subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
-        parser = subparsers.add_parser(
-            self.name,
-            help=self.description,
-            description=self.description
-        )
-        parser.add_argument(
-            MSG.IMPORT_FOCUS_ARG_FILE_PATH,
-            metavar=MSG.IMPORT_FOCUS_ARG_FILE_PATH_METAVAR,
-            type=str,
-            help=MSG.IMPORT_FOCUS_ARG_FILE_PATH_HELP
-        )
-        self.add_common_arguments(parser)
-        parser.set_defaults(handler=self)
-        return parser
-    
-    def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
-        focus_service = context.services.get(KEY.FOCUS_SERVICE)
-        if not focus_service:
-            return CommandResult(
-                success=False,
-                message=MSG.FOCUS_SERVICE_NOT_AVAILABLE,
-                exit_code=1
-            )
-
-        file_path = getattr(args, MSG.IMPORT_FOCUS_ARG_FILE_PATH)
-        success = focus_service.import_focus_areas(file_path)
-
-        if success:
-            return CommandResult(
-                success=True,
-                message=MSG.IMPORT_FOCUS_SUCCESS.format(file_path=file_path)
-            )
-        else:
-            return CommandResult(
-                success=False,
-                message=MSG.IMPORT_FOCUS_FAIL.format(file_path=file_path),
-                exit_code=1
-            )
-
-class ExportFocusAreasCommand(CommandHandler):
-    """Export focus areas to a JSON file."""
-    
-    @property
-    def name(self) -> str:
-        return MSG.EXPORT_FOCUS_CMD_NAME
-
-    @property
-    def description(self) -> str:
-        return MSG.EXPORT_FOCUS_CMD_DESC
-    
-    def register(self, subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
-        parser = subparsers.add_parser(
-            self.name,
-            help=self.description,
-            description=self.description
-        )
-        parser.add_argument(
-            MSG.EXPORT_FOCUS_ARG_FILE_PATH,
-            metavar=MSG.EXPORT_FOCUS_ARG_FILE_PATH_METAVAR,
-            type=str,
-            help=MSG.EXPORT_FOCUS_ARG_FILE_PATH_HELP
-        )
-        self.add_common_arguments(parser)
-        parser.set_defaults(handler=self)
-        return parser
-    
-    def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
-        focus_service = context.services.get(KEY.FOCUS_SERVICE)
-        if not focus_service:
-            return CommandResult(
-                success=False,
-                message=MSG.FOCUS_SERVICE_NOT_AVAILABLE,
-                exit_code=1
-            )
-
-        file_path = getattr(args, MSG.EXPORT_FOCUS_ARG_FILE_PATH)
-        success = focus_service.export_focus_areas(file_path)
-
-        if success:
-            return CommandResult(
-                success=True,
-                message=MSG.EXPORT_FOCUS_SUCCESS.format(file_path=file_path)
-            )
-        else:
-            return CommandResult(
-                success=False,
-                message=MSG.EXPORT_FOCUS_FAIL.format(file_path=file_path),
-                exit_code=1
-            )
-
 class FocusCommandGroup(CommandGroup):
     """Focus area management command group."""
     
@@ -405,7 +301,5 @@ class FocusCommandGroup(CommandGroup):
             ListFocusAreasCommand(),
             AddFocusAreaCommand(),
             EditFocusAreaCommand(),
-            RemoveFocusAreaCommand(),
-            ImportFocusAreasCommand(),
-            ExportFocusAreasCommand()
+            RemoveFocusAreaCommand()
         ]

@@ -148,6 +148,7 @@ class ProcessBackend(ABC):
     
     def start_output_monitoring(self, output_parser: 'OutputParser') -> None:
         """Start monitoring process output (optional implementation)."""
+        # TODO: Implement process output monitoring functionality
         pass
 
 
@@ -227,7 +228,7 @@ class CrawlerOrchestrator:
         """Prepare a launch plan with validation."""
         # Get paths from configuration
         project_root = getattr(self.config, 'PROJECT_ROOT')
-        main_script_name = getattr(self.config, 'MAIN_SCRIPT_NAME', 'main.py')
+        main_script_name = getattr(self.config, 'MAIN_SCRIPT_NAME', 'run_cli.py')
         main_script = os.path.join(project_root, main_script_name)
         
         # Resolve paths

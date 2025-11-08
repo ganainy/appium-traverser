@@ -188,58 +188,6 @@ class ClearPackagesCommand(CommandHandler):
             return CommandResult(success=False, message=MSG.CLEAR_PACKAGES_RESULT_FAIL)
 
 
-class UpdatePackageCommand(CommandHandler):
-    """Command to update (rename) a package in allowed external packages."""
-    
-    @property
-    def name(self) -> str:
-        return MSG.UPDATE_PACKAGE_NAME
-
-    @property
-    def description(self) -> str:
-        return MSG.UPDATE_PACKAGE_DESC
-    
-    def register(self, subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
-        parser = subparsers.add_parser(
-            self.name,
-            help=self.description,
-            description=self.description
-        )
-
-        parser.add_argument(
-            "old_name",
-            help=MSG.UPDATE_PACKAGE_OLD_ARG
-        )
-
-        parser.add_argument(
-            "new_name",
-            help=MSG.UPDATE_PACKAGE_NEW_ARG
-        )
-
-        self.add_common_arguments(parser)
-        parser.set_defaults(handler=self)
-        return parser
-    
-    def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
-        from cli.services.packages_service import PackagesService
-
-        packages_service = PackagesService(context)
-        telemetry = context.services.get(KEYS.TELEMETRY_SERVICE)
-
-        if packages_service.update_package(args.old_name, args.new_name):
-            telemetry.print_success(MSG.UPDATE_PACKAGE_SUCCESS.format(old_name=args.old_name, new_name=args.new_name))
-            return CommandResult(
-                success=True,
-                message=MSG.UPDATE_PACKAGE_RESULT.format(old_name=args.old_name, new_name=args.new_name)
-            )
-        else:
-            telemetry.print_error(MSG.UPDATE_PACKAGE_FAIL.format(old_name=args.old_name))
-            return CommandResult(
-                success=False,
-                message=MSG.UPDATE_PACKAGE_RESULT_FAIL.format(old_name=args.old_name)
-            )
-
-
 class PackagesCommandGroup(CommandGroup):
     """Group of commands for managing allowed external packages."""
     
@@ -252,6 +200,5 @@ class PackagesCommandGroup(CommandGroup):
             ListPackagesCommand(),
             AddPackageCommand(),
             RemovePackageCommand(),
-            UpdatePackageCommand(),
             ClearPackagesCommand(),
         ]

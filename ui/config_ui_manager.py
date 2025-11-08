@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 # Import UIComponents 
-from ui.components import UIComponents
+from ui.ui_components import UIComponents
 
 
 class ConfigManager(QObject):
@@ -449,73 +449,3 @@ class ConfigManager(QObject):
                 pass
         logging.debug("Connected widgets for auto-saving.")
     
-    def update_focus_areas(self, focus_areas):
-        """Update focus areas configuration and save via config interface."""
-        # Convert FocusArea objects to dictionaries for storage
-        focus_areas_dict = []
-        for area in focus_areas:
-            if hasattr(area, '__dict__'):
-                focus_areas_dict.append({
-                    'id': area.id,
-                    'name': area.name,
-                    'description': area.description,
-                    'prompt_modifier': area.prompt_modifier,
-                    'enabled': bool(area.enabled),
-                    'priority': int(area.priority)
-                })
-            else:
-                focus_areas_dict.append(area)
-
-        # Basic schema validation and unique ID enforcement
-        errors = []
-        seen_ids = set()
-        validated_dicts = []
-        for idx, area in enumerate(focus_areas_dict):
-            try:
-                aid = str(area.get('id', '')).strip()
-                name = str(area.get('name', '')).strip()
-                desc = str(area.get('description', ''))
-                prompt = str(area.get('prompt_modifier', ''))
-                enabled = bool(area.get('enabled', True))
-                try:
-                    priority = int(area.get('priority', 0))
-                except (TypeError, ValueError):
-                    priority = 0
-
-                if not aid:
-                    errors.append(f"Focus area at index {idx} missing non-empty 'id'")
-                    continue
-                if aid in seen_ids:
-                    errors.append(f"Duplicate focus area id detected: '{aid}'")
-                    continue
-                if not name:
-                    errors.append(f"Focus area '{aid}' has empty 'name'")
-                    continue
-                if len(prompt) > 1000:
-                    errors.append(f"Focus area '{aid}' prompt_modifier too long ({len(prompt)} > 1000)")
-                    continue
-
-                seen_ids.add(aid)
-                validated_dicts.append({
-                    'id': aid,
-                    'name': name,
-                    'description': desc,
-                    'prompt_modifier': prompt,
-                    'enabled': enabled,
-                    'priority': priority
-                })
-            except Exception as e:
-                errors.append(f"Error validating focus area at index {idx}: {e}")
-
-        if errors:
-            err_text = "; ".join(errors)
-            logging.warning(f"Focus areas validation failed: {err_text}")
-            try:
-                self.main_controller.log_message(f"Focus areas not saved due to validation errors: {err_text}", 'red')
-            except Exception:
-                pass
-            return
-
-        # Save to config using set()
-        self.config.set('FOCUS_AREAS', validated_dicts)
-        logging.debug(f"Updated focus areas configuration with {len(validated_dicts)} areas")

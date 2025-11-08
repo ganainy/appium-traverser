@@ -143,6 +143,7 @@ Successful Identifier-Based Mapping & {total_identifier_successes} \\\\ \\hline
 if __name__ == '__main__':
     # The script assumes it's run from the project root.
     # It will look for the database files inside './output_data/' session directories
-    project_root = Path(__file__).resolve().parent
+    project_root = Path(__file__).resolve().parent.parent
     output_directory = project_root / 'output_data'
     analyze_databases(output_directory)
+

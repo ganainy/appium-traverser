@@ -683,9 +683,9 @@ class FocusAreasWidget(QWidget):
         # Remove from service if available
         if self.focus_service:
             try:
-                success = self.focus_service.remove_focus_area(area_id)
+                success, msg = self.focus_service.remove_focus_area(area_id)
                 if not success:
-                    logging.error(f"Failed to delete focus area {area_id} from service")
+                    logging.error(f"Failed to delete focus area {area_id} from service: {msg}")
             except Exception as e:
                 logging.error(f"Error deleting focus area {area_id}: {e}")
         
@@ -803,12 +803,10 @@ class FocusAreasWidget(QWidget):
             # Add to service if available
             if self.focus_service:
                 try:
-                    success = self.focus_service.add_focus_area(
-                        id_or_name=data['id'],
+                    success, msg = self.focus_service.add_focus_area(
                         title=data['name'],
                         description=data['description'],
-                        prompt_modifier=data['prompt_modifier'],
-                        priority=data['priority'],
+                        priority=data.get('priority', 0),
                         enabled=True
                     )
                     if success:

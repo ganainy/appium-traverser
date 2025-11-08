@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # ui/__init__.py - Initialize the UI package
 
-from ui.components import UIComponents
-from ui.config_manager import ConfigManager
-from ui.crawler_manager import CrawlerManager
-from ui.health_app_scanner import HealthAppScanner
+from ui.ui_components import UIComponents
+from ui.config_ui_manager import ConfigManager
+from ui.crawler_ui_manager import CrawlerManager
+from ui.app_scanner_ui import HealthAppScanner
 from ui.mobsf_ui_manager import MobSFUIManager
-from ui.utils import update_screenshot
+from ui.ui_utils import update_screenshot
 from ui.allowed_packages_widget import AllowedPackagesWidget
 
 __all__ = [

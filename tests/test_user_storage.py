@@ -8,7 +8,7 @@ import os
 import tempfile
 import sqlite3
 import pytest
-from core.user_storage import UserConfigStore
+from infrastructure.user_config_store import UserConfigStore
 
 def test_set_and_get_string():
     with tempfile.TemporaryDirectory() as tmpdir:

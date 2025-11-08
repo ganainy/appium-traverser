@@ -1401,12 +1401,8 @@ class UIComponents:
         focus_widget = FocusAreasWidget(focus_areas_data, parent=None, focus_service=focus_service)
         focus_layout.addWidget(focus_widget)
 
-        # Connect to config changes
-        focus_widget.focus_areas_changed.connect(
-            lambda areas: config_handler.update_focus_areas(areas)
-        )
-
         # Store reference for later access
+        # Note: Focus areas are persisted directly through FocusAreaService when CRUD operations occur
         config_handler.focus_areas_widget = focus_widget
 
         layout.addRow(focus_group)

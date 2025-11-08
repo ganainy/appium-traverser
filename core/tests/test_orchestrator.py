@@ -16,7 +16,10 @@ from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
 
 # Add parent directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+from utils.paths import find_project_root
+project_root = find_project_root(Path(__file__).resolve().parent)
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
 
 
 try:
@@ -63,7 +66,7 @@ class TestCrawlerOrchestrator(unittest.TestCase):
         self.assertEqual(plan.app_package, "com.example.app")
         self.assertEqual(plan.app_activity, "com.example.app.MainActivity")
         self.assertEqual(plan.python_executable, sys.executable)
-        self.assertTrue(plan.script_path.endswith("main.py"))
+        self.assertTrue(plan.script_path.endswith("run_cli.py"))
     
     @patch('core.validation.ValidationService.validate_all')
     def test_prepare_plan_with_validation(self, mock_validate):

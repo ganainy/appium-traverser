@@ -11,11 +11,13 @@ from pathlib import Path
 import pytest
 
 # Add project root to path for imports
-project_root = Path(__file__).resolve().parent.parent.parent
-sys.path.insert(0, str(project_root))
+from utils.paths import find_project_root
+project_root = find_project_root(Path(__file__).resolve().parent)
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
 
 try:
-    from cli.parser import (
+    from cli.argument_parser import (
         build_parser, 
         add_common_arguments, 
         add_force_argument, 

@@ -9,6 +9,35 @@ from datetime import datetime
 if TYPE_CHECKING:
     from config.config import Config
 
+
+def find_project_root(start_path: Path) -> Path:
+    """Find project root by looking for marker files (pyproject.toml, setup.py, etc.).
+    
+    Args:
+        start_path: Starting path to search from (typically __file__ or current directory).
+        
+    Returns:
+        Path to project root directory.
+        
+    Raises:
+        FileNotFoundError: If project root cannot be determined (no marker files found).
+    """
+    start_path = Path(start_path).resolve()
+    
+    # Marker files that indicate project root
+    markers = ["pyproject.toml", "setup.py", "setup.cfg", ".git", "README.md"]
+    
+    for parent in [start_path] + list(start_path.parents):
+        # Check if any marker file exists
+        if any((parent / marker).exists() for marker in markers):
+            return parent
+    
+    # If no marker found, raise an error
+    raise FileNotFoundError(
+        f"Could not find project root. Searched from {start_path} "
+        f"looking for markers: {markers}"
+    )
+
 # Constants for configuration keys
 class SessionKeys:
     """Constants for configuration keys related to session paths."""

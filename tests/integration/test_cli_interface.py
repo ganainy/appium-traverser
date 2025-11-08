@@ -17,7 +17,6 @@ def test_cli_can_import_core_modules():
         from core.config import Configuration
         from core.storage import Storage
         from core.crawler import CrawlerSession, Crawler
-        from core.parser import ParsedData, parse_raw_data
     except ImportError as e:
         pytest.fail(f"CLI failed to import core modules: {e}")
 
@@ -26,7 +25,6 @@ def test_cli_can_create_core_instances():
     from core.config import Configuration
     from core.storage import Storage
     from core.crawler import CrawlerSession, Crawler
-    from core.parser import ParsedData
 
     # Test Configuration creation with required settings
     config = Configuration(
@@ -69,21 +67,10 @@ def test_cli_can_create_core_instances():
     assert session.config_id == "test-cli-config"
     assert session.status == "pending"
 
-    # Test ParsedData creation
-    parsed_data = ParsedData(
-        session_id="test-cli-session",
-        element_type="button",
-        identifier="test-button",
-        bounding_box={"top_left": [10, 20], "bottom_right": [30, 40]}
-    )
-    assert parsed_data.session_id == "test-cli-session"
-    assert parsed_data.element_type == "button"
-    assert parsed_data.identifier == "test-button"
 
 def test_cli_core_validation_works():
     """Test that core validation works in CLI context."""
     from core.config import Configuration
-    from core.parser import ParsedData
 
     # Test Configuration validation with proper settings
     config = Configuration(
@@ -97,14 +84,6 @@ def test_cli_core_validation_works():
     )
     config.validate()  # Should not raise
 
-    # Test ParsedData validation
-    parsed_data = ParsedData(
-        session_id="test-cli-session",
-        element_type="button",
-        identifier="test-button",
-        bounding_box={"top_left": [10, 20], "bottom_right": [30, 40]}
-    )
-    parsed_data.validate()  # Should not raise
 
 def test_cli_core_storage_operations():
     """Test that core storage operations work in CLI context."""
@@ -189,19 +168,9 @@ def test_cli_core_crawler_operations():
     assert isinstance(stopped_session, CrawlerSession)
     assert stopped_session.status == "stopped"
 
-def test_cli_core_parser_operations():
-    """Test that core parser operations work in CLI context."""
-    from core.parser import parse_raw_data
-
-    # Test parsing empty data (current implementation returns empty list)
-    result = parse_raw_data({})
-    assert isinstance(result, list)
-    assert len(result) == 0
-
 def test_cli_core_error_handling():
     """Test that core error handling works in CLI context."""
     from core.config import Configuration
-    from core.parser import ParsedData
 
     # Test Configuration validation error - empty name
     config = Configuration(
@@ -215,14 +184,3 @@ def test_cli_core_error_handling():
 
     with pytest.raises(ValueError, match="Configuration name must be a non-empty string"):
         config.validate()
-
-    # Test ParsedData validation error
-    parsed_data = ParsedData(
-        session_id="test-session",
-        element_type="invalid_type",  # Invalid element type
-        identifier="test",
-        bounding_box={"top_left": [10, 20], "bottom_right": [30, 40]}
-    )
-
-    with pytest.raises(ValueError, match="Invalid element type"):
-        parsed_data.validate()

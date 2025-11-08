@@ -44,7 +44,9 @@ class HealthAppScanner(QObject):
         super().__init__()
         self.main_controller = main_controller
         self.config = main_controller.config
-        self.api_dir = os.path.abspath(os.path.join(self.config.BASE_DIR, ".."))
+        from pathlib import Path
+        from utils.paths import find_project_root
+        self.api_dir = str(find_project_root(Path(self.config.BASE_DIR)))
         self.find_app_info_script_path = os.path.join(self.api_dir, "domain", "find_app_info.py")
         self.find_apps_process: Optional[QProcess] = None
         self.find_apps_stdout_buffer: str = ""

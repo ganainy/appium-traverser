@@ -3,7 +3,7 @@ import tempfile
 import pytest
 import json
 from config.config import Config
-from core.user_storage import UserConfigStore
+from infrastructure.user_config_store import UserConfigStore
 
 @pytest.fixture
 def temp_config_env(tmp_path):
@@ -21,7 +21,7 @@ def temp_config_env(tmp_path):
             for area in value:
                 store.add_focus_area(area)
         else:
-            store.set_config(key, value)
+            store.set(key, value)
     yield str(db_path)
 
 def test_config_lifecycle_integration(temp_config_env):

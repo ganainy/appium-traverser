@@ -11,7 +11,6 @@ import pytest
 from typing import Dict, Any
 from unittest.mock import patch
 from core.crawler import CrawlerSession
-from core.parser import ParsedData
 
 def test_configuration_contract():
     """Test Configuration class maintains its contract."""
@@ -109,46 +108,6 @@ def test_crawler_session_contract():
     assert session.status == "completed"
     assert session.end_time is not None
 
-def test_parsed_data_contract():
-    """Test ParsedData class maintains its contract."""
-    from core.parser import ParsedData
-
-    # Test constructor contract
-    data = ParsedData(
-        session_id="test-session",
-        element_type="button",
-        identifier="test-button",
-        bounding_box={"top_left": [10, 20], "bottom_right": [30, 40]},
-        properties={"text": "Click me"},
-        confidence_score=0.95
-    )
-
-    # Verify attributes exist and have correct types
-    assert hasattr(data, 'data_id')
-    assert hasattr(data, 'session_id')
-    assert hasattr(data, 'element_type')
-    assert hasattr(data, 'identifier')
-    assert hasattr(data, 'bounding_box')
-    assert hasattr(data, 'properties')
-    assert hasattr(data, 'confidence_score')
-    assert hasattr(data, 'timestamp')
-
-    assert isinstance(data.data_id, str)
-    assert isinstance(data.session_id, str)
-    assert isinstance(data.element_type, str)
-    assert isinstance(data.identifier, str)
-    assert isinstance(data.bounding_box, dict)
-    assert isinstance(data.properties, dict)
-    assert isinstance(data.confidence_score, float)
-
-    assert data.session_id == "test-session"
-    assert data.element_type == "button"
-    assert data.identifier == "test-button"
-    assert data.confidence_score == 0.95
-
-    # Test validation contract
-    assert hasattr(data, 'validate')
-    data.validate()  # Should not raise
 
 def test_storage_contract():
     """Test Storage class maintains its contract."""
@@ -191,17 +150,7 @@ def test_storage_contract():
         assert hasattr(storage, 'save_session')
         storage.save_session(session)
 
-        # Test parsed data operations contract
-        parsed_data = ParsedData(
-            session_id="test-session",
-            element_type="button",
-            identifier="test-button",
-            bounding_box={"top_left": [10, 20], "bottom_right": [30, 40]}
-        )
-
-        assert hasattr(storage, 'save_parsed_data')
-        storage.save_parsed_data([parsed_data])
-
+        # Test get_session_results contract (returns empty list for now)
         assert hasattr(storage, 'get_session_results')
         results = storage.get_session_results("test-session")
         assert isinstance(results, list)
@@ -248,29 +197,6 @@ def test_crawler_contract():
     with pytest.raises(ValueError):
         crawler.get_status("missing-session")
 
-def test_parser_contract():
-    """Test parser module maintains its contract."""
-    from core.parser import parse_raw_data
-
-    # Test function contract
-    assert callable(parse_raw_data)
-
-    result = parse_raw_data({})
-    assert isinstance(result, list)
-
-    # Test with sample data
-    sample_data = {
-        "elements": [
-            {
-                "type": "button",
-                "id": "test-btn",
-                "bounds": {"top_left": [0, 0], "bottom_right": [100, 50]}
-            }
-        ]
-    }
-
-    result = parse_raw_data(sample_data)
-    assert isinstance(result, list)
 
 def test_core_module_imports_contract():
     """Test that all core modules can be imported and have expected exports."""
@@ -291,16 +217,10 @@ def test_core_module_imports_contract():
     assert hasattr(crawler, 'Crawler')
     assert hasattr(crawler, 'CrawlerSession')
 
-    # Test parser module
-    assert hasattr(core, 'parser')
-    from core import parser
-    assert hasattr(parser, 'ParsedData')
-    assert hasattr(parser, 'parse_raw_data')
 
 def test_error_handling_contract():
     """Test that error handling maintains contract across core modules."""
     from core.config import Configuration
-    from core.parser import ParsedData
 
     # Test Configuration error contract
     config = Configuration(
@@ -310,15 +230,4 @@ def test_error_handling_contract():
 
     with pytest.raises(ValueError):
         config.validate()
-
-    # Test ParsedData error contract
-    data = ParsedData(
-        session_id="test",
-        element_type="invalid",  # Invalid type
-        identifier="test",
-        bounding_box={"top_left": [10, 20], "bottom_right": [30, 40]}
-    )
-
-    with pytest.raises(ValueError):
-        data.validate()
 

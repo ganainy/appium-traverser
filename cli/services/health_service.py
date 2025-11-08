@@ -9,7 +9,7 @@ from cli.shared.context import CLIContext
 from cli.constants import messages as MSG
 from cli.constants import keys as KEYS
 from cli.constants import config as CFG
-from cli.services import process_utils
+from cli.services.process_utils import run_subprocess
 
 
 class HealthCheckService:
@@ -144,7 +144,7 @@ class HealthCheckService:
         except Exception:
             pass
         try:
-            result = process_utils.run_subprocess(
+            result = run_subprocess(
                 ["ollama", "list"],
                 timeout=CFG.OLLAMA_CLI_TIMEOUT,
                 capture_output=True

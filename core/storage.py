@@ -22,12 +22,10 @@ class Storage:
     # Table Names
     TABLE_CONFIGS = "configurations"
     TABLE_SESSIONS = "crawler_sessions"
-    TABLE_DATA = "parsed_data"
     
     # Column Lists
     COLS_CONFIG = ("config_id", "name", "settings", "created_at", "updated_at", "is_default")
     COLS_SESSION = ("session_id", "config_id", "status", "progress", "start_time", "end_time", "error_message")
-    COLS_DATA = ("data_id", "session_id", "element_type", "identifier", "bounding_box", "properties", "confidence_score", "timestamp")
 
     def __init__(self, db_path: str = DEFAULT_DB_PATH):
         """
@@ -70,20 +68,6 @@ class Storage:
                     )
                 """)
 
-                # Create parsed_data table
-                conn.execute(f"""
-                    CREATE TABLE IF NOT EXISTS {self.TABLE_DATA} (
-                        data_id TEXT PRIMARY KEY,
-                        session_id TEXT NOT NULL,
-                        element_type TEXT NOT NULL,
-                        identifier TEXT NOT NULL,
-                        bounding_box TEXT NOT NULL,
-                        properties TEXT,
-                        confidence_score REAL NOT NULL,
-                        timestamp TEXT NOT NULL,
-                        FOREIGN KEY (session_id) REFERENCES {self.TABLE_SESSIONS} (session_id)
-                    )
-                """)
             logger.info("Database tables initialized successfully")
         except sqlite3.Error as e:
             logger.error(f"Failed to initialize database: {e}")
@@ -199,61 +183,12 @@ class Storage:
             logger.error(f"Failed to retrieve session {session_id}: {e}")
             raise
 
-    def save_parsed_data(self, data_list: List) -> None:
-        """
-        Save parsed data to database.
-        """
-        logger.debug(f"Saving {len(data_list)} parsed data items")
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                for data in data_list:
-                    cols = ', '.join(self.COLS_DATA)
-                    placeholders = ', '.join(['?'] * len(self.COLS_DATA))
-                    sql = f"INSERT INTO {self.TABLE_DATA} ({cols}) VALUES ({placeholders})"
-                    conn.execute(sql, (
-                        data.data_id,
-                        data.session_id,
-                        data.element_type,
-                        data.identifier,
-                        json.dumps(data.bounding_box),
-                        json.dumps(data.properties) if data.properties else None,
-                        data.confidence_score,
-                        data.timestamp.isoformat()
-                    ))
-            logger.info(f"Parsed data saved successfully: {len(data_list)} items")
-        except sqlite3.Error as e:
-            logger.error(f"Failed to save parsed data: {e}")
-            raise
-
     def get_session_results(self, session_id: str) -> List:
         """
         Get all parsed data for a session.
+        
+        Note: Currently returns empty list as parsed data functionality is not yet implemented.
         """
         logger.debug(f"Retrieving session results for: {session_id}")
-        try:
-            from core.parser import ParsedData  # Import here to avoid circular import
-            results = []
-
-            with sqlite3.connect(self.db_path) as conn:
-                cols = ', '.join(self.COLS_DATA)
-                sql = f"SELECT {cols} FROM {self.TABLE_DATA} WHERE session_id = ?"
-                rows = conn.execute(sql, (session_id,)).fetchall()
-
-                for row in rows:
-                    data = ParsedData(
-                        data_id=row[0],
-                        session_id=row[1],
-                        element_type=row[2],
-                        identifier=row[3],
-                        bounding_box=json.loads(row[4]),
-                        properties=json.loads(row[5]) if row[5] else None,
-                        confidence_score=row[6]
-                    )
-                    data.timestamp = datetime.fromisoformat(row[7])
-                    results.append(data)
-
-            logger.info(f"Retrieved {len(results)} results for session: {session_id}")
-            return results
-        except Exception as e:
-            logger.error(f"Failed to retrieve session results for {session_id}: {e}")
-            raise
+        # TODO: Implement when parsed data functionality is added
+        return []

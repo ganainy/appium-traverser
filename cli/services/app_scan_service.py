@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-App scanning service for discovering and managing installed applications.
+App scanning service for discovering and managing installed Android applications.
+
+Handles scanning (all apps or AI-filtered health apps), caching, and app selection.
+App dictionaries contain: app_name, package_name, activity_name.
 """
 
 import json
@@ -15,14 +18,11 @@ from cli.constants.keys import (
     SERVICE_CONFIG,
     CONFIG_APP_INFO_OUTPUT_DIR,
     CONFIG_CURRENT_HEALTH_APP_LIST_FILE,
-    CACHE_KEY_ALL,
-    CACHE_KEY_HEALTH,
-    CACHE_KEY_HEALTH_FILTERED,
-    JSON_KEY_ALL_APPS,
-    JSON_KEY_HEALTH_APPS,
+    JSON_KEY_APPS,
     APP_NAME,
     PACKAGE_NAME,
     ACTIVITY_NAME,
+    IS_HEALTH_APP,
     FILE_PATTERN_DEVICE_APP_INFO,
     DEFAULT_UNKNOWN
 )
@@ -31,7 +31,6 @@ from cli.constants.messages import (
     ERR_HEALTH_APPS_SCAN_NO_CACHE,
     ERR_APP_INFO_OUTPUT_DIR_NOT_CONFIGURED,
     ERR_NO_APP_CACHE_FOUND,
-    ERR_FAILED_TO_LOAD_APPS_FROM_CACHE,
     ERR_FAILED_TO_LOAD_APPS_FROM_CACHE_WITH_ERROR,
     ERR_NO_HEALTH_APPS_LOADED,
     ERR_APP_NOT_FOUND,
@@ -41,59 +40,67 @@ from cli.constants.messages import (
     DEBUG_NO_CACHE_FILES_FOUND,
     DEBUG_RESOLVED_LATEST_CACHE_FILE
 )
-from utils.app_scanner import generate_app_info_cache
+from domain.find_app_info import generate_app_info_cache
 
 
 class AppScanService:
-    """Service for scanning and managing installed applications."""
+    """Service for scanning and managing installed Android applications."""
     
     def __init__(self, context: CLIContext):
+        """Initialize the AppScanService.
+        
+        Args:
+            context: CLI context containing services and configuration
+        """
         self.context = context
         self.logger = logging.getLogger(__name__)
     
-    def scan_all_apps(self, force_rescan: bool = False) -> Tuple[bool, Optional[str]]:
-        """Scan and cache ALL apps (no AI filtering).
+    def scan_apps(self, force_rescan: bool = False) -> Tuple[bool, Optional[str]]:
+        """Scan and cache all installed apps with AI health filtering.
+        
+        Creates a unified cache file with all apps, each marked with is_health_app flag.
+        AI filtering is always enabled to identify health-related apps.
         
         Args:
-            force_rescan: Force rescan even if cache exists
+            force_rescan: If True, force a new scan even if cache exists. 
+                         If False, return existing cache if available.
             
         Returns:
             Tuple of (success, cache_file_path)
+            
+        Note:
+            Cache file contains unified 'apps' list with is_health_app flags (true/false/null).
+            Cache file path is stored in configuration as current health app list.
         """
+        # Check for existing cache if not forcing rescan
+        if not force_rescan:
+            existing_cache = self.resolve_latest_cache_file()
+            if existing_cache and os.path.exists(existing_cache):
+                # Validate the cache has the unified format
+                try:
+                    with open(existing_cache, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    if isinstance(data, dict) and JSON_KEY_APPS in data and isinstance(data[JSON_KEY_APPS], list):
+                        self.logger.info(f"Using existing cache file: {existing_cache}")
+                        # Update config with existing cache file
+                        config_service = self.context.services.get(SERVICE_CONFIG)
+                        if config_service:
+                            config_service.set(CONFIG_CURRENT_HEALTH_APP_LIST_FILE, existing_cache)
+                        return True, existing_cache
+                except Exception as e:
+                    self.logger.warning(f"Existing cache file is invalid, will rescan: {e}")
+                    # Fall through to generate new cache
+        
+        # Perform new scan (either forced or no valid cache found)
         self.logger.debug(DEBUG_STARTING_ALL_APPS_SCAN)
+        if force_rescan:
+            self.logger.info("Force rescan requested, generating new cache...")
+        
         try:
-            output_path, result_data = generate_app_info_cache(
-                perform_ai_filtering_on_this_call=False
-            )
+            output_path, result_data = generate_app_info_cache()
             
             if not output_path:
                 self.logger.error(ERR_ALL_APPS_SCAN_NO_CACHE)
-                return False, None
-                
-            self.logger.info(f"Cache file generated at: {output_path}")
-            return True, output_path
-            
-        except Exception as e:
-            self.logger.error(f"Error during all-apps scan: {e}", exc_info=True)
-            return False, None
-    
-    def scan_health_apps(self, force_rescan: bool = False) -> Tuple[bool, Optional[str]]:
-        """Scan and cache AI-filtered health apps.
-        
-        Args:
-            force_rescan: Force rescan even if cache exists
-            
-        Returns:
-            Tuple of (success, cache_file_path)
-        """
-        self.logger.debug(DEBUG_STARTING_HEALTH_APPS_SCAN)
-        try:
-            output_path, result_data = generate_app_info_cache(
-                perform_ai_filtering_on_this_call=True
-            )
-            
-            if not output_path:
-                self.logger.error(ERR_HEALTH_APPS_SCAN_NO_CACHE)
                 return False, None
                 
             self.logger.info(f"Cache file generated at: {output_path}")
@@ -106,11 +113,11 @@ class AppScanService:
             return True, output_path
             
         except Exception as e:
-            self.logger.error(f"Error during health-apps scan: {e}", exc_info=True)
+            self.logger.error(f"Error during app scan: {e}", exc_info=True)
             return False, None
     
     def load_apps_from_file(self, file_path: str) -> Tuple[bool, List[Dict]]:
-        """Load apps from a cache file.
+        """Load apps from cache file.
 
         Args:
             file_path: Path to cache file
@@ -118,15 +125,26 @@ class AppScanService:
         Returns:
             Tuple of (success, apps_list)
         """
-        # Simplified to use the helper method with health apps as default
-        success, apps, _ = self._get_cached_apps_by_key(CACHE_KEY_HEALTH, JSON_KEY_HEALTH_APPS)
-        return success, apps
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            
+            # Require unified list structure
+            if not isinstance(data, dict) or JSON_KEY_APPS not in data or not isinstance(data[JSON_KEY_APPS], list):
+                self.logger.error(f"Cache file {file_path} does not contain unified 'apps' list. Expected format with 'apps' key containing list of apps with 'is_health_app' flags.")
+                return False, []
+            
+            # Return health apps by default (is_health_app == True)
+            unified_apps = data[JSON_KEY_APPS]
+            health_apps = [app for app in unified_apps if app.get(IS_HEALTH_APP) is True]
+            return True, health_apps
+            
+        except Exception as e:
+            self.logger.error(f"Error loading apps from {file_path}: {e}")
+            return False, []
     
-    def resolve_latest_cache_file(self, app_type: str) -> Optional[str]:
-        """Find the most recent device-specific app info cache.
-
-        Args:
-            app_type: App type ('all' or 'health')
+    def resolve_latest_cache_file(self) -> Optional[str]:
+        """Find the most recent device-specific app info cache file.
 
         Returns:
             Path to latest cache file or None
@@ -141,7 +159,7 @@ class AppScanService:
                 self.logger.error(ERR_APP_INFO_OUTPUT_DIR_NOT_CONFIGURED)
                 return None
 
-            # Use new merged file pattern
+            # Use unified file pattern
             pattern = os.path.join(out_dir, FILE_PATTERN_DEVICE_APP_INFO)
 
             import glob
@@ -151,24 +169,20 @@ class AppScanService:
                 return None
 
             latest = max(candidates, key=lambda p: os.path.getmtime(p))
-            self.logger.debug(DEBUG_RESOLVED_LATEST_CACHE_FILE.format(app_type=app_type, latest=latest))
+            self.logger.debug(DEBUG_RESOLVED_LATEST_CACHE_FILE.format(app_type="unified", latest=latest))
             return latest
 
         except Exception as e:
-            self.logger.error(f"Failed to resolve latest cache file for '{app_type}': {e}", exc_info=True)
+            self.logger.error(f"Failed to resolve latest cache file: {e}", exc_info=True)
             return None
     
-    def _get_cached_apps_by_key(self, cache_type: str, json_key: str) -> Tuple[bool, List[Dict], Optional[str]]:
-        """Helper method to get cached apps by cache type and JSON key.
+    def _load_unified_apps_from_cache(self) -> Tuple[bool, List[Dict], Optional[str]]:
+        """Helper method to load the unified apps list from the latest cache file.
         
-        Args:
-            cache_type: Type of cache ('all' or 'health')
-            json_key: JSON key to extract apps from ('all_apps' or 'health_apps')
-            
         Returns:
-            Tuple of (success, apps_list, error_message)
+            Tuple of (success, unified_apps_list, error_message)
         """
-        cache_path = self.resolve_latest_cache_file(cache_type)
+        cache_path = self.resolve_latest_cache_file()
         if not cache_path:
             return False, [], ERR_NO_APP_CACHE_FOUND
         
@@ -176,15 +190,12 @@ class AppScanService:
             with open(cache_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             
-            if isinstance(data, dict) and json_key in data and isinstance(data[json_key], list):
-                apps = data[json_key]
-            else:
-                # Fallback to default loading
-                success, apps = self.load_apps_from_file(cache_path)
-                if not success:
-                    return False, [], ERR_FAILED_TO_LOAD_APPS_FROM_CACHE
+            # Require unified list structure
+            if not isinstance(data, dict) or JSON_KEY_APPS not in data or not isinstance(data[JSON_KEY_APPS], list):
+                return False, [], f"Cache file does not contain unified 'apps' list. Expected format with 'apps' key containing list of apps with 'is_health_app' flags."
             
-            return True, apps, None
+            unified_apps = data[JSON_KEY_APPS]
+            return True, unified_apps, None
             
         except Exception as e:
             return False, [], ERR_FAILED_TO_LOAD_APPS_FROM_CACHE_WITH_ERROR.format(error=e)
@@ -193,7 +204,7 @@ class AppScanService:
         """Get current health apps from cache.
         
         Returns:
-            List of health app dictionaries
+            List of health app dictionaries (app_name, package_name, activity_name, is_health_app)
         """
         config_service = self.context.services.get(SERVICE_CONFIG)
         if not config_service:
@@ -202,18 +213,29 @@ class AppScanService:
         # Try configured path first
         cache_path = config_service.get_config_value(CONFIG_CURRENT_HEALTH_APP_LIST_FILE)
         if cache_path and os.path.exists(cache_path):
-            success, apps = self.load_apps_from_file(cache_path)
-            if success:
-                return apps
-        
+            try:
+                with open(cache_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
                 
+                # Require unified list structure
+                if not isinstance(data, dict) or JSON_KEY_APPS not in data or not isinstance(data[JSON_KEY_APPS], list):
+                    self.logger.error(f"Cache file {cache_path} does not contain unified 'apps' list. Expected format with 'apps' key containing list of apps with 'is_health_app' flags.")
+                    return []
+                
+                unified_apps = data[JSON_KEY_APPS]
+                # Filter to only health apps (is_health_app == True)
+                health_apps = [app for app in unified_apps if app.get(IS_HEALTH_APP) is True]
+                return health_apps
+            except Exception as e:
+                self.logger.error(f"Error loading health apps from {cache_path}: {e}")
+        
         return []
     
     def select_app(self, app_identifier: str) -> Tuple[bool, Optional[Dict]]:
-        """Select an app by index or name.
+        """Select an app by index (1-based), name, or package identifier.
         
         Args:
-            app_identifier: App index (1-based) or name/package
+            app_identifier: App index, name (partial match), or package (exact match)
             
         Returns:
             Tuple of (success, selected_app_dict)
@@ -261,13 +283,24 @@ class AppScanService:
         
         Returns:
             Tuple of (success, apps_list, error_message)
+            Apps list includes all apps with is_health_app flags (true, false, or null)
         """
-        return self._get_cached_apps_by_key(CACHE_KEY_ALL, JSON_KEY_ALL_APPS)
+        success, unified_apps, error = self._load_unified_apps_from_cache()
+        if not success:
+            return False, [], error
+        return True, unified_apps, None
     
     def get_health_cached_apps(self) -> Tuple[bool, List[Dict], Optional[str]]:
         """Get health apps from the latest cache file.
         
         Returns:
             Tuple of (success, apps_list, error_message)
+            Apps list includes only apps where is_health_app == True
         """
-        return self._get_cached_apps_by_key(CACHE_KEY_HEALTH, JSON_KEY_HEALTH_APPS)
+        success, unified_apps, error = self._load_unified_apps_from_cache()
+        if not success:
+            return False, [], error
+        
+        # Filter to only health apps
+        health_apps = [app for app in unified_apps if app.get(IS_HEALTH_APP) is True]
+        return True, health_apps, None

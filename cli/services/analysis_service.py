@@ -1,6 +1,17 @@
 #!/usr/bin/env python3
 """
 Analysis service for managing crawl analysis and reporting.
+
+This service provides functionality to:
+- Discover and list analysis targets from crawl data
+- Retrieve targets by index or package name
+- List runs for specific targets
+- Generate PDF analysis reports
+- Get analysis summaries with metrics
+- Run offline UI annotation
+
+The service works with SQLite databases containing crawl session data and integrates
+with the RunAnalyzer from domain.analysis_viewer for detailed analysis operations.
 """
 
 
@@ -19,7 +30,12 @@ from utils.paths import SessionPathManager
 
 
 class AnalysisService:
-    """Service for managing analysis of crawl data."""
+    """Service for managing analysis of crawl data.
+    
+    Provides methods to discover, query, and analyze crawl session data stored in
+    SQLite databases. Supports target discovery, run listing, PDF report generation,
+    and summary metrics extraction.
+    """
     
     def __init__(self, context: CLIContext):
         self.context = context
@@ -58,11 +74,10 @@ class AnalysisService:
         for session_dir in db_output_root.iterdir():
             if not session_dir.is_dir():
                 continue
-            # Use the new robust parser!
             target_info = SessionPathManager.parse_session_dir(session_dir, config_service.config)
             if target_info:
-                target_info[CKeys.KEY_INDEX] = target_idx  # type: ignore
-                self.discovered_analysis_targets.append(target_info)  # type: ignore
+                target_info[CKeys.KEY_INDEX] = target_idx  
+                self.discovered_analysis_targets.append(target_info)
                 target_idx += 1
         return True
     
@@ -147,7 +162,7 @@ class AnalysisService:
             return False, {CKeys.KEY_ERROR: CMsg.ERR_TARGET_NOT_FOUND}
         
         try:
-            from analysis_viewer import RunAnalyzer
+            from domain.analysis_viewer import RunAnalyzer
         except ImportError as e:
             self.logger.error(CMsg.ERR_RUN_ANALYZER_IMPORT_FAILED.format(error=e))
             return False, {CKeys.KEY_ERROR: CMsg.ERR_RUN_ANALYZER_IMPORT_FAILED.format(error=e)}
@@ -210,7 +225,7 @@ class AnalysisService:
             return False, {CKeys.KEY_ERROR: CMsg.ERR_TARGET_NOT_FOUND}
         
         try:
-            from analysis_viewer import XHTML2PDF_AVAILABLE, RunAnalyzer
+            from domain.analysis_viewer import XHTML2PDF_AVAILABLE, RunAnalyzer
         except ImportError as e:
             self.logger.error(CMsg.ERR_RUN_ANALYZER_IMPORT_FAILED.format(error=e))
             return False, {CKeys.KEY_ERROR: CMsg.ERR_RUN_ANALYZER_IMPORT_FAILED.format(error=e)}
@@ -288,7 +303,7 @@ class AnalysisService:
             return False, {CKeys.KEY_ERROR: CMsg.ERR_TARGET_NOT_FOUND}
         
         try:
-            from analysis_viewer import RunAnalyzer
+            from domain.analysis_viewer import RunAnalyzer
         except ImportError as e:
             self.logger.error(CMsg.ERR_RUN_ANALYZER_IMPORT_FAILED.format(error=e))
             return False, {CKeys.KEY_ERROR: CMsg.ERR_RUN_ANALYZER_IMPORT_FAILED.format(error=e)}

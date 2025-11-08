@@ -13,7 +13,7 @@ import os
 from typing import List
 
 # Test the new architecture directly
-from core.allowed_packages_service import AllowedPackagesService
+from core.packages_crud import AllowedPackagesService
 from infrastructure.allowed_packages_adapter import AllowedPackagesAdapter
 from config.config import Config
 
@@ -268,7 +268,7 @@ def test_integration_persistence():
 
 def test_new_architecture_direct_usage():
     """Test that the new architecture works when used directly."""
-    from core.allowed_packages_service import AllowedPackagesService
+    from core.packages_crud import AllowedPackagesService
     from infrastructure.allowed_packages_adapter import AllowedPackagesAdapter
     from config.config import Config
     

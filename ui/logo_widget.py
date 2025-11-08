@@ -39,10 +39,10 @@ class LogoWidget(QLabel):
         try:
             # If base_dir not provided, find it dynamically
             if base_dir is None:
-                # Get the directory of this script
-                current_dir = os.path.dirname(os.path.abspath(__file__))
-                # Go up to the project root (2 levels up from ui folder)
-                base_dir = os.path.dirname(os.path.dirname(current_dir))
+                from pathlib import Path
+                from utils.paths import find_project_root
+                # Find project root using marker files
+                base_dir = str(find_project_root(Path(__file__).resolve().parent))
             
             # Logo is located at the project root
             logo_path = os.path.join(base_dir, "crawler_logo.png")
@@ -79,10 +79,10 @@ class LogoWidget(QLabel):
         try:
             # If base_dir not provided, find it dynamically
             if base_dir is None:
-                # Get the directory of this script
-                current_dir = os.path.dirname(os.path.abspath(__file__))
-                # Go up to the project root (2 levels up from ui folder)
-                base_dir = os.path.dirname(os.path.dirname(current_dir))
+                from pathlib import Path
+                from utils.paths import find_project_root
+                # Find project root using marker files
+                base_dir = str(find_project_root(Path(__file__).resolve().parent))
             
             # Logo is located at the project root
             logo_path = os.path.join(base_dir, "crawler_logo.png")

@@ -22,7 +22,7 @@ class PackagesService:
         self.config = context.config
         self.logger = logging.getLogger(__name__)
         # Import here to avoid circular imports
-        from core.allowed_packages_service import AllowedPackagesService
+        from core.packages_crud import AllowedPackagesService
         from infrastructure.allowed_packages_adapter import AllowedPackagesAdapter
         
         adapter = AllowedPackagesAdapter(self.config, self.logger)

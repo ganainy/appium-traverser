@@ -94,13 +94,15 @@ The Model Context Protocol (MCP) provides standardized mobile device interaction
 
 ### Core Components
 
-- **`main.py`** - Entry point and orchestration
-- **`crawler.py`** - Main crawling logic and state transitions
-- **`agent_assistant.py`** - AI-driven action orchestration
-- **`model_adapters.py`** - Unified AI provider integration
-- **`agent_tools.py`** - Device interaction tools
-- **`mcp_client.py`** - MCP server communication
-- **`screen_state_manager.py`** - State tracking and transitions
+- **`run_cli.py`** - CLI entry point
+- **`run_ui.py`** - GUI entry point
+- **`cli/main.py`** - CLI command orchestration
+- **`core/crawler.py`** - Main crawling logic and state transitions
+- **`domain/agent_assistant.py`** - AI-driven action orchestration
+- **`domain/model_adapters.py`** - Unified AI provider integration
+- **`domain/agent_tools.py`** - Device interaction tools
+- **`infrastructure/mcp_client.py`** - MCP server communication
+- **`domain/screen_state_manager.py`** - State tracking and transitions
 
 ### Agent-Based Workflow
 

@@ -8,7 +8,7 @@ import argparse
 from typing import List
 
 from cli.commands.base import CommandGroup, CommandHandler, CommandResult
-from cli.parser import add_common_arguments
+from cli.argument_parser import add_common_arguments
 from cli.shared.context import CLIContext
 from cli.constants import messages as MSG
 from cli.constants import keys as KEY

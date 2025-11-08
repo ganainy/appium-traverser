@@ -114,6 +114,8 @@ TELEMETRY_SERVICE = "telemetry"
 # === Crawler command group ===
 CRAWLER_SERVICE = "crawler"
 ANALYSIS_SERVICE = "analysis"
+# === MobSF command group ===
+MOBSF_SERVICE = "mobsf"
 
 # Status dictionary keys
 PROCESS_KEY = "process"
@@ -139,13 +141,13 @@ CACHE_KEY_ALL = "all"
 CACHE_KEY_HEALTH = "health"
 
 # JSON keys in cache files
-JSON_KEY_ALL_APPS = "all_apps"
-JSON_KEY_HEALTH_APPS = "health_apps"
+JSON_KEY_APPS = "apps"  # Unified list with is_health_app flags
 
 # App data keys
 APP_NAME = "app_name"
 PACKAGE_NAME = "package_name"
 ACTIVITY_NAME = "activity_name"
+IS_HEALTH_APP = "is_health_app"  # Three-state flag: true, false, or null/None
 
 # Config keys
 CONFIG_LAST_SELECTED_APP = "LAST_SELECTED_APP"
@@ -159,6 +161,9 @@ CMD_LIST_ALL = "list-all"
 CMD_LIST_HEALTH = "list-health"
 CMD_SELECT = "select"
 CMD_SHOW_SELECTED = "show-selected"
+# MobSF command names
+CMD_MOBSF_TEST = "test"
+CMD_MOBSF_ANALYZE = "analyze"
 
 # Argument names
 ARG_FORCE_RESCAN = "--force-rescan"
@@ -182,13 +187,13 @@ CACHE_KEY_HEALTH = "health"
 CACHE_KEY_HEALTH_FILTERED = "health_filtered"
 
 # JSON keys in cache files
-JSON_KEY_ALL_APPS = "all_apps"
-JSON_KEY_HEALTH_APPS = "health_apps"
+JSON_KEY_APPS = "apps"  # Unified list with is_health_app flags
 
 # App data keys
 APP_NAME = "app_name"
 PACKAGE_NAME = "package_name"
 ACTIVITY_NAME = "activity_name"
+IS_HEALTH_APP = "is_health_app"  # Three-state flag: true, false, or null/None
 
 # File patterns
 FILE_PATTERN_DEVICE_APP_INFO = "device_*_app_info.json"

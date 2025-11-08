@@ -45,13 +45,18 @@ class Config:
     def _init_paths(self):
         # Initialize path-related attributes used across the project
         self.BASE_DIR = os.path.abspath(os.path.dirname(__file__))
-        self.SHUTDOWN_FLAG_PATH = os.path.abspath(os.path.join(self.BASE_DIR, "..", "shutdown.flag"))
         # Placeholder for session-specific metadata (non-persistent)
         self._session_context: Dict[str, Any] = {}
+    
+    @property
+    def SHUTDOWN_FLAG_PATH(self) -> str:
+        """Return absolute path to shutdown flag file in project root."""
+        return os.path.abspath(os.path.join(self._project_root(), "shutdown.flag"))
 
     def _project_root(self) -> str:
-        """Return absolute project root (one level up from config module)."""
-        return os.path.abspath(os.path.join(self.BASE_DIR, ".."))
+        """Return absolute project root using marker file detection."""
+        from utils.paths import find_project_root
+        return str(find_project_root(Path(self.BASE_DIR)))
 
     @property
     def PROJECT_ROOT(self):
@@ -153,7 +158,7 @@ class Config:
             return raw
         if os.path.isabs(raw):
             return raw
-        return os.path.abspath(os.path.join(self.BASE_DIR, "..", raw))
+        return os.path.abspath(os.path.join(self._project_root(), raw))
 
     @property
     def SESSION_DIR(self):
@@ -237,14 +242,6 @@ class Config:
             return stored_list
 
         return []
-
-    @property
-    def MAX_APPS_TO_SEND_TO_AI(self):
-        return self.get("MAX_APPS_TO_SEND_TO_AI")
-
-    @property
-    def THIRD_PARTY_APPS_ONLY(self):
-        return self.get("THIRD_PARTY_APPS_ONLY")
 
     @property
     def USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY(self):
@@ -605,7 +602,6 @@ AI_PROVIDER = "gemini"  # Available providers: 'gemini', 'openrouter', 'ollama'
 DEFAULT_MODEL_TYPE = "gemini-2.5-flash-image"
 ENABLE_IMAGE_CONTEXT = False
 XML_SNIPPET_MAX_LEN = 15000
-MAX_APPS_TO_SEND_TO_AI = 200
 USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY = True
 AI_SAFETY_SETTINGS = {}
 # Prompt and XML compacting/caching for latency reduction
@@ -847,7 +843,6 @@ MAX_CRAWL_STEPS = 10
 MAX_CRAWL_DURATION_SECONDS = 600
 CONTINUE_EXISTING_RUN = False
 VISUAL_SIMILARITY_THRESHOLD = 5
-THIRD_PARTY_APPS_ONLY = True
 
 AVAILABLE_ACTIONS = [
     "click",

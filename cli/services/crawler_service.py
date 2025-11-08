@@ -20,7 +20,6 @@ from cli.constants.messages import (
     CRAWLER_STATUS_STOPPED, CRAWLER_STATUS_UNKNOWN,
     CRAWLER_STATUS_ERROR, CRAWLER_STATUS_RUNNING
 )
-from interfaces.cli import CLICrawlerInterface, create_cli_interface
 from core.controller import CrawlerOrchestrator
 from core.adapters import create_process_backend
 

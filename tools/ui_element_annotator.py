@@ -21,10 +21,13 @@ import argparse
 from typing import Optional, Dict, Any, Tuple
 
 # Ensure project root is on sys.path for absolute imports
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, '..'))
-if PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, PROJECT_ROOT)
+from pathlib import Path
+from utils.paths import find_project_root
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = find_project_root(SCRIPT_DIR)
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 try:
     from config.config import Config

@@ -15,9 +15,9 @@ from typing import Dict, Any, Optional
 from core.config import Configuration
 from core.crawler import Crawler, CrawlerSession
 from core.storage import Storage
-from cli.services.focus_area_service import (
-    add_focus_area, remove_focus_area, update_focus_area, get_focus_areas
-)
+from cli.services.focus_area_service import FocusAreaService
+from cli.shared.context import CLIContext
+from config.config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +111,7 @@ class CLICrawlerInterface:
             print(f"UI_STEP: 1")
             logger.info(f"Started crawler session: {session_id}")
             
-            # FIX: Simulate some crawling activity and then complete
+            # TODO: Replace simulation with actual crawling implementation
             import threading
             import time
             
@@ -252,7 +252,8 @@ class CLICrawlerInterface:
                 logger.error("No session ID available")
                 return None
 
-            results = self.storage.get_session_results(target_session_id)
+            # TODO: Implement when parsed data functionality is added
+            results = self.storage.get_session_results(target_session_id) if hasattr(self.storage, 'get_session_results') else []
 
             # CLI-specific output
             print(f"UI_STATUS: Retrieved {len(results)} results for session {target_session_id}")
@@ -335,98 +336,64 @@ class CLICrawlerInterface:
 
 
     # --- Focus Area CRUD CLI methods ---
+    def _get_focus_service(self) -> FocusAreaService:
+        """Get a FocusAreaService instance."""
+        context = CLIContext()
+        context.config = Config()
+        return FocusAreaService(context)
+    
     def cli_add_focus_area(self, name: str, description: str = ""):
         try:
-            result = add_focus_area(name, description)
-            print(f"UI_STATUS: Focus area added: {result}")
-            return result
+            service = self._get_focus_service()
+            success, msg = service.add_focus_area(name, description)
+            if success:
+                areas = service.get_focus_areas()
+                result = next((a for a in areas if a.get('name') == name), {})
+                print(f"UI_STATUS: Focus area added: {result}")
+                return result
+            else:
+                print(f"UI_STATUS: Failed to add focus area: {msg}")
+                return None
         except Exception as e:
             print(f"UI_STATUS: Failed to add focus area: {e}")
             return None
 
     def cli_remove_focus_area(self, id: int):
         try:
-            remove_focus_area(id)
-            print(f"UI_STATUS: Focus area removed: {id}")
-            return True
+            service = self._get_focus_service()
+            success, msg = service.remove_focus_area(str(id))
+            if success:
+                print(f"UI_STATUS: Focus area removed: {id}")
+                return True
+            else:
+                print(f"UI_STATUS: Failed to remove focus area: {msg}")
+                return False
         except Exception as e:
             print(f"UI_STATUS: Failed to remove focus area: {e}")
             return False
 
     def cli_update_focus_area(self, id: int, name: Optional[str] = None, description: Optional[str] = None):
         try:
-            result = update_focus_area(id, name, description)
-            print(f"UI_STATUS: Focus area updated: {result}")
-            return result
+            service = self._get_focus_service()
+            success, msg = service.edit_focus_area(str(id), name, description)
+            if success:
+                areas = service.get_focus_areas()
+                result = next((a for a in areas if a.get('id') == id), {})
+                print(f"UI_STATUS: Focus area updated: {result}")
+                return result
+            else:
+                print(f"UI_STATUS: Failed to update focus area: {msg}")
+                return None
         except Exception as e:
             print(f"UI_STATUS: Failed to update focus area: {e}")
             return None
 
     def cli_list_focus_areas(self):
         try:
-            result = get_focus_areas()
+            service = self._get_focus_service()
+            result = service.get_focus_areas()
             print(f"UI_STATUS: Focus areas: {result}")
             return result
         except Exception as e:
             print(f"UI_STATUS: Failed to list focus areas: {e}")
             return []
-
-
-# Convenience functions for CLI usage
-
-def create_cli_interface(config_data: Optional[Dict[str, Any]] = None) -> CLICrawlerInterface:
-    """
-    Create and initialize a CLI crawler interface.
-
-    Args:
-        config_data: Optional configuration data
-
-    Returns:
-        Initialized CLI crawler interface
-    """
-    interface = CLICrawlerInterface(config_data)
-    if interface.initialize_core():
-        return interface
-    else:
-        raise RuntimeError("Failed to initialize CLI crawler interface")
-
-
-def start_cli_session(interface: CLICrawlerInterface) -> Optional[str]:
-    """
-    Start a crawler session via CLI interface.
-
-    Args:
-        interface: CLI crawler interface
-
-    Returns:
-        Session ID if successful
-    """
-    return interface.start_crawler_session()
-
-
-def get_cli_status(interface: CLICrawlerInterface, session_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
-    """
-    Get session status via CLI interface.
-
-    Args:
-        interface: CLI crawler interface
-        session_id: Optional session ID
-
-    Returns:
-        Status information
-    """
-    return interface.get_session_status(session_id)
-
-
-def stop_cli_session(interface: CLICrawlerInterface, session_id: Optional[str] = None) -> bool:
-    """
-    Stop a crawler session via CLI interface.
-
-    Args:
-        interface: CLI crawler interface
-        session_id: Optional session ID
-
-    Returns:
-        True if successful
-    """
-    return interface.stop_crawler_session(session_id)

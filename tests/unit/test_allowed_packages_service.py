@@ -9,7 +9,7 @@ import pytest
 from unittest.mock import Mock, MagicMock
 import logging
 
-from core.allowed_packages_service import AllowedPackagesService, PackagesPersistence
+from core.packages_crud import AllowedPackagesService, PackagesPersistence
 
 
 class MockPersistence(PackagesPersistence):

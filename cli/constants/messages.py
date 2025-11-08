@@ -209,6 +209,23 @@ STATUS_SUCCESS = "Status retrieved"
 
 SERVICE_NOT_AVAILABLE = "{service} service not available"
 
+# === MobSF command group ===
+MOBSF_COMMAND_GROUP_DESC = "MobSF security analysis commands"
+
+MOBSF_TEST_CMD_NAME = "test"
+MOBSF_TEST_CMD_DESC = "Test connection to MobSF server"
+MOBSF_TEST_SUCCESS = "MobSF connection test successful"
+MOBSF_TEST_FAIL = "MobSF connection test failed"
+
+MOBSF_ANALYZE_CMD_NAME = "analyze"
+MOBSF_ANALYZE_CMD_DESC = "Run MobSF security analysis on an app"
+MOBSF_ANALYZE_ARG_PACKAGE = "package"
+MOBSF_ANALYZE_ARG_PACKAGE_METAVAR = "PACKAGE"
+MOBSF_ANALYZE_ARG_PACKAGE_HELP = "Package name to analyze (defaults to configured APP_PACKAGE)"
+MOBSF_ANALYZE_SUCCESS = "MobSF analysis completed successfully"
+MOBSF_ANALYZE_FAIL = "MobSF analysis failed"
+MOBSF_ANALYZE_NO_PACKAGE = "No package name provided and APP_PACKAGE not configured"
+
 # Print format strings for status
 STATUS_HEADER = "\n=== Crawler Status ==="
 STATUS_PROCESS = "  Process: {process}"

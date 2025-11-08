@@ -16,7 +16,8 @@ from typing import Generator, Dict, Any
 import pytest
 
 # Add project root to sys.path for imports (avoid changing CWD)
-project_root = Path(__file__).resolve().parent.parent
+from utils.paths import find_project_root
+project_root = find_project_root(Path(__file__).resolve().parent)
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 

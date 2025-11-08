@@ -36,8 +36,12 @@ class UserConfigStore:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS focus_areas (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                area TEXT UNIQUE NOT NULL,
+                name TEXT UNIQUE NOT NULL,
+                description TEXT DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
                 enabled BOOLEAN DEFAULT TRUE,
+                priority INTEGER DEFAULT 0,
                 sort_order INTEGER
             );
         """)
@@ -63,26 +67,31 @@ class UserConfigStore:
         conn.commit()
 
     def get_focus_areas(self) -> List[Dict[str, Any]]:
+        """Get all focus areas from the focus_areas table (legacy method, returns simple format)."""
         conn = self._ensure_conn()
-        cur = conn.execute("SELECT area, enabled FROM focus_areas ORDER BY sort_order ASC, id ASC")
-        return [{"area": area, "enabled": bool(enabled)} for area, enabled in cur.fetchall()]
+        cur = conn.execute("SELECT name, enabled FROM focus_areas ORDER BY sort_order ASC, id ASC")
+        return [{"area": name, "enabled": bool(enabled)} for name, enabled in cur.fetchall()]
 
     def add_focus_area(self, area: str) -> None:
+        """Add a focus area to the focus_areas table (legacy method, simple format)."""
         conn = self._ensure_conn()
         cur = conn.execute("SELECT MAX(sort_order) FROM focus_areas")
         max_order = cur.fetchone()[0] or 0
         try:
+            from datetime import datetime, UTC
+            now = datetime.now(UTC).isoformat()
             conn.execute(
-                "INSERT INTO focus_areas (area, enabled, sort_order) VALUES (?, ?, ?)",
-                (area, True, max_order + 1)
+                "INSERT INTO focus_areas (name, description, created_at, updated_at, enabled, sort_order) VALUES (?, ?, ?, ?, ?, ?)",
+                (area, "", now, now, True, max_order + 1)
             )
             conn.commit()
         except sqlite3.IntegrityError:
             raise ValueError(f"Focus area '{area}' already exists.")
 
     def remove_focus_area(self, area: str) -> None:
+        """Remove a focus area from the focus_areas table (legacy method)."""
         conn = self._ensure_conn()
-        conn.execute("DELETE FROM focus_areas WHERE area = ?", (area,))
+        conn.execute("DELETE FROM focus_areas WHERE name = ?", (area,))
         conn.commit()
 
     def close(self):
@@ -167,5 +176,167 @@ class UserConfigStore:
         elif type_ == 'json':
             return json.dumps(value)
         return str(value)
+    
+    # Full focus area model methods (using proper SQLite table)
+    def get_focus_areas_full(self) -> List[Dict[str, Any]]:
+        """Get all focus areas with full model (id, name, description, timestamps).
+        
+        Returns:
+            List of focus area dictionaries with full model
+        """
+        conn = self._ensure_conn()
+        cur = conn.execute("""
+            SELECT id, name, description, created_at, updated_at, enabled, priority 
+            FROM focus_areas 
+            ORDER BY sort_order ASC, id ASC
+        """)
+        return [
+            {
+                "id": row[0],
+                "name": row[1],
+                "description": row[2] or "",
+                "created_at": row[3],
+                "updated_at": row[4],
+                "enabled": bool(row[5]),
+                "priority": row[6] or 0,
+            }
+            for row in cur.fetchall()
+        ]
+    
+    def add_focus_area_full(self, name: str, description: Optional[str] = None, 
+                           created_at: Optional[str] = None, 
+                           updated_at: Optional[str] = None) -> Dict[str, Any]:
+        """Add a new focus area with full model.
+        
+        Args:
+            name: Focus area name (must be unique)
+            description: Optional description
+            created_at: Optional creation timestamp (ISO format)
+            updated_at: Optional update timestamp (ISO format)
+            
+        Returns:
+            Dict representing the new focus area
+            
+        Raises:
+            ValueError if name is not unique
+        """
+        from datetime import datetime, UTC
+        
+        conn = self._ensure_conn()
+        
+        # Check for duplicates
+        cur = conn.execute("SELECT id FROM focus_areas WHERE name = ?", (name,))
+        if cur.fetchone():
+            raise ValueError("Focus area name must be unique.")
+        
+        # Get max sort_order
+        cur = conn.execute("SELECT MAX(sort_order) FROM focus_areas")
+        max_order = cur.fetchone()[0] or 0
+        
+        # Create new focus area
+        now = datetime.now(UTC).isoformat()
+        try:
+            cur = conn.execute("""
+                INSERT INTO focus_areas (name, description, created_at, updated_at, enabled, priority, sort_order)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (name, description or "", created_at or now, updated_at or now, True, 0, max_order + 1))
+            conn.commit()
+            area_id = cur.lastrowid
+            
+            # Return the created area
+            return {
+                "id": area_id,
+                "name": name,
+                "description": description or "",
+                "created_at": created_at or now,
+                "updated_at": updated_at or now,
+                "enabled": True,
+                "priority": 0,
+            }
+        except sqlite3.IntegrityError:
+            raise ValueError("Focus area name must be unique.")
+    
+    def update_focus_area_full(self, area_id: int, name: Optional[str] = None, 
+                               description: Optional[str] = None) -> Dict[str, Any]:
+        """Update a focus area by id.
+        
+        Args:
+            area_id: Focus area ID
+            name: New name (optional, must be unique if provided)
+            description: New description (optional)
+            
+        Returns:
+            Dict representing the updated focus area
+            
+        Raises:
+            ValueError if not found or name not unique
+        """
+        from datetime import datetime, UTC
+        
+        conn = self._ensure_conn()
+        
+        # Check if area exists
+        cur = conn.execute("SELECT id FROM focus_areas WHERE id = ?", (area_id,))
+        if not cur.fetchone():
+            raise ValueError("Focus area not found.")
+        
+        # Check for duplicate name if changing name
+        if name:
+            cur = conn.execute("SELECT id FROM focus_areas WHERE name = ? AND id != ?", (name, area_id))
+            if cur.fetchone():
+                raise ValueError("Focus area name must be unique.")
+        
+        # Build update query
+        updates = []
+        params = []
+        if name:
+            updates.append("name = ?")
+            params.append(name)
+        if description is not None:
+            updates.append("description = ?")
+            params.append(description)
+        updates.append("updated_at = ?")
+        params.append(datetime.now(UTC).isoformat())
+        params.append(area_id)
+        
+        conn.execute(
+            f"UPDATE focus_areas SET {', '.join(updates)} WHERE id = ?",
+            params
+        )
+        conn.commit()
+        
+        # Return the updated area
+        cur = conn.execute("""
+            SELECT id, name, description, created_at, updated_at, enabled, priority 
+            FROM focus_areas 
+            WHERE id = ?
+        """, (area_id,))
+        row = cur.fetchone()
+        return {
+            "id": row[0],
+            "name": row[1],
+            "description": row[2] or "",
+            "created_at": row[3],
+            "updated_at": row[4],
+            "enabled": bool(row[5]),
+            "priority": row[6] or 0,
+        }
+    
+    def remove_focus_area_full(self, area_id: int) -> None:
+        """Remove a focus area by id.
+        
+        Args:
+            area_id: Focus area ID
+            
+        Raises:
+            ValueError if not found
+        """
+        conn = self._ensure_conn()
+        cur = conn.execute("SELECT id FROM focus_areas WHERE id = ?", (area_id,))
+        if not cur.fetchone():
+            raise ValueError("Focus area not found.")
+        
+        conn.execute("DELETE FROM focus_areas WHERE id = ?", (area_id,))
+        conn.commit()
     
     

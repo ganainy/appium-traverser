@@ -14,8 +14,9 @@ from PySide6.QtWidgets import QApplication
 
 # Import shared orchestrator components
 try:
-    from core import get_process_backend, get_crawler_orchestrator, get_validation_service
+    from core import get_process_backend, get_validation_service
     from core.adapters import create_process_backend
+    from core.controller import CrawlerOrchestrator
 except ImportError:
     # Use the new core interface
     try:
@@ -574,12 +575,14 @@ class CrawlerManager(QObject):
             # Use the same Python executable that's running this script
             python_exe = sys.executable
             # Determine project root and set working directory
-            project_root = os.path.dirname(self.config.BASE_DIR)
+            from pathlib import Path
+            from utils.paths import find_project_root
+            project_root = str(find_project_root(Path(self.config.BASE_DIR)))
             self.crawler_process.setWorkingDirectory(project_root)
             
             # Choose entrypoint dynamically:
-            # - Prefer package module (traverser_ai_api.main or app.main) if importable with -m
-            # - Otherwise fall back to running a known script file (app/main.py, traverser_ai_api/main.py, main.py, run_cli.py)
+            # - Prefer package module (traverser_ai_api.main) if importable with -m
+            # - Otherwise fall back to running a known script file (traverser_ai_api/main.py, main.py, run_cli.py)
             try:
                 import importlib.util
             except Exception:
@@ -593,15 +596,9 @@ class CrawlerManager(QObject):
                     module_to_run = "traverser_ai_api.main"
             except Exception:
                 pass
-            try:
-                if importlib and importlib.util.find_spec("app.main"):
-                    module_to_run = module_to_run or "app.main"
-            except Exception:
-                pass
             
             if module_to_run is None:
                 possible_scripts = [
-                    os.path.join(project_root, "app", "main.py"),
                     os.path.join(project_root, "traverser_ai_api", "main.py"),
                     os.path.join(project_root, "main.py"),
                     os.path.join(project_root, "run_cli.py"),
@@ -621,7 +618,7 @@ class CrawlerManager(QObject):
                 self.crawler_process.start(python_exe, ["-u", script_to_run])
             else:
                 self.main_controller.log_message(
-                    "ERROR: Could not locate crawler entrypoint (traverser_ai_api.main or app.main).",
+                    "ERROR: Could not locate crawler entrypoint (traverser_ai_api.main or run_cli.py).",
                     'red'
                 )
                 return

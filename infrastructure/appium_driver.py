@@ -14,6 +14,7 @@ class AppiumDriver:
     def connect(self) -> bool:
         """Initialize MCP client connection."""
         try:
+            # TODO: Implement actual MCP server connection
             # For now, assume MCP server is running locally
             # In production, this would connect to the MCP server
             # self.mcp_client = ClientSession(...)
@@ -26,88 +27,92 @@ class AppiumDriver:
     def disconnect(self):
         """Disconnect MCP client."""
         if self.mcp_client:
-            # Close connection
+            # TODO: Implement MCP client disconnection logic
             pass
         logging.debug("MCP client disconnected.")
 
     def get_page_source(self) -> Optional[str]:
         """Get page source via MCP."""
-        # Call MCP get_screen_info tool
+        # TODO: Implement actual MCP get_screen_info tool call
         # For now, return mock
         return "<mock xml>"
 
     def get_screenshot_as_base64(self) -> Optional[str]:
         """Get screenshot via MCP."""
-        # Call MCP get_screen_info tool
+        # TODO: Implement actual MCP get_screen_info tool call
         # For now, return mock
         return "mock_base64"
 
     def tap(self, target_identifier: Optional[str], bbox: Optional[Dict[str, Any]] = None) -> bool:
         """Tap via MCP."""
-        # Call MCP tap tool
+        # TODO: Implement actual MCP tap tool call
         logging.info(f"MCP Action: tap(target_identifier='{target_identifier}', bbox={bbox})")
         return True
 
     def input_text(self, target_identifier: str, text: str) -> bool:
         """Input text via MCP."""
-        # Call MCP input_text tool
+        # TODO: Implement actual MCP input_text tool call
         logging.info(f"MCP Action: input_text(target_identifier='{target_identifier}', text='{text}')")
         return True
 
     def scroll(self, target_identifier: Optional[str], direction: str) -> bool:
         """Scroll via MCP."""
-        # Call MCP scroll tool
+        # TODO: Implement actual MCP scroll tool call
         logging.info(f"MCP Action: scroll(target_identifier='{target_identifier}', direction='{direction}')")
         return True
 
     def long_press(self, target_identifier: str, duration: int) -> bool:
         """Long press via MCP."""
-        # Call MCP long_press tool
+        # TODO: Implement actual MCP long_press tool call
         logging.info(f"MCP Action: long_press(target_identifier='{target_identifier}', duration={duration})")
         return True
 
     def press_back(self) -> bool:
         """Press back via MCP."""
-        # Call MCP press_back tool
+        # TODO: Implement actual MCP press_back tool call
         logging.info("MCP Action: press_back()")
         return True
 
     def press_home(self) -> bool:
         """Press home via MCP."""
-        # Call MCP press_home tool
+        # TODO: Implement actual MCP press_home tool call
         logging.info("MCP Action: press_home()")
         return True
 
     def wait_for_toast_to_dismiss(self, timeout_ms: int = 1200):
         """Wait for toast to dismiss."""
-        # Implement if needed
+        # TODO: Implement toast dismissal waiting logic
         pass
 
     def get_window_size(self):
         """Get window size."""
+        # TODO: Implement actual window size retrieval via MCP
         return {"width": 1080, "height": 1920}
 
     def start_video_recording(self):
         """Start video recording."""
+        # TODO: Implement video recording start functionality
         pass
 
     def stop_video_recording(self):
         """Stop video recording."""
+        # TODO: Implement video recording stop functionality
         return None
 
     def save_video_recording(self, data, path):
         """Save video recording."""
+        # TODO: Implement video recording save functionality
         pass
 
     def get_current_package(self) -> Optional[str]:
         """Get current package via MCP."""
-        # Call MCP get_current_package tool
+        # TODO: Implement actual MCP get_current_package tool call
         # For now, return mock
         return "com.example.mock"
 
     def get_current_activity(self) -> Optional[str]:
         """Get current activity via MCP."""
-        # Call MCP get_current_activity tool
+        # TODO: Implement actual MCP get_current_activity tool call
         # For now, return mock
         return "com.example.mock.MainActivity"
 
@@ -119,13 +124,13 @@ class AppiumDriver:
 
     def terminate_app(self, package_name: str) -> bool:
         """Terminate app via MCP."""
-        # Call MCP terminate_app tool
+        # TODO: Implement actual MCP terminate_app tool call
         logging.info(f"MCP Action: terminate_app({package_name})")
         return True
 
     def launch_app(self) -> bool:
         """Launch app via MCP."""
-        # Call MCP launch_app tool
+        # TODO: Implement actual MCP launch_app tool call
         logging.info("MCP Action: launch_app()")
         return True
 
