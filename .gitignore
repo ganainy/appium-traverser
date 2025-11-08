@@ -2,6 +2,7 @@
 .specify/
 .github/
 removed_appium_code/
+appium-mcp-server/
 .env
 traverser_ai_api/.env
 traverser_ai_api/screenshots/

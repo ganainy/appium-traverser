@@ -107,18 +107,22 @@ def _check_ai_filtering_prerequisites(config):
     # Get provider credentials using provider-agnostic utility
     model_type = config.get("DEFAULT_MODEL_TYPE")
     
+    # For Ollama, use default URL if not configured
+    default_ollama_url = "http://localhost:11434" if result["provider"] == "ollama" else None
+    
     # Validate provider configuration
-    is_valid, error_msg = validate_provider_config(config, result["provider"])
+    is_valid, error_msg = validate_provider_config(config, result["provider"], default_ollama_url)
     if not is_valid:
         print(f"Error: {error_msg}. AI Filtering will be globally unavailable.", file=sys.stderr)
         result["enabled"] = False
         return result
     
     # Get API key or URL for the provider
-    result["api_key_or_url"] = get_provider_api_key(config, result["provider"])
+    result["api_key_or_url"] = get_provider_api_key(config, result["provider"], default_ollama_url)
     
     # Validate credential / URL presence
-    if not result["api_key_or_url"]:
+    # For Ollama, it's okay if not set (will use default)
+    if not result["api_key_or_url"] and result["provider"] != "ollama":
         missing_key_name = get_missing_key_name(result["provider"])
         print(
             f"Error: {missing_key_name} not found in configuration. AI Filtering will be globally unavailable.",
@@ -126,6 +130,10 @@ def _check_ai_filtering_prerequisites(config):
         )
         result["enabled"] = False
         return result
+    
+    # For Ollama, ensure we have a URL (use default if not configured)
+    if result["provider"] == "ollama" and not result["api_key_or_url"]:
+        result["api_key_or_url"] = default_ollama_url
     
     # Validate model selection
     if not model_type:
@@ -222,8 +230,8 @@ def run_adb_command(command_list):
 
 
 def get_installed_packages():
-    """Retrieves list of all installed package names (including system apps)."""
-    command = ["shell", "pm", "list", "packages"]
+    """Retrieves list of user-installed package names (third-party apps only, excludes system apps)."""
+    command = ["shell", "pm", "list", "packages", "-3"]
 
     output = run_adb_command(command)
     if output is None:
@@ -341,9 +349,6 @@ def generate_app_info_cache():
     Discovers app information, always attempts AI filtering, and saves merged results.
     Returns the path to the cache file and the app info data structure.
     """
-    print(
-        f"--- Generating App Info ---"
-    )
 
     # Instantiate Config to get current configuration (reads fresh each time)
     try:
@@ -354,10 +359,6 @@ def generate_app_info_cache():
         return None, []
     
     # Check AI filtering prerequisites dynamically (reads current config)
-    # Debug: Show what config values are being read
-    print(f"  Debug: Reading AI config from Config...")
-    print(f"    AI_PROVIDER from config: {cfg.get('AI_PROVIDER')}")
-    print(f"    DEFAULT_MODEL_TYPE from config: {cfg.get('DEFAULT_MODEL_TYPE')}")
     
     ai_config = _check_ai_filtering_prerequisites(cfg)
     can_enable_ai_filtering = ai_config["enabled"]
@@ -366,8 +367,6 @@ def generate_app_info_cache():
     ai_model_safety_settings = ai_config["safety_settings"]
     provider_api_key_or_url = ai_config["api_key_or_url"]
     
-    print(f"    Resolved provider: {ai_provider}")
-    print(f"    Resolved model: {default_ai_model_name}")
     
     if not can_enable_ai_filtering:
         print(
@@ -386,7 +385,7 @@ def generate_app_info_cache():
 
     print(f"Device ID: {device_id}")
     print(
-        f"\n--- Discovering installed packages (All apps including system apps) ---"
+        f"\n--- Discovering installed packages (User-installed apps only) ---"
     )
     packages = get_installed_packages()
     if not packages:
@@ -457,15 +456,12 @@ def generate_app_info_cache():
     )
 
     # AI filtering: Always attempt to classify apps as health-related or not
-    print(f"\n--- AI Filtering: Classifying apps as health-related ---")
     unified_apps = []
     ai_filter_was_effectively_applied = False
     ai_filter_error = None
     
     if can_enable_ai_filtering and default_ai_model_name and provider_api_key_or_url:
         try:
-            print(f"  Initializing AI model: {default_ai_model_name} (provider: {ai_provider})")
-            
             # Initialize the model adapter
             model_adapter = create_model_adapter(
                 provider=ai_provider,
@@ -473,24 +469,69 @@ def generate_app_info_cache():
                 model_name=default_ai_model_name
             )
             
+            # Identify apps with missing names
+            apps_with_missing_names = []
+            for idx, app in enumerate(all_apps_info):
+                app_name = app.get("app_name")
+                if not app_name or app_name == "Unknown":
+                    apps_with_missing_names.append(idx)
+            
+            # Calculate required max_output_tokens based on number of apps
+            # Each classification entry needs ~30-40 tokens: {"index": N, "is_health_app": true/false},
+            # If app_name is provided, add ~20-30 tokens per app with missing name
+            # Plus overhead for JSON structure (~50 tokens)
+            num_apps = len(all_apps_info)
+            num_missing_names = len(apps_with_missing_names)
+            base_tokens = num_apps * 40
+            name_tokens = num_missing_names * 30
+            estimated_tokens_needed = base_tokens + name_tokens + 100
+            # Use a reasonable maximum (e.g., 32k tokens) but ensure we have enough
+            max_output_tokens = min(max(estimated_tokens_needed, 2048), 32768)
+            
             # Initialize with basic config
             model_config = {
                 "description": f"Health app classifier using {default_ai_model_name}",
-                "temperature": 0.1,  # Low temperature for consistent classification
+                "generation_config": {
+                    "temperature": 0.1,  # Low temperature for consistent classification
+                    "max_output_tokens": max_output_tokens,
+                }
             }
             model_adapter.initialize(model_config, ai_model_safety_settings)
             
             print(f"  Using AI model: {default_ai_model_name} (provider: {ai_provider})")
-            print(f"  Classifying {len(all_apps_info)} apps in a single AI call...")
+            print(f"  Classifying {len(all_apps_info)} apps in a single AI call (max tokens: {max_output_tokens})...")
             
             # Build a single prompt with all apps
             apps_list = []
             for idx, app in enumerate(all_apps_info):
                 app_name = app.get("app_name") or "Unknown"
                 package_name = app.get("package_name", "")
-                apps_list.append(f"{idx}. App name: {app_name} | Package: {package_name}")
+                if app_name == "Unknown":
+                    apps_list.append(f"{idx}. App name: [MISSING - please provide] | Package: {package_name}")
+                else:
+                    apps_list.append(f"{idx}. App name: {app_name} | Package: {package_name}")
             
             apps_text = "\n".join(apps_list)
+            
+            # Build JSON format example - include app_name only when needed
+            if num_missing_names > 0:
+                json_format_example = """{
+  "classifications": [
+    {"index": 0, "is_health_app": true, "app_name": "App Name Here"},
+    {"index": 1, "is_health_app": false, "app_name": "Another App Name"},
+    ...
+  ]
+}"""
+                app_name_instruction = f"\nFor apps with '[MISSING - please provide]' as the app name, you must provide a reasonable app name based on the package name. For apps that already have a name, you can omit the 'app_name' field or include it to confirm."
+            else:
+                json_format_example = """{
+  "classifications": [
+    {"index": 0, "is_health_app": true},
+    {"index": 1, "is_health_app": false},
+    ...
+  ]
+}"""
+                app_name_instruction = ""
             
             prompt = f"""Classify the following Android apps as health-related or not. A health app is one that:
 - Tracks fitness, exercise, or physical activity
@@ -501,24 +542,24 @@ def generate_app_info_cache():
 - Manages diet, nutrition, or weight
 
 Return ONLY a valid JSON object with this exact format:
-{{
-  "classifications": [
-    {{"index": 0, "is_health_app": true}},
-    {{"index": 1, "is_health_app": false}},
-    ...
-  ]
-}}
+{json_format_example}
 
-For each app, set "is_health_app" to true if it's health-related, false if it's not.
+For each app, set "is_health_app" to true if it's health-related, false if it's not.{app_name_instruction}
+IMPORTANT: You must return classifications for ALL {num_apps} apps (indices 0 to {num_apps - 1}). Do not truncate the response.
 
 Apps to classify:
 {apps_text}
 
-Return the JSON classification now:"""
+Return the complete JSON classification for all {num_apps} apps now:"""
             
-            # Get AI classification for all apps in one call
-            response_text, metadata = model_adapter.generate_response(prompt)
-            response_text = response_text.strip()
+            # Show loading indicator while AI is processing
+            from utils import LoadingIndicator
+            
+            with LoadingIndicator("AI is processing"):
+                # Get AI classification for all apps in one call
+                # Note: max_output_tokens is already set in model_config during initialize()
+                response_text, metadata = model_adapter.generate_response(prompt)
+                response_text = response_text.strip()
             
             # Try to extract JSON from the response
             # Sometimes the model wraps JSON in markdown code blocks
@@ -529,37 +570,68 @@ Return the JSON classification now:"""
             else:
                 json_text = response_text
             
+            # Check if JSON appears incomplete (common signs: missing closing brackets, incomplete last entry)
+            json_text_stripped = json_text.strip()
+            if json_text_stripped and not json_text_stripped.endswith("}"):
+                print(f"  ⚠️ Warning: JSON response appears incomplete (doesn't end with '}}'). Response length: {len(json_text)} chars", file=sys.stderr)
+                print(f"  Last 200 chars: {json_text[-200:]}", file=sys.stderr)
+            
             # Parse the JSON response
             try:
                 classifications_data = json.loads(json_text)
                 classifications = classifications_data.get("classifications", [])
                 
-                # Create a mapping from index to classification
+                # Create a mapping from index to classification and app name
                 classification_map = {}
+                app_name_map = {}
                 for item in classifications:
                     idx = item.get("index")
                     is_health = item.get("is_health_app")
+                    app_name = item.get("app_name")
                     if idx is not None:
                         classification_map[idx] = is_health
+                        if app_name:
+                            app_name_map[idx] = app_name
                 
-                # Apply classifications to apps
+                # Apply classifications and app names to apps
+                names_filled = 0
                 for idx, app in enumerate(all_apps_info):
                     is_health = classification_map.get(idx)
+                    ai_provided_name = app_name_map.get(idx)
+                    
+                    # Update app name if AI provided one and current name is missing
+                    updated_app = {**app}
+                    if ai_provided_name and (not app.get("app_name") or app.get("app_name") == "Unknown"):
+                        updated_app["app_name"] = ai_provided_name
+                        names_filled += 1
+                    
                     if is_health is None:
                         # If classification missing, mark as unknown
-                        print(f"    Warning: No classification for app {idx} ({app.get('package_name', 'unknown')})", file=sys.stderr)
-                        unified_apps.append({**app, "is_health_app": None})
+                        print(f"    Warning: No classification for app {idx} ({updated_app.get('package_name', 'unknown')})", file=sys.stderr)
+                        unified_apps.append({**updated_app, "is_health_app": None})
                     else:
-                        unified_apps.append({**app, "is_health_app": bool(is_health)})
+                        unified_apps.append({**updated_app, "is_health_app": bool(is_health)})
                 
                 classified_count = len([a for a in unified_apps if a.get("is_health_app") is not None])
                 ai_filter_was_effectively_applied = True
                 print(f"  ✓ Successfully classified {classified_count}/{len(all_apps_info)} apps using AI (single call)")
+                if names_filled > 0:
+                    print(f"  ✓ Filled in {names_filled} missing app names")
                 
             except json.JSONDecodeError as e:
                 ai_filter_error = f"Failed to parse AI response as JSON: {e}"
                 print(f"  ✗ {ai_filter_error}", file=sys.stderr)
+                print(f"  Error location: line {e.lineno}, column {e.colno}", file=sys.stderr)
+                print(f"  AI response length: {len(response_text)} chars", file=sys.stderr)
                 print(f"  AI response (first 500 chars): {response_text[:500]}", file=sys.stderr)
+                if len(response_text) > 500:
+                    print(f"  AI response (last 500 chars): {response_text[-500:]}", file=sys.stderr)
+                
+                # Check if response was likely truncated due to token limit
+                if len(response_text) > 0 and not response_text.rstrip().endswith("}"):
+                    print(f"  ⚠️ Response appears truncated (doesn't end with '}}'). This may indicate the model hit a token limit.", file=sys.stderr)
+                    print(f"  💡 Suggestion: Try using a model with a larger context window, or reduce the number of apps classified at once.", file=sys.stderr)
+                
                 print(f"  Falling back to marking all apps as unknown health status.")
                 # Fall through to mark all as unknown
                 unified_apps = [
@@ -609,9 +681,6 @@ Return the JSON classification now:"""
     # Use shared utility to get cache path 
     output_path = get_app_cache_path(device_id, cfg)
 
-    print(
-        f"\n--- Saving merged app info to: {output_path} ---"
-    )
     print(f"  - Total apps: {len(unified_apps)}")
     health_count = sum(1 for app in unified_apps if app.get("is_health_app") is True)
     non_health_count = sum(1 for app in unified_apps if app.get("is_health_app") is False)
@@ -627,7 +696,6 @@ Return the JSON classification now:"""
         # Save merged data to device-specific path
         with open(output_path, "w", encoding="utf-8") as f:
             json.dump(result_data, f, indent=4, ensure_ascii=False)
-        print(f"Successfully saved merged app data to {output_path}")
     except IOError as e:
         print(f"Error writing to file {output_path}: {e}", file=sys.stderr)
         traceback.print_exc()

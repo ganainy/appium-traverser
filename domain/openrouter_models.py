@@ -102,7 +102,9 @@ def background_refresh_openrouter_models(wait_for_completion: bool = False) -> T
         thread.start()
         
         if wait_for_completion:
-            completion_event.wait(timeout=30)  # 30 second timeout
+            from utils import LoadingIndicator
+            with LoadingIndicator("Refreshing OpenRouter models"):
+                completion_event.wait(timeout=30)  # 30 second timeout
             if completion_event.is_set():
                 return success_flag["success"], cache_path_ref.get("cache_path")
             else:

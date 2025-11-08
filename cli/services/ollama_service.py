@@ -38,10 +38,18 @@ class OllamaService:
         
         try:
             base_url = self.context.config.get(K.CONFIG_OLLAMA_BASE_URL)
-            success, cache_path = background_refresh_ollama_models(
-                base_url=base_url,
-                wait_for_completion=wait_for_completion
-            )
+            if wait_for_completion:
+                from utils import LoadingIndicator
+                with LoadingIndicator("Refreshing Ollama models"):
+                    success, cache_path = background_refresh_ollama_models(
+                        base_url=base_url,
+                        wait_for_completion=wait_for_completion
+                    )
+            else:
+                success, cache_path = background_refresh_ollama_models(
+                    base_url=base_url,
+                    wait_for_completion=wait_for_completion
+                )
             if success and cache_path:
                 self.logger.info(
                     MSG.SUCCESS_OLLAMA_MODELS_REFRESHED.format(cache_path=cache_path)
@@ -84,8 +92,10 @@ class OllamaService:
         # If refresh requested, fetch fresh models
         if refresh:
             try:
+                from utils import LoadingIndicator
                 base_url = self.context.config.get(K.CONFIG_OLLAMA_BASE_URL)
-                models = fetch_ollama_models(base_url)
+                with LoadingIndicator("Fetching Ollama models"):
+                    models = fetch_ollama_models(base_url)
                 if models:
                     save_ollama_models_to_cache(models)
                 return True, models if models else []
@@ -100,8 +110,10 @@ class OllamaService:
         # If no cache, try to fetch fresh
         if not models:
             try:
+                from utils import LoadingIndicator
                 base_url = self.context.config.get(K.CONFIG_OLLAMA_BASE_URL)
-                models = fetch_ollama_models(base_url)
+                with LoadingIndicator("Fetching Ollama models"):
+                    models = fetch_ollama_models(base_url)
                 if models:
                     save_ollama_models_to_cache(models)
             except Exception as e:

@@ -252,7 +252,9 @@ def background_refresh_ollama_models(
         thread.start()
         
         if wait_for_completion:
-            completion_event.wait(timeout=20)  # 20 second timeout
+            from utils import LoadingIndicator
+            with LoadingIndicator("Refreshing Ollama models"):
+                completion_event.wait(timeout=20)  # 20 second timeout
             if completion_event.is_set():
                 if not success_flag["success"] and error_ref["error"]:
                     # Re-raise the error so it can be caught by the service layer

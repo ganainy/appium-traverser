@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import sys
+import threading
 import time
 
 from config.config import Config
@@ -597,6 +598,89 @@ def validate_jsonrpc_response(response: Dict[str, Any]) -> bool:
     has_result = "result" in response
     has_error = "error" in response
     return (has_result or has_error) and not (has_result and has_error)
+
+class LoadingIndicator:
+    """
+    A reusable CLI loading indicator that displays an animated message.
+    
+    Can be used as a context manager or with start/stop methods.
+    
+    Example usage:
+        # As context manager (recommended)
+        with LoadingIndicator("Processing..."):
+            # Do long-running operation
+            time.sleep(5)
+        
+        # With start/stop methods
+        loader = LoadingIndicator("Loading data...")
+        loader.start()
+        try:
+            # Do long-running operation
+            time.sleep(5)
+        finally:
+            loader.stop()
+    """
+    
+    def __init__(self, message: str = "Processing...", update_interval: float = 0.5):
+        """
+        Initialize the loading indicator.
+        
+        Args:
+            message: The message to display (dots will be appended)
+            update_interval: How often to update the animation (in seconds)
+        """
+        self.message = message
+        self.update_interval = update_interval
+        self.stop_event = threading.Event()
+        self.loading_thread = None
+        self._is_running = False
+    
+    def _show_loading(self):
+        """Display loading dots animation in a background thread."""
+        dots = 0
+        while not self.stop_event.is_set():
+            # Create animated dots (0, 1, 2, 3 dots)
+            dot_count = dots % 4
+            spaces = 3 - dot_count
+            sys.stdout.write(f"\r  {self.message}{'.' * dot_count}{' ' * spaces}")
+            sys.stdout.flush()
+            dots += 1
+            self.stop_event.wait(self.update_interval)
+        
+        # Clear the loading line when done
+        sys.stdout.write("\r" + " " * (len(self.message) + 10) + "\r")
+        sys.stdout.flush()
+    
+    def start(self):
+        """Start the loading indicator."""
+        if self._is_running:
+            return
+        
+        self.stop_event.clear()
+        self._is_running = True
+        self.loading_thread = threading.Thread(target=self._show_loading, daemon=True)
+        self.loading_thread.start()
+    
+    def stop(self):
+        """Stop the loading indicator."""
+        if not self._is_running:
+            return
+        
+        self.stop_event.set()
+        if self.loading_thread:
+            self.loading_thread.join(timeout=1.0)
+        self._is_running = False
+    
+    def __enter__(self):
+        """Context manager entry."""
+        self.start()
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit."""
+        self.stop()
+        return False  # Don't suppress exceptions
+
 
 if __name__ == '__main__':
     # Example usage or tests for utils can go here

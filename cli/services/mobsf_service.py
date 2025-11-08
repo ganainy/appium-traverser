@@ -98,7 +98,9 @@ class MobSFService:
             
             # Run complete scan
             self.logger.info(f"Starting MobSF analysis for package: {package_name}")
-            success, result = mobsf_manager.perform_complete_scan(package_name)
+            from utils import LoadingIndicator
+            with LoadingIndicator(f"Running MobSF analysis for {package_name}"):
+                success, result = mobsf_manager.perform_complete_scan(package_name)
             
             if success:
                 self.logger.info("MobSF analysis completed successfully")
