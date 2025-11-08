@@ -322,9 +322,9 @@ def _process_single_package(package_name):
     except Exception:
         pass
     
-    # Step 2: Get label - only for user apps that have launcher activities
-    # Skip system packages and apps without launchers to save significant time
-    if not is_system and main_activity:
+    # Step 2: Get label - try for all apps (not just user apps with launchers)
+    # This ensures we get app names even if they don't have launcher activities
+    if not app_label:  # Only try if we don't already have a label
         try:
             pm_dump_cmd = ["shell", "pm", "dump", package_name]
             pm_output = run_adb_command(pm_dump_cmd)
@@ -473,40 +473,39 @@ def generate_app_info_cache():
             apps_with_missing_names = []
             for idx, app in enumerate(all_apps_info):
                 app_name = app.get("app_name")
-                if not app_name or app_name == "Unknown":
+                # Check for None, empty string, or "Unknown" (handle null from JSON)
+                if not app_name or app_name == "Unknown" or (isinstance(app_name, str) and app_name.strip() == ""):
                     apps_with_missing_names.append(idx)
             
-            # Calculate required max_output_tokens based on number of apps
-            # Each classification entry needs ~30-40 tokens: {"index": N, "is_health_app": true/false},
-            # If app_name is provided, add ~20-30 tokens per app with missing name
-            # Plus overhead for JSON structure (~50 tokens)
+            # Get counts for prompt building
             num_apps = len(all_apps_info)
             num_missing_names = len(apps_with_missing_names)
-            base_tokens = num_apps * 40
-            name_tokens = num_missing_names * 30
-            estimated_tokens_needed = base_tokens + name_tokens + 100
-            # Use a reasonable maximum (e.g., 32k tokens) but ensure we have enough
-            max_output_tokens = min(max(estimated_tokens_needed, 2048), 32768)
             
             # Initialize with basic config
+            # Let the AI model decide how many tokens it needs (no max_output_tokens limit)
             model_config = {
                 "description": f"Health app classifier using {default_ai_model_name}",
                 "generation_config": {
                     "temperature": 0.1,  # Low temperature for consistent classification
-                    "max_output_tokens": max_output_tokens,
                 }
             }
             model_adapter.initialize(model_config, ai_model_safety_settings)
             
             print(f"  Using AI model: {default_ai_model_name} (provider: {ai_provider})")
-            print(f"  Classifying {len(all_apps_info)} apps in a single AI call (max tokens: {max_output_tokens})...")
+            print(f"  Classifying {num_apps} apps in a single AI call...")
             
             # Build a single prompt with all apps
             apps_list = []
             for idx, app in enumerate(all_apps_info):
-                app_name = app.get("app_name") or "Unknown"
+                app_name = app.get("app_name")
+                # Handle None/null values from JSON
+                if not app_name or (isinstance(app_name, str) and app_name.strip() == ""):
+                    app_name_display = "[MISSING - please provide]"
+                else:
+                    app_name_display = app_name
                 package_name = app.get("package_name", "")
-                if app_name == "Unknown":
+                
+                if not app_name or (isinstance(app_name, str) and app_name.strip() == ""):
                     apps_list.append(f"{idx}. App name: [MISSING - please provide] | Package: {package_name}")
                 else:
                     apps_list.append(f"{idx}. App name: {app_name} | Package: {package_name}")
@@ -522,7 +521,7 @@ def generate_app_info_cache():
     ...
   ]
 }"""
-                app_name_instruction = f"\nFor apps with '[MISSING - please provide]' as the app name, you must provide a reasonable app name based on the package name. For apps that already have a name, you can omit the 'app_name' field or include it to confirm."
+                app_name_instruction = f"\nIMPORTANT: Only include the 'app_name' field in your response for apps that have '[MISSING - please provide]' as the app name. For apps that already have a name, DO NOT include the 'app_name' field in your response - only include 'index' and 'is_health_app'."
             else:
                 json_format_example = """{
   "classifications": [
@@ -557,9 +556,15 @@ Return the complete JSON classification for all {num_apps} apps now:"""
             
             with LoadingIndicator("AI is processing"):
                 # Get AI classification for all apps in one call
-                # Note: max_output_tokens is already set in model_config during initialize()
-                response_text, metadata = model_adapter.generate_response(prompt)
-                response_text = response_text.strip()
+                try:
+                    response_text, metadata = model_adapter.generate_response(prompt)
+                    if not response_text or len(response_text.strip()) == 0:
+                        raise ValueError("AI model returned empty response. Check if the model is running and accessible.")
+                    response_text = response_text.strip()
+                except Exception as ai_error:
+                    # Log the error but don't crash - we'll fall back to unknown status
+                    print(f"  ✗ AI call failed: {ai_error}", file=sys.stderr)
+                    raise  # Re-raise to be caught by outer exception handler
             
             # Try to extract JSON from the response
             # Sometimes the model wraps JSON in markdown code blocks
@@ -590,8 +595,21 @@ Return the complete JSON classification for all {num_apps} apps now:"""
                     app_name = item.get("app_name")
                     if idx is not None:
                         classification_map[idx] = is_health
-                        if app_name:
-                            app_name_map[idx] = app_name
+                        # Only store app names from AI if the app actually needs a name
+                        # This prevents misalignment where AI provides names for apps that already have them
+                        # Also ignore placeholder text that the AI might return
+                        if (app_name and 
+                            app_name != "[MISSING - please provide]" and
+                            idx < len(all_apps_info)):
+                            current_app = all_apps_info[idx]
+                            current_name = current_app.get("app_name")
+                            # Only store if the current name is missing, None, or "Unknown"
+                            # Handle None (null from JSON) and empty strings
+                            if (not current_name or 
+                                current_name == "Unknown" or 
+                                current_name == "[MISSING - please provide]" or
+                                (isinstance(current_name, str) and current_name.strip() == "")):
+                                app_name_map[idx] = app_name
                 
                 # Apply classifications and app names to apps
                 names_filled = 0
@@ -600,8 +618,17 @@ Return the complete JSON classification for all {num_apps} apps now:"""
                     ai_provided_name = app_name_map.get(idx)
                     
                     # Update app name if AI provided one and current name is missing
+                    # Only update if the app name is actually missing, None, or "Unknown"
+                    # This prevents misalignment issues where AI provides names for apps that already have them
                     updated_app = {**app}
-                    if ai_provided_name and (not app.get("app_name") or app.get("app_name") == "Unknown"):
+                    current_app_name = app.get("app_name")
+                    # Handle None (null from JSON), empty strings, and "Unknown"
+                    if ai_provided_name and (
+                        not current_app_name or 
+                        current_app_name == "Unknown" or 
+                        (isinstance(current_app_name, str) and current_app_name.strip() == "")
+                    ):
+                        # Only apply the AI-provided name if the current name is truly missing
                         updated_app["app_name"] = ai_provided_name
                         names_filled += 1
                     
@@ -668,6 +695,49 @@ Return the complete JSON classification for all {num_apps} apps now:"""
             {**app, "is_health_app": None}
             for app in all_apps_info
         ]
+    
+    # Final step: Generate app names from package names for any apps still missing names
+    # This provides a fallback when both ADB and AI fail to provide names
+    def _derive_app_name_from_package(package_name: str) -> str:
+        """Derive a readable app name from package name as a last resort."""
+        if not package_name:
+            return "Unknown"
+        
+        # Remove common prefixes
+        parts = package_name.split(".")
+        
+        # Try to find a meaningful part (usually the last or second-to-last)
+        # Skip common words like "com", "android", "app", etc.
+        skip_words = {"com", "org", "net", "io", "app", "android", "apps", "www"}
+        
+        for part in reversed(parts):
+            if part and part not in skip_words and len(part) > 2:
+                # Capitalize first letter and make it readable
+                name = part.replace("_", " ").replace("-", " ")
+                # Title case
+                name = " ".join(word.capitalize() for word in name.split())
+                return name
+        
+        # If nothing found, use the last part
+        if parts:
+            last_part = parts[-1]
+            if last_part:
+                return last_part.replace("_", " ").replace("-", " ").title()
+        
+        return "Unknown"
+    
+    # Apply fallback names to apps that still don't have names
+    # This handles cases where ADB and AI both failed, or AI returned placeholder text
+    for app in unified_apps:
+        current_name = app.get("app_name")
+        # Check for missing names: None, empty, "Unknown", or the placeholder text from prompts
+        if (not current_name or 
+            current_name == "Unknown" or 
+            current_name == "[MISSING - please provide]" or
+            (isinstance(current_name, str) and current_name.strip() == "")):
+            package_name = app.get("package_name", "")
+            derived_name = _derive_app_name_from_package(package_name)
+            app["app_name"] = derived_name
 
     # Add timestamp to the output
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")

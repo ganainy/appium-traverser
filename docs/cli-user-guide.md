@@ -1,111 +1,94 @@
 # CLI User Guide
 
-This guide explains how to use the command-line interface (CLI) for the Appium Traverser project. The CLI is intended for general users who prefer scripting or terminal-based workflows.
+This guide explains how to use the command-line interface (CLI) for the Appium Traverser project.
 
 ## Prerequisites
 
-- Python 3.12 (use a virtual environment) - Download from [Python 3.12.0 release page](https://www.python.org/downloads/release/python-3120/)
-- Node.js & npm (required to install and run Appium and drivers)
-- Appium installed and a compatible driver (e.g. uiautomator2)
-- Android SDK with ADB available on PATH (see [Installing ADB](#installing-adb) below)
-- Optional services depending on features:
-  - Ollama (for using local AI models)
-  - MobSF (for static analysis of APKs)
-  - PCAPdroid (for traffic capture on device)
-- API keys / environment variables (set these in your environment or a .env file as needed):
-  - GEMINI_API_KEY (for Gemini provider)
-  - OPENROUTER_API_KEY (for OpenRouter provider)
-  - OLLAMA_BASE_URL (for Ollama; e.g. http://localhost:11434)
-  - MOBSF_API_KEY (if MobSF analysis is enabled)
-  - PCAPDROID_API_KEY (if PCAPdroid traffic capture is enabled)
+- Python 3.12 (use a virtual environment) - [Download](https://www.python.org/downloads/release/python-3120/)
+- Node.js & npm (for Appium and MCP server)
+- Appium installed with a compatible driver (e.g. uiautomator2)
+- Android SDK with ADB on PATH (see [Installing ADB](#installing-adb))
+- API keys (set in environment or .env):
+  - `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `OLLAMA_BASE_URL` (for AI providers)
+  - `MOBSF_API_KEY`, `PCAPDROID_API_KEY` (optional, for additional features)
 
 ## Installing ADB
 
-ADB (Android Debug Bridge) is required to communicate with Android devices.
-
-1. **Download and extract:** Get [Android SDK Platform Tools](https://developer.android.com/tools/releases/platform-tools) and extract to `C:\platform-tools\`
-
-2. **Add to PATH (PowerShell as Administrator):**
+1. Download [Android SDK Platform Tools](https://developer.android.com/tools/releases/platform-tools) and extract to `C:\platform-tools\`
+2. Add to PATH (PowerShell as Administrator):
    ```powershell
    $currentPath = [Environment]::GetEnvironmentVariable("Path", "User")
    [Environment]::SetEnvironmentVariable("Path", "$currentPath;C:\platform-tools", "User")
    $env:Path += ";C:\platform-tools"
    ```
+3. Verify: Restart PowerShell and run `adb version`
+4. Enable USB debugging on your Android device (Settings → Developer options)
 
-3. **Verify:** Restart PowerShell and run `adb version`
+## Starting Required Services
 
-4. **Enable USB debugging on your Android device:**
-   - On your Android device, go to Settings → About phone
-   - Tap "Build number" 7 times to enable Developer options
-   - Go back to Settings → Developer options
-   - Enable "USB debugging"
-   - Connect your device via USB and authorize the computer when prompted
-   - Verify connection: `adb devices` should show your device
+Start these services in separate terminals before using the CLI:
 
-## Quick start (Windows PowerShell example)
-
-1. Clone and set up project:
+### Appium Server (port 4723)
 ```powershell
-git clone <repository-url>
-cd appium-traverser-master-arbeit
-py -3.12 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-pip install -r requirements.txt
+npx appium -p 4723
 ```
 
-2. Configure environment (example .env entries):
-```env
-GEMINI_API_KEY=your_key
-OPENROUTER_API_KEY=your_key
-OLLAMA_BASE_URL=http://localhost:11434
-```
-
-3. Run the CLI:
+### MCP Server (port 3000)
 ```powershell
-python run_cli.py apps scan-health
-python run_cli.py apps select 1
-python run_cli.py crawler start
+cd appium-mcp-server
+npm install          # First time only
+npm run build        # First time or after changes
+npm run start:http   # Start server
+# Or use: npm run dev  # For development with auto-reload
 ```
 
-Or if installed as a console script (optional):
-```bash
-traverser-cli apps scan-health
-traverser-cli crawler start
-```
+Verify services: `python run_cli.py precheck-services`
 
-## Choosing an AI provider
+## Quick Start
 
-When launching the CLI you can specify an AI provider and (optionally) a model:
+1. **Setup project:**
+   ```powershell
+   git clone <repository-url>
+   cd appium-traverser
+   py -3.12 -m venv .venv
+   .\.venv\Scripts\Activate.ps1
+   pip install -r requirements.txt
+   ```
 
-- CLI flags:
-  - --provider (gemini, openrouter, ollama)
-  - --model (provider-specific model alias)
+2. **Configure environment** (.env file):
+   ```env
+   GEMINI_API_KEY=your_key
+   OPENROUTER_API_KEY=your_key
+   OLLAMA_BASE_URL=http://localhost:11434
+   ```
 
-If not provided, the CLI will read:
-1. runtime options
-2. environment variables (e.g., AI_PROVIDER)
-3. a local user_config.json (created under the package directory)
+3. **Basic workflow:**
+   ```powershell
+   python run_cli.py precheck-services    # Verify services
+   python run_cli.py device list          # List devices
+   python run_cli.py apps scan-all        # Scan apps
+   python run_cli.py apps list-all        # List available apps
+   python run_cli.py apps select 1        # Select app
+   python run_cli.py crawler start        # Start crawler
+   ```
 
-Example:
+## CLI Commands
+
+### Device Management
 ```powershell
-python run_cli.py --provider ollama --model "llama3.2-vision" apps scan-health
+python run_cli.py device list
+python run_cli.py device select <device_id>
 ```
 
-## Primary CLI workflows
-
-### App management
-Scan and list installed apps:
+### App Management
 ```powershell
-python run_cli.py apps scan-health    # AI-filtered health apps
-python run_cli.py apps scan-all       # All installed apps
-python run_cli.py apps list-health
-python run_cli.py apps select 1
-python run_cli.py apps select "com.example.app"
+python run_cli.py apps scan-all       # Scan all installed apps (with AI health filtering)
+python run_cli.py apps list-all       # List all apps from cache
+python run_cli.py apps select <index_or_package> # e.g. python run_cli.py apps select 1
+python run_cli.py apps show-selected  # Show currently selected app
 ```
 
-### Crawler control
-Start/stop/pause/resume the crawler:
+### Crawler Control
 ```powershell
 python run_cli.py crawler start [--annotate-offline-after-run]
 python run_cli.py crawler stop
@@ -115,91 +98,112 @@ python run_cli.py crawler status
 ```
 
 ### Configuration
-View and change runtime configuration:
 ```powershell
 python run_cli.py config show
 python run_cli.py config set MAX_CRAWL_STEPS=15
 python run_cli.py config set CRAWL_MODE=time
 ```
 
-### Focus areas
-Manage focus/target areas for private-data scanning:
+### Focus Areas (for privacy testing)
 ```powershell
 python run_cli.py focus add "Privacy Policy" --priority 1
 python run_cli.py focus list
 python run_cli.py focus remove <id>
 ```
 
-### Allowed external packages
-Manage external packages that the crawler can interact with outside the main target app:
+### External Packages
 ```powershell
 python run_cli.py packages list
 python run_cli.py packages add com.example.app
 python run_cli.py packages remove com.example.app
-python run_cli.py packages update old.package new.package
-python run_cli.py packages clear
 ```
 
-### Analysis and reporting
-Generate reports and inspect analysis data:
+### Analysis and Reporting
 ```powershell
 python run_cli.py analysis list-targets
 python run_cli.py analysis list-runs --target-index 1
 python run_cli.py analysis generate-pdf --target-index 1
 ```
 
-## Common workflows (example)
+## Choosing an AI Provider
 
-1. Discover health apps:
+Specify provider via CLI flags or environment variables:
 ```powershell
-python run_cli.py apps scan-health
-python run_cli.py apps list-health
+python run_cli.py --provider ollama --model "llama3.2-vision" apps scan-all
 ```
-2. Select target app:
-```powershell
-python run_cli.py apps select 1
-```
-3. Start crawler:
-```powershell
-python run_cli.py crawler start
-```
-4. After crawl, generate a PDF report:
-```powershell
-python run_cli.py analysis generate-pdf --target-index 1
-```
+
+Providers: `gemini`, `openrouter`, `ollama`. If not specified, CLI reads from environment variables or `user_config.json`.
+
+## Typical Workflow
+
+1. **Check services and devices:**
+   ```powershell
+   python run_cli.py precheck-services
+   python run_cli.py device list
+   ```
+
+2. **Discover and select app:**
+   ```powershell
+   python run_cli.py apps scan-all
+   python run_cli.py apps list-all
+   python run_cli.py apps select 1
+   ```
+
+3. **Start crawler:**
+   ```powershell
+   python run_cli.py crawler start --annotate-offline-after-run
+   ```
+
+4. **Monitor and control:**
+   ```powershell
+   python run_cli.py crawler status  # Check status
+   python run_cli.py crawler pause   # Pause if needed
+   python run_cli.py crawler resume  # Resume
+   ```
+
+5. **View results:**
+   Results are in: `output_data/<device_id>_<app_package>_<timestamp>/`
+   - `screenshots/` - Captured screenshots
+   - `annotated_screenshots/` - AI-annotated (if enabled)
+   - `database/` - Crawl data
+   - `logs/` - Crawl logs
+   - `reports/` - Analysis reports
+
+6. **Generate report:**
+   ```powershell
+   python run_cli.py analysis generate-pdf --target-index 1
+   ```
 
 ## Troubleshooting
 
-- Appium not reachable:
-  - Ensure Appium is running: `appium` or use `appium --allow-insecure chromedriver_autodownload` as appropriate
-  - Verify APPIUM_SERVER_URL in config or .env
+### Service Issues
+- **Service not available:** Ensure Appium (port 4723) and MCP server (port 3000) are running
+- **Port 3000 in use (Windows):** `netstat -ano | findstr :3000` then `taskkill /PID <PID> /F`
+- **Port 3000 in use (Linux/Mac):** `lsof -i :3000` then `kill -9 <PID>`
+- **MCP build errors:** `cd appium-mcp-server && npm run clean && npm install && npm run build`
+- **MCP won't start:** Check `appium-mcp-server/mcp-server.log`, verify Node.js >= 18.0.0
 
-- Device not listed / ADB not found:
-  - Ensure ADB is installed and added to PATH (see [Installing ADB](#installing-adb))
-  - Verify installation: `adb version`
-  - Check device connection: `adb devices`
-  - Ensure USB debugging is enabled on your Android device
-  - On device, authorize the computer when prompted
+### Device Issues
+- **No device found:** Connect device via USB, enable USB debugging, run `adb devices`
+- **ADB not found:** See [Installing ADB](#installing-adb) section
 
-- Missing API keys:
-  - Set environment variables or update the local config store:
-    - GEMINI_API_KEY, OPENROUTER_API_KEY, MOBSF_API_KEY, PCAPDROID_API_KEY
+### App/Crawler Issues
+- **No app selected:** Run `python run_cli.py apps scan-all` then `apps select <index>`
+- **Crawler not starting:** Check Appium/MCP server logs, verify device connection, check status with `crawler status`
 
-- Provider validation errors:
-  - Check `--provider` value (must be one of gemini, openrouter, ollama)
-  - Use `--model` to specify a compatible model when needed
-
-- Permission or path issues on Windows:
-  - Run PowerShell as Administrator for device and network access if required
-  - Use the project virtual environment's python executable
+### Configuration Issues
+- **AI provider not configured:** Set `$env:AI_PROVIDER="gemini"` or use `--provider` flag
+- **Missing API keys:** Set environment variables: `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, etc.
+- **Provider validation errors:** Use `--provider` (gemini/openrouter/ollama) and `--model` if needed
 
 ## Tips
 
-- Use `-v` or `--verbose` to enable more detailed CLI logging.
-- Use `python run_cli.py --help` or `traverser-cli --help` to see available subcommands and flags.
-- The CLI stores user preference in a local user_config.json under the package; passing flags overrides stored settings for the session.
+- Use `-v` or `--verbose` for detailed logging
+- Use `python run_cli.py --help` to see all available commands
+- Configuration changes persist in the database
+- Crawler can be paused/resumed during execution
 
-## Where to find more
+## Additional Resources
 
-- GUI user guide: docs/gui-user-guide.md
-- Main project README: README.md
+- GUI user guide: `docs/gui-user-guide.md`
+- Main project README: `README.md`

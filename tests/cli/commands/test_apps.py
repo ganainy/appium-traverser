@@ -18,10 +18,8 @@ if str(project_root) not in sys.path:
 
 try:
     from cli.commands.apps import (
-        ScanAllAppsCommand,
-        ScanHealthAppsCommand,
+        ScanAppsCommand,
         ListAllAppsCommand,
-        ListHealthAppsCommand,
         SelectAppCommand,
         ShowSelectedAppCommand,
         AppsCommandGroup
@@ -31,10 +29,8 @@ try:
 except ImportError as e:
     try:
         from cli.commands.apps import (
-            ScanAllAppsCommand,
-            ScanHealthAppsCommand,
+            ScanAppsCommand,
             ListAllAppsCommand,
-            ListHealthAppsCommand,
             SelectAppCommand,
             ShowSelectedAppCommand,
             AppsCommandGroup
@@ -47,8 +43,8 @@ except ImportError as e:
 
 @pytest.mark.cli
 def test_scan_all_apps_command_properties():
-    """Test ScanAllAppsCommand properties."""
-    command = ScanAllAppsCommand()
+    """Test ScanAppsCommand properties."""
+    command = ScanAppsCommand()
     
     assert command.name == "scan-all"
     assert "Scan device and cache ALL installed apps" in command.description
@@ -58,38 +54,20 @@ def test_scan_all_apps_command_properties():
 @pytest.mark.cli
 def test_scan_all_apps_command_run_success(cli_context, sample_app_data: dict):
     """Test successful scan all apps command."""
-    command = ScanAllAppsCommand()
+    command = ScanAppsCommand()
     args = Mock()
+    args.force_rescan = False
     
     # Mock app scan service
     mock_app_scan_service = Mock()
-    mock_app_scan_service.scan_all_apps.return_value = (True, "/tmp/cache.json")
+    mock_app_scan_service.scan_apps.return_value = (True, "/tmp/cache.json")
     cli_context.services.register("app_scan", mock_app_scan_service)
     
     result = command.run(args, cli_context)
     
     assert result.success is True
-    assert "Successfully scanned all apps" in result.message
-    mock_app_scan_service.scan_all_apps.assert_called_once()
-
-
-@pytest.mark.cli
-def test_scan_health_apps_command_run_success(cli_context, sample_app_data: dict):
-    """Test successful scan health apps command."""
-    command = ScanHealthAppsCommand()
-    args = Mock()
-    
-    # Mock app scan service
-    mock_app_scan_service = Mock()
-    health_apps = [app for app in sample_app_data['apps'] if app['is_health_app']]
-    mock_app_scan_service.scan_health_apps.return_value = (True, "/tmp/health_cache.json")
-    cli_context.services.register("app_scan", mock_app_scan_service)
-    
-    result = command.run(args, cli_context)
-    
-    assert result.success is True
-    assert "Successfully scanned health apps" in result.message
-    mock_app_scan_service.scan_health_apps.assert_called_once()
+    assert "Successfully scanned" in result.message
+    mock_app_scan_service.scan_apps.assert_called_once()
 
 
 @pytest.mark.cli
@@ -102,24 +80,6 @@ def test_list_all_apps_command_run_success(cli_context, sample_app_data: dict):
     mock_app_scan_service = Mock()
     mock_app_scan_service.resolve_latest_cache_file.return_value = "/tmp/cache.json"
     mock_app_scan_service.load_apps_from_file.return_value = (True, sample_app_data['apps'])
-    cli_context.services.register("app_scan", mock_app_scan_service)
-    
-    result = command.run(args, cli_context)
-    
-    assert result.success is True
-    assert "Listed" in result.message
-
-
-@pytest.mark.cli
-def test_list_health_apps_command_run_success(cli_context, sample_app_data: dict):
-    """Test successful list health apps command."""
-    command = ListHealthAppsCommand()
-    args = Mock()
-    
-    # Mock app scan service
-    mock_app_scan_service = Mock()
-    health_apps = [app for app in sample_app_data['apps'] if app['is_health_app']]
-    mock_app_scan_service.get_current_health_apps.return_value = health_apps
     cli_context.services.register("app_scan", mock_app_scan_service)
     
     result = command.run(args, cli_context)
@@ -255,10 +215,10 @@ def test_apps_command_group():
     assert "App management" in group.description
     
     commands = group.get_commands()
-    assert len(commands) == 6
+    assert len(commands) == 4
     
     command_names = [cmd.name for cmd in commands]
-    expected_names = ["scan-all", "scan-health", "list-all", "list-health", "select", "show-selected"]
+    expected_names = ["scan-all", "list-all", "select", "show-selected"]
     for name in expected_names:
         assert name in command_names
 
@@ -266,18 +226,19 @@ def test_apps_command_group():
 @pytest.mark.cli
 def test_scan_apps_command_no_device(cli_context):
     """Test scan apps command when no device is available."""
-    command = ScanAllAppsCommand()
+    command = ScanAppsCommand()
     args = Mock()
+    args.force_rescan = False
     
     # Mock app scan service to return failure
     mock_app_scan_service = Mock()
-    mock_app_scan_service.scan_all_apps.return_value = (False, None)
+    mock_app_scan_service.scan_apps.return_value = (False, None)
     cli_context.services.register("app_scan", mock_app_scan_service)
     
     result = command.run(args, cli_context)
     
     assert result.success is False
-    assert "Failed to scan apps" in result.message
+    assert "Failed" in result.message
 
 
 @pytest.mark.cli
@@ -365,18 +326,3 @@ def test_apps_command_with_exception(cli_context):
     assert "Unexpected error" in str(exc_info.value)
 
 
-@pytest.mark.cli
-def test_scan_health_apps_command_no_health_apps(cli_context):
-    """Test scan health apps command when no health apps found."""
-    command = ScanHealthAppsCommand()
-    args = Mock()
-    
-    # Mock app scan service
-    mock_app_scan_service = Mock()
-    mock_app_scan_service.scan_health_apps.return_value = (True, "/tmp/health_cache.json")
-    cli_context.services.register("app_scan", mock_app_scan_service)
-    
-    result = command.run(args, cli_context)
-    
-    assert result.success is True
-    assert "Successfully scanned health apps" in result.message

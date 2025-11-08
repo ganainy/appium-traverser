@@ -55,13 +55,7 @@ class ListDevicesCommand(CommandHandler):
         if telemetry_service:
             telemetry_service.print_device_list(devices)
 
-        # Determine the appropriate message based on device count
-        if not devices:
-            message = MSG.NO_DEVICES_FOUND
-        else:
-            message = MSG.FOUND_CONNECTED_DEVICES.format(count=len(devices))
-
-        return CommandResult(success=True, message=message)
+        return CommandResult(success=True)
 
 
 class SelectDeviceCommand(CommandHandler):

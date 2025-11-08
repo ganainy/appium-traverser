@@ -8,8 +8,6 @@ SWITCH_PROVIDER_FAIL = "Failed to switch AI provider to {provider}"
 # === Service check command group (user-facing strings) ===
 PRECHECK_NAME = "precheck-services"
 PRECHECK_DESC = "Run pre-crawl validation checks for services and configuration"
-PRECHECK_SUCCESS = "All pre-crawl checks passed!"
-PRECHECK_WARNING = "Pre-crawl validation completed with warnings"
 PRECHECK_ERROR = "Pre-crawl validation failed"
 PRECHECK_RESULT_SUCCESS = "All checks passed"
 PRECHECK_RESULT_WARNING = "Checks passed with warnings"
@@ -292,9 +290,6 @@ MSG_SCAN_HEALTH_SUCCESS = "Successfully scanned apps with AI health filtering. C
 # ListAllAppsCommand
 CMD_LIST_ALL_DESC = "List ALL apps from the latest merged cache"
 
-# ListHealthAppsCommand
-CMD_LIST_HEALTH_DESC = "List health apps from the latest cache"
-
 # SelectAppCommand
 CMD_SELECT_DESC = "Select an app by index or name"
 ARG_HELP_APP_IDENTIFIER = "App index (1-based) or name/package"
@@ -314,6 +309,7 @@ ERR_CONFIG_SERVICE_NOT_AVAILABLE = "Config service not available"
 
 # BaseListAppsCommand
 MSG_NO_APPS_FOUND = "No {cache_key_type} apps found in cache."
+MSG_AUTO_SCANNING = "No cache found. Automatically scanning apps..."
 HEADER_APPS_LIST = "\n=== {header_title} ({count}) ==="
 FORMAT_APP_LIST_ITEM = "{index:2d}. {name} ({package})"
 FOOTER_APPS_LIST = "=" * (len("{header_title}") + 10)
@@ -375,7 +371,7 @@ ERR_APP_INFO_OUTPUT_DIR_NOT_CONFIGURED = "APP_INFO_OUTPUT_DIR not configured in 
 ERR_NO_APP_CACHE_FOUND = "No app cache found. Run 'apps scan-all' or 'apps scan-health' first."
 ERR_FAILED_TO_LOAD_APPS_FROM_CACHE = "Failed to load apps from cache"
 ERR_FAILED_TO_LOAD_APPS_FROM_CACHE_WITH_ERROR = "Failed to load apps from cache: {error}"
-ERR_NO_HEALTH_APPS_LOADED = "No health apps loaded. Run scan-health-apps first."
+ERR_NO_HEALTH_APPS_LOADED = "No apps loaded. Run 'apps scan-all' first to scan and cache apps."
 ERR_APP_NOT_FOUND = "App '{app_identifier}' not found."
 ERR_SELECTED_APP_MISSING_PACKAGE_ACTIVITY = "Selected app '{name}' missing package/activity."
 

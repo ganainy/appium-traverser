@@ -370,15 +370,6 @@ class CrawlerManager(QObject):
         blocking_issues = [msg for msg in messages if msg.startswith("❌")]
         warnings = [msg for msg in messages if msg.startswith("⚠️")]
 
-        if not is_valid:
-            self.main_controller.log_message("❌ Pre-crawl validation failed:", 'red')
-            for issue in blocking_issues:
-                self.main_controller.log_message(f"   {issue}", 'red')
-        elif warnings:
-            self.main_controller.log_message("⚠️ Pre-crawl validation completed with warnings:", 'orange')
-        else:
-            self.main_controller.log_message("✅ All pre-crawl checks passed!", 'green')
-
         # Show warnings if any
         if warnings:
             for warning in warnings:

@@ -22,8 +22,8 @@ def build_parser() -> argparse.ArgumentParser:
             Examples (console script):
               traverser-cli device list
               traverser-cli device select emulator-5554
-              traverser-cli apps scan-health
-              traverser-cli apps list-health
+              traverser-cli apps scan-all
+              traverser-cli apps list-all
               traverser-cli apps select "Your App Name"
               traverser-cli crawler start
               traverser-cli crawler stop

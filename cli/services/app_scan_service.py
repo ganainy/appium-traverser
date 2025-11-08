@@ -83,9 +83,7 @@ class AppScanService:
                     if isinstance(data, dict) and JSON_KEY_APPS in data and isinstance(data[JSON_KEY_APPS], list):
                         self.logger.info(f"Using existing cache file: {existing_cache}")
                         # Update config with existing cache file
-                        config_service = self.context.services.get(SERVICE_CONFIG)
-                        if config_service:
-                            config_service.set(CONFIG_CURRENT_HEALTH_APP_LIST_FILE, existing_cache)
+                        self.context.config.set(CONFIG_CURRENT_HEALTH_APP_LIST_FILE, existing_cache)
                         return True, existing_cache
                 except Exception as e:
                     self.logger.warning(f"Existing cache file is invalid, will rescan: {e}")
@@ -105,10 +103,9 @@ class AppScanService:
                 
             self.logger.info(f"Cache file generated at: {output_path}")
             
-            # Update config with health app list file
-            config_service = self.context.services.get(SERVICE_CONFIG)
-            if config_service:
-                config_service.set(CONFIG_CURRENT_HEALTH_APP_LIST_FILE, output_path)
+            # Update config with health app list file (use absolute path)
+            abs_output_path = os.path.abspath(output_path)
+            self.context.config.set(CONFIG_CURRENT_HEALTH_APP_LIST_FILE, abs_output_path)
             
             return True, output_path
             
@@ -150,17 +147,27 @@ class AppScanService:
             Path to latest cache file or None
         """
         try:
-            config_service = self.context.services.get(SERVICE_CONFIG)
-            if not config_service:
-                return None
-
-            out_dir = config_service.get_config_value(CONFIG_APP_INFO_OUTPUT_DIR)
+            # Try to get output dir from config
+            out_dir = self.context.config.get(CONFIG_APP_INFO_OUTPUT_DIR)
+            
+            # If not set, construct it the same way get_app_cache_path() does
             if not out_dir:
-                self.logger.error(ERR_APP_INFO_OUTPUT_DIR_NOT_CONFIGURED)
-                return None
+                # Get OUTPUT_DATA_DIR and construct app_info path
+                output_data_dir = self.context.config.get("OUTPUT_DATA_DIR")
+                if not output_data_dir:
+                    # Try property access
+                    output_data_dir = getattr(self.context.config, "OUTPUT_DATA_DIR", None)
+                
+                if output_data_dir:
+                    # Construct app_info directory (without device_id, for glob search)
+                    out_dir = os.path.join(output_data_dir, "app_info")
+                else:
+                    self.logger.error(ERR_APP_INFO_OUTPUT_DIR_NOT_CONFIGURED)
+                    return None
 
-            # Use unified file pattern
-            pattern = os.path.join(out_dir, FILE_PATTERN_DEVICE_APP_INFO)
+            # Use recursive glob pattern to search in device subdirectories
+            # Pattern: app_info/*/device_*_app_info.json
+            pattern = os.path.join(out_dir, "*", FILE_PATTERN_DEVICE_APP_INFO)
 
             import glob
             candidates = glob.glob(pattern)
@@ -182,7 +189,22 @@ class AppScanService:
         Returns:
             Tuple of (success, unified_apps_list, error_message)
         """
-        cache_path = self.resolve_latest_cache_file()
+        # First, try to get the cache path from config (set after scan)
+        cache_path = self.context.config.get(CONFIG_CURRENT_HEALTH_APP_LIST_FILE)
+        if cache_path:
+            # Ensure it's an absolute path
+            if not os.path.isabs(cache_path):
+                # Try to resolve relative to project root
+                project_root = self.context.get_project_root()
+                cache_path = os.path.join(project_root, cache_path)
+            if not os.path.exists(cache_path):
+                # File doesn't exist, fall through to resolve_latest_cache_file
+                cache_path = None
+        
+        # If not found in config, try to resolve via glob pattern
+        if not cache_path:
+            cache_path = self.resolve_latest_cache_file()
+        
         if not cache_path:
             return False, [], ERR_NO_APP_CACHE_FOUND
         
@@ -206,12 +228,13 @@ class AppScanService:
         Returns:
             List of health app dictionaries (app_name, package_name, activity_name, is_health_app)
         """
-        config_service = self.context.services.get(SERVICE_CONFIG)
-        if not config_service:
-            return []
-            
         # Try configured path first
-        cache_path = config_service.get_config_value(CONFIG_CURRENT_HEALTH_APP_LIST_FILE)
+        cache_path = self.context.config.get(CONFIG_CURRENT_HEALTH_APP_LIST_FILE)
+        if cache_path:
+            # Ensure it's an absolute path
+            if not os.path.isabs(cache_path):
+                project_root = self.context.get_project_root()
+                cache_path = os.path.join(project_root, cache_path)
         if cache_path and os.path.exists(cache_path):
             try:
                 with open(cache_path, "r", encoding="utf-8") as f:
@@ -240,10 +263,17 @@ class AppScanService:
         Returns:
             Tuple of (success, selected_app_dict)
         """
+        # Try health apps first, fall back to all apps if no health apps available
         apps = self.get_current_health_apps()
         if not apps:
-            self.logger.error(ERR_NO_HEALTH_APPS_LOADED)
-            return False, None
+            # Fall back to all apps if health apps are not available
+            success, all_apps, error = self.get_all_cached_apps()
+            if success and all_apps:
+                apps = all_apps
+                self.logger.debug("No health apps found, using all apps for selection")
+            else:
+                self.logger.error(ERR_NO_HEALTH_APPS_LOADED)
+                return False, None
         
         selected_app = None
         

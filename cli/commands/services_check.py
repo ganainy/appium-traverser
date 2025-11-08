@@ -10,6 +10,7 @@ from cli.services.health_service import HealthCheckService
 from cli.shared.context import CLIContext
 from cli.constants import messages as MSG
 from cli.constants import keys as KEYS
+from utils import LoadingIndicator
 
 
 class PrecheckCommand(CommandHandler):
@@ -40,8 +41,10 @@ class PrecheckCommand(CommandHandler):
         # Instantiate the new HealthCheckService
         health_service = HealthCheckService(context)
         
-        # Call services_status = health_service.check_all_services()
-        services_status = health_service.check_all_services()
+        # Show loading indicator while checking services
+        with LoadingIndicator("Checking services"):
+            # Call services_status = health_service.check_all_services()
+            services_status = health_service.check_all_services()
         
         # Get the telemetry service and call telemetry.print_status_table(services_status)
         telemetry.print_status_table(services_status)
@@ -51,14 +54,11 @@ class PrecheckCommand(CommandHandler):
         warnings = [s for s in services_status.values() if s.get(KEYS.STATUS_KEY_STATUS) == KEYS.STATUS_WARNING]
 
         if not issues and not warnings:
-            telemetry.print_success(MSG.PRECHECK_SUCCESS)
             return CommandResult(success=True, message=MSG.PRECHECK_RESULT_SUCCESS)
         elif not issues:
-            telemetry.print_warning(MSG.PRECHECK_WARNING)
-            return CommandResult(success=True, message=MSG.PRECHECK_RESULT_WARNING)
+            return CommandResult(success=True, message="")
         else:
-            telemetry.print_error(MSG.PRECHECK_ERROR)
-            return CommandResult(success=False, message=MSG.PRECHECK_RESULT_ERROR, exit_code=1)
+            return CommandResult(success=False, message="", exit_code=1)
 
 
 class UtilityCommandGroup(CommandGroup):

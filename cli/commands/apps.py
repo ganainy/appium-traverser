@@ -7,6 +7,19 @@ import argparse
 from abc import abstractmethod
 from typing import List
 
+try:
+    from colorama import init, Fore, Style
+    init(autoreset=True)  # Initialize colorama for cross-platform support
+    COLORAMA_AVAILABLE = True
+except ImportError:
+    # Fallback if colorama is not available
+    class Fore:
+        GREEN = ''
+        RESET = ''
+    class Style:
+        RESET_ALL = ''
+    COLORAMA_AVAILABLE = False
+
 from cli.commands.base import CommandGroup, CommandHandler, CommandResult
 from cli.shared.context import CLIContext
 from cli.constants.keys import (
@@ -14,22 +27,22 @@ from cli.constants.keys import (
     CACHE_KEY_ALL, CACHE_KEY_HEALTH,
     APP_NAME, PACKAGE_NAME, ACTIVITY_NAME,
     CONFIG_LAST_SELECTED_APP, CONFIG_APP_PACKAGE, CONFIG_APP_ACTIVITY,
-    CMD_SCAN_ALL, CMD_LIST_ALL, CMD_LIST_HEALTH,
+    CMD_SCAN_ALL, CMD_LIST_ALL,
     CMD_SELECT, CMD_SHOW_SELECTED,
     ARG_FORCE_RESCAN, ARG_APP_IDENTIFIER, ARG_METAVAR_ID_OR_NAME,
-    DEFAULT_UNKNOWN
+    DEFAULT_UNKNOWN, IS_HEALTH_APP
 )
 from cli.constants.messages import (
     APPS_GROUP_DESC,
     CMD_SCAN_ALL_DESC, ARG_HELP_FORCE_RESCAN, MSG_SCAN_ALL_SUCCESS, ERR_SCAN_APPS_FAILED,
-    CMD_LIST_ALL_DESC, CMD_LIST_HEALTH_DESC,
+    CMD_LIST_ALL_DESC,
     CMD_SELECT_DESC, ARG_HELP_APP_IDENTIFIER, MSG_SELECT_APP_SUCCESS, ERR_SELECT_APP_FAILED,
     CMD_SHOW_SELECTED_DESC, HEADER_SELECTED_APP, LABEL_NAME, LABEL_PACKAGE, LABEL_ACTIVITY,
     FOOTER_SELECTED_APP, MSG_NO_APP_SELECTED, ERR_APP_SCAN_SERVICE_NOT_AVAILABLE,
     ERR_CONFIG_SERVICE_NOT_AVAILABLE,
-    MSG_NO_APPS_FOUND, HEADER_APPS_LIST, FORMAT_APP_LIST_ITEM, FOOTER_APPS_LIST,
+    MSG_NO_APPS_FOUND, MSG_AUTO_SCANNING, HEADER_APPS_LIST, FORMAT_APP_LIST_ITEM, FOOTER_APPS_LIST,
     MSG_LISTED_APPS_SUCCESS,
-    HEADER_ALL_APPS, HEADER_HEALTH_APPS
+    HEADER_ALL_APPS, ERR_NO_APP_CACHE_FOUND
 )
 
 
@@ -75,6 +88,22 @@ class BaseListAppsCommand(CommandHandler):
         else:  # health
             success, apps, error_message = app_service.get_health_cached_apps()
         
+        # If no cache found, automatically trigger a scan
+        if not success and error_message == ERR_NO_APP_CACHE_FOUND:
+            print(MSG_AUTO_SCANNING)
+            scan_success, cache_path = app_service.scan_apps(force_rescan=False)
+            if not scan_success:
+                return CommandResult(
+                    success=False,
+                    message=ERR_SCAN_APPS_FAILED,
+                    exit_code=1
+                )
+            # Retry getting apps after scan
+            if self._cache_key_type == CACHE_KEY_ALL:
+                success, apps, error_message = app_service.get_all_cached_apps()
+            else:  # health
+                success, apps, error_message = app_service.get_health_cached_apps()
+        
         if not success:
             print(error_message)
             return CommandResult(
@@ -89,9 +118,22 @@ class BaseListAppsCommand(CommandHandler):
 
         print(HEADER_APPS_LIST.format(header_title=self._header_title, count=len(apps)))
         for i, app in enumerate(apps):
-            name = app.get(APP_NAME, DEFAULT_UNKNOWN)
+            # Handle null/None values from JSON - convert to default
+            name = app.get(APP_NAME) or DEFAULT_UNKNOWN
+            if name is None:
+                name = DEFAULT_UNKNOWN
             package = app.get(PACKAGE_NAME, DEFAULT_UNKNOWN)
-            print(FORMAT_APP_LIST_ITEM.format(index=i+1, name=name, package=package))
+            is_health = app.get(IS_HEALTH_APP) is True
+            
+            # Color code health apps in green
+            if is_health and COLORAMA_AVAILABLE:
+                colored_name = f"{Fore.GREEN}{name}{Style.RESET_ALL}"
+                colored_package = f"{Fore.GREEN}{package}{Style.RESET_ALL}"
+                formatted_item = FORMAT_APP_LIST_ITEM.format(index=i+1, name=colored_name, package=colored_package)
+            else:
+                formatted_item = FORMAT_APP_LIST_ITEM.format(index=i+1, name=name, package=package)
+            
+            print(formatted_item)
         print(FOOTER_APPS_LIST.format(header_title=self._header_title))
 
         return CommandResult(
@@ -177,30 +219,6 @@ class ListAllAppsCommand(BaseListAppsCommand):
     def _header_title(self) -> str:
         """Header title for display."""
         return HEADER_ALL_APPS
-
-
-class ListHealthAppsCommand(BaseListAppsCommand):
-    """List health apps from the latest cache."""
-    
-    @property
-    def name(self) -> str:
-        """Get command name."""
-        return CMD_LIST_HEALTH
-    
-    @property
-    def description(self) -> str:
-        """Get command description."""
-        return CMD_LIST_HEALTH_DESC
-    
-    @property
-    def _cache_key_type(self) -> str:
-        """Cache key type."""
-        return CACHE_KEY_HEALTH
-    
-    @property
-    def _header_title(self) -> str:
-        """Header title for display."""
-        return HEADER_HEALTH_APPS
 
 
 class SelectAppCommand(CommandHandler):
@@ -359,7 +377,6 @@ class AppsCommandGroup(CommandGroup):
         return [
             ScanAppsCommand(),
             ListAllAppsCommand(),
-            ListHealthAppsCommand(),
             SelectAppCommand(),
             ShowSelectedAppCommand(),
         ]

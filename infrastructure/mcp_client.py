@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 import time
 from typing import Any, Dict, Optional
 from enum import Enum
@@ -136,6 +137,10 @@ class MCPClient:
                     response = self._session.post(
                         self.server_url,
                         json=request_data,
+                        headers={
+                            'Content-Type': 'application/json',
+                            'Accept': 'application/json'
+                        },
                         timeout=(self.connection_timeout, self.request_timeout)
                     )
                     response.raise_for_status()
@@ -175,26 +180,6 @@ class MCPClient:
 
         # Use circuit breaker to protect against persistent failures
         return self.circuit_breaker.call(_make_request)
-
-    def initialize_session(self, app_package: str, app_activity: Optional[str] = None, device_udid: Optional[str] = None) -> Dict[str, Any]:
-        """Initialize a new testing session."""
-        params = {"app_package": app_package}
-        if app_activity:
-            params["app_activity"] = app_activity
-        if device_udid:
-            params["device_udid"] = device_udid
-
-        response = self._send_request("appium.initialize_session", params)
-        return response.get("result", {})
-
-    def execute_action(self, action: Dict[str, Any], session_context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """Execute an Appium action."""
-        params = {"action": action}
-        if session_context:
-            params["session_context"] = session_context
-
-        response = self._send_request("appium.execute_action", params)
-        return response.get("result", {})
 
     def get_circuit_breaker_state(self) -> Dict[str, Any]:
         """Get the current state of the circuit breaker.
@@ -274,14 +259,58 @@ class MCPClient:
         
         return result
 
-    def get_screen_state(self, include_screenshot: bool = True, include_xml: bool = True) -> Dict[str, Any]:
-        """Get the current screen state including screenshot and XML dump."""
+    def call_tool(self, tool_name: str, arguments: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Call an MCP tool by name with the provided arguments.
+        
+        Args:
+            tool_name: Name of the MCP tool to call
+            arguments: Optional dictionary of tool arguments
+            
+        Returns:
+            Dictionary containing the tool result with 'success', 'message', 'data' fields
+        """
         params = {
-            "include_screenshot": include_screenshot,
-            "include_xml": include_xml
+            "name": tool_name,
+            "arguments": arguments or {}
         }
+        
+        response = self._send_request("tools/call", params)
+        result = response.get("result", {})
+        
+        # Handle MCP response format - may have content array with text
+        if isinstance(result, dict) and "content" in result:
+            # Extract text from content array if present
+            content = result.get("content", [])
+            if content and isinstance(content, list) and len(content) > 0:
+                text_content = content[0].get("text", "")
+                # Try to parse JSON from text if it contains JSON
+                if text_content and text_content.strip().startswith("{"):
+                    try:
+                        # Find JSON object in text
+                        json_match = re.search(r'\{[\s\S]*\}', text_content)
+                        if json_match:
+                            parsed = json.loads(json_match.group(0))
+                            return parsed
+                    except (json.JSONDecodeError, AttributeError):
+                        pass
+                # If not JSON, return the text as message
+                if not isinstance(result, dict) or "message" not in result:
+                    return {
+                        "success": True,
+                        "message": text_content,
+                        "data": result
+                    }
+        
+        # Return result as-is if it's already in expected format
+        return result
 
-        response = self._send_request("appium.get_screen_state", params)
+    def list_tools(self) -> Dict[str, Any]:
+        """List all available MCP tools.
+        
+        Returns:
+            Dictionary containing list of available tools
+        """
+        response = self._send_request("tools/list", {})
         return response.get("result", {})
 
     def close(self) -> None:
