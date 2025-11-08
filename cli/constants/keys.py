@@ -99,6 +99,7 @@ HTTP_CODE_OK = 200
 HTTP_CODE_SERVICE_UNAVAILABLE = 503
 # === OpenRouter service and keys ===
 OPENROUTER_SERVICE = "openrouter"
+OLLAMA_SERVICE = "ollama"
 HANDLER = "handler"
 
 # Model dictionary keys

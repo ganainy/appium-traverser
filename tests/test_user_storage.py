@@ -50,20 +50,21 @@ def test_focus_area_crud():
         db_path = os.path.join(tmpdir, "test_config.db")
         store = UserConfigStore(db_path)
         # Add
-        store.add_focus_area("Login")
-        areas = store.get_focus_areas()
-        assert any(a["area"] == "Login" for a in areas)
+        store.add_focus_area_full("Login")
+        areas = store.get_focus_areas_full()
+        assert any(a["name"] == "Login" for a in areas)
         # Remove
-        store.remove_focus_area("Login")
-        areas = store.get_focus_areas()
-        assert not any(a["area"] == "Login" for a in areas)
+        area_id = next(a["id"] for a in areas if a["name"] == "Login")
+        store.remove_focus_area_full(area_id)
+        areas = store.get_focus_areas_full()
+        assert not any(a["name"] == "Login" for a in areas)
         store.close()
 
 def test_add_duplicate_focus_area_raises():
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = os.path.join(tmpdir, "test_config.db")
         store = UserConfigStore(db_path)
-        store.add_focus_area("Settings")
+        store.add_focus_area_full("Settings")
         with pytest.raises(ValueError):
-            store.add_focus_area("Settings")
+            store.add_focus_area_full("Settings")
         store.close()

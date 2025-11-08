@@ -19,7 +19,7 @@ def temp_config_env(tmp_path):
     for key, value in sample_data.items():
         if key == "focus_areas":
             for area in value:
-                store.add_focus_area(area)
+                store.add_focus_area_full(area)
         else:
             store.set(key, value)
     yield str(db_path)
@@ -37,7 +37,9 @@ def test_config_lifecycle_integration(temp_config_env):
     config.set("max_tokens", 4096)
     assert config.get("max_tokens") == 4096
     # Focus area CRUD
-    config._user_store.add_focus_area("new_area")
+    config._user_store.add_focus_area_full("new_area")
     assert "new_area" in config.FOCUS_AREAS
-    config._user_store.remove_focus_area("new_area")
+    areas = config._user_store.get_focus_areas_full()
+    area_id = next(a["id"] for a in areas if a["name"] == "new_area")
+    config._user_store.remove_focus_area_full(area_id)
     assert "new_area" not in config.FOCUS_AREAS

@@ -19,6 +19,7 @@ from langgraph.checkpoint.memory import MemorySaver
 # Always use absolute import for model_adapters
 from domain.model_adapters import create_model_adapter, Session
 from domain import constants as K
+from domain.provider_utils import get_provider_api_key, get_provider_config_key, validate_provider_config
 from domain.prompts import JSON_OUTPUT_SCHEMA, AVAILABLE_ACTIONS, ACTION_DECISION_SYSTEM_PROMPT, CONTEXT_ANALYSIS_PROMPT, SYSTEM_PROMPT_TEMPLATE, SECOND_CALL_PROMPT
 
 # Update AgentAssistant to initialize AppiumDriver with a valid Config instance
@@ -74,13 +75,6 @@ class AgentAssistant:
     implement more complex behaviors like planning, self-correction, and memory.
     """
     
-    # Class-level dictionary mapping provider names to their config attribute names
-    _PROVIDER_API_KEY_MAP = {
-        'gemini': 'GEMINI_API_KEY',
-        'openrouter': 'OPENROUTER_API_KEY',
-        'ollama': 'OLLAMA_BASE_URL'  # Uses URL instead of API key
-    }
-    
     def __init__(self,
                 app_config, # Type hint with your actual Config class
                 model_alias_override: Optional[str] = None,
@@ -107,18 +101,16 @@ class AgentAssistant:
         # Adapter provider override (for routing purposes without changing UI label)
         self._adapter_provider_override: Optional[str] = None
 
-        # Get the appropriate API key based on the provider using dictionary lookup
-        if self.ai_provider not in self._PROVIDER_API_KEY_MAP:
-            raise ValueError(f"Unsupported AI provider: {self.ai_provider}")
+        # Get the appropriate API key based on the provider using provider-agnostic utility
+        is_valid, error_msg = validate_provider_config(self.cfg, self.ai_provider, K.DEFAULT_OLLAMA_URL)
+        if not is_valid:
+            raise ValueError(error_msg or f"Unsupported AI provider: {self.ai_provider}")
         
-        config_attr = self._PROVIDER_API_KEY_MAP[self.ai_provider]
-        if self.ai_provider == 'ollama':
-            # For Ollama, we use the base URL instead of API key
-            self.api_key = getattr(self.cfg, config_attr, K.DEFAULT_OLLAMA_URL)
-        else:
-            if not getattr(self.cfg, config_attr, None):
-                raise ValueError(f"{config_attr} is not set in the provided application configuration.")
-            self.api_key = getattr(self.cfg, config_attr)
+        self.api_key = get_provider_api_key(self.cfg, self.ai_provider, K.DEFAULT_OLLAMA_URL)
+        if not self.api_key:
+            # This should not happen if validation passed, but add safety check
+            config_key = get_provider_config_key(self.ai_provider) or "API_KEY"
+            raise ValueError(f"{config_key} is not set in the provided application configuration.")
 
         # Use DEFAULT_MODEL_TYPE directly as a provider-specific model identifier
         model_id = model_alias_override or self.cfg.DEFAULT_MODEL_TYPE

@@ -267,7 +267,7 @@ class TelemetryService:
     
     def print_model_list(self, models: List[Dict[str, Any]]) -> None:
         """
-        Print a formatted list of OpenRouter models.
+        Print a formatted list of models (OpenRouter or Ollama).
         
         Args:
             models: List of model dictionaries
@@ -276,27 +276,42 @@ class TelemetryService:
             print(MSG.UI_NO_MODELS_AVAILABLE)
             return
         
-        print(f"\n=== {MSG.UI_OPENROUTER_MODELS} ({len(models)}) ===")
+        # Detect provider from first model (all models should have same provider)
+        provider = models[0].get("provider", "openrouter") if models else "openrouter"
+        if provider == "ollama":
+            header = MSG.UI_OLLAMA_MODELS
+        else:
+            header = MSG.UI_OPENROUTER_MODELS
+        
+        print(f"\n=== {header} ({len(models)}) ===")
         for i, model in enumerate(models):
             model_id = model.get(KEYS.MODEL_ID, MSG.UI_UNKNOWN)
             model_name = model.get(KEYS.MODEL_NAME, MSG.UI_UNKNOWN)
             pricing = model.get(KEYS.MODEL_PRICING, {})
            
-            # Check if free
-            is_free = (pricing.get(KEYS.MODEL_PROMPT_PRICE, "0") == "0" and
-                      pricing.get(KEYS.MODEL_COMPLETION_PRICE, "0") == "0")
+            # Check if free (for OpenRouter models)
+            is_free = False
+            if provider == "openrouter":
+                is_free = (pricing.get(KEYS.MODEL_PROMPT_PRICE, "0") == "0" and
+                          pricing.get(KEYS.MODEL_COMPLETION_PRICE, "0") == "0")
+            elif provider == "ollama":
+                # Ollama models are always free (local)
+                is_free = True
             
             free_marker = MSG.UI_FREE_MARKER if is_free else ""
             print(f"{i+1:2d}. {model_name} {free_marker}")
             print(f"    ID: {model_id}")
-            print(f"    {MSG.UI_PROMPT}: {pricing.get(KEYS.MODEL_PROMPT_PRICE, MSG.UI_NOT_AVAILABLE)} | {MSG.UI_COMPLETION}: {pricing.get(KEYS.MODEL_COMPLETION_PRICE, MSG.UI_NOT_AVAILABLE)}")
+            
+            # Only show pricing for OpenRouter models
+            if provider == "openrouter":
+                print(f"    {MSG.UI_PROMPT}: {pricing.get(KEYS.MODEL_PROMPT_PRICE, MSG.UI_NOT_AVAILABLE)} | {MSG.UI_COMPLETION}: {pricing.get(KEYS.MODEL_COMPLETION_PRICE, MSG.UI_NOT_AVAILABLE)}")
             print()
         
         print("==============================")
     
     def print_selected_model(self, selected_model: Optional[Dict[str, Any]]) -> None:
         """
-        Print the currently selected OpenRouter model.
+        Print the currently selected model (OpenRouter or Ollama).
         
         Args:
             selected_model: Model dictionary or None if no model is selected
@@ -304,12 +319,72 @@ class TelemetryService:
         if selected_model:
             model_id = selected_model.get(KEYS.MODEL_ID, MSG.UI_UNKNOWN)
             model_name = selected_model.get(KEYS.MODEL_NAME, MSG.UI_UNKNOWN)
-            print(f"\n=== {MSG.UI_SELECTED_OPENROUTER_MODEL} ===")
+            provider = selected_model.get("provider", "openrouter")
+            
+            if provider == "ollama":
+                header = MSG.UI_SELECTED_OLLAMA_MODEL
+            else:
+                header = MSG.UI_SELECTED_OPENROUTER_MODEL
+            
+            print(f"\n=== {header} ===")
             print(f"{MSG.UI_MODEL_NAME}: {model_name}")
             print(f"{MSG.UI_MODEL_ID}: {model_id}")
             print("==============================")
         else:
+            # Try to detect provider from context, default to OpenRouter for backward compatibility
+            # Since we don't have context here, we'll show a generic message
+            # The command handler should provide the specific error message
             print(MSG.UI_NO_OPENROUTER_MODEL_SELECTED)
+    
+    def print_model_selection(self, data: Dict[str, Any]) -> None:
+        """
+        Print model selection result.
+        
+        Args:
+            data: Dictionary containing selection result with keys:
+                  - model: Model dictionary
+                  - is_free: Whether the model is free (for OpenRouter)
+                  - show_warning: Whether to show a warning for paid models (for OpenRouter)
+                  - vision_supported: Whether the model supports vision (for Ollama)
+        """
+        model = data.get(KEYS.KEY_MODEL, {})
+        if not model:
+            # Try to detect provider from context - if we can't, default to OpenRouter
+            provider = data.get("provider", "openrouter")
+            if provider == "ollama":
+                print(MSG.UI_NO_OLLAMA_MODEL_SELECTED)
+            else:
+                print(MSG.UI_NO_OPENROUTER_MODEL_SELECTED)
+            return
+        
+        model_id = model.get(KEYS.MODEL_ID, MSG.UI_UNKNOWN)
+        model_name = model.get(KEYS.MODEL_NAME, MSG.UI_UNKNOWN)
+        provider = model.get("provider", "openrouter")
+        
+        if provider == "ollama":
+            header = MSG.UI_SELECTED_OLLAMA_MODEL
+            vision_supported = data.get("vision_supported", False)
+        else:
+            header = MSG.UI_SELECTED_OPENROUTER_MODEL
+            is_free = data.get(KEYS.KEY_IS_FREE, False)
+            show_warning = data.get(KEYS.KEY_SHOW_WARNING, False)
+        
+        print(f"\n=== {header} ===")
+        print(f"{MSG.UI_MODEL_NAME}: {model_name}")
+        print(f"{MSG.UI_MODEL_ID}: {model_id}")
+        
+        if provider == "ollama":
+            # Show vision support for Ollama models
+            vision_status = MSG.UI_YES if vision_supported else MSG.UI_NO
+            print(f"Vision Supported: {vision_status}")
+        else:
+            # Show free/paid status for OpenRouter models
+            if is_free:
+                print(f"{MSG.ICON_SUCCESS} {MSG.UI_FREE_MODEL}: {MSG.UI_YES}")
+            elif show_warning:
+                print(f"{MSG.ICON_WARNING} {MSG.UI_FREE_MODEL}: {MSG.UI_NO} - {MSG.UI_PAID_MODEL_WARNING if hasattr(MSG, 'UI_PAID_MODEL_WARNING') else 'This is a paid model'}")
+        
+        print("==============================")
     
     def print_json(self, data: Dict[str, Any]) -> None:
         """

@@ -4,14 +4,14 @@ This guide explains how to use the command-line interface (CLI) for the Appium T
 
 ## Prerequisites
 
-- Python 3.8+ (use a virtual environment)
+- Python 3.12 (use a virtual environment) - Download from [Python 3.12.0 release page](https://www.python.org/downloads/release/python-3120/)
 - Node.js & npm (required to install and run Appium and drivers)
 - Appium installed and a compatible driver (e.g. uiautomator2)
-- Android SDK with ADB available on PATH
+- Android SDK with ADB available on PATH (see [Installing ADB](#installing-adb) below)
 - Optional services depending on features:
-  - Ollama (local models)
-  - MobSF (binary analysis)
-  - PCAPdroid (traffic capture on device)
+  - Ollama (for using local AI models)
+  - MobSF (for static analysis of APKs)
+  - PCAPdroid (for traffic capture on device)
 - API keys / environment variables (set these in your environment or a .env file as needed):
   - GEMINI_API_KEY (for Gemini provider)
   - OPENROUTER_API_KEY (for OpenRouter provider)
@@ -19,14 +19,38 @@ This guide explains how to use the command-line interface (CLI) for the Appium T
   - MOBSF_API_KEY (if MobSF analysis is enabled)
   - PCAPDROID_API_KEY (if PCAPdroid traffic capture is enabled)
 
+## Installing ADB
+
+ADB (Android Debug Bridge) is required to communicate with Android devices.
+
+1. **Download and extract:** Get [Android SDK Platform Tools](https://developer.android.com/tools/releases/platform-tools) and extract to `C:\platform-tools\`
+
+2. **Add to PATH (PowerShell as Administrator):**
+   ```powershell
+   $currentPath = [Environment]::GetEnvironmentVariable("Path", "User")
+   [Environment]::SetEnvironmentVariable("Path", "$currentPath;C:\platform-tools", "User")
+   $env:Path += ";C:\platform-tools"
+   ```
+
+3. **Verify:** Restart PowerShell and run `adb version`
+
+4. **Enable USB debugging on your Android device:**
+   - On your Android device, go to Settings → About phone
+   - Tap "Build number" 7 times to enable Developer options
+   - Go back to Settings → Developer options
+   - Enable "USB debugging"
+   - Connect your device via USB and authorize the computer when prompted
+   - Verify connection: `adb devices` should show your device
+
 ## Quick start (Windows PowerShell example)
 
 1. Clone and set up project:
 ```powershell
 git clone <repository-url>
 cd appium-traverser-master-arbeit
-py -3 -m venv .venv
+py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
@@ -150,8 +174,12 @@ python run_cli.py analysis generate-pdf --target-index 1
   - Ensure Appium is running: `appium` or use `appium --allow-insecure chromedriver_autodownload` as appropriate
   - Verify APPIUM_SERVER_URL in config or .env
 
-- Device not listed:
-  - Ensure adb is available and device is authorized: `adb devices`
+- Device not listed / ADB not found:
+  - Ensure ADB is installed and added to PATH (see [Installing ADB](#installing-adb))
+  - Verify installation: `adb version`
+  - Check device connection: `adb devices`
+  - Ensure USB debugging is enabled on your Android device
+  - On device, authorize the computer when prompted
 
 - Missing API keys:
   - Set environment variables or update the local config store:

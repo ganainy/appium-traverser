@@ -12,6 +12,18 @@ from cli.argument_parser import build_parser
 from cli.shared.context import CLIContext
 
 
+# def _get_banner() -> str:
+#     """Get the banner for the CLI."""   
+#     return r"""
+#     █████╗ ██╗    ██████╗██████╗  █████╗ ██╗    ██╗██╗     
+#    ██╔══██╗██║   ██╔════╝██╔══██╗██╔══██╗██║    ██║██║     
+#    ███████║██║   ██║     ██████╔╝███████║██║ █╗ ██║██║     
+#    ██╔══██║██║   ██║     ██╔══██╗██╔══██║██║███╗██║██║     
+#    ██║  ██║██║   ╚██████╗██║  ██║██║  ██║╚███╔███╔╝███████╗
+#    ╚═╝  ╚═╝╚═╝    ╚═════╝╚═╝  ╚═╝╚═╝  ╚═╝ ╚══╝╚══╝ ╚══════╝
+#     """
+
+
 def run(args: Optional[List[str]] = None) -> int:
     """
     Main CLI entry point.
@@ -22,6 +34,9 @@ def run(args: Optional[List[str]] = None) -> int:
     Returns:
         Exit code
     """
+    # Display banner
+    # print(_get_banner())
+    
     try:
         # Build argument parser
         parser = build_parser()
@@ -49,6 +64,7 @@ def run(args: Optional[List[str]] = None) -> int:
         from cli.services.focus_area_service import FocusAreaService
         from cli.services.mobsf_service import MobSFService
         from cli.services.openrouter_service import OpenRouterService
+        from cli.services.ollama_service import OllamaService
 
         context.services.register("device", DeviceService(context))
         context.services.register("app_scan", AppScanService(context))
@@ -57,6 +73,7 @@ def run(args: Optional[List[str]] = None) -> int:
         context.services.register("focus", FocusAreaService(context))
         context.services.register("mobsf", MobSFService(context))
         context.services.register("openrouter", OpenRouterService(context))
+        context.services.register("ollama", OllamaService(context))
 
         # Execute command
         handler = registry.get_command_handler(parsed_args)
@@ -97,6 +114,7 @@ def _register_commands(registry: CommandRegistry) -> None:
             device,
             focus,
             mobsf,
+            ollama,
             openrouter,
             packages,
             services_check,
@@ -117,6 +135,7 @@ def _register_commands(registry: CommandRegistry) -> None:
         crawler_group = crawler.CrawlerCommandGroup()
         focus_group = focus.FocusCommandGroup()
         mobsf_group = mobsf.MobSFCommandGroup()
+        ollama_group = ollama.OllamaCommandGroup()
         openrouter_group = openrouter.OpenRouterCommandGroup()
         analysis_group = analysis.AnalysisCommandGroup()
         packages_group = packages.PackagesCommandGroup()
@@ -127,6 +146,7 @@ def _register_commands(registry: CommandRegistry) -> None:
         registry.add_group(crawler_group)
         registry.add_group(focus_group)
         registry.add_group(mobsf_group)
+        registry.add_group(ollama_group)
         registry.add_group(openrouter_group)
         registry.add_group(analysis_group)
         registry.add_group(packages_group)

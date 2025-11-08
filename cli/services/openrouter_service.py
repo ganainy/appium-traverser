@@ -28,7 +28,7 @@ class OpenRouterService:
             Tuple of (success, cache_path) where cache_path is the path to the saved cache file
         """
         try:
-            from openrouter_models import background_refresh_openrouter_models
+            from domain.openrouter_models import background_refresh_openrouter_models
         except ImportError as e:
             self.logger.error(MSG.ERR_OPENROUTER_IMPORT_FAILED.format(error=e))
             return False, None
@@ -57,7 +57,7 @@ class OpenRouterService:
             Tuple of (success, models_list)
         """
         try:
-            from openrouter_models import is_openrouter_model_free, load_openrouter_models_cache
+            from domain.openrouter_models import is_openrouter_model_free, load_openrouter_models_cache
         except ImportError as e:
             self.logger.error(MSG.ERR_OPENROUTER_IMPORT_FAILED.format(error=e))
             return False, None
@@ -99,7 +99,7 @@ class OpenRouterService:
             - error: str (error message if failed)
         """
         try:
-            from openrouter_models import is_openrouter_model_free, load_openrouter_models_cache
+            from domain.openrouter_models import is_openrouter_model_free, load_openrouter_models_cache
         except ImportError as e:
             self.logger.error(MSG.ERR_OPENROUTER_IMPORT_FAILED.format(error=e))
             return False, {K.KEY_SUCCESS: False, K.KEY_ERROR: MSG.ERR_OPENROUTER_IMPORT_FAILED.format(error=e)}
@@ -171,7 +171,7 @@ class OpenRouterService:
             return None
         
         try:
-            from openrouter_models import get_openrouter_model_meta
+            from domain.openrouter_models import get_openrouter_model_meta
         except ImportError as e:
             self.logger.error(MSG.ERR_OPENROUTER_IMPORT_FAILED.format(error=e))
             return None
@@ -219,7 +219,7 @@ class OpenRouterService:
         
         # Get model metadata
         try:
-            from openrouter_models import get_openrouter_model_meta, is_openrouter_model_vision
+            from domain.openrouter_models import get_openrouter_model_meta, is_openrouter_model_vision
         except ImportError as e:
             self.logger.error(f"Failed to import openrouter_models: {e}")
             return False, {"success": False, "error": f"Failed to import openrouter_models: {e}"}
@@ -326,7 +326,7 @@ class OpenRouterService:
         
         # Get model metadata
         try:
-            from openrouter_models import get_openrouter_model_meta, is_openrouter_model_free
+            from domain.openrouter_models import get_openrouter_model_meta, is_openrouter_model_free
         except ImportError as e:
             self.logger.error(MSG.ERR_OPENROUTER_IMPORT_FAILED.format(error=e))
             return False, {K.KEY_SUCCESS: False, K.KEY_ERROR: MSG.ERR_OPENROUTER_IMPORT_FAILED.format(error=e)}

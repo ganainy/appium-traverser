@@ -844,29 +844,24 @@ class HealthAppScanner(QObject):
             with open(file_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
 
-            # Handle merged format (new) - contains both all_apps and health_apps
+            # Handle unified format (new) - contains apps list with is_health_app flags
             if (
                 isinstance(data, dict)
-                and "all_apps" in data
-                and "health_apps" in data
-                and isinstance(data["all_apps"], list)
-                and isinstance(data["health_apps"], list)
+                and "apps" in data
+                and isinstance(data["apps"], list)
             ):
-                # Determine which app list to show based on filter toggle
-                show_health_only = bool(
-                    getattr(self.config, "USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY", False)
-                )
-
-                if show_health_only:
-                    raw_apps = data["health_apps"]
-                    app_type = "health apps"
-                else:
-                    raw_apps = data["all_apps"]
-                    app_type = "all apps"
-
+                # Get all apps from the unified list
+                raw_apps = data["apps"]
+                
+                # Filter to only health apps (is_health_app == True)
+                self.health_apps_data = [
+                    app for app in raw_apps 
+                    if isinstance(app, dict) and app.get("is_health_app") is True
+                ]
+                
                 # Log raw data info
                 self.main_controller.log_message(
-                    f"Raw {app_type} list has {len(raw_apps)} items", "blue"
+                    f"Raw apps list has {len(raw_apps)} items", "blue"
                 )
                 
                 # Check first item type for debugging
@@ -880,53 +875,28 @@ class HealthAppScanner(QObject):
                             f"WARNING: First item is not a dict! Value: {str(raw_apps[0])[:100]}", "orange"
                         )
 
-                # Filter to ensure all items are dictionaries
-                self.health_apps_data = [app for app in raw_apps if isinstance(app, dict)]
-                skipped_count = len(raw_apps) - len(self.health_apps_data)
+                skipped_count = len(raw_apps) - len([app for app in raw_apps if isinstance(app, dict)])
                 if skipped_count > 0:
                     self.main_controller.log_message(
-                        f"Warning: Skipped {skipped_count} non-dict items in {app_type} data.",
+                        f"Warning: Skipped {skipped_count} non-dict items in apps data.",
                         "orange"
                     )
                 
                 self.main_controller.log_message(
-                    f"After filtering: {len(self.health_apps_data)} valid dict items", "green"
+                    f"After filtering: {len(self.health_apps_data)} health apps (is_health_app=True)", "green"
                 )
 
                 timestamp = data.get("timestamp", "unknown")
                 ai_filtered = data.get("ai_filtered", False)
                 self.main_controller.log_message(
-                    f"Loaded {app_type} data from timestamp: {timestamp} (AI filtered: {ai_filtered})", "blue"
+                    f"Loaded health apps data from timestamp: {timestamp} (AI filtered: {ai_filtered})", "blue"
                 )
-            # Handle old format for backward compatibility
-            elif (
-                isinstance(data, dict)
-                and "health_apps" in data
-                and isinstance(data["health_apps"], list)
-            ):
-                # Legacy format - nested under 'health_apps' key
-                # Filter to ensure all items are dictionaries
-                raw_apps = data["health_apps"]
-                self.health_apps_data = [app for app in raw_apps if isinstance(app, dict)]
-                skipped_count = len(raw_apps) - len(self.health_apps_data)
-                if skipped_count > 0:
-                    self.main_controller.log_message(
-                        f"Warning: Skipped {skipped_count} non-dict items in health_apps data.",
-                        "orange"
-                    )
-                timestamp = data.get("timestamp", "unknown")
-                self.main_controller.log_message(
-                    f"Loaded health apps data from legacy format, timestamp: {timestamp}", "orange"
-                )
-            elif isinstance(data, list):
-                # Oldest format - direct list (assume health apps)
-                self.main_controller.log_message(
-                    "Loaded health apps data from legacy format file", "orange"
-                )
-                self.health_apps_data = data
             else:
                 self.main_controller.log_message(
                     f"Invalid format in health apps file: {file_path}", "red"
+                )
+                self.main_controller.log_message(
+                    "Expected format: {{'apps': [{{'package_name': '...', 'app_name': '...', 'is_health_app': true/false/null}}, ...]}} with 'apps' key containing list of apps with 'is_health_app' flags", "red"
                 )
                 self.main_controller.log_message(f"Data type: {type(data)}", "red")
                 if isinstance(data, dict):

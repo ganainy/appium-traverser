@@ -52,7 +52,7 @@ class ListFocusAreasCommand(CommandHandler):
                 exit_code=1
             )
 
-    areas = focus_service.get_focus_areas()
+        areas = focus_service.get_focus_areas()
         telemetry_service.print_focus_areas(areas)
 
         return CommandResult(

@@ -102,60 +102,42 @@ class UIComponents:
                 if "IMAGE_CONTEXT_WARNING" in config_widgets:
                     config_widgets["IMAGE_CONTEXT_WARNING"].setVisible(False)
         elif provider.lower() == "ollama":
-            # Get available Ollama models dynamically
+            # Get available Ollama models dynamically using domain logic
             try:
-                import ollama
-
-                available_models = ollama.list()
+                from domain.ollama_models import fetch_ollama_models, load_ollama_models_cache
+                
+                # Try to get base URL from config
+                base_url = None
+                try:
+                    base_url = getattr(config_handler.config, "OLLAMA_BASE_URL", None)
+                except Exception:
+                    pass
+                
+                # Try to fetch fresh models, fall back to cache if that fails
+                models = None
+                try:
+                    models = fetch_ollama_models(base_url)
+                except Exception as fetch_error:
+                    logging.debug(f"Failed to fetch fresh Ollama models: {fetch_error}, trying cache")
+                    models = load_ollama_models_cache()
+                
                 model_items = []
                 vision_models = []
 
-                for model_info in available_models.get("models", []):
-                    model_name = model_info.get("model", model_info.get("name", ""))
-                    if not model_name:
-                        continue
+                if models:
+                    for model in models:
+                        model_name = model.get("name") or model.get("id", "")
+                        if not model_name:
+                            continue
 
-                    # Keep full model name with tag for display and API usage
-                    display_name = model_name
+                        # Keep full model name with tag for display and API usage
+                        display_name = model_name
+                        vision_supported = model.get("vision_supported", False)
 
-                    # Extract base name for feature detection
-                    base_name = model_name.split(":")[0]
+                        if vision_supported:
+                            vision_models.append(display_name)
 
-                    # Check if this model supports vision by directly querying Ollama
-                    # We'll try to get model metadata or tags that indicate vision support
-                    vision_supported = False
-                    try:
-                        # Try to get model info to determine vision capabilities
-                        # First attempt: check model tags or metadata
-                        # For now, we'll still use name-based detection as a fallback
-                        vision_supported = any(
-                            pattern in base_name.lower()
-                            for pattern in [
-                                "vision",
-                                "llava",
-                                "bakllava",
-                                "minicpm-v",
-                                "moondream",
-                                "gemma3",
-                                "llama",
-                                "qwen2.5vl",
-                            ]
-                        )
-                        logging.debug(
-                            f"Vision capability for {model_name}: {vision_supported}"
-                        )
-                    except Exception as e:
-                        logging.debug(
-                            f"Error checking vision capability for {model_name}: {e}"
-                        )
-                        # Fallback to name-based detection
-
-                    # Use the original model name without adding suffixes
-                    display_name = model_name
-                    if vision_supported:
-                        vision_models.append(display_name)
-
-                    model_items.append(display_name)
+                        model_items.append(display_name)
 
                 # If no models found, show a message
                 if not model_items:
@@ -177,12 +159,12 @@ class UIComponents:
 
                 logging.debug(f"Loaded {len(model_items)} Ollama models: {model_items}")
 
-            except ImportError:
-                # Fallback if ollama package not installed
+            except ImportError as import_error:
+                # Fallback if domain module not available
+                logging.warning(f"Failed to import ollama_models: {import_error}")
                 model_dropdown.addItems(
-                    ['Ollama not installed - run "pip install ollama"']
+                    ['Ollama models module not available']
                 )
-                logging.warning("Ollama package not installed")
             except Exception as e:
                 # Fallback if Ollama is not running or other error
                 logging.warning(f"Could not fetch Ollama models: {e}")

@@ -233,9 +233,9 @@ class Config:
     @property
     def FOCUS_AREAS(self):
         # Return focus areas from user store if present, else from defaults
-        focus_areas = self._user_store.get_focus_areas()
+        focus_areas = self._user_store.get_focus_areas_full()
         if focus_areas:
-            return [fa["area"] for fa in focus_areas if fa.get("enabled", True)]
+            return [fa["name"] for fa in focus_areas if fa.get("enabled", True)]
 
         stored_list = self.get("FOCUS_AREAS")
         if isinstance(stored_list, list):
@@ -551,8 +551,22 @@ class Config:
                 exit_code=1
             )
 
-# --- Default values (loaded if not in user_config.json or .env) ---
-# --- These are loaded by _load_from_defaults_module by exec-ing this file ---
+# ============================================================================
+# DEFAULT CONFIGURATION VALUES
+# ============================================================================
+# These are FALLBACK defaults used when no user configuration exists.
+# 
+# Configuration precedence (highest to lowest):
+#   1. Runtime volatile overrides (temporary, in-memory)
+#   2. User Store (SQLite database) - persistent user settings
+#   3. Environment variables
+#   4. These module defaults (fallback only)
+#
+# IMPORTANT: These values in this file are NOT the active configuration!
+# To see actual active values at runtime, use: config.get("KEY_NAME")
+# 
+# User-facing settings are prefixed with DEFAULT_ for clarity.
+# ============================================================================
 
 APP_PACKAGE = "de.deltacity.android.blutspende"
 APP_ACTIVITY = "de.deltacity.android.blutspende.activities.SplashScreenActivity"
@@ -599,7 +613,7 @@ TARGET_DEVICE_UDID = None
 USE_COORDINATE_FALLBACK = True
 
 AI_PROVIDER = "gemini"  # Available providers: 'gemini', 'openrouter', 'ollama'
-DEFAULT_MODEL_TYPE = "gemini-2.5-flash-image"
+DEFAULT_MODEL_TYPE = "google/gemini-flash-2.5:free"  # Free model from OpenRouter
 ENABLE_IMAGE_CONTEXT = False
 XML_SNIPPET_MAX_LEN = 15000
 USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY = True

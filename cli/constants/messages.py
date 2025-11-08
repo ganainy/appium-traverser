@@ -416,7 +416,7 @@ INDEXES_MUST_BE_INTEGERS = "--from-index and --to-index must be integers (1-base
 # === OpenRouter Service Messages ===
 # Error messages
 ERR_OPENROUTER_IMPORT_FAILED = "Failed to import openrouter_models: {error}"
-ERR_OPENROUTER_MODELS_CACHE_NOT_FOUND = "OpenRouter models cache not found. Run refresh first."
+ERR_OPENROUTER_MODELS_CACHE_NOT_FOUND = "OpenRouter models cache not found. Run 'python run_cli.py openrouter refresh-models --wait' first."
 ERR_OPENROUTER_MODEL_NOT_FOUND = "Model '{model_identifier}' not found."
 ERR_OPENROUTER_SELECT_MODEL_FAILED = "Failed to select OpenRouter model: {error}"
 ERR_OPENROUTER_NOT_SELECTED_PROVIDER = "This command is only available when OpenRouter is selected as the AI provider."
@@ -473,6 +473,58 @@ TELEMETRY_SERVICE_NOT_AVAILABLE = "Telemetry service not available"
 LIST_MODELS_SUCCESS = "Listed {count} models"
 LIST_MODELS_FAIL = "Failed to list models"
 LIST_MODELS_NONE = "No models available"
+LIST_MODELS_SELECT_HINT = "To select a model, run: python run_cli.py openrouter select-model <index_or_name>"
+
+# === Ollama Service Messages ===
+# Error messages
+ERR_OLLAMA_IMPORT_FAILED = "Failed to import ollama_models: {error}"
+ERR_OLLAMA_MODELS_NOT_FOUND = "Ollama models not found. Make sure Ollama is running and run 'python run_cli.py ollama refresh-models --wait' first."
+ERR_OLLAMA_MODEL_NOT_FOUND = "Model '{model_identifier}' not found."
+ERR_OLLAMA_SELECT_MODEL_FAILED = "Failed to select Ollama model: {error}"
+ERR_OLLAMA_NOT_SELECTED_PROVIDER = "This command is only available when Ollama is selected as the AI provider."
+ERR_OLLAMA_NO_MODEL_SELECTED = "No Ollama model selected. Use 'python run_cli.py ollama select-model <model>' first."
+ERR_OLLAMA_MODEL_NOT_IN_CACHE = "Model '{model_identifier}' not found in cache."
+ERR_OLLAMA_REFRESH_FAILED = "Failed to refresh Ollama models cache"
+
+# Success messages
+SUCCESS_OLLAMA_MODELS_REFRESHED = "Ollama models cache refreshed successfully; saved to {cache_path}"
+SUCCESS_OLLAMA_MODEL_SELECTED = "Successfully selected Ollama model: {model_name} ({model_id})"
+
+# Command names and descriptions
+OLLAMA_GROUP_NAME = "ollama"
+OLLAMA_GROUP_DESC = "Ollama AI model management commands"
+
+OLLAMA_REFRESH_MODELS_CMD_NAME = "refresh-models"
+OLLAMA_REFRESH_MODELS_DESC = "Refresh Ollama models cache"
+
+OLLAMA_LIST_MODELS_CMD_NAME = "list-models"
+OLLAMA_LIST_MODELS_DESC = "List available Ollama models"
+OLLAMA_LIST_MODELS_REFRESH = "Refresh models from Ollama before listing"
+
+OLLAMA_SELECT_MODEL_CMD_NAME = "select-model"
+OLLAMA_SELECT_MODEL_DESC = "Select an Ollama model"
+OLLAMA_SELECT_MODEL_ARG = "Model index (1-based) or name/ID fragment"
+OLLAMA_SELECT_MODEL_SUCCESS = "Selected model: {name} ({id})"
+OLLAMA_SELECT_MODEL_FAIL = "Failed to select model: {identifier}"
+
+OLLAMA_SHOW_SELECTION_CMD_NAME = "show-selection"
+OLLAMA_SHOW_SELECTION_DESC = "Show currently selected Ollama model"
+OLLAMA_SHOW_SELECTION_SUCCESS = "Selected model: {name} ({id})"
+OLLAMA_SHOW_SELECTION_FAIL = "No Ollama model selected"
+
+OLLAMA_SHOW_MODEL_DETAILS_CMD_NAME = "show-model-details"
+OLLAMA_SHOW_MODEL_DETAILS_DESC = "Show detailed information about selected model"
+OLLAMA_SHOW_MODEL_DETAILS_SUCCESS = "Model details displayed"
+OLLAMA_SHOW_MODEL_DETAILS_FAIL = "Failed to show model details"
+
+# Service availability messages
+OLLAMA_SERVICE_NOT_AVAILABLE = "Ollama service not available"
+
+# List models messages
+OLLAMA_LIST_MODELS_SUCCESS = "Listed {count} models"
+OLLAMA_LIST_MODELS_FAIL = "Failed to list models"
+OLLAMA_LIST_MODELS_NONE = "No models available"
+OLLAMA_LIST_MODELS_SELECT_HINT = "To select a model, run: python run_cli.py ollama select-model <index_or_name>"
 
 # Added constants for process_utils.py
 DEFAULT_FLAG_CONTENT = "flag"
@@ -549,9 +601,13 @@ UI_FREE_MARKER = "[FREE]"
 UI_CRAWLER_STATUS = "Crawler Status"
 UI_FOCUS_AREAS = "Focus Areas"
 UI_OPENROUTER_MODELS = "OpenRouter Models"
+UI_OLLAMA_MODELS = "Ollama Models"
 UI_SELECTED_OPENROUTER_MODEL = "Selected OpenRouter Model"
+UI_SELECTED_OLLAMA_MODEL = "Selected Ollama Model"
 UI_OPENROUTER_MODEL_DETAILS = "OpenRouter Model Details"
+UI_OLLAMA_MODEL_DETAILS = "Ollama Model Details"
 UI_OPENROUTER_IMAGE_CONTEXT_CONFIGURATION = "OpenRouter Image Context Configuration"
+UI_NO_OLLAMA_MODEL_SELECTED = "No Ollama model selected."
 
 # Model selection messages
 UI_SUCCESSFULLY_SELECTED_OPENROUTER_MODEL = "Successfully selected OpenRouter model:"

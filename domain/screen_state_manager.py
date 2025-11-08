@@ -13,10 +13,7 @@ except ImportError:
     from database import DatabaseManager
 
 # Import your main Config class
-try:
-    from config.config import Config  # Assuming Config class is in config.py in the same package
-except ImportError:
-    from config.config import Config  # Assuming Config class is in config.py in the same package
+from config.config import Config
 
 if TYPE_CHECKING:
     from infrastructure.appium_driver import AppiumDriver

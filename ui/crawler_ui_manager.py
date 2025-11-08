@@ -13,18 +13,9 @@ from PySide6.QtCore import QObject, QProcess, QRunnable, QThread, QThreadPool, Q
 from PySide6.QtWidgets import QApplication
 
 # Import shared orchestrator components
-try:
-    from core import get_process_backend, get_validation_service
-    from core.adapters import create_process_backend
-    from core.controller import CrawlerOrchestrator
-except ImportError:
-    # Use the new core interface
-    try:
-        from interfaces.gui import GUICrawlerInterface, create_gui_interface
-        from core.adapters import create_process_backend
-    except ImportError:
-        from interfaces.gui import GUICrawlerInterface, create_gui_interface
-        from core.adapters import create_process_backend
+from core import get_process_backend, get_validation_service
+from core.adapters import create_process_backend
+from core.controller import CrawlerOrchestrator
 
 
 class ValidationWorker(QRunnable):
@@ -86,26 +77,8 @@ class CrawlerManager(QObject):
         self.shutdown_timer.timeout.connect(self.force_stop_crawler_on_timeout)
         
         # Initialize shared orchestrator
-        try:
-            backend = create_process_backend(use_qt=True)  # UI uses Qt backend
-            self.orchestrator = CrawlerOrchestrator(self.config, backend)
-        except (ImportError, NameError):
-            # Use the new GUI interface for core operations
-            config_dict = {
-                "name": "GUI Crawler Config",
-                "settings": {
-                    "max_depth": getattr(self.config, 'MAX_DEPTH', 10),
-                    "timeout": getattr(self.config, 'TIMEOUT', 300),
-                    "platform": getattr(self.config, 'PLATFORM', 'android')
-                }
-            }
-            try:
-                self.gui_interface = create_gui_interface(config_dict)
-            except NameError:
-                # create_gui_interface not available, create a minimal fallback
-                self.gui_interface = None
-            self.orchestrator = None  # Not available
-            logging.info("GUI Crawler Interface initialized for core operations")
+        backend = create_process_backend(use_qt=True)  # UI uses Qt backend
+        self.orchestrator = CrawlerOrchestrator(self.config, backend)
         
         # Initialize thread pool for async validation
         self.thread_pool = QThreadPool()
@@ -116,8 +89,6 @@ class CrawlerManager(QObject):
     
     def _connect_orchestrator_signals(self):
         """Connect orchestrator output callbacks to UI signals."""
-        if self.orchestrator is None:
-            return
         # Register callbacks with the orchestrator
         self.orchestrator.register_callback('step', self._on_step_callback)
         self.orchestrator.register_callback('action', self._on_action_callback)
@@ -347,21 +318,9 @@ class CrawlerManager(QObject):
         Returns:
             Dictionary with service status details
         """
-        # Use the shared validation service if orchestrator available
-        try:
-            if self.orchestrator and get_validation_service:
-                validation_service = get_validation_service(self.config)
-                return validation_service.get_service_status_details()
-        except NameError:
-            pass
-
-        # Fallback to basic validation using GUI interface
-        return {
-            "appium": {"running": False, "message": "Appium server status unknown", "required": True},
-            "ollama": {"running": False, "message": "Ollama service status unknown", "required": False},
-            "api_keys": {"running": False, "message": "API keys status unknown", "required": True},
-            "app_selected": {"running": bool(self.config.get('APP_PACKAGE', None)), "message": f"App selected: {self.config.get('APP_PACKAGE', 'None')}", "required": True}
-        }
+        # Use the shared validation service
+        validation_service = get_validation_service(self.config)
+        return validation_service.get_service_status_details()
     
     def update_progress(self):
         """Update the progress bar based on the current step count."""
@@ -502,14 +461,11 @@ class CrawlerManager(QObject):
         try:
             from domain.model_adapters import check_dependencies
         except ImportError:
-            try:
-                from domain.model_adapters import check_dependencies
-            except ImportError:
-                self.main_controller.log_message(
-                    "ERROR: Could not import model_adapters module. Please check your installation.",
-                    'red'
-                )
-                return
+            self.main_controller.log_message(
+                "ERROR: Could not import model_adapters module. Please check your installation.",
+                'red'
+            )
+            return
                 
         ai_provider = self.config.get('AI_PROVIDER', 'gemini').lower()
         deps_installed, error_msg = check_dependencies(ai_provider)

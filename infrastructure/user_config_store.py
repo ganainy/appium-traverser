@@ -66,34 +66,6 @@ class UserConfigStore:
         )
         conn.commit()
 
-    def get_focus_areas(self) -> List[Dict[str, Any]]:
-        """Get all focus areas from the focus_areas table (legacy method, returns simple format)."""
-        conn = self._ensure_conn()
-        cur = conn.execute("SELECT name, enabled FROM focus_areas ORDER BY sort_order ASC, id ASC")
-        return [{"area": name, "enabled": bool(enabled)} for name, enabled in cur.fetchall()]
-
-    def add_focus_area(self, area: str) -> None:
-        """Add a focus area to the focus_areas table (legacy method, simple format)."""
-        conn = self._ensure_conn()
-        cur = conn.execute("SELECT MAX(sort_order) FROM focus_areas")
-        max_order = cur.fetchone()[0] or 0
-        try:
-            from datetime import datetime, UTC
-            now = datetime.now(UTC).isoformat()
-            conn.execute(
-                "INSERT INTO focus_areas (name, description, created_at, updated_at, enabled, sort_order) VALUES (?, ?, ?, ?, ?, ?)",
-                (area, "", now, now, True, max_order + 1)
-            )
-            conn.commit()
-        except sqlite3.IntegrityError:
-            raise ValueError(f"Focus area '{area}' already exists.")
-
-    def remove_focus_area(self, area: str) -> None:
-        """Remove a focus area from the focus_areas table (legacy method)."""
-        conn = self._ensure_conn()
-        conn.execute("DELETE FROM focus_areas WHERE name = ?", (area,))
-        conn.commit()
-
     def close(self):
         if hasattr(self, '_conn') and self._conn:
             self._conn.close()

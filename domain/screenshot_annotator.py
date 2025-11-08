@@ -8,10 +8,7 @@ from PIL import Image, ImageDraw  # Added ImageDraw
 
 if TYPE_CHECKING:
     from infrastructure.appium_driver import AppiumDriver
-try:
-    from config.config import Config
-except ImportError:
-    from config.config import Config
+from config.config import Config
 try:
     import utils.utils as utils
 except ImportError:

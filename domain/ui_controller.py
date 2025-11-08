@@ -34,11 +34,8 @@ from PySide6.QtWidgets import (
 try:
     from domain.analysis_viewer import XHTML2PDF_AVAILABLE, RunAnalyzer
 except Exception:
-    try:
-        from domain.analysis_viewer import XHTML2PDF_AVAILABLE, RunAnalyzer
-    except Exception:
-        RunAnalyzer = None
-        XHTML2PDF_AVAILABLE = False
+    RunAnalyzer = None
+    XHTML2PDF_AVAILABLE = False
 from ui.ui_components import UIComponents
 from ui.config_ui_manager import ConfigManager
 from ui.crawler_ui_manager import CrawlerManager
@@ -927,10 +924,7 @@ class CrawlerControllerWindow(QMainWindow):
 
 if __name__ == "__main__":
     # Import LoggerManager for proper logging setup
-    try:
-        from utils.utils import LoggerManager
-    except ImportError:
-        from utils.utils import LoggerManager
+    from utils.utils import LoggerManager
 
     # GUI initialization is now handled in interfaces/gui.py
     # This file contains the controller class only

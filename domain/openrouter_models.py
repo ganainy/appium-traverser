@@ -189,16 +189,6 @@ def load_openrouter_models_cache() -> Optional[List[Dict[str, Any]]]:
                 logging.debug(f"TTL check failed: {e}")
             return models if models else None
         
-        # Old schema: { models: [...] } or raw list
-        models = data.get("models") if isinstance(data, dict) else data
-        if isinstance(models, list) and len(models) > 0:
-            # Trigger background upgrade to new schema if possible
-            try:
-                logging.info("Detected old OpenRouter cache schema; queuing background schema upgrade.")
-                background_refresh_openrouter_models()
-            except Exception as e:
-                logging.debug(f"Background cache upgrade skipped: {e}")
-            return models
         return None
     except Exception as e:
         logging.debug(f"Failed to read OpenRouter cache: {e}")
@@ -206,7 +196,7 @@ def load_openrouter_models_cache() -> Optional[List[Dict[str, Any]]]:
 
 
 def get_openrouter_model_meta(model_id: str) -> Optional[Dict[str, Any]]:
-    """Lookup a model's metadata by id from the cache (supports both schemas).
+    """Lookup a model's metadata by id from the cache.
     
     Args:
         model_id: The model ID to look up
@@ -234,12 +224,6 @@ def get_openrouter_model_meta(model_id: str) -> Optional[Dict[str, Any]]:
                     return m
             return None
         
-        # Old schema: list or {models:[]}
-        models = data.get("models") if isinstance(data, dict) else data
-        if isinstance(models, list):
-            for m in models:
-                if str(m.get("id")) == str(model_id) or str(m.get("name")) == str(model_id):
-                    return m
         return None
     except Exception as e:
         logging.debug(f"Failed to lookup model meta: {e}")

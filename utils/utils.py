@@ -6,12 +6,7 @@ import os
 import sys
 import time
 
-try:
-    # Import Config only when needed to avoid circular import
-    from config.config import Config
-except ImportError:
-    # Import Config only when needed to avoid circular import
-    from config.config import Config
+from config.config import Config
 
 import hashlib
 import shutil
@@ -291,10 +286,7 @@ def simplify_xml_for_ai(xml_string: str, max_len: int, provider: str = "gemini",
         logging.debug(f"Original XML length: {original_len} (provider: {provider})")
 
     # Get provider capabilities from config
-    try:
-        from config import AI_PROVIDER_CAPABILITIES
-    except ImportError:
-        from config import AI_PROVIDER_CAPABILITIES
+    from config import AI_PROVIDER_CAPABILITIES
     
     capabilities = AI_PROVIDER_CAPABILITIES.get(provider.lower(), AI_PROVIDER_CAPABILITIES.get('gemini', {}))
     
