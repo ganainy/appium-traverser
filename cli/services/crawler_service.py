@@ -6,8 +6,6 @@ Crawler service for managing crawl processes and lifecycle.
 import errno
 import logging
 import os
-import signal
-import sys
 from pathlib import Path
 from typing import Optional, Dict, Any
 
@@ -34,10 +32,6 @@ class CrawlerService:
         self.orchestrator = None
         self.backend = None
         
-        # Set up signal handlers
-        signal.signal(signal.SIGINT, self._signal_handler)
-        signal.signal(signal.SIGTERM, self._signal_handler)
-    
     def _initialize_if_needed(self) -> bool:
         """Initialize orchestrator if not already initialized.
         
@@ -56,13 +50,6 @@ class CrawlerService:
         except Exception as e:
             self.logger.error(f"Failed to initialize crawler service: {e}")
             return False
-    
-    def _signal_handler(self, signum, _frame):
-        """Handle shutdown signals."""
-        self.logger.warning(
-            f"\nSignal {signal.Signals(signum).name} received. Initiating crawler shutdown..."
-        )
-        self.stop_crawler()
     
     def start_crawler(self, annotate_after_run: bool = False) -> bool:
         """Start the crawler process.

@@ -9,7 +9,7 @@ starting the crawler.
 import logging
 import subprocess
 import sys
-from typing import Any, Dict, List, Tuple, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 import requests
 
@@ -221,7 +221,8 @@ class ValidationService:
                     self._get_status_key('message'): http_msg
                 }
         except Exception as e:
-            conn_fail_msg = self._get_message('conn_fail', error=str(e)) if CLI_CONSTANTS_AVAILABLE else VALIDATION_MESSAGES["APPIUM_NOT_ACCESSIBLE"]
+            appium_url = self._get_appium_url()
+            conn_fail_msg = self._format_connection_error(e, "Appium Server", appium_url)
             return {
                 self._get_status_key('status'): self._get_status_value('error'),
                 self._get_status_key('message'): conn_fail_msg
@@ -294,13 +295,15 @@ class ValidationService:
                             self._get_status_key('message'): http_msg
                         }
                 except Exception as health_error:
-                    health_fail_msg = self._get_message('health_fail', error=str(health_error)) if CLI_CONSTANTS_AVAILABLE else VALIDATION_MESSAGES["MCP_NOT_ACCESSIBLE"].format(url=base_url)
+                    health_fail_msg = self._format_connection_error(health_error, "MCP Server", base_url)
                     return {
                         self._get_status_key('status'): self._get_status_value('error'),
                         self._get_status_key('message'): health_fail_msg
                     }
         except Exception as e:
-            mcp_fail_msg = self._get_message('mcp_fail', error=str(e)) if CLI_CONSTANTS_AVAILABLE else VALIDATION_MESSAGES["MCP_NOT_ACCESSIBLE"].format(url="unknown")
+            mcp_url = self._get_mcp_url()
+            base_url = mcp_url.rstrip('/mcp').rstrip('/') if mcp_url else "unknown"
+            mcp_fail_msg = self._format_connection_error(e, "MCP Server", base_url)
             return {
                 self._get_status_key('status'): self._get_status_value('error'),
                 self._get_status_key('message'): mcp_fail_msg
@@ -334,7 +337,8 @@ class ValidationService:
                     self._get_status_key('message'): http_msg
                 }
         except Exception as e:
-            conn_fail_msg = self._get_message('conn_fail', error=str(e)) if CLI_CONSTANTS_AVAILABLE else VALIDATION_MESSAGES["MOBSF_NOT_ACCESSIBLE"]
+            mobsf_url = self._get_mobsf_url()
+            conn_fail_msg = self._format_connection_error(e, "MobSF Server", mobsf_url)
             return {
                 self._get_status_key('status'): self._get_status_value('warning'),
                 self._get_status_key('message'): conn_fail_msg
@@ -399,7 +403,7 @@ class ValidationService:
         """Check PCAPdroid traffic capture status and return detailed status dict."""
         if self.config.get("ENABLE_TRAFFIC_CAPTURE", False):
             if not self.config.get("PCAPDROID_API_KEY", None):
-                missing_key_msg = self._get_message('missing_key', key="PCAPDroid API key", env="PCAPDROID_API_KEY") if CLI_CONSTANTS_AVAILABLE else VALIDATION_MESSAGES["PCAPDROID_API_KEY_MISSING"]
+                missing_key_msg = self._get_message('missing_key', key="API key", env="PCAPDROID_API_KEY") if CLI_CONSTANTS_AVAILABLE else "API key not set (check PCAPDROID_API_KEY in .env)"
                 return {
                     self._get_status_key('status'): self._get_status_value('warning'),
                     self._get_status_key('message'): missing_key_msg
@@ -653,9 +657,9 @@ class ValidationService:
         if self.config.get('ENABLE_MOBSF_ANALYSIS', False):
             if not self.config.get('MOBSF_API_KEY', None):
                 if CLI_CONSTANTS_AVAILABLE:
-                    issues.append(self._get_message('missing_key', key="MobSF API key", env="MOBSF_API_KEY"))
+                    issues.append(self._get_message('missing_key', key="API key", env="MOBSF_API_KEY"))
                 else:
-                    issues.append(VALIDATION_MESSAGES["MOBSF_API_KEY_MISSING"])
+                    issues.append("API key not set (check MOBSF_API_KEY in .env)")
         
         return issues, warnings
     
@@ -813,10 +817,69 @@ class ValidationService:
             'cli_not_accessible': MSG.PRECHECK_STATUS_MESSAGE_CLI_NOT_ACCESSIBLE,
             'not_accessible': MSG.PRECHECK_STATUS_MESSAGE_NOT_ACCESSIBLE,
             'api_reachable': MSG.PRECHECK_STATUS_MESSAGE_API_REACHABLE,
-            'missing_key': MSG.PRECHECK_STATUS_MESSAGE_MISSING_KEY
+            'missing_key': MSG.PRECHECK_STATUS_MESSAGE_MISSING_KEY,
+            'not_running_port': MSG.PRECHECK_STATUS_MESSAGE_NOT_RUNNING_PORT
         }
         msg_template = msg_map.get(msg_type, "")
         return msg_template.format(**kwargs) if msg_template else ""
+    
+    def _extract_port_from_error(self, error_str: str, default_port: Optional[int] = None) -> Optional[int]:
+        """
+        Extract port number from connection error message.
+        
+        Args:
+            error_str: Error message string
+            default_port: Default port to return if extraction fails
+            
+        Returns:
+            Port number or default_port if not found
+        """
+        import re
+        # Try to extract port from patterns like "port=4723" or "port:4723"
+        match = re.search(r'port[=:](\d+)', error_str, re.IGNORECASE)
+        if match:
+            try:
+                return int(match.group(1))
+            except ValueError:
+                pass
+        return default_port
+    
+    def _format_connection_error(self, error: Exception, service_name: str, url: str) -> str:
+        """
+        Format connection error into a shorter, user-friendly message.
+        
+        Args:
+            error: Exception object
+            service_name: Name of the service (e.g., "Appium Server", "MCP Server")
+            url: Service URL
+            
+        Returns:
+            Formatted error message
+        """
+        error_str = str(error)
+        port = self._extract_port_from_error(error_str)
+        
+        # Try to extract port from URL if not found in error
+        if port is None:
+            import re
+            url_match = re.search(r':(\d+)', url)
+            if url_match:
+                try:
+                    port = int(url_match.group(1))
+                except ValueError:
+                    pass
+        
+        if port:
+            if CLI_CONSTANTS_AVAILABLE:
+                return self._get_message('not_running_port', port=port)
+            else:
+                return f"Not running on port {port}"
+        else:
+            # Fallback to generic message
+            if CLI_CONSTANTS_AVAILABLE:
+                return self._get_message('not_accessible', url=url)
+            else:
+                return f"Not accessible at {url}"
     
     def _get_appium_url(self) -> str:
         """Get Appium URL from config."""

@@ -68,12 +68,17 @@ def run(args: Optional[List[str]] = None) -> int:
 
         context.services.register("device", DeviceService(context))
         context.services.register("app_scan", AppScanService(context))
-        context.services.register("crawler", CrawlerService(context))
+        crawler_service = CrawlerService(context)
+        context.services.register("crawler", crawler_service)
         context.services.register("analysis", AnalysisService(context))
         context.services.register("focus", FocusAreaService(context))
         context.services.register("mobsf", MobSFService(context))
         context.services.register("openrouter", OpenRouterService(context))
         context.services.register("ollama", OllamaService(context))
+
+        # Set up signal handler for graceful shutdown (Ctrl+C)
+        from core.signal_handler import setup_cli_signal_handler
+        setup_cli_signal_handler(crawler_service=crawler_service)
 
         # Execute command
         handler = registry.get_command_handler(parsed_args)
