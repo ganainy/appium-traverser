@@ -280,13 +280,16 @@ class TelemetryService:
         provider = models[0].get("provider", "openrouter") if models else "openrouter"
         if provider == "ollama":
             header = MSG.UI_OLLAMA_MODELS
+        elif provider == "gemini":
+            header = MSG.UI_GEMINI_MODELS
         else:
             header = MSG.UI_OPENROUTER_MODELS
         
         print(f"\n=== {header} ({len(models)}) ===")
         for i, model in enumerate(models):
             model_id = model.get(KEYS.MODEL_ID, MSG.UI_UNKNOWN)
-            model_name = model.get(KEYS.MODEL_NAME, MSG.UI_UNKNOWN)
+            # Use display_name for Gemini, fallback to name or id
+            model_name = model.get("display_name") or model.get(KEYS.MODEL_NAME) or model_id
             pricing = model.get(KEYS.MODEL_PRICING, {})
            
             # Check if free (for OpenRouter models)
@@ -294,8 +297,8 @@ class TelemetryService:
             if provider == "openrouter":
                 is_free = (pricing.get(KEYS.MODEL_PROMPT_PRICE, "0") == "0" and
                           pricing.get(KEYS.MODEL_COMPLETION_PRICE, "0") == "0")
-            elif provider == "ollama":
-                # Ollama models are always free (local)
+            elif provider in ("ollama", "gemini"):
+                # Ollama and Gemini models are always free (local/Google)
                 is_free = True
             
             free_marker = MSG.UI_FREE_MARKER if is_free else ""
@@ -323,6 +326,8 @@ class TelemetryService:
             
             if provider == "ollama":
                 header = MSG.UI_SELECTED_OLLAMA_MODEL
+            elif provider == "gemini":
+                header = MSG.UI_SELECTED_GEMINI_MODEL
             else:
                 header = MSG.UI_SELECTED_OPENROUTER_MODEL
             
@@ -353,6 +358,8 @@ class TelemetryService:
             provider = data.get("provider", "openrouter")
             if provider == "ollama":
                 print(MSG.UI_NO_OLLAMA_MODEL_SELECTED)
+            elif provider == "gemini":
+                print(MSG.UI_NO_GEMINI_MODEL_SELECTED)
             else:
                 print(MSG.UI_NO_OPENROUTER_MODEL_SELECTED)
             return
@@ -364,6 +371,9 @@ class TelemetryService:
         if provider == "ollama":
             header = MSG.UI_SELECTED_OLLAMA_MODEL
             vision_supported = data.get("vision_supported", False)
+        elif provider == "gemini":
+            header = MSG.UI_SELECTED_GEMINI_MODEL
+            vision_supported = data.get("vision_supported", False)
         else:
             header = MSG.UI_SELECTED_OPENROUTER_MODEL
             is_free = data.get(KEYS.KEY_IS_FREE, False)
@@ -373,8 +383,8 @@ class TelemetryService:
         print(f"{MSG.UI_MODEL_NAME}: {model_name}")
         print(f"{MSG.UI_MODEL_ID}: {model_id}")
         
-        if provider == "ollama":
-            # Show vision support for Ollama models
+        if provider in ("ollama", "gemini"):
+            # Show vision support for Ollama and Gemini models
             vision_status = MSG.UI_YES if vision_supported else MSG.UI_NO
             print(f"Vision Supported: {vision_status}")
         else:
@@ -487,54 +497,84 @@ class TelemetryService:
             data: Dictionary containing model details data
         """
         model = data.get(KEYS.KEY_MODEL, {})
+        provider = model.get("provider", "openrouter")
+        
+        # Determine header based on provider
+        if provider == "ollama":
+            header = MSG.UI_OLLAMA_MODEL_DETAILS
+        elif provider == "gemini":
+            header = MSG.UI_GEMINI_MODEL_DETAILS
+        else:
+            header = MSG.UI_OPENROUTER_MODEL_DETAILS
         
         # Display detailed information
-        print(f"\n=== {MSG.UI_OPENROUTER_MODEL_DETAILS} ===")
+        print(f"\n=== {header} ===")
         print(f"{MSG.UI_MODEL_ID}: {model.get(KEYS.MODEL_ID, MSG.UI_NOT_AVAILABLE)}")
-        print(f"{MSG.UI_MODEL_NAME}: {model.get(KEYS.MODEL_NAME, MSG.UI_NOT_AVAILABLE)}")
+        print(f"{MSG.UI_MODEL_NAME}: {model.get('display_name') or model.get(KEYS.MODEL_NAME, MSG.UI_NOT_AVAILABLE)}")
         print(f"{MSG.UI_DESCRIPTION}: {model.get(KEYS.MODEL_DESCRIPTION, MSG.UI_NOT_AVAILABLE)}")
-        print(f"{MSG.UI_CONTEXT_LENGTH}: {model.get(KEYS.MODEL_CONTEXT_LENGTH, MSG.UI_NOT_AVAILABLE)}")
         
-        # Pricing information
-        pricing = model.get(KEYS.MODEL_PRICING, {})
-        if pricing:
-            print(f"\n{MSG.UI_PRICING}:")
-            print(f"  {MSG.UI_PROMPT}: {pricing.get(KEYS.MODEL_PROMPT_PRICE, MSG.UI_NOT_AVAILABLE)}")
-            print(f"  {MSG.UI_COMPLETION}: {pricing.get(KEYS.MODEL_COMPLETION_PRICE, MSG.UI_NOT_AVAILABLE)}")
-            print(f"  {MSG.UI_IMAGE}: {pricing.get(KEYS.MODEL_IMAGE_PRICE, MSG.UI_NOT_AVAILABLE)}")
-            
-            # Free status
-            is_free = data.get(KEYS.KEY_IS_FREE, False)
-            print(f"  {MSG.UI_FREE_MODEL}: {MSG.UI_YES if is_free else MSG.UI_NO}")
-        else:
-            print(f"\n{MSG.UI_PRICING}: {MSG.UI_PRICING_NOT_AVAILABLE}")
+        # Context length (for OpenRouter and Gemini)
+        if provider in ("openrouter", "gemini"):
+            context_length = model.get(KEYS.MODEL_CONTEXT_LENGTH) or model.get("input_token_limit", MSG.UI_NOT_AVAILABLE)
+            print(f"{MSG.UI_CONTEXT_LENGTH}: {context_length}")
         
-        # Capabilities
-        architecture = model.get(KEYS.MODEL_ARCHITECTURE, {})
-        if architecture:
+        # Pricing information (OpenRouter only)
+        if provider == "openrouter":
+            pricing = model.get(KEYS.MODEL_PRICING, {})
+            if pricing:
+                print(f"\n{MSG.UI_PRICING}:")
+                print(f"  {MSG.UI_PROMPT}: {pricing.get(KEYS.MODEL_PROMPT_PRICE, MSG.UI_NOT_AVAILABLE)}")
+                print(f"  {MSG.UI_COMPLETION}: {pricing.get(KEYS.MODEL_COMPLETION_PRICE, MSG.UI_NOT_AVAILABLE)}")
+                print(f"  {MSG.UI_IMAGE}: {pricing.get(KEYS.MODEL_IMAGE_PRICE, MSG.UI_NOT_AVAILABLE)}")
+                
+                # Free status
+                is_free = data.get(KEYS.KEY_IS_FREE, False)
+                print(f"  {MSG.UI_FREE_MODEL}: {MSG.UI_YES if is_free else MSG.UI_NO}")
+            else:
+                print(f"\n{MSG.UI_PRICING}: {MSG.UI_PRICING_NOT_AVAILABLE}")
+        
+        # Vision support (for Ollama and Gemini)
+        if provider in ("ollama", "gemini"):
+            vision_supported = data.get("vision_supported", False) or model.get("vision_supported", False)
             print(f"\n{MSG.UI_CAPABILITIES}:")
-            input_modalities = architecture.get(KEYS.MODEL_INPUT_MODALITIES, [])
-            output_modalities = architecture.get(KEYS.MODEL_OUTPUT_MODALITIES, [])
-            print(f"  {MSG.UI_INPUT_MODALITIES}: {', '.join(input_modalities) if input_modalities else MSG.UI_NOT_AVAILABLE}")
-            print(f"  {MSG.UI_OUTPUT_MODALITIES}: {', '.join(output_modalities) if output_modalities else MSG.UI_NOT_AVAILABLE}")
+            print(f"  Vision Supported: {MSG.UI_YES if vision_supported else MSG.UI_NO}")
             
-            supports_image = model.get(KEYS.MODEL_SUPPORTS_IMAGE)
-            print(f"  {MSG.UI_IMAGE_SUPPORT}: {MSG.UI_YES if supports_image else MSG.UI_NO}")
+            # Show token limits for Gemini
+            if provider == "gemini":
+                input_tokens = model.get("input_token_limit", MSG.UI_NOT_AVAILABLE)
+                output_tokens = model.get("output_token_limit", MSG.UI_NOT_AVAILABLE)
+                if input_tokens != MSG.UI_NOT_AVAILABLE:
+                    print(f"  Input Token Limit: {input_tokens}")
+                if output_tokens != MSG.UI_NOT_AVAILABLE:
+                    print(f"  Output Token Limit: {output_tokens}")
+        
+        # Capabilities (for OpenRouter)
+        if provider == "openrouter":
+            architecture = model.get(KEYS.MODEL_ARCHITECTURE, {})
+            if architecture:
+                print(f"\n{MSG.UI_CAPABILITIES}:")
+                input_modalities = architecture.get(KEYS.MODEL_INPUT_MODALITIES, [])
+                output_modalities = architecture.get(KEYS.MODEL_OUTPUT_MODALITIES, [])
+                print(f"  {MSG.UI_INPUT_MODALITIES}: {', '.join(input_modalities) if input_modalities else MSG.UI_NOT_AVAILABLE}")
+                print(f"  {MSG.UI_OUTPUT_MODALITIES}: {', '.join(output_modalities) if output_modalities else MSG.UI_NOT_AVAILABLE}")
+                
+                supports_image = model.get(KEYS.MODEL_SUPPORTS_IMAGE)
+                print(f"  {MSG.UI_IMAGE_SUPPORT}: {MSG.UI_YES if supports_image else MSG.UI_NO}")
+                
+                supported_parameters = architecture.get(KEYS.MODEL_SUPPORTED_PARAMETERS, [])
+                if supported_parameters:
+                    print(f"  {MSG.UI_SUPPORTED_PARAMETERS}: {', '.join(supported_parameters)}")
             
-            supported_parameters = architecture.get(KEYS.MODEL_SUPPORTED_PARAMETERS, [])
-            if supported_parameters:
-                print(f"  {MSG.UI_SUPPORTED_PARAMETERS}: {', '.join(supported_parameters)}")
-        
-        # Provider information
-        top_provider = model.get(KEYS.MODEL_TOP_PROVIDER, {})
-        if top_provider:
-            print(f"\n{MSG.UI_PROVIDER_INFORMATION}:")
-            print(f"  {MSG.UI_PROVIDER_NAME}: {top_provider.get(KEYS.MODEL_PROVIDER_NAME, MSG.UI_NOT_AVAILABLE)}")
-            print(f"  {MSG.UI_MODEL_FORMAT}: {top_provider.get(KEYS.MODEL_MODEL_FORMAT, MSG.UI_NOT_AVAILABLE)}")
-        
-        # Current configuration
-        current_image_context = data.get(KEYS.KEY_CURRENT_IMAGE_CONTEXT, False)
-        print(f"\n{MSG.UI_CURRENT_CONFIGURATION}:")
-        print(f"  {MSG.UI_IMAGE_CONTEXT}: {MSG.UI_ENABLED if current_image_context else MSG.UI_DISABLED}")
+            # Provider information (OpenRouter only)
+            top_provider = model.get(KEYS.MODEL_TOP_PROVIDER, {})
+            if top_provider:
+                print(f"\n{MSG.UI_PROVIDER_INFORMATION}:")
+                print(f"  {MSG.UI_PROVIDER_NAME}: {top_provider.get(KEYS.MODEL_PROVIDER_NAME, MSG.UI_NOT_AVAILABLE)}")
+                print(f"  {MSG.UI_MODEL_FORMAT}: {top_provider.get(KEYS.MODEL_MODEL_FORMAT, MSG.UI_NOT_AVAILABLE)}")
+            
+            # Current configuration (OpenRouter only)
+            current_image_context = data.get(KEYS.KEY_CURRENT_IMAGE_CONTEXT, False)
+            print(f"\n{MSG.UI_CURRENT_CONFIGURATION}:")
+            print(f"  {MSG.UI_IMAGE_CONTEXT}: {MSG.UI_ENABLED if current_image_context else MSG.UI_DISABLED}")
         
         print("=================================")

@@ -34,7 +34,7 @@ from cli.constants.keys import (
 )
 from cli.constants.messages import (
     APPS_GROUP_DESC,
-    CMD_SCAN_ALL_DESC, ARG_HELP_FORCE_RESCAN, MSG_SCAN_ALL_SUCCESS, ERR_SCAN_APPS_FAILED,
+    CMD_SCAN_ALL_DESC, ARG_HELP_FORCE_RESCAN, MSG_SCAN_ALL_SUCCESS, MSG_SCAN_ALL_SUCCESS_NO_AI, ERR_SCAN_APPS_FAILED,
     CMD_LIST_ALL_DESC,
     CMD_SELECT_DESC, ARG_HELP_APP_IDENTIFIER, MSG_SELECT_APP_SUCCESS, ERR_SELECT_APP_FAILED,
     CMD_SHOW_SELECTED_DESC, HEADER_SELECTED_APP, LABEL_NAME, LABEL_PACKAGE, LABEL_ACTIVITY,
@@ -181,12 +181,18 @@ class ScanAppsCommand(CommandHandler):
             )
 
         # Unified scan with AI filtering always enabled
-        success, cache_path = app_service.scan_apps(force_rescan=args.force_rescan)
+        success, result = app_service.scan_apps(force_rescan=args.force_rescan)
 
         if success:
+            cache_path, ai_filtered = result
+            if ai_filtered:
+                message = MSG_SCAN_ALL_SUCCESS.format(cache_path=cache_path)
+            else:
+                message = MSG_SCAN_ALL_SUCCESS_NO_AI.format(cache_path=cache_path)
+            
             return CommandResult(
                 success=True,
-                message=MSG_SCAN_ALL_SUCCESS.format(cache_path=cache_path)
+                message=message
             )
         else:
             return CommandResult(

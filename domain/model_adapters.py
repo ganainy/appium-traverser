@@ -4,16 +4,6 @@ from typing import Optional, Dict, Any, List
 # ------ Provider-Agnostic Entities ------
 
 @dataclass
-class AIProvider:
-    """Represents a supported AI provider and its metadata."""
-    name: str
-    display_name: str
-    models: List[str] = field(default_factory=list)
-    capabilities: Dict[str, Any] = field(default_factory=dict)
-    is_online: bool = True
-    extra: Dict[str, Any] = field(default_factory=dict)
-
-@dataclass
 class Session:
     """Represents a provider-agnostic AI session."""
     session_id: str
@@ -38,6 +28,11 @@ Each adapter implements a common interface for:
 2. Image processing and prompting
 3. Response parsing and formatting
 4. Error handling and rate limiting
+
+This module focuses on runtime model interaction (inference). For model
+discovery and metadata management, see:
+- domain/ollama_models.py: Ollama model discovery, caching, and vision detection
+- domain/openrouter_models.py: OpenRouter model discovery, caching, and metadata
 """
 
 import io
@@ -427,27 +422,14 @@ class OllamaAdapter(ModelAdapter):
     def _check_vision_support(self, model_name: str) -> bool:
         """Check if the model supports vision capabilities.
         
-        This method uses a direct query to Ollama for model information when possible,
-        and falls back to pattern matching when necessary.
+        Delegates to the shared vision detection function in ollama_models.py
+        to ensure consistent detection across the codebase. Uses hybrid detection
+        (metadata → CLI → patterns) for accurate results.
         """
         try:
-            import ollama
-
-            # Extract base name for feature detection
-            base_name = model_name.split(':')[0].lower()
-            
-            # First, try to get model tags or metadata from Ollama
-            # This would be the preferred approach if Ollama API provides this info
-            # Future improvement: Use Ollama API to get model capabilities directly
-            
-            # For now, we'll still use name-based detection as primary method
-            # since Ollama doesn't have a direct "capabilities" API
-            vision_patterns = [
-                'vision', 'llava', 'bakllava', 'minicpm-v', 'moondream', 'gemma3', 
-                'llama', 'qwen2.5vl', 'mistral3', 'vl'
-            ]
-            return any(pattern in base_name for pattern in vision_patterns)
-            
+            from domain.ollama_models import is_ollama_model_vision
+            # Pass base_url if available to enable metadata/CLI checks with custom Ollama instances
+            return is_ollama_model_vision(model_name, base_url=self.base_url)
         except Exception as e:
             # Log the error but don't crash - fall back to conservative result
             logging.warning(f"Error checking vision support for {model_name}: {e}")
@@ -504,29 +486,49 @@ class OllamaAdapter(ModelAdapter):
             start_time = time.time()
             
             # Check if model is available before attempting to use it
+            available_model_names = []
             try:
                 available_models = ollama.list()
-                model_names = []
                 
                 # Handle the new Ollama API response format (Python SDK v0.5.0+)
-                model_names = []
                 for model_obj in available_models.models:
                     # Extract model name from the model object
                     if hasattr(model_obj, 'model'):
                         model_name = model_obj.model
                         if model_name and isinstance(model_name, str):
-                            model_names.append(model_name)
+                            available_model_names.append(model_name)
                 
                 # Check if our model is in the list
-                if self.model_name not in model_names:
-                    available_str = ", ".join(model_names) if model_names else "None"
-                    error_msg = f"🔴 Model '{self.model_name}' not found. Available models: {available_str}. Please run: ollama pull {self.model_name}"
-                    logging.error(error_msg)
+                if self.model_name not in available_model_names:
+                    # Build clean error message with available models and commands
+                    if available_model_names:
+                        models_list = "\n  - " + "\n  - ".join(available_model_names)
+                        error_msg = (
+                            f"Model '{self.model_name}' not found.\n"
+                            f"Available models:{models_list}\n\n"
+                            f"To select a model, run:\n"
+                            f"  python run_cli.py ollama select-model <index_or_name>\n\n"
+                            f"To install a new model, run:\n"
+                            f"  ollama pull {self.model_name}"
+                        )
+                    else:
+                        error_msg = (
+                            f"Model '{self.model_name}' not found. No models available.\n\n"
+                            f"To install a model, run:\n"
+                            f"  ollama pull {self.model_name}\n\n"
+                            f"Then select it with:\n"
+                            f"  python run_cli.py ollama select-model {self.model_name}"
+                        )
                     raise ValueError(error_msg)
                 else:
                     logging.debug(f"✅ Verified model '{self.model_name}' is available in Ollama")
+            except ValueError:
+                # Re-raise ValueError (model not found) without modification
+                raise
             except Exception as list_error:
-                logging.warning(f"⚠️ Could not verify model availability: {list_error}. Proceeding anyway.")
+                # If we can't list models, store available_model_names as empty for later error handling
+                logging.debug(f"Could not verify model availability: {list_error}")
+                available_model_names = []
             
             # Prepare messages and images
             messages = []
@@ -585,8 +587,45 @@ class OllamaAdapter(ModelAdapter):
                     if not isinstance(response_text, str):
                         response_text = str(response_text)
                 except Exception as chat_error:
-                    logging.error(f"Error in Ollama chat API call: {chat_error}", exc_info=True)
-                    raise ValueError(f"Ollama chat API call failed: {chat_error}")
+                    # Check if it's a model not found error (404)
+                    error_str = str(chat_error).lower()
+                    if "not found" in error_str or "404" in error_str:
+                        # Get available models if we don't have them yet
+                        if not available_model_names:
+                            try:
+                                available_models = ollama.list()
+                                for model_obj in available_models.models:
+                                    if hasattr(model_obj, 'model'):
+                                        model_name = model_obj.model
+                                        if model_name and isinstance(model_name, str):
+                                            available_model_names.append(model_name)
+                            except Exception:
+                                pass
+                        
+                        # Build clean error message
+                        if available_model_names:
+                            models_list = "\n  - " + "\n  - ".join(available_model_names)
+                            error_msg = (
+                                f"Model '{self.model_name}' not found.\n"
+                                f"Available models:{models_list}\n\n"
+                                f"To select a model, run:\n"
+                                f"  python run_cli.py ollama select-model <index_or_name>\n\n"
+                                f"To install a new model, run:\n"
+                                f"  ollama pull {self.model_name}"
+                            )
+                        else:
+                            error_msg = (
+                                f"Model '{self.model_name}' not found. No models available.\n\n"
+                                f"To install a model, run:\n"
+                                f"  ollama pull {self.model_name}\n\n"
+                                f"Then select it with:\n"
+                                f"  python run_cli.py ollama select-model {self.model_name}"
+                            )
+                        raise ValueError(error_msg)
+                    else:
+                        # Other errors - log with minimal traceback
+                        logging.error(f"Ollama chat API call failed: {chat_error}")
+                        raise ValueError(f"Ollama API error: {chat_error}")
             else:
                 logging.debug("Using Ollama chat API (text-only)")
                 try:
@@ -606,8 +645,45 @@ class OllamaAdapter(ModelAdapter):
                     if not isinstance(response_text, str):
                         response_text = str(response_text)
                 except Exception as chat_error:
-                    logging.error(f"Error in Ollama chat API call: {chat_error}")
-                    raise ValueError(f"Ollama chat API call failed: {chat_error}")
+                    # Check if it's a model not found error (404)
+                    error_str = str(chat_error).lower()
+                    if "not found" in error_str or "404" in error_str:
+                        # Get available models if we don't have them yet
+                        if not available_model_names:
+                            try:
+                                available_models = ollama.list()
+                                for model_obj in available_models.models:
+                                    if hasattr(model_obj, 'model'):
+                                        model_name = model_obj.model
+                                        if model_name and isinstance(model_name, str):
+                                            available_model_names.append(model_name)
+                            except Exception:
+                                pass
+                        
+                        # Build clean error message
+                        if available_model_names:
+                            models_list = "\n  - " + "\n  - ".join(available_model_names)
+                            error_msg = (
+                                f"Model '{self.model_name}' not found.\n"
+                                f"Available models:{models_list}\n\n"
+                                f"To select a model, run:\n"
+                                f"  python run_cli.py ollama select-model <index_or_name>\n\n"
+                                f"To install a new model, run:\n"
+                                f"  ollama pull {self.model_name}"
+                            )
+                        else:
+                            error_msg = (
+                                f"Model '{self.model_name}' not found. No models available.\n\n"
+                                f"To install a model, run:\n"
+                                f"  ollama pull {self.model_name}\n\n"
+                                f"Then select it with:\n"
+                                f"  python run_cli.py ollama select-model {self.model_name}"
+                            )
+                        raise ValueError(error_msg)
+                    else:
+                        # Other errors - log with minimal traceback
+                        logging.error(f"Ollama chat API call failed: {chat_error}")
+                        raise ValueError(f"Ollama API error: {chat_error}")
             
             # Ensure response_text is a valid string
             if response_text is None:
@@ -633,7 +709,11 @@ class OllamaAdapter(ModelAdapter):
             
             return response_text, metadata
             
+        except ValueError:
+            # Re-raise ValueError (clean error messages) without modification
+            raise
         except Exception as e:
+            # Only log full traceback for unexpected errors
             logging.error(f"Error generating response from Ollama: {e}", exc_info=True)
             raise
     

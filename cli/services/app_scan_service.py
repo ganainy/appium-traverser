@@ -83,7 +83,9 @@ class AppScanService:
                         self.logger.info(f"Using existing cache file: {existing_cache}")
                         # Update config with existing cache file
                         self.context.config.set(CONFIG_CURRENT_HEALTH_APP_LIST_FILE, existing_cache)
-                        return True, existing_cache
+                        # Return path and AI filtering status from cache
+                        ai_filtered = data.get("ai_filtered", False)
+                        return True, (existing_cache, ai_filtered)
                 except Exception as e:
                     self.logger.warning(f"Existing cache file is invalid, will rescan: {e}")
                     # Fall through to generate new cache
@@ -106,7 +108,9 @@ class AppScanService:
             abs_output_path = os.path.abspath(output_path)
             self.context.config.set(CONFIG_CURRENT_HEALTH_APP_LIST_FILE, abs_output_path)
             
-            return True, output_path
+            # Return path and whether AI filtering was applied
+            ai_filtered = result_data.get("ai_filtered", False) if result_data else False
+            return True, (abs_output_path, ai_filtered)
             
         except Exception as e:
             self.logger.error(f"Error during app scan: {e}", exc_info=True)

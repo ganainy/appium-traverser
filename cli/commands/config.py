@@ -10,7 +10,6 @@ from cli.commands.base import CommandGroup, CommandHandler, CommandResult
 from cli.shared.context import CLIContext
 from cli.constants import messages as MSG
 from cli.constants import keys as KEYS
-from cli.commands.switch_provider import SwitchProviderCommand
 
 __all__ = [
     "ShowConfigCommand",
@@ -129,4 +128,3 @@ class ConfigCommandGroup(CommandGroup):
         )
         self.add_command(ShowConfigCommand())
         self.add_command(SetConfigCommand())
-        self.add_command(SwitchProviderCommand())

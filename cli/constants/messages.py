@@ -282,6 +282,7 @@ APPS_GROUP_DESC = "App management commands"
 CMD_SCAN_ALL_DESC = "Scan device and cache ALL installed apps with AI health filtering (merged file)"
 ARG_HELP_FORCE_RESCAN = "Force rescan even if cache exists"
 MSG_SCAN_ALL_SUCCESS = "Successfully scanned and cached apps with AI filtering. Cache at: {cache_path}"
+MSG_SCAN_ALL_SUCCESS_NO_AI = "Successfully scanned and cached apps (AI filtering not applied). Cache at: {cache_path}"
 ERR_SCAN_APPS_FAILED = "Failed to scan apps"
 
 # ScanHealthAppsCommand
@@ -523,6 +524,57 @@ OLLAMA_LIST_MODELS_FAIL = "Failed to list models"
 OLLAMA_LIST_MODELS_NONE = "No models available"
 OLLAMA_LIST_MODELS_SELECT_HINT = "To select a model, run: python run_cli.py ollama select-model <index_or_name>"
 
+# === Gemini Service Messages ===
+# Error messages
+ERR_GEMINI_IMPORT_FAILED = "Failed to import gemini_models: {error}"
+ERR_GEMINI_MODELS_NOT_FOUND = "Gemini models not found. Make sure GEMINI_API_KEY is set and run 'python run_cli.py gemini refresh-models --wait' first."
+ERR_GEMINI_MODEL_NOT_FOUND = "Model '{model_identifier}' not found."
+ERR_GEMINI_SELECT_MODEL_FAILED = "Failed to select Gemini model: {error}"
+ERR_GEMINI_NOT_SELECTED_PROVIDER = "This command is only available when Gemini is selected as the AI provider."
+ERR_GEMINI_NO_MODEL_SELECTED = "No Gemini model selected. Use 'python run_cli.py gemini select-model <model>' first."
+ERR_GEMINI_MODEL_NOT_IN_CACHE = "Model '{model_identifier}' not found in cache."
+ERR_GEMINI_REFRESH_FAILED = "Failed to refresh Gemini models cache"
+
+# Success messages
+SUCCESS_GEMINI_MODELS_REFRESHED = "Gemini models cache refreshed successfully; saved to {cache_path}"
+SUCCESS_GEMINI_MODEL_SELECTED = "Successfully selected Gemini model: {model_name} ({model_id})"
+
+# Command names and descriptions
+GEMINI_GROUP_NAME = "gemini"
+GEMINI_GROUP_DESC = "Gemini AI model management commands"
+
+GEMINI_REFRESH_MODELS_CMD_NAME = "refresh-models"
+GEMINI_REFRESH_MODELS_DESC = "Refresh Gemini models cache"
+
+GEMINI_LIST_MODELS_CMD_NAME = "list-models"
+GEMINI_LIST_MODELS_DESC = "List available Gemini models"
+GEMINI_LIST_MODELS_REFRESH = "Refresh models from API before listing"
+
+GEMINI_SELECT_MODEL_CMD_NAME = "select-model"
+GEMINI_SELECT_MODEL_DESC = "Select a Gemini model"
+GEMINI_SELECT_MODEL_ARG = "Model index (1-based) or name/ID fragment"
+GEMINI_SELECT_MODEL_SUCCESS = "Selected model: {name} ({id})"
+GEMINI_SELECT_MODEL_FAIL = "Failed to select model: {identifier}"
+
+GEMINI_SHOW_SELECTION_CMD_NAME = "show-selection"
+GEMINI_SHOW_SELECTION_DESC = "Show currently selected Gemini model"
+GEMINI_SHOW_SELECTION_SUCCESS = "Selected model: {name} ({id})"
+GEMINI_SHOW_SELECTION_FAIL = "No Gemini model selected"
+
+GEMINI_SHOW_MODEL_DETAILS_CMD_NAME = "show-model-details"
+GEMINI_SHOW_MODEL_DETAILS_DESC = "Show detailed information about selected model"
+GEMINI_SHOW_MODEL_DETAILS_SUCCESS = "Model details displayed"
+GEMINI_SHOW_MODEL_DETAILS_FAIL = "Failed to show model details"
+
+# Service availability messages
+GEMINI_SERVICE_NOT_AVAILABLE = "Gemini service not available"
+
+# List models messages
+GEMINI_LIST_MODELS_SUCCESS = "Listed {count} models"
+GEMINI_LIST_MODELS_FAIL = "Failed to list models"
+GEMINI_LIST_MODELS_NONE = "No models available"
+GEMINI_LIST_MODELS_SELECT_HINT = "To select a model, run: python run_cli.py gemini select-model <index_or_name>"
+
 # Added constants for process_utils.py
 DEFAULT_FLAG_CONTENT = "flag"
 SUBPROCESS_ENCODING = "utf-8"
@@ -599,12 +651,16 @@ UI_CRAWLER_STATUS = "Crawler Status"
 UI_FOCUS_AREAS = "Focus Areas"
 UI_OPENROUTER_MODELS = "OpenRouter Models"
 UI_OLLAMA_MODELS = "Ollama Models"
+UI_GEMINI_MODELS = "Gemini Models"
 UI_SELECTED_OPENROUTER_MODEL = "Selected OpenRouter Model"
 UI_SELECTED_OLLAMA_MODEL = "Selected Ollama Model"
+UI_SELECTED_GEMINI_MODEL = "Selected Gemini Model"
 UI_OPENROUTER_MODEL_DETAILS = "OpenRouter Model Details"
 UI_OLLAMA_MODEL_DETAILS = "Ollama Model Details"
 UI_OPENROUTER_IMAGE_CONTEXT_CONFIGURATION = "OpenRouter Image Context Configuration"
 UI_NO_OLLAMA_MODEL_SELECTED = "No Ollama model selected."
+UI_NO_GEMINI_MODEL_SELECTED = "No Gemini model selected."
+UI_GEMINI_MODEL_DETAILS = "Gemini Model Details"
 
 # Model selection messages
 UI_SUCCESSFULLY_SELECTED_OPENROUTER_MODEL = "Successfully selected OpenRouter model:"

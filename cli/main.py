@@ -65,6 +65,7 @@ def run(args: Optional[List[str]] = None) -> int:
         from cli.services.mobsf_service import MobSFService
         from cli.services.openrouter_service import OpenRouterService
         from cli.services.ollama_service import OllamaService
+        from cli.services.gemini_service import GeminiService
 
         context.services.register("device", DeviceService(context))
         context.services.register("app_scan", AppScanService(context))
@@ -75,6 +76,7 @@ def run(args: Optional[List[str]] = None) -> int:
         context.services.register("mobsf", MobSFService(context))
         context.services.register("openrouter", OpenRouterService(context))
         context.services.register("ollama", OllamaService(context))
+        context.services.register("gemini", GeminiService(context))
 
         # Set up signal handler for graceful shutdown (Ctrl+C)
         from core.signal_handler import setup_cli_signal_handler
@@ -118,12 +120,12 @@ def _register_commands(registry: CommandRegistry) -> None:
             crawler,
             device,
             focus,
+            gemini,
             mobsf,
             ollama,
             openrouter,
             packages,
-            services_check,
-            switch_provider
+            services_check
         )
 
         logging.debug("Registering standalone commands...")
@@ -131,7 +133,6 @@ def _register_commands(registry: CommandRegistry) -> None:
         registry.add_standalone_command(config.ShowConfigCommand())
         registry.add_standalone_command(config.SetConfigCommand())
         registry.add_standalone_command(services_check.PrecheckCommand())
-        registry.add_standalone_command(switch_provider.SwitchProviderCommand())
 
         logging.debug("Registering command groups...")
         # Register command groups
@@ -139,6 +140,7 @@ def _register_commands(registry: CommandRegistry) -> None:
         apps_group = apps.AppsCommandGroup()
         crawler_group = crawler.CrawlerCommandGroup()
         focus_group = focus.FocusCommandGroup()
+        gemini_group = gemini.GeminiCommandGroup()
         mobsf_group = mobsf.MobSFCommandGroup()
         ollama_group = ollama.OllamaCommandGroup()
         openrouter_group = openrouter.OpenRouterCommandGroup()
@@ -150,6 +152,7 @@ def _register_commands(registry: CommandRegistry) -> None:
         registry.add_group(apps_group)
         registry.add_group(crawler_group)
         registry.add_group(focus_group)
+        registry.add_group(gemini_group)
         registry.add_group(mobsf_group)
         registry.add_group(ollama_group)
         registry.add_group(openrouter_group)

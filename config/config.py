@@ -503,51 +503,6 @@ class Config:
         
         return value
     
-    def switch_ai_provider(self, provider: str, model: Optional[str] = None) -> 'CommandResult':
-        """
-        Switch the AI provider and optionally set the model.
-        
-        Args:
-            provider: AI provider to use (gemini, openrouter, ollama)
-            model: Optional model name/alias to use
-            
-        Returns:
-            CommandResult indicating success or failure
-        """
-        import logging
-        from cli.constants.keys import VALID_AI_PROVIDERS
-        from cli.commands.base import CommandResult
-
-        # Validate provider
-        if provider not in VALID_AI_PROVIDERS:
-            return CommandResult(
-                success=False,
-                message=f"[ERROR] Invalid provider: {provider}",
-                exit_code=1
-            )
-
-        try:
-            # Update provider
-            self.set("AI_PROVIDER", provider)
-
-            # Update model if provided
-            if model:
-                self.set("DEFAULT_MODEL_TYPE", model)
-
-            return CommandResult(
-                success=True,
-                message=f"Provider switched to '{provider}'. Please restart session/command if required.",
-                exit_code=0
-            )
-
-        except Exception as e:
-            logging.error(f"Failed to switch AI provider: {e}", exc_info=True)
-            return CommandResult(
-                success=False,
-                message=f"[ERROR] Failed to switch provider: {str(e)}",
-                exit_code=1
-            )
-
 # ============================================================================
 # DEFAULT CONFIGURATION VALUES
 # ============================================================================

@@ -562,8 +562,6 @@ Return the complete JSON classification for all {num_apps} apps now:"""
                         raise ValueError("AI model returned empty response. Check if the model is running and accessible.")
                     response_text = response_text.strip()
                 except Exception as ai_error:
-                    # Log the error but don't crash - we'll fall back to unknown status
-                    print(f"  ✗ AI call failed: {ai_error}", file=sys.stderr)
                     raise  # Re-raise to be caught by outer exception handler
             
             # Try to extract JSON from the response
@@ -669,7 +667,8 @@ Return the complete JSON classification for all {num_apps} apps now:"""
         except Exception as e:
             ai_filter_error = str(e)
             print(f"  ✗ AI filtering failed: {e}", file=sys.stderr)
-            traceback.print_exc(file=sys.stderr)
+            if not isinstance(e, ValueError):
+                traceback.print_exc(file=sys.stderr)
             print(f"  Falling back to marking all apps as unknown health status.")
             # Fall through to mark all as unknown
             unified_apps = [
@@ -759,8 +758,7 @@ Return the complete JSON classification for all {num_apps} apps now:"""
     print(f"  - Non-health apps: {non_health_count}")
     print(f"  - Unknown status: {unknown_count}")
     print(f"  - AI filtering applied: {ai_filter_was_effectively_applied}")
-    if ai_filter_error:
-        print(f"  - AI filtering error: {ai_filter_error}", file=sys.stderr)
+    # Don't print ai_filter_error here - it's already been printed in the exception handler
 
     try:
         # Save merged data to device-specific path
