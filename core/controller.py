@@ -217,29 +217,25 @@ class CrawlerOrchestrator:
         self._is_running = False
         
         # Set up flag paths from config
-        shutdown_flag_path = getattr(config, 'SHUTDOWN_FLAG_PATH',
-                                os.path.join(config.BASE_DIR or '.', DEFAULT_SHUTDOWN_FLAG))
-        pause_flag_path = getattr(config, 'PAUSE_FLAG_PATH',
-                                os.path.join(config.BASE_DIR or '.', DEFAULT_PAUSE_FLAG))
+        shutdown_flag_path = config.get('SHUTDOWN_FLAG_PATH') or os.path.join(config.BASE_DIR or '.', DEFAULT_SHUTDOWN_FLAG)
+        pause_flag_path = config.get('PAUSE_FLAG_PATH') or os.path.join(config.BASE_DIR or '.', DEFAULT_PAUSE_FLAG)
         
         self.flag_controller = FlagController(shutdown_flag_path, pause_flag_path)
     
     def prepare_plan(self) -> CrawlerLaunchPlan:
         """Prepare a launch plan with validation."""
         # Get paths from configuration
-        project_root = getattr(self.config, 'PROJECT_ROOT')
-        main_script_name = getattr(self.config, 'MAIN_SCRIPT_NAME', 'run_cli.py')
+        project_root = self.config.get('PROJECT_ROOT')
+        main_script_name = self.config.get('MAIN_SCRIPT_NAME', 'run_cli.py')
         main_script = os.path.join(project_root, main_script_name)
         
         # Resolve paths
-        output_data_dir = getattr(self.config, 'OUTPUT_DATA_DIR',
-                                os.path.join(project_root, DEFAULT_OUTPUT_DIR))
-        log_dir = getattr(self.config, 'LOG_DIR',
-                        os.path.join(output_data_dir, DEFAULT_LOG_SUBDIR))
-        log_file_path = os.path.join(log_dir, getattr(self.config, 'LOG_FILE_NAME', DEFAULT_LOG_FILE))
+        output_data_dir = self.config.get('OUTPUT_DATA_DIR') or os.path.join(project_root, DEFAULT_OUTPUT_DIR)
+        log_dir = self.config.get('LOG_DIR') or os.path.join(output_data_dir, DEFAULT_LOG_SUBDIR)
+        log_file_path = os.path.join(log_dir, self.config.get('LOG_FILE_NAME', DEFAULT_LOG_FILE))
         
         # PID file path (use property to resolve placeholders)
-        pid_file_path = getattr(self.config, 'CRAWLER_PID_PATH')
+        pid_file_path = self.config.get('CRAWLER_PID_PATH')
         
         # Prepare environment
         env = os.environ.copy()
@@ -251,8 +247,8 @@ class CrawlerOrchestrator:
             script_path=main_script,
             working_directory=project_root,
             environment=env,
-            app_package=getattr(self.config, 'APP_PACKAGE', ''),
-            app_activity=getattr(self.config, 'APP_ACTIVITY', ''),
+            app_package=self.config.get('APP_PACKAGE', ''),
+            app_activity=self.config.get('APP_ACTIVITY', ''),
             output_data_dir=output_data_dir,
             log_file_path=log_file_path,
             shutdown_flag_path=self.flag_controller.shutdown_flag_path,
@@ -268,7 +264,7 @@ class CrawlerOrchestrator:
     
     def _validate_plan(self, plan: CrawlerLaunchPlan):
         """Validate the launch plan."""
-        from core.validation import ValidationService
+        from core.health_check import ValidationService
         
         validation_service = ValidationService(self.config)
         is_valid, messages = validation_service.validate_all()
@@ -372,9 +368,9 @@ class CrawlerOrchestrator:
             "process_id": self.backend.get_process_id(),
             "validation_passed": self._current_plan.validation_passed if self._current_plan else False,
             "validation_messages": self._current_plan.validation_messages if self._current_plan else [],
-            "app_package": getattr(self.config, 'APP_PACKAGE', 'Not Set'),
-            "app_activity": getattr(self.config, 'APP_ACTIVITY', 'Not Set'),
-            "output_dir": getattr(self.config, 'OUTPUT_DATA_DIR', 'Not Set')
+            "app_package": self.config.get('APP_PACKAGE', 'Not Set'),
+            "app_activity": self.config.get('APP_ACTIVITY', 'Not Set'),
+            "output_dir": self.config.get('OUTPUT_DATA_DIR', 'Not Set')
         }
         
         return status

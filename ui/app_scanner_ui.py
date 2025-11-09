@@ -73,7 +73,7 @@ class HealthAppScanner(QObject):
             logging.warning("get_app_cache_path not available from shared utilities, using direct implementation")
             app_info_dir = os.path.join(
                 self.api_dir,
-                getattr(self.config, "OUTPUT_DATA_DIR", "output_data"),
+                self.config.get("OUTPUT_DATA_DIR", "output_data"),
                 "app_info",
                 device_id,
             )
@@ -351,7 +351,7 @@ class HealthAppScanner(QObject):
         # Respect the UI checkbox/config for AI filtering
         try:
             use_ai_filter = bool(
-                getattr(self.config, "USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY", False)
+                self.config.get("USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY", False)
             )
         except Exception:
             use_ai_filter = False
@@ -726,7 +726,7 @@ class HealthAppScanner(QObject):
                 # Look for any cached device-specific file as a last resort
                 app_info_dir = os.path.join(
                     self.api_dir,
-                    getattr(self.config, "OUTPUT_DATA_DIR", "output_data"),
+                    self.config.get("OUTPUT_DATA_DIR", "output_data"),
                     "app_info",
                     self._get_current_device_id(),
                 )
@@ -933,7 +933,7 @@ class HealthAppScanner(QObject):
                     and self.main_controller.app_scan_status_label
                 ):
                     show_health_only = bool(
-                        getattr(self.config, "USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY", False)
+                        self.config.get("USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY", False)
                     )
                     app_type_display = "Health Apps" if show_health_only else "All Apps"
                     self.main_controller.app_scan_status_label.setText(
@@ -941,7 +941,7 @@ class HealthAppScanner(QObject):
                     )
 
                 show_health_only = bool(
-                    getattr(self.config, "USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY", False)
+                    self.config.get("USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY", False)
                 )
                 app_type = "health apps" if show_health_only else "all apps"
                 self.main_controller.log_message(

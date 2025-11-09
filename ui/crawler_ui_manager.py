@@ -4,11 +4,9 @@
 import logging
 import os
 import re
-import subprocess
 import sys
 from typing import Any, Dict, List, Optional, Tuple
 
-import requests
 from PySide6.QtCore import QObject, QProcess, QRunnable, QThread, QThreadPool, QTimer, Signal, Slot
 from PySide6.QtWidgets import QApplication
 
@@ -16,6 +14,8 @@ from PySide6.QtWidgets import QApplication
 from core import get_process_backend, get_validation_service
 from core.adapters import create_process_backend
 from core.controller import CrawlerOrchestrator
+from core.health_check import ValidationService
+from cli.constants import keys as KEYS
 
 
 class ValidationWorker(QRunnable):
@@ -185,131 +185,30 @@ class CrawlerManager(QObject):
         Returns:
             Tuple of (is_valid, list_of_issues)
         """
+        # Use ValidationService for validation
+        health_service = ValidationService(self.config)
+        services_status = health_service.check_all_services()
+        
         issues = []
         warnings = []
         
-        # 1. Check Appium server
-        if not self._check_appium_server():
-            issues.append("❌ Appium server is not running or not accessible")
-        
-        # 2. Check Ollama (if selected as AI provider)
-        ai_provider = self.config.get('AI_PROVIDER', 'gemini').lower()
-        if ai_provider == 'ollama':
-            if not self._check_ollama_service():
-                issues.append("❌ Ollama service is not running")
-        
-        # 3. Check API keys and required environment variables
-        api_issues, api_warnings = self._check_api_keys_and_env()
-        issues.extend(api_issues)
-        warnings.extend(api_warnings)
-        
-        # 4. Check target app is selected
-        if not self.config.get('APP_PACKAGE', None):
-            issues.append("❌ No target app selected")
+        # Extract issues and warnings from service status
+        for service_name, status in services_status.items():
+            status_type = status.get(KEYS.STATUS_KEY_STATUS, '')
+            message = status.get(KEYS.STATUS_KEY_MESSAGE, '')
+            
+            if status_type == KEYS.STATUS_ERROR:
+                issues.append(f"❌ {service_name}: {message}")
+            elif status_type == KEYS.STATUS_WARNING:
+                warnings.append(f"⚠️ {service_name}: {message}")
         
         # Combine issues and warnings for display
         all_messages = issues + warnings
         
         return len(issues) == 0, all_messages
     
-    def _check_appium_server(self) -> bool:
-        """Check if Appium server is running and accessible."""
-        try:
-            appium_url = self.config.get('APPIUM_SERVER_URL', 'http://127.0.0.1:4723')
-            response = requests.get(f"{appium_url}/status", timeout=3)
-            if response.status_code == 200:
-                status_data = response.json()
-                # Check for 'ready' field, handling both direct and nested formats
-                if status_data.get('ready', False) or status_data.get('value', {}).get('ready', False):
-                    return True
-        except Exception as e:
-            logging.debug(f"Appium server check failed: {e}")
-        return False
-    
-    def _check_mobsf_server(self) -> bool:
-        """Check if MobSF server is running and accessible."""
-        try:
-            mobsf_url = self.config.get('MOBSF_API_URL', 'http://localhost:8000/api/v1')
-            # Try to connect to MobSF API with shorter timeout
-            response = requests.get(f"{mobsf_url}/server_status", timeout=3)
-            if response.status_code == 200:
-                return True
-        except Exception as e:
-            logging.debug(f"MobSF server check failed: {e}")
-        
-        return False
-    
-    def _check_ollama_service(self) -> bool:
-        """Check if Ollama service is running using HTTP API first, then subprocess fallback."""
-        # First try HTTP API check (fast and non-blocking)
-        ollama_url = self.config.get('OLLAMA_BASE_URL', 'http://localhost:11434')
-        
-        try:
-            # Try to connect to Ollama API endpoint with shorter timeout
-            response = requests.get(f"{ollama_url}/api/tags", timeout=1.5)
-            if response.status_code == 200:
-                logging.debug("Ollama service detected via HTTP API")
-                return True
-        except requests.RequestException as e:
-            logging.debug(f"Ollama HTTP API check failed: {e}")
-        except Exception as e:
-            logging.debug(f"Unexpected error during Ollama HTTP check: {e}")
-        
-        # Fallback to subprocess check if HTTP fails
-        try:
-            result = subprocess.run(['ollama', 'list'],
-                                capture_output=True,
-                                text=True,
-                                timeout=2,  # Reduced from 3 seconds
-                                creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0)
-            if result.returncode == 0:
-                logging.debug("Ollama service detected via subprocess")
-                return True
-        except subprocess.TimeoutExpired:
-            logging.debug("Ollama subprocess check timed out")
-        except FileNotFoundError:
-            logging.debug("Ollama executable not found")
-        except subprocess.SubprocessError as e:
-            logging.debug(f"Ollama subprocess check failed: {e}")
-        except Exception as e:
-            logging.debug(f"Unexpected error during Ollama subprocess check: {e}")
-        
-        logging.debug("Ollama service not detected")
-        return False
-    
-    def _check_api_keys_and_env(self) -> Tuple[List[str], List[str]]:
-        """Check if required API keys and environment variables are provided.
-        
-        Returns:
-            Tuple of (blocking_issues, warnings)
-        """
-        issues = []
-        warnings = []
-        ai_provider = self.config.get('AI_PROVIDER', 'gemini').lower()
-        
-        if ai_provider == 'gemini':
-            if not self.config.get('GEMINI_API_KEY', None):
-                issues.append("❌ Gemini API key is not set (check GEMINI_API_KEY in .env file)")
-        
-        elif ai_provider == 'openrouter':
-            if not self.config.get('OPENROUTER_API_KEY', None):
-                issues.append("❌ OpenRouter API key is not set (check OPENROUTER_API_KEY in .env file)")
-        
-        elif ai_provider == 'ollama':
-            if not self.config.get('OLLAMA_BASE_URL', None):
-                warnings.append("⚠️ Ollama base URL not set (using default localhost:11434)")
-        
-        # Check PCAPdroid API key if traffic capture is enabled
-        if self.config.get('ENABLE_TRAFFIC_CAPTURE', False):
-            if not self.config.get('PCAPDROID_API_KEY', None):
-                issues.append("❌ PCAPdroid API key is not set (check PCAPDROID_API_KEY in .env file)")
-        
-        # Check MobSF API key if MobSF analysis is enabled
-        if self.config.get('ENABLE_MOBSF_ANALYSIS', False):
-            if not self.config.get('MOBSF_API_KEY', None):
-                issues.append("❌ MobSF API key is not set (check MOBSF_API_KEY in .env file)")
-        
-        return issues, warnings
+    # Removed duplicate health check methods - now using ValidationService
+    # These methods were replaced by ValidationService to eliminate code duplication
     
     def get_service_status_details(self) -> Dict[str, Dict[str, Any]]:
         """

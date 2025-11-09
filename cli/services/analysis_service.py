@@ -51,12 +51,7 @@ class AnalysisService:
         Returns:
             True if successful, False otherwise
         """
-        config_service = self.context.services.get(CKeys.SERVICE_CONFIG)
-        if not config_service:
-            self.logger.error(CMsg.ERR_CONFIG_SERVICE_NOT_AVAILABLE)
-            return False
-
-        output_data_dir = config_service.get(CKeys.CONFIG_OUTPUT_DATA_DIR)
+        output_data_dir = self.context.config.get(CKeys.CONFIG_OUTPUT_DATA_DIR)
         if not output_data_dir:
             if not quiet:
                 self.logger.error(CMsg.ERR_OUTPUT_DATA_DIR_NOT_CONFIGURED)
@@ -70,11 +65,11 @@ class AnalysisService:
 
         self.discovered_analysis_targets = []
         target_idx = 1
-        # Use the already fetched config_service
+        # Use config directly
         for session_dir in db_output_root.iterdir():
             if not session_dir.is_dir():
                 continue
-            target_info = SessionPathManager.parse_session_dir(session_dir, config_service.config)
+            target_info = SessionPathManager.parse_session_dir(session_dir, self.context.config)
             if target_info:
                 target_info[CKeys.KEY_INDEX] = target_idx  
                 self.discovered_analysis_targets.append(target_info)
@@ -167,11 +162,7 @@ class AnalysisService:
             self.logger.error(CMsg.ERR_RUN_ANALYZER_IMPORT_FAILED.format(error=e))
             return False, {CKeys.KEY_ERROR: CMsg.ERR_RUN_ANALYZER_IMPORT_FAILED.format(error=e)}
         
-        config_service = self.context.services.get(CKeys.SERVICE_CONFIG)
-        if not config_service:
-            return False, {CKeys.KEY_ERROR: CMsg.ERR_CONFIG_SERVICE_NOT_AVAILABLE}
-
-        output_data_dir = config_service.get(CKeys.CONFIG_OUTPUT_DATA_DIR)
+        output_data_dir = self.context.config.get(CKeys.CONFIG_OUTPUT_DATA_DIR)
         if not output_data_dir:
             self.logger.error(CMsg.ERR_OUTPUT_DATA_DIR_NOT_CONFIGURED)
             return False, {CKeys.KEY_ERROR: CMsg.ERR_OUTPUT_DATA_DIR_NOT_CONFIGURED}
@@ -235,11 +226,7 @@ class AnalysisService:
             self.logger.error(error_msg)
             return False, {CKeys.KEY_ERROR: error_msg}
         
-        config_service = self.context.services.get(CKeys.SERVICE_CONFIG)
-        if not config_service:
-            return False, {CKeys.KEY_ERROR: CMsg.ERR_CONFIG_SERVICE_NOT_AVAILABLE}
-
-        output_data_dir = config_service.get(CKeys.CONFIG_OUTPUT_DATA_DIR)
+        output_data_dir = self.context.config.get(CKeys.CONFIG_OUTPUT_DATA_DIR)
         if not output_data_dir:
             self.logger.error(CMsg.ERR_OUTPUT_DATA_DIR_NOT_CONFIGURED)
             return False, {CKeys.KEY_ERROR: CMsg.ERR_OUTPUT_DATA_DIR_NOT_CONFIGURED}
@@ -308,11 +295,7 @@ class AnalysisService:
             self.logger.error(CMsg.ERR_RUN_ANALYZER_IMPORT_FAILED.format(error=e))
             return False, {CKeys.KEY_ERROR: CMsg.ERR_RUN_ANALYZER_IMPORT_FAILED.format(error=e)}
         
-        config_service = self.context.services.get(CKeys.SERVICE_CONFIG)
-        if not config_service:
-            return False, {CKeys.KEY_ERROR: CMsg.ERR_CONFIG_SERVICE_NOT_AVAILABLE}
-
-        output_data_dir = config_service.get(CKeys.CONFIG_OUTPUT_DATA_DIR)
+        output_data_dir = self.context.config.get(CKeys.CONFIG_OUTPUT_DATA_DIR)
         if not output_data_dir:
             self.logger.error(CMsg.ERR_OUTPUT_DATA_DIR_NOT_CONFIGURED)
             return False, {CKeys.KEY_ERROR: CMsg.ERR_OUTPUT_DATA_DIR_NOT_CONFIGURED}

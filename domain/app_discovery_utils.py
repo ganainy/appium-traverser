@@ -86,7 +86,7 @@ def get_app_cache_path(
         base_dir = str(find_project_root(Path(config.BASE_DIR)))
     
     # Get output data directory from config
-    output_data_dir = getattr(config, "OUTPUT_DATA_DIR", "output_data")
+    output_data_dir = config.get("OUTPUT_DATA_DIR", "output_data") if hasattr(config, 'get') else getattr(config, "OUTPUT_DATA_DIR", "output_data")
     
     # Construct the app info directory
     app_info_dir = os.path.join(base_dir, output_data_dir, "app_info", device_id)

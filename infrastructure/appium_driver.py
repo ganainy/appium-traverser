@@ -20,14 +20,11 @@ class AppiumDriver:
     def connect(self) -> bool:
         """Initialize MCP client connection."""
         try:
-            # Get MCP server URL - use property if available, otherwise direct attribute
-            try:
-                mcp_url = self.cfg.CONFIG_MCP_SERVER_URL
-            except AttributeError:
-                mcp_url = getattr(self.cfg, 'MCP_SERVER_URL', 'http://localhost:3000/mcp')
-            # Get timeout values - try direct attributes
-            connection_timeout = getattr(self.cfg, 'MCP_CONNECTION_TIMEOUT', 5.0)
-            request_timeout = getattr(self.cfg, 'MCP_REQUEST_TIMEOUT', 30.0)
+            # Get MCP server URL - use config.get() to follow precedence
+            mcp_url = self.cfg.get('CONFIG_MCP_SERVER_URL') or self.cfg.get('MCP_SERVER_URL', 'http://localhost:3000/mcp')
+            # Get timeout values
+            connection_timeout = self.cfg.get('MCP_CONNECTION_TIMEOUT', 5.0)
+            request_timeout = self.cfg.get('MCP_REQUEST_TIMEOUT', 30.0)
             
             self.mcp_client = MCPClient(
                 server_url=mcp_url,

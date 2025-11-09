@@ -65,7 +65,7 @@ class ScreenStateManager:
             'APP_PACKAGE', 'APP_ACTIVITY'
         ]
         for attr in required_cfg_attrs:
-            val = getattr(self.cfg, attr, None)
+            val = self.cfg.get(attr, None)
             if val is None:
                 if attr == 'VISUAL_SIMILARITY_THRESHOLD' and val == 0: continue # 0 is valid
                 if attr == 'ALLOWED_EXTERNAL_PACKAGES' and isinstance(val, list): continue # Empty list is fine

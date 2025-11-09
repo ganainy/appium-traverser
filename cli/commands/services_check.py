@@ -6,7 +6,7 @@ import argparse
 from typing import Any, Dict, List
 
 from cli.commands.base import CommandHandler, CommandResult, CommandGroup
-from cli.services.health_service import HealthCheckService
+from core.health_check import ValidationService
 from cli.shared.context import CLIContext
 from cli.constants import messages as MSG
 from cli.constants import keys as KEYS
@@ -38,8 +38,8 @@ class PrecheckCommand(CommandHandler):
     def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
         telemetry = context.services.get(KEYS.SERVICE_TELEMETRY)
 
-        # Instantiate the new HealthCheckService
-        health_service = HealthCheckService(context)
+        # Instantiate ValidationService with config
+        health_service = ValidationService(context.config)
         
         # Show loading indicator while checking services
         with LoadingIndicator("Checking services"):

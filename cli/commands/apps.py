@@ -23,7 +23,7 @@ except ImportError:
 from cli.commands.base import CommandGroup, CommandHandler, CommandResult
 from cli.shared.context import CLIContext
 from cli.constants.keys import (
-    SERVICE_APP_SCAN, SERVICE_CONFIG,
+    SERVICE_APP_SCAN,
     CACHE_KEY_ALL, CACHE_KEY_HEALTH,
     APP_NAME, PACKAGE_NAME, ACTIVITY_NAME,
     CONFIG_LAST_SELECTED_APP, CONFIG_APP_PACKAGE, CONFIG_APP_ACTIVITY,
@@ -39,7 +39,6 @@ from cli.constants.messages import (
     CMD_SELECT_DESC, ARG_HELP_APP_IDENTIFIER, MSG_SELECT_APP_SUCCESS, ERR_SELECT_APP_FAILED,
     CMD_SHOW_SELECTED_DESC, HEADER_SELECTED_APP, LABEL_NAME, LABEL_PACKAGE, LABEL_ACTIVITY,
     FOOTER_SELECTED_APP, MSG_NO_APP_SELECTED, ERR_APP_SCAN_SERVICE_NOT_AVAILABLE,
-    ERR_CONFIG_SERVICE_NOT_AVAILABLE,
     MSG_NO_APPS_FOUND, MSG_AUTO_SCANNING, HEADER_APPS_LIST, FORMAT_APP_LIST_ITEM, FOOTER_APPS_LIST,
     MSG_LISTED_APPS_SUCCESS,
     HEADER_ALL_APPS, ERR_NO_APP_CACHE_FOUND
@@ -263,20 +262,18 @@ class SelectAppCommand(CommandHandler):
         success, selected_app = app_service.select_app(getattr(args, ARG_APP_IDENTIFIER))
         
         if success:
-            # Get config service to save app details
-            config_service = context.services.get(SERVICE_CONFIG)
-            if config_service:
-                pkg = selected_app.get(PACKAGE_NAME)
-                act = selected_app.get(ACTIVITY_NAME)
-                name = selected_app.get(APP_NAME, "Unknown")
-                
-                # Save to config
-                config_service.set(CONFIG_APP_PACKAGE, pkg)
-                config_service.set(CONFIG_APP_ACTIVITY, act)
-                config_service.set(
-                    CONFIG_LAST_SELECTED_APP,
-                    {"package_name": pkg, "activity_name": act, "app_name": name},
-                )
+            # Save app details directly to config
+            pkg = selected_app.get(PACKAGE_NAME)
+            act = selected_app.get(ACTIVITY_NAME)
+            name = selected_app.get(APP_NAME, "Unknown")
+            
+            # Save to config
+            context.config.set(CONFIG_APP_PACKAGE, pkg)
+            context.config.set(CONFIG_APP_ACTIVITY, act)
+            context.config.set(
+                CONFIG_LAST_SELECTED_APP,
+                {"package_name": pkg, "activity_name": act, "app_name": name},
+            )
             
             name = selected_app.get(APP_NAME, DEFAULT_UNKNOWN)
             package = selected_app.get(PACKAGE_NAME, DEFAULT_UNKNOWN)
@@ -318,18 +315,10 @@ class ShowSelectedAppCommand(CommandHandler):
     
     def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
         """Execute the command."""
-        config_service = context.services.get(SERVICE_CONFIG)
-        if not config_service:
-            return CommandResult(
-                success=False,
-                message=ERR_CONFIG_SERVICE_NOT_AVAILABLE,
-                exit_code=1
-            )
-        
-        # Use the new method that handles JSON deserialization internally
-        last_selected = config_service.get_deserialized_config_value(CONFIG_LAST_SELECTED_APP)
-        app_package = config_service.get(CONFIG_APP_PACKAGE)
-        app_activity = config_service.get(CONFIG_APP_ACTIVITY)
+        # Get configuration values directly from config
+        last_selected = context.config.get_deserialized_config_value(CONFIG_LAST_SELECTED_APP)
+        app_package = context.config.get(CONFIG_APP_PACKAGE)
+        app_activity = context.config.get(CONFIG_APP_ACTIVITY)
         
         if last_selected and isinstance(last_selected, dict):
             name = last_selected.get(APP_NAME, DEFAULT_UNKNOWN)

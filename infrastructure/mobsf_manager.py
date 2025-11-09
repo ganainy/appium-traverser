@@ -25,16 +25,16 @@ class MobSFManager:
         Initialize the MobSF Manager with configuration settings
         """
         self.cfg = app_config
-        self.api_key = getattr(self.cfg, 'MOBSF_API_KEY', '')
-        self.api_url = getattr(self.cfg, 'MOBSF_API_URL', 'http://localhost:8000/api/v1')
+        self.api_key = self.cfg.get('MOBSF_API_KEY', '')
+        self.api_url = self.cfg.get('MOBSF_API_URL', 'http://localhost:8000/api/v1')
         self.headers = {
             'Authorization': self.api_key
         }
         
         # Ensure OUTPUT_DATA_DIR exists
-        output_dir = str(getattr(self.cfg, 'OUTPUT_DATA_DIR', 'output_data'))
+        output_dir = str(self.cfg.get('OUTPUT_DATA_DIR', 'output_data'))
         # Use session directory for MobSF results if available
-        session_dir = getattr(self.cfg, 'SESSION_DIR', output_dir)
+        session_dir = self.cfg.get('SESSION_DIR', output_dir)
         self.scan_results_dir = os.path.join(session_dir, 'mobsf_scan_results')
         os.makedirs(self.scan_results_dir, exist_ok=True)
         logging.debug(f"MobSFManager initialized with API URL: {self.api_url}")
@@ -139,8 +139,8 @@ class MobSFManager:
             logging.debug(f"Found base APK path: {base_apk_path}")
 
             # Create output directory if it doesn't exist
-            output_dir_base = str(getattr(self.cfg, 'OUTPUT_DATA_DIR', 'output_data'))
-            session_dir = getattr(self.cfg, 'SESSION_DIR', output_dir_base)
+            output_dir_base = str(self.cfg.get('OUTPUT_DATA_DIR', 'output_data'))
+            session_dir = self.cfg.get('SESSION_DIR', output_dir_base)
             output_dir = os.path.join(session_dir, 'extracted_apk')
             os.makedirs(output_dir, exist_ok=True)
             

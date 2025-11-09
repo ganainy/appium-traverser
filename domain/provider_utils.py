@@ -70,6 +70,7 @@ def get_provider_api_key(config: Any, provider: str, default_ollama_url: Optiona
     if hasattr(config, 'get'):
         value = config.get(config_key)
     else:
+        # Fallback for non-Config objects - use getattr but prefer get() if available
         value = getattr(config, config_key, None)
     
     # For Ollama, use default URL if not configured

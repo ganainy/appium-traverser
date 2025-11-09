@@ -352,8 +352,8 @@ class CrawlerControllerWindow(QMainWindow):
         """(Re)initialize the AgentAssistant with current config and model."""
         try:
             from domain.agent_assistant import AgentAssistant
-            provider = getattr(self.config, "AI_PROVIDER", None)
-            model = getattr(self.config, "DEFAULT_MODEL_TYPE", None)
+            provider = self.config.get("AI_PROVIDER", None)
+            model = self.config.get("DEFAULT_MODEL_TYPE", None)
             if not provider or not model or str(model).strip() in ["", "No model selected"]:
                 self.agent_assistant = None
                 self.log_message("AgentAssistant not initialized: provider or model not set.", "orange")
@@ -528,7 +528,7 @@ class CrawlerControllerWindow(QMainWindow):
 
             # Process each path setting
             for setting_name in path_settings:
-                current_value = getattr(self.config, setting_name, None)
+                current_value = self.config.get(setting_name, None)
                 if current_value and os.path.isabs(current_value):
                     # Try to make it relative to the api_dir
                     try:
@@ -758,10 +758,10 @@ class CrawlerControllerWindow(QMainWindow):
         import sqlite3
         from pathlib import Path
 
-        app_package = getattr(self.config, "APP_PACKAGE", None)
-        output_data_dir = getattr(self.config, "OUTPUT_DATA_DIR", None)
-        session_dir = getattr(self.config, "SESSION_DIR", None)
-        db_path = getattr(self.config, "DB_NAME", None)
+        app_package = self.config.get("APP_PACKAGE", None)
+        output_data_dir = self.config.get("OUTPUT_DATA_DIR", None)
+        session_dir = self.config.get("SESSION_DIR", None)
+        db_path = self.config.get("DB_NAME", None)
 
         if not app_package:
             self.log_message("Error: No target app selected.", "red")
@@ -825,7 +825,7 @@ class CrawlerControllerWindow(QMainWindow):
             return
 
         # Prepare output directory and filename
-        reports_dir = Path(getattr(self.config, "PDF_REPORT_DIR", ""))
+        reports_dir = Path(self.config.get("PDF_REPORT_DIR", ""))
         if not reports_dir:
             reports_dir = resolved_session_dir / "reports"
         reports_dir.mkdir(parents=True, exist_ok=True)
@@ -893,7 +893,7 @@ class CrawlerControllerWindow(QMainWindow):
             self.log_message("No connected devices found.", "orange")
 
         # Try to set to the currently configured device; otherwise auto-select first available
-        current_udid = getattr(self.config, "TARGET_DEVICE_UDID", None)
+        current_udid = self.config.get("TARGET_DEVICE_UDID", None)
         # Normalize placeholder values
         normalized_current = (current_udid or "").strip().lower()
         is_placeholder = normalized_current in ("no devices found", "")

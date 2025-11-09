@@ -16,7 +16,7 @@ def get_process_backend(use_qt: bool = False):
 
 def get_validation_service(config):
     """Factory to create validation service without eager imports."""
-    from .validation import ValidationService
+    from .health_check import ValidationService
     return ValidationService(config)
 
 def get_crawler_orchestrator(config, backend):

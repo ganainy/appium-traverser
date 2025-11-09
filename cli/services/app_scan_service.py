@@ -15,7 +15,6 @@ from typing import Dict, List, Optional, Tuple
 
 from cli.shared.context import CLIContext
 from cli.constants.keys import (
-    SERVICE_CONFIG,
     CONFIG_APP_INFO_OUTPUT_DIR,
     CONFIG_CURRENT_HEALTH_APP_LIST_FILE,
     JSON_KEY_APPS,
@@ -156,7 +155,7 @@ class AppScanService:
                 output_data_dir = self.context.config.get("OUTPUT_DATA_DIR")
                 if not output_data_dir:
                     # Try property access
-                    output_data_dir = getattr(self.context.config, "OUTPUT_DATA_DIR", None)
+                    output_data_dir = self.context.config.get("OUTPUT_DATA_DIR", None)
                 
                 if output_data_dir:
                     # Construct app_info directory (without device_id, for glob search)

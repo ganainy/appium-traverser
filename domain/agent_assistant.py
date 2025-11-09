@@ -95,7 +95,7 @@ class AgentAssistant:
         logging.debug("AI response cache initialized.")
 
         # Determine which AI provider to use
-        self.ai_provider = getattr(self.cfg, 'AI_PROVIDER', K.DEFAULT_AI_PROVIDER).lower()
+        self.ai_provider = self.cfg.get('AI_PROVIDER', K.DEFAULT_AI_PROVIDER).lower()
         logging.debug(f"Using AI provider: {self.ai_provider}")
 
         # Adapter provider override (for routing purposes without changing UI label)
@@ -151,7 +151,7 @@ class AgentAssistant:
     def _init_session(self, user_id: Optional[str] = None):
         """Initialize a new provider-agnostic session."""
         now = time.time()
-        model = self.actual_model_name if hasattr(self, 'actual_model_name') else (self.model_alias if hasattr(self, 'model_alias') else getattr(self.cfg, 'DEFAULT_MODEL_TYPE', K.DEFAULT_MODEL_NAME))
+        model = self.actual_model_name if hasattr(self, 'actual_model_name') else (self.model_alias if hasattr(self, 'model_alias') else self.cfg.get('DEFAULT_MODEL_TYPE', K.DEFAULT_MODEL_NAME))
         self.session = Session(
             session_id=str(uuid.uuid4()),
             provider=self.ai_provider,
@@ -187,8 +187,8 @@ class AgentAssistant:
                 response_text, metadata = self.model_adapter.generate_response(
                     prompt=prompt_text,
                     image=None,
-                    image_format=getattr(self.cfg, 'IMAGE_FORMAT', None),
-                    image_quality=getattr(self.cfg, 'IMAGE_QUALITY', None)
+                    image_format=self.cfg.get('IMAGE_FORMAT', None),
+                    image_quality=self.cfg.get('IMAGE_QUALITY', None)
                 )
                 return response_text
             except Exception as e:
@@ -277,7 +277,7 @@ class AgentAssistant:
         bbox = action_data.get("target_bounding_box")
         # Default duration from config
         try:
-            default_duration_ms = int(getattr(self.cfg, 'LONG_PRESS_MIN_DURATION_MS', K.DEFAULT_LONG_PRESS_MS))
+            default_duration_ms = int(self.cfg.get('LONG_PRESS_MIN_DURATION_MS', K.DEFAULT_LONG_PRESS_MS))
         except Exception:
             default_duration_ms = K.DEFAULT_LONG_PRESS_MS
         duration_ms = action_data.get("duration_ms", default_duration_ms)
@@ -347,7 +347,7 @@ class AgentAssistant:
             )
             
             # Set up safety settings
-            safety_settings = safety_settings_override or getattr(self.cfg, 'AI_SAFETY_SETTINGS', None)
+            safety_settings = safety_settings_override or self.cfg.get('AI_SAFETY_SETTINGS', None)
             
             # Initialize the model adapter
             self.model_adapter.initialize(model_config, safety_settings)
@@ -365,7 +365,7 @@ class AgentAssistant:
         if self.ai_interaction_readable_logger and self.ai_interaction_readable_logger.handlers:
             return  # Already configured
 
-        target_log_dir = getattr(self.cfg, 'LOG_DIR', None)
+        target_log_dir = self.cfg.get('LOG_DIR', None)
         try:
             if target_log_dir:
                 os.makedirs(target_log_dir, exist_ok=True)
@@ -414,7 +414,7 @@ class AgentAssistant:
             original_size = len(screenshot_bytes)
             
             # Get AI provider for provider-specific optimizations
-            ai_provider = getattr(self.cfg, 'AI_PROVIDER', K.DEFAULT_AI_PROVIDER).lower()
+            ai_provider = self.cfg.get('AI_PROVIDER', K.DEFAULT_AI_PROVIDER).lower()
             
             # Get provider capabilities from config
             try:
@@ -425,12 +425,12 @@ class AgentAssistant:
             capabilities = AI_PROVIDER_CAPABILITIES.get(ai_provider, AI_PROVIDER_CAPABILITIES.get(K.DEFAULT_AI_PROVIDER, {}))
             
             # Resolve preprocessing settings (global overrides take precedence)
-            max_width = getattr(self.cfg, 'IMAGE_MAX_WIDTH', None) or capabilities.get('image_max_width', K.IMAGE_MAX_WIDTH)
-            quality = getattr(self.cfg, 'IMAGE_QUALITY', None) or capabilities.get('image_quality', K.IMAGE_DEFAULT_QUALITY)
-            image_format = getattr(self.cfg, 'IMAGE_FORMAT', None) or capabilities.get('image_format', K.IMAGE_DEFAULT_FORMAT)
-            crop_bars = getattr(self.cfg, 'IMAGE_CROP_BARS', True)
-            crop_top_pct = float(getattr(self.cfg, 'IMAGE_CROP_TOP_PERCENT', K.IMAGE_CROP_TOP_PCT) or 0.0)
-            crop_bottom_pct = float(getattr(self.cfg, 'IMAGE_CROP_BOTTOM_PERCENT', K.IMAGE_CROP_BOTTOM_PCT) or 0.0)
+            max_width = self.cfg.get('IMAGE_MAX_WIDTH', None) or capabilities.get('image_max_width', K.IMAGE_MAX_WIDTH)
+            quality = self.cfg.get('IMAGE_QUALITY', None) or capabilities.get('image_quality', K.IMAGE_DEFAULT_QUALITY)
+            image_format = self.cfg.get('IMAGE_FORMAT', None) or capabilities.get('image_format', K.IMAGE_DEFAULT_FORMAT)
+            crop_bars = self.cfg.get('IMAGE_CROP_BARS', True)
+            crop_top_pct = float(self.cfg.get('IMAGE_CROP_TOP_PERCENT', K.IMAGE_CROP_TOP_PCT) or 0.0)
+            crop_bottom_pct = float(self.cfg.get('IMAGE_CROP_BOTTOM_PERCENT', K.IMAGE_CROP_BOTTOM_PCT) or 0.0)
             
             logging.debug(
                 f"Image preprocessing settings -> provider: {ai_provider}, max_width: {max_width}, "

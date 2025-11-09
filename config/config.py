@@ -36,11 +36,8 @@ class Config:
         self._secrets = {"OPENROUTER_API_KEY", "GEMINI_API_KEY", "OLLAMA_BASE_URL", "MOBSF_API_KEY"}
         self._init_paths()
         self._path_manager = SessionPathManager(self)
+        # Collect default settings snapshot for to_dict() and reset_settings()
         self._default_snapshot = self._collect_default_settings()
-        try:
-            self._user_store.initialize_defaults(self._default_snapshot)
-        except Exception:
-            logging.exception("Failed to initialize default configuration values in user store.")
 
     def _init_paths(self):
         # Initialize path-related attributes used across the project

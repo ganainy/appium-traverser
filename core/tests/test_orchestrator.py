@@ -25,11 +25,11 @@ if str(project_root) not in sys.path:
 try:
     from core.adapters import SubprocessBackend
     from core.controller import CrawlerLaunchPlan, CrawlerOrchestrator, FlagController
-    from core.validation import ValidationService
+    from core.health_check import ValidationService
 except ImportError:
     from core.adapters import SubprocessBackend
     from core.controller import CrawlerLaunchPlan, CrawlerOrchestrator, FlagController
-    from core.validation import ValidationService
+    from core.health_check import ValidationService
 
 
 class TestCrawlerOrchestrator(unittest.TestCase):
@@ -238,7 +238,7 @@ class TestValidationService(unittest.TestCase):
         self.mock_config.AI_PROVIDER = "gemini"
         self.mock_config.ENABLE_TRAFFIC_CAPTURE = False
         self.mock_config.ENABLE_MOBSF_ANALYSIS = False
-        from core.validation import ValidationService
+        from core.health_check import ValidationService
         self.validation_service = ValidationService(self.mock_config)
     
     @patch('core.validation.requests.get')

@@ -109,7 +109,7 @@ class UIComponents:
                 # Try to get base URL from config
                 base_url = None
                 try:
-                    base_url = getattr(config_handler.config, "OLLAMA_BASE_URL", None)
+                    base_url = config_handler.config.get("OLLAMA_BASE_URL", None)
                 except Exception:
                     pass
                 
@@ -1161,7 +1161,7 @@ class UIComponents:
         except Exception:
             pass
         try:
-            api_key = getattr(config_handler.config, "OPENROUTER_API_KEY", None)
+            api_key = config_handler.config.get("OPENROUTER_API_KEY", None)
             if not api_key:
                 logging.warning("OpenRouter refresh requested but API key is missing.")
                 config_handler.main_controller.log_message(
@@ -1369,7 +1369,7 @@ class UIComponents:
             logging.warning(f"Could not get focus_service from main_controller: {e}")
 
         # Load focus areas from config
-        focus_areas_data = getattr(config_handler.config, "FOCUS_AREAS", None)
+        focus_areas_data = config_handler.config.get("FOCUS_AREAS", None)
 
         # Start with empty list - users must add focus areas through CRUD operations
         # If config has saved focus areas, load them

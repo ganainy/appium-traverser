@@ -43,9 +43,9 @@ class TrafficCaptureManager:
                 # CLEANUP_DEVICE_PCAP_FILE is optional
             ]
             for cfg_key in required_pcap_configs:
-                if not hasattr(self.cfg, cfg_key) or getattr(self.cfg, cfg_key) is None:
+                if self.cfg.get(cfg_key) is None:
                     # Allow DEVICE_PCAP_DIR to be None and default later
-                    if cfg_key == 'DEVICE_PCAP_DIR' and getattr(self.cfg, cfg_key, None) is None:
+                    if cfg_key == 'DEVICE_PCAP_DIR' and self.cfg.get(cfg_key) is None:
                         continue
                     raise ValueError(f"TrafficCaptureManager: Required config '{cfg_key}' not found or is None.")
             logging.debug("TrafficCaptureManager initialized and enabled.")
@@ -58,7 +58,7 @@ class TrafficCaptureManager:
         """
         # Ensure adb path is correct, consider making it configurable if not in PATH
         # For simplicity, assuming 'adb' is in PATH
-        adb_executable = getattr(self.cfg, 'ADB_EXECUTABLE_PATH', 'adb') 
+        adb_executable = self.cfg.get('ADB_EXECUTABLE_PATH', 'adb') 
         try:
             full_command = [adb_executable] + command_list
             
@@ -149,7 +149,7 @@ class TrafficCaptureManager:
             # Optional: enable TLS decryption if PCAPdroid is set up for it (requires root/special setup)
             # '-e', 'tls_decryption', 'true' # Add to config if desired
         ]
-        if getattr(self.cfg, 'PCAPDROID_TLS_DECRYPTION', False): # Example config flag
+        if self.cfg.get('PCAPDROID_TLS_DECRYPTION', False): # Example config flag
             start_command_args.extend(['-e', 'tls_decryption', 'true'])
 
         if self.cfg.get('PCAPDROID_API_KEY'):
@@ -171,7 +171,7 @@ class TrafficCaptureManager:
         self._is_currently_capturing = True
         
         # Wait for PCAPdroid to initialize (configurable)
-        init_wait = float(getattr(self.cfg, 'PCAPDROID_INIT_WAIT', 3.0)) # Default 3s
+        init_wait = float(self.cfg.get('PCAPDROID_INIT_WAIT', 3.0)) # Default 3s
         if init_wait > 0:
             logging.debug(f"Waiting {init_wait}s for PCAPdroid to initialize capture...")
             await asyncio.sleep(init_wait)
@@ -202,7 +202,7 @@ class TrafficCaptureManager:
             logging.debug("PCAPdroid 'stop' command sent successfully.")
 
         # Wait for file finalization (configurable)
-        finalize_wait = float(getattr(self.cfg, 'PCAPDROID_FINALIZE_WAIT', 2.0)) # Default 2s
+        finalize_wait = float(self.cfg.get('PCAPDROID_FINALIZE_WAIT', 2.0)) # Default 2s
         if finalize_wait > 0:
             logging.debug(f"Waiting {finalize_wait}s for PCAP file finalization...")
             await asyncio.sleep(finalize_wait)

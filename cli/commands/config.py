@@ -101,10 +101,11 @@ class SetConfigCommand(CommandHandler):
         return parser
 
     def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
-        from cli.services.config_service import ConfigService
-
-        config_service = ConfigService(context)
-        success = config_service.set_and_save_from_pairs(args.key_value_pairs)
+        # Use config directly
+        success = context.config.set_and_save_from_pairs(
+            args.key_value_pairs, 
+            context.services.get(KEYS.TELEMETRY_SERVICE)
+        )
         total_count = len(args.key_value_pairs)
 
         # Calculate success count for the message
