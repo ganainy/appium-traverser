@@ -11,7 +11,7 @@ import logging
 from typing import List, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from config.config import Config
+    from config.app_config import Config
 
 
 class AllowedPackagesAdapter:

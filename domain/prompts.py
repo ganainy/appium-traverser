@@ -25,8 +25,11 @@ AVAILABLE_ACTIONS = {
     "click": "Perform a click action on the target element.",
     "input": "Input text into the target element.",
     "long_press": "Perform a long press action on the target element.",
-    "swipe": "Swipe in a specified direction.",
-    "scroll": "Scroll the view to reveal more content."
+    "scroll_down": "Scroll the view downward to reveal more content below.",
+    "scroll_up": "Scroll the view upward to reveal more content above.",
+    "swipe_left": "Swipe left to navigate or reveal content on the right.",
+    "swipe_right": "Swipe right to navigate or reveal content on the left.",
+    "back": "Press the back button to return to the previous screen."
 }
 
 # Define prompt templates as string constants

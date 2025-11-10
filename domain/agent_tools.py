@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 if TYPE_CHECKING:
     from infrastructure.appium_driver import AppiumDriver
-    from config.config import Config
+    from config.app_config import Config
 
 
 class AgentTools:
@@ -130,7 +130,7 @@ class AgentTools:
                 }
             
             # Call MCP driver scroll method
-            success = self.driver.scroll(None, direction)
+            success = self.driver.scroll(direction)
             result = {
                 "success": success,
                 "message": f"Scroll {direction} executed successfully" if success else "Scroll failed"

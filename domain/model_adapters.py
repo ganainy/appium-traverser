@@ -31,8 +31,8 @@ Each adapter implements a common interface for:
 
 This module focuses on runtime model interaction (inference). For model
 discovery and metadata management, see:
-- domain/ollama_models.py: Ollama model discovery, caching, and vision detection
-- domain/openrouter_models.py: OpenRouter model discovery, caching, and metadata
+- domain/providers/ollama_provider.py: Ollama model discovery, caching, and vision detection
+- domain/providers/openrouter_provider.py: OpenRouter model discovery, caching, and metadata
 """
 
 import io
@@ -208,7 +208,8 @@ class OpenRouterAdapter(ModelAdapter):
             OpenAI = __import__('openai').OpenAI
             
             # Initialize client (OpenRouter uses OpenAI-compatible API)
-            self.client = OpenAI(api_key=self.api_key, base_url="https://openrouter.ai/api/v1")
+            from config.urls import ServiceURLs
+            self.client = OpenAI(api_key=self.api_key, base_url=ServiceURLs.get_openrouter_api_url())
             
             # Store generation parameters
             self.generation_params = model_config.get('generation_config', {})
@@ -422,14 +423,21 @@ class OllamaAdapter(ModelAdapter):
     def _check_vision_support(self, model_name: str) -> bool:
         """Check if the model supports vision capabilities.
         
-        Delegates to the shared vision detection function in ollama_models.py
-        to ensure consistent detection across the codebase. Uses hybrid detection
+        Delegates to the provider strategy for vision detection to ensure
+        consistent detection across the codebase. Uses hybrid detection
         (metadata → CLI → patterns) for accurate results.
         """
         try:
-            from domain.ollama_models import is_ollama_model_vision
-            # Pass base_url if available to enable metadata/CLI checks with custom Ollama instances
-            return is_ollama_model_vision(model_name, base_url=self.base_url)
+            from domain.providers.registry import ProviderRegistry
+            from domain.providers.enums import AIProvider
+            
+            provider = ProviderRegistry.get(AIProvider.OLLAMA)
+            if provider:
+                # Pass base_url if available to enable metadata/CLI checks with custom Ollama instances
+                return provider.is_model_vision(model_name, base_url=self.base_url)
+            else:
+                # Fallback to conservative result if provider not found
+                return False
         except Exception as e:
             # Log the error but don't crash - fall back to conservative result
             logging.warning(f"Error checking vision support for {model_name}: {e}")
@@ -490,7 +498,7 @@ class OllamaAdapter(ModelAdapter):
             try:
                 available_models = ollama.list()
                 
-                # Handle the new Ollama API response format (Python SDK v0.5.0+)
+                # Process Ollama API response format
                 for model_obj in available_models.models:
                     # Extract model name from the model object
                     if hasattr(model_obj, 'model'):
@@ -727,33 +735,30 @@ class OllamaAdapter(ModelAdapter):
 
 def check_dependencies(provider: str) -> tuple[bool, str]:
     """Check if the required dependencies are installed for the chosen provider."""
-    if provider.lower() == "gemini":
-        try:
-            import google.generativeai
-            return True, ""
-        except ImportError:
-            return False, "Google Generative AI Python SDK not installed. Run: pip install google-generativeai"
-    elif provider.lower() == "openrouter":
-        try:
-            __import__('openai')
-            return True, ""
-        except ImportError:
-            return False, "OpenAI Python SDK not installed. Run: pip install openai"
-    elif provider.lower() == "ollama":
-        try:
-            import ollama
-            return True, ""
-        except ImportError:
-            return False, "Ollama Python SDK not installed. Run: pip install ollama"
+    from domain.providers.registry import ProviderRegistry
+    
+    strategy = ProviderRegistry.get_by_name(provider)
+    if strategy:
+        return strategy.check_dependencies()
     return True, ""  # Default case
 
 def create_model_adapter(provider: str, api_key: str, model_name: str) -> ModelAdapter:
     """Factory function to create the appropriate model adapter."""
-    if provider.lower() == "gemini":
+    from domain.providers.enums import AIProvider
+    from domain.providers.registry import ProviderRegistry
+    
+    # Use enum for type safety
+    try:
+        provider_enum = AIProvider.from_string(provider)
+    except ValueError:
+        raise ValueError(f"Unsupported model provider: {provider}")
+    
+    # Map provider enum to adapter class
+    if provider_enum == AIProvider.GEMINI:
         return GeminiAdapter(api_key, model_name)
-    elif provider.lower() == "openrouter":
+    elif provider_enum == AIProvider.OPENROUTER:
         return OpenRouterAdapter(api_key, model_name)
-    elif provider.lower() == "ollama":
+    elif provider_enum == AIProvider.OLLAMA:
         return OllamaAdapter(api_key, model_name)
     else:
         raise ValueError(f"Unsupported model provider: {provider}")

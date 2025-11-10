@@ -116,7 +116,7 @@ def _register_commands(registry: CommandRegistry) -> None:
         from cli.commands import (
             analysis,
             apps,
-            config,
+            settings,
             crawler,
             device,
             focus,
@@ -130,12 +130,11 @@ def _register_commands(registry: CommandRegistry) -> None:
 
         logging.debug("Registering standalone commands...")
         # Register standalone commands
-        registry.add_standalone_command(config.ShowConfigCommand())
-        registry.add_standalone_command(config.SetConfigCommand())
         registry.add_standalone_command(services_check.PrecheckCommand())
 
         logging.debug("Registering command groups...")
         # Register command groups
+        config_group = settings.ConfigCommandGroup()
         device_group = device.DeviceCommandGroup()
         apps_group = apps.AppsCommandGroup()
         crawler_group = crawler.CrawlerCommandGroup()
@@ -148,6 +147,7 @@ def _register_commands(registry: CommandRegistry) -> None:
         packages_group = packages.PackagesCommandGroup()
 
         # Register groups instead of individual commands
+        registry.add_group(config_group)
         registry.add_group(device_group)
         registry.add_group(apps_group)
         registry.add_group(crawler_group)

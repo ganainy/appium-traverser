@@ -28,18 +28,30 @@ class OpenRouterService:
             Tuple of (success, cache_path) where cache_path is the path to the saved cache file
         """
         try:
-            from domain.openrouter_models import background_refresh_openrouter_models
-        except ImportError as e:
-            self.logger.error(MSG.ERR_OPENROUTER_IMPORT_FAILED.format(error=e))
+            from domain.providers.registry import ProviderRegistry
+            from domain.providers.enums import AIProvider
+            
+            provider = ProviderRegistry.get(AIProvider.OPENROUTER)
+            if not provider:
+                self.logger.error("OpenRouter provider not found")
+                return False, None
+        except Exception as e:
+            self.logger.error(f"Failed to get OpenRouter provider: {e}")
             return False, None
         
         try:
             if wait_for_completion:
                 from utils import LoadingIndicator
                 with LoadingIndicator("Refreshing OpenRouter models"):
-                    success, cache_path = background_refresh_openrouter_models(wait_for_completion=wait_for_completion)
+                    success, cache_path = provider.refresh_models(
+                        self.context.config,
+                        wait_for_completion=wait_for_completion
+                    )
             else:
-                success, cache_path = background_refresh_openrouter_models(wait_for_completion=wait_for_completion)
+                success, cache_path = provider.refresh_models(
+                    self.context.config,
+                    wait_for_completion=wait_for_completion
+                )
             if success and cache_path:
                 self.logger.info(
                     MSG.SUCCESS_OPENROUTER_MODELS_REFRESHED.format(cache_path=cache_path)
@@ -62,32 +74,28 @@ class OpenRouterService:
             Tuple of (success, models_list)
         """
         try:
-            from domain.openrouter_models import is_openrouter_model_free, load_openrouter_models_cache
-        except ImportError as e:
-            self.logger.error(MSG.ERR_OPENROUTER_IMPORT_FAILED.format(error=e))
+            from domain.providers.registry import ProviderRegistry
+            from domain.providers.enums import AIProvider
+            
+            provider = ProviderRegistry.get(AIProvider.OPENROUTER)
+            if not provider:
+                self.logger.error("OpenRouter provider not found")
+                return False, None
+        except Exception as e:
+            self.logger.error(f"Failed to get OpenRouter provider: {e}")
             return False, None
         
-        models = load_openrouter_models_cache()
+        success, models = provider.get_models_full(
+            self.context.config,
+            free_only=free_only,
+            all_models=all_models
+        )
         
-        if not models:
+        if not success or not models:
             self.logger.error(MSG.ERR_OPENROUTER_MODELS_CACHE_NOT_FOUND)
             return False, None
         
-        # Determine if we should filter to free-only models
-        should_filter_free = free_only
-        if not should_filter_free and not all_models:
-            # Use config setting only if neither free_only nor all_models is specified
-            should_filter_free = self.context.config.get(K.CONFIG_OPENROUTER_SHOW_FREE_ONLY, False)
-        
-        # Filter models if should_filter_free is True
-        if should_filter_free:
-            filtered_models = [m for m in models if is_openrouter_model_free(m)]
-            if not filtered_models:
-                self.logger.error("No free models found in cache. Run refresh to update.")
-                return False, None
-            return True, filtered_models
-        else:
-            return True, models
+        return True, models
     
     def select_model(self, model_identifier: str) -> Tuple[bool, Optional[Dict]]:
         """Select an OpenRouter model by index or name/ID fragment.
@@ -104,14 +112,19 @@ class OpenRouterService:
             - error: str (error message if failed)
         """
         try:
-            from domain.openrouter_models import is_openrouter_model_free, load_openrouter_models_cache
-        except ImportError as e:
-            self.logger.error(MSG.ERR_OPENROUTER_IMPORT_FAILED.format(error=e))
-            return False, {K.KEY_SUCCESS: False, K.KEY_ERROR: MSG.ERR_OPENROUTER_IMPORT_FAILED.format(error=e)}
+            from domain.providers.registry import ProviderRegistry
+            from domain.providers.enums import AIProvider
+            
+            provider = ProviderRegistry.get(AIProvider.OPENROUTER)
+            if not provider:
+                return False, {K.KEY_SUCCESS: False, K.KEY_ERROR: "OpenRouter provider not found"}
+        except Exception as e:
+            self.logger.error(f"Failed to get OpenRouter provider: {e}")
+            return False, {K.KEY_SUCCESS: False, K.KEY_ERROR: f"Failed to get OpenRouter provider: {e}"}
         
-        models = load_openrouter_models_cache()
+        success, models = provider.get_models_full(self.context.config)
         
-        if not models:
+        if not success or not models:
             self.logger.error(MSG.ERR_OPENROUTER_MODELS_CACHE_NOT_FOUND)
             return False, {K.KEY_SUCCESS: False, K.KEY_ERROR: MSG.ERR_OPENROUTER_MODELS_CACHE_NOT_FOUND}
         
@@ -147,7 +160,7 @@ class OpenRouterService:
             
             # Show warning if this is a paid model and warnings are enabled
             show_warning = self.context.config.get(K.CONFIG_OPENROUTER_NON_FREE_WARNING, False)
-            is_free = is_openrouter_model_free(selected_model)
+            is_free = provider.is_model_free(selected_model)
             
             # Return data for presentation layer
             data = {
@@ -169,19 +182,23 @@ class OpenRouterService:
         Returns:
             Selected model dictionary or None
         """
+        from domain.providers.registry import ProviderRegistry
+        from domain.providers.enums import AIProvider
+        
         current_provider = self.context.config.get(K.CONFIG_AI_PROVIDER, "")
         current_model = self.context.config.get(K.CONFIG_DEFAULT_MODEL_TYPE, "")
         
-        if current_provider.lower() != K.PROVIDER_OPENROUTER:
+        if current_provider.lower() != AIProvider.OPENROUTER.value:
             return None
         
         try:
-            from domain.openrouter_models import get_openrouter_model_meta
-        except ImportError as e:
-            self.logger.error(MSG.ERR_OPENROUTER_IMPORT_FAILED.format(error=e))
+            provider = ProviderRegistry.get(AIProvider.OPENROUTER)
+            if not provider:
+                return None
+        except Exception:
             return None
         
-        return get_openrouter_model_meta(current_model)
+        return provider.get_model_meta(current_model)
     
     def configure_image_context(
         self,
@@ -224,12 +241,17 @@ class OpenRouterService:
         
         # Get model metadata
         try:
-            from domain.openrouter_models import get_openrouter_model_meta, is_openrouter_model_vision
-        except ImportError as e:
-            self.logger.error(f"Failed to import openrouter_models: {e}")
-            return False, {"success": False, "error": f"Failed to import openrouter_models: {e}"}
+            from domain.providers.registry import ProviderRegistry
+            from domain.providers.enums import AIProvider
+            
+            provider = ProviderRegistry.get(AIProvider.OPENROUTER)
+            if not provider:
+                return False, {"success": False, "error": "OpenRouter provider not found"}
+        except Exception as e:
+            self.logger.error(f"Failed to get OpenRouter provider: {e}")
+            return False, {"success": False, "error": f"Failed to get OpenRouter provider: {e}"}
         
-        selected_model = get_openrouter_model_meta(model_identifier)
+        selected_model = provider.get_model_meta(model_identifier)
         
         if not selected_model:
             return False, {
@@ -274,7 +296,7 @@ class OpenRouterService:
             return True, data
         else:
             # Unknown capability - use heuristic
-            heuristic = is_openrouter_model_vision(model_identifier)
+            heuristic = provider.is_model_vision(model_identifier)
             data[K.KEY_HEURISTIC_SUPPORTS_IMAGE] = heuristic
             
             if heuristic:
@@ -313,8 +335,9 @@ class OpenRouterService:
             - error: str (error message if failed)
             - model_identifier: str (model ID if error)
         """
+        from domain.providers.enums import AIProvider
         current_provider = self.context.config.get(K.CONFIG_AI_PROVIDER, "")
-        if current_provider.lower() != K.PROVIDER_OPENROUTER:
+        if current_provider.lower() != AIProvider.OPENROUTER.value:
             return False, {
                 K.KEY_SUCCESS: False,
                 K.KEY_ERROR: MSG.ERR_OPENROUTER_NOT_SELECTED_PROVIDER
@@ -331,12 +354,17 @@ class OpenRouterService:
         
         # Get model metadata
         try:
-            from domain.openrouter_models import get_openrouter_model_meta, is_openrouter_model_free
-        except ImportError as e:
-            self.logger.error(MSG.ERR_OPENROUTER_IMPORT_FAILED.format(error=e))
-            return False, {K.KEY_SUCCESS: False, K.KEY_ERROR: MSG.ERR_OPENROUTER_IMPORT_FAILED.format(error=e)}
+            from domain.providers.registry import ProviderRegistry
+            from domain.providers.enums import AIProvider
+            
+            provider = ProviderRegistry.get(AIProvider.OPENROUTER)
+            if not provider:
+                return False, {K.KEY_SUCCESS: False, K.KEY_ERROR: "OpenRouter provider not found"}
+        except Exception as e:
+            self.logger.error(f"Failed to get OpenRouter provider: {e}")
+            return False, {K.KEY_SUCCESS: False, K.KEY_ERROR: f"Failed to get OpenRouter provider: {e}"}
         
-        selected_model = get_openrouter_model_meta(model_identifier)
+        selected_model = provider.get_model_meta(model_identifier)
         
         if not selected_model:
             return False, {
@@ -346,7 +374,7 @@ class OpenRouterService:
             }
         
         # Get additional information for presentation
-        is_free = is_openrouter_model_free(selected_model)
+        is_free = provider.is_model_free(selected_model)
         current_image_context = self.context.config.get(K.CONFIG_ENABLE_IMAGE_CONTEXT, False)
         
         # Return data for presentation layer

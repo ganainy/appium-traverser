@@ -7,7 +7,7 @@ import sys
 import threading
 import time
 
-from config.config import Config
+from config.app_config import Config
 
 import hashlib
 import shutil
@@ -258,8 +258,9 @@ def visual_hash_distance(hash1: str, hash2: str) -> int:
     """Calculates the Hamming distance between two visual hashes."""
     if hash1 == hash2:
         return 0
+    from config.numeric_constants import HASH_DISTANCE_ERROR_THRESHOLD
     if "no_image" in [hash1, hash2] or "hash_error" in [hash1, hash2]:
-        return 1000
+        return HASH_DISTANCE_ERROR_THRESHOLD
 
     try:
         h1 = imagehash.hex_to_hash(hash1)
@@ -282,19 +283,36 @@ def simplify_xml_for_ai(xml_string: str, max_len: int, provider: str = "gemini",
     if not xml_string:
         return ""
 
+    from config.numeric_constants import XML_ORIGINAL_LEN_LOG_THRESHOLD
     original_len = len(xml_string)
-    if original_len > 200:
+    if original_len > XML_ORIGINAL_LEN_LOG_THRESHOLD:
         logging.debug(f"Original XML length: {original_len} (provider: {provider})")
 
     # Get provider capabilities from config
-    from config import AI_PROVIDER_CAPABILITIES
+    from config.app_config import AI_PROVIDER_CAPABILITIES
+    from domain.providers.enums import AIProvider
     
-    capabilities = AI_PROVIDER_CAPABILITIES.get(provider.lower(), AI_PROVIDER_CAPABILITIES.get('gemini', {}))
+    # Use provider enum for type safety
+    try:
+        provider_enum = AIProvider.from_string(provider)
+        provider_key = provider_enum.value
+    except ValueError:
+        # Fallback to lowercase string if enum conversion fails
+        provider_key = provider.lower()
+    
+    capabilities = AI_PROVIDER_CAPABILITIES.get(provider_key, AI_PROVIDER_CAPABILITIES.get('gemini', {}))
     
     # Use the more restrictive limit between configured max_len and provider capability
     effective_max_len = min(max_len, capabilities.get('xml_max_len', max_len))
+    from config.numeric_constants import (
+        XML_TIGHT_MODE_THRESHOLD,
+        XML_VERY_TIGHT_MODE_THRESHOLD
+    )
     # Tight mode for small provider limits or explicitly small max_len
-    tight_mode = effective_max_len <= 50000 or provider.lower() in {"openrouter", "ollama"}
+    # Check using enum values for type safety
+    tight_mode = effective_max_len <= XML_TIGHT_MODE_THRESHOLD or provider_key in {AIProvider.OPENROUTER.value, AIProvider.OLLAMA.value}
+    # Very tight mode for very small limits (e.g., 15000) - more aggressive pruning
+    very_tight_mode = effective_max_len <= XML_VERY_TIGHT_MODE_THRESHOLD
     
     if effective_max_len != max_len:
         logging.debug(f"Applied {provider}-specific XML limit: {effective_max_len} (from configured {max_len})")
@@ -317,6 +335,10 @@ def simplify_xml_for_ai(xml_string: str, max_len: int, provider: str = "gemini",
         for element in root.iter('*'):
             current_attrs = list(element.attrib.keys())
             for attr_name in current_attrs:
+                # Always remove 'index' attribute - it's not useful for AI decisions
+                if attr_name == 'index':
+                    del element.attrib[attr_name]
+                    continue
                 if attr_name not in KEEP_ATTRS:
                     del element.attrib[attr_name]
                     continue
@@ -339,8 +361,13 @@ def simplify_xml_for_ai(xml_string: str, max_len: int, provider: str = "gemini",
 
         # Second pass: interactive-node-centric text handling
         # Interactive criteria: any of clickable, focusable, checkable, long-clickable == 'true'
+        from config.numeric_constants import (
+            XML_TEXT_FIELD_LEN_VERY_TIGHT,
+            XML_TEXT_FIELD_LEN_TIGHT,
+            XML_TEXT_FIELD_LEN_NORMAL
+        )
         interactive_flags: Dict[Any, bool] = {}
-        MAX_TEXT_FIELD_LEN = 80 if tight_mode else 120
+        MAX_TEXT_FIELD_LEN = XML_TEXT_FIELD_LEN_VERY_TIGHT if very_tight_mode else (XML_TEXT_FIELD_LEN_TIGHT if tight_mode else XML_TEXT_FIELD_LEN_NORMAL)
         for element in root.iter('*'):
             try:
                 is_interactive = any(
@@ -358,6 +385,9 @@ def simplify_xml_for_ai(xml_string: str, max_len: int, provider: str = "gemini",
                         val = element.attrib[field]
                         if len(val) > MAX_TEXT_FIELD_LEN:
                             element.attrib[field] = val[:MAX_TEXT_FIELD_LEN]
+                # In very tight mode, remove bounds from interactive elements if they have resource-id
+                if very_tight_mode and element.attrib.get('resource-id'):
+                    element.attrib.pop('bounds', None)
             else:
                 # Remove non-essential text for non-interactive nodes
                 element.attrib.pop('text', None)
@@ -368,6 +398,9 @@ def simplify_xml_for_ai(xml_string: str, max_len: int, provider: str = "gemini",
                 if tight_mode:
                     # Drop class for purely structural, non-interactive nodes to save tokens
                     element.attrib.pop('class', None)
+                # In very tight mode, also remove hint from non-interactive elements
+                if very_tight_mode:
+                    element.attrib.pop('hint', None)
 
         # Third pass (optional, when lxml is available): prune non-interactive containers
         # that have no resource-id and no interactive descendants (controlled by prune_noninteractive)
@@ -396,7 +429,9 @@ def simplify_xml_for_ai(xml_string: str, max_len: int, provider: str = "gemini",
                     if tight_mode:
                         cls = element.attrib.get('class', '')
                         cls_suffix = cls.split('.')[-1] if '.' in cls else cls
-                        many_children = len(element) >= 4
+                        # In very tight mode, be more aggressive - remove containers with 2+ children
+                        many_children_threshold = 2 if very_tight_mode else 4
+                        many_children = len(element) >= many_children_threshold
                         is_structural = cls_suffix in CONTAINER_CLASSES or (not cls_suffix and many_children)
                         if is_structural and not descendant_has_interactive and not descendant_has_id:
                             nodes_to_remove.append(element)
@@ -450,7 +485,7 @@ def simplify_xml_for_ai(xml_string: str, max_len: int, provider: str = "gemini",
 def filter_xml_by_allowed_packages(xml_string: str, target_package: str, allowed_packages: List[str]) -> str:
     """
     Filters an XML string, removing elements not belonging to the target or allowed packages.
-    System UI packages (e.g., 'com.android.systemui') are implicitly allowed to keep essential navigation.
+    System UI packages are implicitly allowed to keep essential navigation.
     """
     if not xml_string:
         return ""
@@ -470,7 +505,8 @@ def filter_xml_by_allowed_packages(xml_string: str, target_package: str, allowed
 
         allowed_set: Set[str] = set(allowed_packages)
         allowed_set.add(target_package)
-        allowed_set.add('com.android.systemui')
+        from config.package_constants import PackageConstants
+        allowed_set.add(PackageConstants.SYSTEM_UI_PACKAGE)
 
         parent_map = {c: p for p in root.iter() for c in p}
         nodes_to_remove = []

@@ -217,39 +217,8 @@ class CrawlerControllerWindow(QMainWindow):
 
     def _create_tooltips(self) -> Dict[str, str]:
         """Create tooltips for UI elements."""
-        return {
-            "APPIUM_SERVER_URL": "URL of the Appium server (e.g., http://127.0.0.1:4723). This is the server that handles mobile automation.",
-            "MCP_SERVER_URL": "URL of the running MCP server (e.g., http://127.0.0.1:3000).",
-            "TARGET_DEVICE_UDID": "Unique Device Identifier (UDID) of the target Android device or emulator. Optional.",
-            "DEFAULT_MODEL_TYPE": "The default Gemini model to use for AI operations.",
-            "XML_SNIPPET_MAX_LEN": "Maximum characters of the XML page source to send to the AI for context. Minimum 5000 characters to ensure AI has sufficient UI structure information. The system automatically adjusts this limit based on the selected AI provider's payload size constraints to prevent API errors.",
-            "CRAWL_MODE": "'steps': Crawl for a fixed number of actions. 'time': Crawl for a fixed duration.",
-            "MAX_CRAWL_STEPS": "Maximum number of actions to perform if CRAWL_MODE is 'steps'.",
-            "MAX_CRAWL_DURATION_SECONDS": "Maximum duration in seconds for the crawl if CRAWL_MODE is 'time'.",
-            "WAIT_AFTER_ACTION": "Seconds to wait for the UI to stabilize after performing an action.",
-            "STABILITY_WAIT": "Seconds to wait before capturing the UI state (screenshot/XML) after an action, ensuring UI is stable.",
-            "APP_LAUNCH_WAIT_TIME": "Seconds to wait after launching the app for it to stabilize before starting the crawl.",
-            "VISUAL_SIMILARITY_THRESHOLD": "Perceptual hash distance threshold for comparing screenshots. Lower values mean screenshots must be more similar to be considered the same state.",
-            "ALLOWED_EXTERNAL_PACKAGES": "List of package names (one per line) that the crawler can interact with outside the main target app (e.g., for logins, webviews).",
-            "MAX_CONSECUTIVE_AI_FAILURES": "Maximum number of consecutive times the AI can fail to provide a valid action before stopping.",
-            "MAX_CONSECUTIVE_MAP_FAILURES": "Maximum number of consecutive times the AI action cannot be mapped to a UI element before stopping.",
-            "MAX_CONSECUTIVE_EXEC_FAILURES": "Maximum number of consecutive times an action execution can fail before stopping.",
-            "ENABLE_IMAGE_CONTEXT": "Enable to send screenshots to the AI for visual analysis. Disable for text-only analysis using XML only.",
-            "ENABLE_TRAFFIC_CAPTURE": "Enable to capture network traffic (PCAP) during the crawl using PCAPdroid (requires PCAPdroid to be installed and configured on the device).",
-            "CLEANUP_DEVICE_PCAP_FILE": "If traffic capture is enabled, delete the PCAP file from the device after successfully pulling it to the computer.",
-            "CONTINUE_EXISTING_RUN": "Enable to resume a previous crawl session, using its existing database and screenshots. Disable to start a fresh run.",
-            "ENABLE_MOBSF_ANALYSIS": "Enable to perform static analysis of the app using MobSF.",
-            "MOBSF_API_URL": "URL of the MobSF API (e.g., http://localhost:8000/api/v1)",
-            "MOBSF_API_KEY": "API Key for authenticating with MobSF. This can be found in the MobSF web interface or in the config file.",
-            "ENABLE_VIDEO_RECORDING": "Enable to record the entire crawl session as an MP4 video.",
-            # Image preprocessing tooltips
-            "IMAGE_MAX_WIDTH": "Max screenshot width before sending to AI. Smaller widths (e.g., 720â€“1080px) reduce payload and are sufficient for most UI understanding; use larger widths for dense UIs or OCR.",
-            "IMAGE_FORMAT": "Screenshot format sent to AI. JPEG offers broad compatibility; WEBP typically yields smaller files with similar quality (great for OpenRouter); PNG is lossless and best for crisp text/OCR but larger.",
-            "IMAGE_QUALITY": "Compression quality for JPEG/WEBP. 70â€“85 is a good balance; increase to 90â€“95 if the model struggles to read fine text; decrease to ~60 to minimize payload.",
-            "IMAGE_CROP_BARS": "Remove top/bottom system bars to reduce payload while keeping the core app UI. Enable when bars are not needed for analysis.",
-            "IMAGE_CROP_TOP_PERCENT": "Percent of image height to crop from the top. 5â€“8% is typical for Android status bars; adjust if needed.",
-            "IMAGE_CROP_BOTTOM_PERCENT": "Percent of image height to crop from the bottom. 8â€“12% is typical for Android navigation bars; adjust if needed.",
-        }
+        from ui.strings import get_tooltips_dict
+        return get_tooltips_dict()
 
     def _connect_signals(self):
         """Connect signals to slots safely."""
@@ -760,7 +729,7 @@ class CrawlerControllerWindow(QMainWindow):
 
         app_package = self.config.get("APP_PACKAGE", None)
         output_data_dir = self.config.get("OUTPUT_DATA_DIR", None)
-        session_dir = self.config.get("SESSION_DIR", None)
+        session_dir = self.config.SESSION_DIR if hasattr(self.config, 'SESSION_DIR') else None
         db_path = self.config.get("DB_NAME", None)
 
         if not app_package:

@@ -64,7 +64,7 @@ CURRENT_SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = str(find_project_root(CURRENT_SCRIPT_DIR))
 
 try:
-    from config.config import Config
+    from config.app_config import Config
 except ImportError as e:
     sys.stderr.write(
         f"FATAL: Could not import 'Config' class. Ensure config.py is accessible and there are no circular imports. Error: {e}\n"
@@ -108,7 +108,8 @@ def _check_ai_filtering_prerequisites(config):
     model_type = config.get("DEFAULT_MODEL_TYPE")
     
     # For Ollama, use default URL if not configured
-    default_ollama_url = "http://localhost:11434" if result["provider"] == "ollama" else None
+    from config.urls import ServiceURLs
+    default_ollama_url = ServiceURLs.OLLAMA if result["provider"] == "ollama" else None
     
     # Validate provider configuration
     is_valid, error_msg = validate_provider_config(config, result["provider"], default_ollama_url)
@@ -267,13 +268,8 @@ def _extract_label_from_pm_dump(pm_output):
 
 def _is_system_package(package_name):
     """Quick check if package is likely a system package."""
-    # Common system package prefixes - skip label extraction for these to save time
-    system_prefixes = [
-        "android.", "com.android.", "com.google.android.", "com.qualcomm.",
-        "com.qti.", "com.miui.", "com.xiaomi.", "vendor.", "org.ifaa.",
-        "de.qualcomm.", "com.sec.", "com.samsung.", "com.huawei.",
-    ]
-    return any(package_name.startswith(prefix) for prefix in system_prefixes)
+    from config.package_constants import PackageConstants
+    return PackageConstants.is_system_package(package_name)
 
 
 def _process_single_package(package_name):

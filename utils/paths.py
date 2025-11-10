@@ -1,13 +1,15 @@
 """
 Manages path resolution and generation for crawl sessions.
 """
+import logging
 import os
+import re
 from pathlib import Path
 from typing import Optional, Dict, TYPE_CHECKING
 from datetime import datetime
 
 if TYPE_CHECKING:
-    from config.config import Config
+    from config.app_config import Config
 
 
 def find_project_root(start_path: Path) -> Path:
@@ -50,6 +52,7 @@ class SessionKeys:
     TRAFFIC_CAPTURE_OUTPUT_DIR_TEMPLATE = "TRAFFIC_CAPTURE_OUTPUT_DIR"
     APP_PACKAGE = "APP_PACKAGE"
     TARGET_DEVICE_UDID = "TARGET_DEVICE_UDID"
+    TARGET_DEVICE_NAME = "TARGET_DEVICE_NAME"
     SESSION_TIMESTAMP = "SESSION_TIMESTAMP"
     DEVICE_ID_KEY = "device_id"
     APP_PACKAGE_KEY = "app_package"
@@ -75,10 +78,10 @@ class SessionPathManager:
         self._session_path: Optional[Path] = None
         self._app_package: Optional[str] = None
         self._app_package_safe: Optional[str] = None
-        self._timestamp: Optional[str] = self.config.get(SessionKeys.SESSION_TIMESTAMP) or \
-                                       datetime.now().strftime("%Y%m%d_%H%M%S")
-        # Cache timestamp
-        self.config.set(SessionKeys.SESSION_TIMESTAMP, self._timestamp, persist=False)
+        # Store session-specific state as instance variables instead of in config
+        self._timestamp: str = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self._device_udid: Optional[str] = None
+        self._device_name: Optional[str] = None
 
     def _get_app_package(self) -> str:
         if not self._app_package:
@@ -92,35 +95,116 @@ class SessionPathManager:
             self._app_package_safe = self._get_app_package().replace(".", "_")
         return self._app_package_safe
 
-    def get_session_path(self) -> Path:
-        """Resolves and returns the absolute path to the session directory."""
-        if self._session_path:
+    def set_device_info(self, udid: Optional[str] = None, name: Optional[str] = None) -> None:
+        """Set device information and invalidate cached session path.
+        
+        Args:
+            udid: Device UDID (optional)
+            name: Device name (optional, preferred over UDID for readability)
+        """
+        if udid is not None:
+            self._device_udid = udid
+        if name is not None:
+            self._device_name = name
+        # Invalidate cached session path to force regeneration with new device info
+        self._session_path = None
+
+    def get_device_udid(self) -> Optional[str]:
+        """Get the current device UDID."""
+        return self._device_udid
+
+    def get_device_name(self) -> Optional[str]:
+        """Get the current device name."""
+        return self._device_name
+
+    def get_timestamp(self) -> str:
+        """Get the session timestamp."""
+        return self._timestamp
+
+    def get_session_path(self, force_regenerate: bool = False) -> Path:
+        """Resolves and returns the absolute path to the session directory.
+        
+        Args:
+            force_regenerate: If True, force regeneration of the path even if cached.
+        """
+        # Prefer device name over UDID for folder names (more readable)
+        # Fallback: UDID -> unknown_device
+        # Use instance variables instead of config.get()
+        device_name = self._device_name
+        device_udid = self._device_udid
+        current_device_id = device_name or device_udid or "unknown_device"
+        
+        # Sanitize device ID for use in file paths (replace invalid characters)
+        current_device_id = re.sub(r'[^\w.-]', '_', current_device_id)
+        
+        # If path was already created with "unknown_device" but we now have a real device ID, regenerate
+        if self._session_path and not force_regenerate:
+            # Extract device ID from existing path to check if it needs updating
+            path_str = str(self._session_path)
+            if "unknown_device" in path_str and current_device_id != "unknown_device":
+                # Device ID was set after path creation, regenerate the path
+                self._session_path = None
+                logger = logging.getLogger(__name__)
+                logger.info(f"Regenerating session path with device ID: {current_device_id} (was: unknown_device)")
+        elif force_regenerate:
+            # Force regeneration requested
+            self._session_path = None
+            logger = logging.getLogger(__name__)
+            logger.debug(f"Force regenerating session path with device ID: {current_device_id}")
+        
+        if self._session_path and not force_regenerate:
             return self._session_path
 
         template = self.config.get(SessionKeys.SESSION_DIR_TEMPLATE)
         base_dir = self.config.OUTPUT_DATA_DIR  # This property is already resolved
         assert base_dir is not None, "OUTPUT_DATA_DIR must be set"
         
-        device_id = self.config.get(SessionKeys.TARGET_DEVICE_UDID) or "unknown_device"
+        device_id = current_device_id
         app_package_safe = self._get_app_package_safe()
         assert self._timestamp is not None
 
         if not template:
-            session_dir_str = str(Path(base_dir) / f"{device_id}_{app_package_safe}_{self._timestamp}")
+            # Default: sessions/{device_id}_{app_package}_{timestamp}
+            session_dir_str = str(Path(base_dir) / "sessions" / f"{device_id}_{app_package_safe}_{self._timestamp}")
         else:
+            # Replace placeholders in the template
+            # First replace OUTPUT_DATA_DIR placeholder
             template = template.replace(f"{{{SessionKeys.OUTPUT_DATA_DIR_KEY}}}", str(base_dir))
+            # Then replace other placeholders
             session_dir_str = template
             session_dir_str = session_dir_str.replace(f"{{{SessionKeys.DEVICE_ID_KEY}}}", device_id)
             session_dir_str = session_dir_str.replace(f"{{{SessionKeys.APP_PACKAGE_KEY}}}", app_package_safe)
             session_dir_str = session_dir_str.replace(f"{{{SessionKeys.TIMESTAMP_KEY}}}", self._timestamp)
+            
+            # Ensure sessions/ subdirectory is present in the path
+            # If the template was somehow stored without sessions/, add it
+            base_dir_str = str(base_dir)
+            if session_dir_str.startswith(base_dir_str):
+                # Check if sessions/ is missing between base_dir and the session name
+                remaining = session_dir_str[len(base_dir_str):].lstrip('/\\')
+                # If remaining starts directly with device_id pattern (no sessions/), add it
+                if remaining and not remaining.startswith('sessions'):
+                    # Reconstruct with sessions/ subdirectory
+                    session_dir_str = str(Path(base_dir) / "sessions" / f"{device_id}_{app_package_safe}_{self._timestamp}")
 
         self._session_path = Path(session_dir_str).resolve()
+        # Don't create the session directory here - it will be created when actually needed
+        # This allows the path to be regenerated if device info becomes available later
+        # Only create parent directories (sessions/) if they don't exist
+        # But only if we have a real device ID - don't create directories for unknown_device
+        if current_device_id != "unknown_device":
+            self._session_path.parent.mkdir(parents=True, exist_ok=True)
         return self._session_path
 
-    def _resolve_template(self, template_key: str) -> Path:
-        """Helper to resolve a path template like DB_NAME, LOG_DIR, etc."""
+    def _resolve_template(self, template_key: str, force_regenerate: bool = False) -> Path:
+        """Helper to resolve a path template like DB_NAME, LOG_DIR, etc.
+        
+        Args:
+            template_key: The config key for the template
+            force_regenerate: If True, force regeneration of session path before resolving template
+        """
         template = self.config.get(template_key)
-        session_dir = self.get_session_path()  # Ensures session_path is resolved
+        session_dir = self.get_session_path(force_regenerate=force_regenerate)  # Ensures session_path is resolved
 
         if not template:
             raise ValueError(f"Config key {template_key} is not defined.")
@@ -133,20 +217,20 @@ class SessionPathManager:
         return Path(template).resolve()
 
     # --- Public Path Getters ---
-    def get_db_path(self) -> Path:
-        return self._resolve_template(SessionKeys.DB_NAME_TEMPLATE)
+    def get_db_path(self, force_regenerate: bool = False) -> Path:
+        return self._resolve_template(SessionKeys.DB_NAME_TEMPLATE, force_regenerate=force_regenerate)
 
-    def get_screenshots_dir(self) -> Path:
-        return self._resolve_template(SessionKeys.SCREENSHOTS_DIR_TEMPLATE)
+    def get_screenshots_dir(self, force_regenerate: bool = False) -> Path:
+        return self._resolve_template(SessionKeys.SCREENSHOTS_DIR_TEMPLATE, force_regenerate=force_regenerate)
 
-    def get_log_dir(self) -> Path:
-        return self._resolve_template(SessionKeys.LOG_DIR_TEMPLATE)
+    def get_log_dir(self, force_regenerate: bool = False) -> Path:
+        return self._resolve_template(SessionKeys.LOG_DIR_TEMPLATE, force_regenerate=force_regenerate)
 
-    def get_annotated_screenshots_dir(self) -> Path:
-        return self._resolve_template(SessionKeys.ANNOTATED_SCREENSHOTS_DIR_TEMPLATE)
+    def get_annotated_screenshots_dir(self, force_regenerate: bool = False) -> Path:
+        return self._resolve_template(SessionKeys.ANNOTATED_SCREENSHOTS_DIR_TEMPLATE, force_regenerate=force_regenerate)
 
-    def get_traffic_capture_dir(self) -> Path:
-        return self._resolve_template(SessionKeys.TRAFFIC_CAPTURE_OUTPUT_DIR_TEMPLATE)
+    def get_traffic_capture_dir(self, force_regenerate: bool = False) -> Path:
+        return self._resolve_template(SessionKeys.TRAFFIC_CAPTURE_OUTPUT_DIR_TEMPLATE, force_regenerate=force_regenerate)
 
     @staticmethod
     def get_reports_dir(session_dir: str) -> Path:

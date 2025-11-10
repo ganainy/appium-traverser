@@ -13,7 +13,7 @@ except ImportError:
     from database import DatabaseManager
 
 # Import your main Config class
-from config.config import Config
+from config.app_config import Config
 
 if TYPE_CHECKING:
     from infrastructure.appium_driver import AppiumDriver
@@ -203,9 +203,9 @@ class ScreenStateManager:
 
         temp_id = -step_number
         ss_filename = f"screen_run{run_id}_step{step_number}_{visual_hash[:8]}.png"
-        ss_path = os.path.join(str(self.cfg.get('SCREENSHOTS_DIR')), ss_filename)
+        ss_path = os.path.join(str(self.cfg.SCREENSHOTS_DIR), ss_filename)
 
-        os.makedirs(str(self.cfg.get('SCREENSHOTS_DIR')), exist_ok=True)
+        os.makedirs(str(self.cfg.SCREENSHOTS_DIR), exist_ok=True)
 
         return ScreenRepresentation(
             screen_id=temp_id, composite_hash=composite_hash, xml_hash=xml_hash, visual_hash=visual_hash,
@@ -239,7 +239,7 @@ class ScreenStateManager:
                 candidate_screen.id = self._next_screen_db_id_counter
 
                 ss_filename = f"screen_{candidate_screen.id}_{candidate_screen.visual_hash[:8]}.png"
-                candidate_screen.screenshot_path = os.path.join(str(self.cfg.get('SCREENSHOTS_DIR')), ss_filename)
+                candidate_screen.screenshot_path = os.path.join(str(self.cfg.SCREENSHOTS_DIR), ss_filename)
 
                 try:
                     if candidate_screen.screenshot_bytes:

@@ -24,9 +24,12 @@ from typing import Any, Dict, List, Optional, Tuple
 from cli.shared.context import CLIContext
 from cli.shared.command_result import CommandResult
 from cli.constants import keys as CKeys
-from cli.constants import config as CConfig
 from cli.constants import messages as CMsg
 from utils.paths import SessionPathManager
+
+# SQL queries for analysis service
+SQL_SELECT_LATEST_RUN_ID = "SELECT run_id FROM runs ORDER BY run_id DESC LIMIT 1"
+SQL_SELECT_ANY_RUN_ID = "SELECT run_id FROM runs LIMIT 1"
 
 
 class AnalysisService:
@@ -345,7 +348,7 @@ class AnalysisService:
             cursor_temp = conn_temp.cursor()
             
             # Try to get the highest run_id (latest)
-            cursor_temp.execute(CConfig.SQL_SELECT_LATEST_RUN_ID)
+            cursor_temp.execute(SQL_SELECT_LATEST_RUN_ID)
             latest_run_row = cursor_temp.fetchone()
             
             if latest_run_row and latest_run_row[0] is not None:
@@ -355,7 +358,7 @@ class AnalysisService:
                 )
             else:
                 # Fallback: get any run_id
-                cursor_temp.execute(CConfig.SQL_SELECT_ANY_RUN_ID)
+                cursor_temp.execute(SQL_SELECT_ANY_RUN_ID)
                 any_run_row = cursor_temp.fetchone()
                 
                 if any_run_row and any_run_row[0] is not None:

@@ -1,478 +1,634 @@
-# appium_driver.py - MCP Client version (moved to infrastructure)
+"""
+Appium driver wrapper for direct Appium-Python-Client integration.
+
+Provides a high-level interface for Appium operations using AppiumHelper.
+"""
+
 import base64
 import logging
+import time
 from typing import Any, Dict, Optional, Tuple
 
-from config.config import Config
-from infrastructure.mcp_client import MCPClient, MCPConnectionError, MCPError
+from config.app_config import Config
+from infrastructure.appium_helper import AppiumHelper
+from infrastructure.device_detection import (
+    detect_all_devices,
+    select_best_device,
+    validate_device,
+    DeviceInfo,
+    Platform,
+)
+from infrastructure.capability_builder import (
+    build_android_capabilities,
+    AppiumCapabilities,
+)
+from infrastructure.appium_error_handler import AppiumError, validate_coordinates
 
 logger = logging.getLogger(__name__)
 
 
 class AppiumDriver:
+    """High-level Appium driver wrapper."""
+    
     def __init__(self, app_config: Config):
+        """
+        Initialize AppiumDriver.
+        
+        Args:
+            app_config: Application configuration
+        """
         self.cfg = app_config
-        self.mcp_client: Optional[MCPClient] = None
+        self.helper: Optional[AppiumHelper] = None
         self._session_initialized = False
         self._session_info: Optional[Dict[str, Any]] = None
-        logger.debug("AppiumDriver (MCP client) initialized.")
-
-    def connect(self) -> bool:
-        """Initialize MCP client connection."""
-        try:
-            # Get MCP server URL - use config.get() to follow precedence
-            mcp_url = self.cfg.get('CONFIG_MCP_SERVER_URL') or self.cfg.get('MCP_SERVER_URL', 'http://localhost:3000/mcp')
-            # Get timeout values
-            connection_timeout = self.cfg.get('MCP_CONNECTION_TIMEOUT', 5.0)
-            request_timeout = self.cfg.get('MCP_REQUEST_TIMEOUT', 30.0)
-            
-            self.mcp_client = MCPClient(
-                server_url=mcp_url,
-                connection_timeout=connection_timeout,
-                request_timeout=request_timeout
-            )
-            
-            # Check server health
-            health = self.mcp_client.check_server_health()
-            if not health.get("healthy", False):
-                logger.warning(f"MCP server health check failed: {health}")
-                # Continue anyway - server might be starting up
-            
-            logger.debug("MCP client connection established.")
-            return True
-        except Exception as e:
-            logger.error(f"Failed to connect MCP client: {e}")
-            return False
-
+        logger.debug("AppiumDriver initialized.")
+    
     def disconnect(self):
-        """Disconnect MCP client and close session."""
-        if self.mcp_client:
+        """Disconnect Appium helper and close session."""
+        if self.helper:
             try:
-                # Close any active session
                 if self._session_initialized:
                     try:
-                        self.mcp_client.call_tool("close-appium", {})
+                        self.helper.close_driver()
                     except Exception as e:
                         logger.warning(f"Error closing Appium session: {e}")
                     finally:
                         self._session_initialized = False
                         self._session_info = None
-                self.mcp_client.close()
             except Exception as e:
-                logger.warning(f"Error during MCP client disconnect: {e}")
+                logger.warning(f"Error during disconnect: {e}")
             finally:
-                self.mcp_client = None
-        logger.debug("MCP client disconnected.")
-
-    def _ensure_mcp_client(self) -> bool:
-        """Ensure MCP client is initialized."""
-        if not self.mcp_client:
-            if not self.connect():
-                logger.error("Failed to initialize MCP client")
-                return False
+                self.helper = None
+        logger.debug("AppiumDriver disconnected.")
+    
+    def _ensure_helper(self) -> bool:
+        """Ensure AppiumHelper is initialized."""
+        if not self.helper:
+            # Create helper with config values
+            max_retries = self.cfg.get('APPIUM_MAX_RETRIES', 3)
+            retry_delay = self.cfg.get('APPIUM_RETRY_DELAY', 1.0)
+            implicit_wait = self.cfg.get('APPIUM_IMPLICIT_WAIT', 10000)
+            
+            self.helper = AppiumHelper(
+                max_retries=max_retries,
+                retry_delay=retry_delay,
+                implicit_wait=implicit_wait
+            )
         return True
-
-    def initialize_session(self, app_package: Optional[str] = None, app_activity: Optional[str] = None,
-                          device_udid: Optional[str] = None, platform_name: str = "Android") -> bool:
-        """Initialize Appium session via MCP.
+    
+    def initialize_session(
+        self,
+        app_package: Optional[str] = None,
+        app_activity: Optional[str] = None,
+        device_udid: Optional[str] = None,
+        platform_name: str = "Android"
+    ) -> bool:
+        """
+        Initialize Appium session with device auto-detection.
         
         Args:
             app_package: Android app package name
             app_activity: Android app activity name
             device_udid: Device UDID (optional, will auto-detect if not provided)
-            platform_name: Platform name ("Android" or "iOS")
+            platform_name: Platform name ("Android")
             
         Returns:
             True if session initialized successfully, False otherwise
         """
-        if not self._ensure_mcp_client():
+        if not self._ensure_helper():
             return False
         
         try:
-            # Build initialization parameters
-            init_params = {
-                "platformName": platform_name
+            # Detect available devices
+            all_devices = detect_all_devices()
+            if not all_devices:
+                logger.error(
+                    "No devices found. Please ensure:\n"
+                    "- Android: Android SDK is installed and devices/emulators are connected"
+                )
+                return False
+            
+            # Select best device
+            platform: Platform = 'android'
+            selected_device = select_best_device(
+                all_devices,
+                platform,
+                None  # device_name
+            )
+            
+            if not selected_device:
+                logger.error(
+                    f"No suitable {platform_name} device found. Available devices:\n" +
+                    "\n".join(f"- {d.name} ({d.platform}, {d.type})" for d in all_devices)
+                )
+                return False
+            
+            # Override with explicit UDID if provided
+            if device_udid:
+                for device in all_devices:
+                    if device.id == device_udid:
+                        selected_device = device
+                        break
+                else:
+                    logger.warning(f"Device with UDID {device_udid} not found, using auto-selected device")
+            
+            # Validate device is ready
+            if not validate_device(selected_device):
+                logger.error(
+                    f"Device {selected_device.name} is not ready for automation.\n"
+                    "Please ensure the device is responsive and try again."
+                )
+                return False
+            
+            # Set device UDID and name in path manager for session path generation (before session path is accessed)
+            # This ensures the output directory uses the correct device ID instead of "unknown_device"
+            # Prefer device name over UDID for folder names (more readable)
+            if hasattr(self.cfg, '_path_manager'):
+                old_path = self.cfg._path_manager._session_path
+                old_path_str = str(old_path) if old_path else None
+                
+                # Set device info in path manager (this will invalidate cached session path)
+                self.cfg._path_manager.set_device_info(udid=selected_device.id, name=selected_device.name)
+                logger.debug(f"Set device info in path manager: UDID={selected_device.id}, Name={selected_device.name}")
+                
+                # Force path regeneration if session path was already created with unknown_device
+                # This ensures the correct device ID is used even if path was created early
+                if old_path_str and "unknown_device" in old_path_str:
+                    logger.info(f"Regenerating session path: was '{old_path_str}', will use device: {selected_device.name}")
+                    
+                    # Force regeneration to get the new path
+                    new_path = self.cfg._path_manager.get_session_path(force_regenerate=True)
+                    new_path_str = str(new_path)
+                    
+                    # Try to rename the directory if it exists and is different
+                    import os
+                    from pathlib import Path
+                    old_path_obj = Path(old_path_str)
+                    new_path_obj = Path(new_path_str)
+                    
+                    if old_path_obj.exists() and old_path_obj != new_path_obj and not new_path_obj.exists():
+                        try:
+                            # Only rename if old directory exists and new one doesn't
+                            # This is safe because we're early in the process
+                            old_path_obj.rename(new_path_obj)
+                            logger.info(f"Renamed session directory from '{old_path_str}' to '{new_path_str}'")
+                        except Exception as e:
+                            logger.warning(f"Could not rename session directory from '{old_path_str}' to '{new_path_str}': {e}")
+                            logger.info(f"New session path will be: {new_path_str} (old directory may still exist)")
+                    else:
+                        logger.info(f"Session path regenerated: {new_path_str}")
+                    
+                    # Recreate AI interaction logger with new path if AgentAssistant exists
+                    # This ensures log files are created in the correct directory
+                    try:
+                        # Try to find and update AgentAssistant logger if it exists
+                        ai_logger = logging.getLogger('AIInteractionReadableLogger')
+                        if ai_logger and ai_logger.handlers:
+                            # Check if we can access the AgentAssistant instance
+                            # This is a bit of a hack, but we need to update the logger
+                            # The logger will be recreated on next use if needed
+                            logger.debug("AI interaction logger may need to be recreated with new path")
+                    except Exception:
+                        pass  # Not critical if we can't update it
+                else:
+                    # Just regenerate to ensure we have the latest path
+                    new_path = self.cfg._path_manager.get_session_path(force_regenerate=True)
+                    logger.debug(f"Session path: {new_path}")
+            
+            # Build capabilities for Android
+            capabilities = build_android_capabilities(
+                selected_device,
+                app_package=app_package,
+                app_activity=app_activity,
+                app=None,  # Could be added as parameter
+                additional_caps={
+                    'appium:noReset': True,
+                }
+            )
+            
+            # Get allowed external packages from config
+            allowed_external_packages = self.cfg.get('ALLOWED_EXTERNAL_PACKAGES')
+            if allowed_external_packages:
+                if isinstance(allowed_external_packages, str):
+                    allowed_external_packages = [
+                        pkg.strip() for pkg in allowed_external_packages.split('\n')
+                        if pkg.strip()
+                    ]
+                elif isinstance(allowed_external_packages, (list, tuple)):
+                    allowed_external_packages = [
+                        str(pkg).strip() for pkg in allowed_external_packages
+                        if pkg and str(pkg).strip()
+                    ]
+                else:
+                    allowed_external_packages = []
+            
+            # Get Appium server URL
+            from config.urls import ServiceURLs
+            appium_url = self.cfg.get('APPIUM_SERVER_URL', ServiceURLs.APPIUM)
+            
+            # Initialize session with app context configuration
+            context_config = {
+                'targetPackage': app_package,
+                'targetActivity': app_activity,
+                'allowedExternalPackages': allowed_external_packages or []
             }
             
-            if app_package:
-                init_params["appPackage"] = app_package
-            if app_activity:
-                init_params["appActivity"] = app_activity
-            if device_udid:
-                init_params["udid"] = device_udid
+            self.helper.initialize_driver(
+                capabilities,
+                appium_url,
+                context_config
+            )
             
-            result = self.mcp_client.call_tool("initialize-appium", init_params)
+            self._session_initialized = True
+            session_state = self.helper.get_session_state()
+            self._session_info = {
+                'sessionId': session_state.session_id,
+                'platform': selected_device.platform,
+                'device': selected_device.name,
+                'udid': selected_device.id,
+            }
             
-            if result.get("success", False):
-                self._session_initialized = True
-                self._session_info = result.get("data", {})
-                logger.info(f"Appium session initialized: {self._session_info.get('sessionId', 'unknown')}")
-                return True
-            else:
-                logger.error(f"Failed to initialize session: {result.get('message', 'Unknown error')}")
-                return False
-        except (MCPConnectionError, MCPError) as e:
-            logger.error(f"MCP error initializing session: {e}")
+            logger.info(f"[OK] Appium session initialized: {session_state.session_id}")
+            logger.info(f"Session data: {self._session_info}")
+            return True
+            
+        except AppiumError as e:
+            logger.error(f"Appium error initializing session: {e}")
             return False
         except Exception as e:
-            logger.error(f"Unexpected error initializing session: {e}")
+            logger.error(f"Unexpected error initializing session: {e}", exc_info=True)
             return False
-
+    
     def validate_session(self) -> bool:
         """Validate that the current session is still active."""
-        if not self._ensure_mcp_client():
+        if not self._ensure_helper():
             return False
         
         try:
-            result = self.mcp_client.call_tool("validate-session", {})
-            is_valid = result.get("success", False)
+            is_valid = self.helper.validate_session()
             if not is_valid:
                 self._session_initialized = False
                 self._session_info = None
             return is_valid
-        except (MCPConnectionError, MCPError) as e:
-            logger.error(f"MCP error validating session: {e}")
+        except Exception as e:
+            logger.error(f"Error validating session: {e}")
             self._session_initialized = False
             return False
-        except Exception as e:
-            logger.error(f"Unexpected error validating session: {e}")
-            return False
-
+    
     def get_page_source(self) -> Optional[str]:
-        """Get page source via MCP."""
-        if not self._ensure_mcp_client():
+        """Get page source."""
+        if not self._ensure_helper():
             return None
         
         try:
-            result = self.mcp_client.call_tool("get-page-source", {})
-            if result.get("success", False):
-                data = result.get("data", {})
-                # Page source might be in data.xml or data directly
-                return data.get("xml") or data.get("pageSource") or str(data)
-            else:
-                logger.error(f"Failed to get page source: {result.get('message', 'Unknown error')}")
-                return None
-        except (MCPConnectionError, MCPError) as e:
-            logger.error(f"MCP error getting page source: {e}")
-            return None
+            return self.helper.get_page_source()
         except Exception as e:
-            logger.error(f"Unexpected error getting page source: {e}")
+            logger.error(f"Error getting page source: {e}")
             return None
-
+    
     def get_screenshot_as_base64(self) -> Optional[str]:
-        """Get screenshot via MCP."""
-        if not self._ensure_mcp_client():
+        """Get screenshot as base64 string."""
+        if not self._ensure_helper():
             return None
         
         try:
-            result = self.mcp_client.call_tool("take-screenshot", {})
-            if result.get("success", False):
-                data = result.get("data", {})
-                # Screenshot might be in data.screenshot, data.base64, or data directly
-                screenshot = data.get("screenshot") or data.get("base64") or data.get("image")
-                if screenshot:
-                    # If it's already base64, return as-is; otherwise encode
-                    if isinstance(screenshot, str):
-                        # Remove data URL prefix if present
-                        if screenshot.startswith("data:image"):
-                            screenshot = screenshot.split(",", 1)[1]
-                        return screenshot
-                    elif isinstance(screenshot, bytes):
-                        return base64.b64encode(screenshot).decode('utf-8')
-            else:
-                logger.error(f"Failed to get screenshot: {result.get('message', 'Unknown error')}")
-                return None
-        except (MCPConnectionError, MCPError) as e:
-            logger.error(f"MCP error getting screenshot: {e}")
-            return None
+            screenshot = self.helper.take_screenshot()
+            # Screenshot is already base64 from Appium-Python-Client
+            if screenshot.startswith("data:image"):
+                screenshot = screenshot.split(",", 1)[1]
+            return screenshot
         except Exception as e:
-            logger.error(f"Unexpected error getting screenshot: {e}")
+            logger.error(f"Error getting screenshot: {e}")
             return None
-
-    def tap(self, target_identifier: Optional[str], bbox: Optional[Dict[str, Any]] = None) -> bool:
-        """Tap via MCP. Can tap by element identifier or coordinates (bbox)."""
-        if not self._ensure_mcp_client():
+    
+    def tap(
+        self,
+        target_identifier: Optional[str],
+        bbox: Optional[Dict[str, Any]] = None
+    ) -> bool:
+        """
+        Tap element or coordinates.
+        
+        Args:
+            target_identifier: Element identifier (optional if bbox provided)
+            bbox: Bounding box with 'top_left' and 'bottom_right' (optional if target_identifier provided)
+            
+        Returns:
+            True if tap successful
+        """
+        if not self._ensure_helper():
             return False
         
         try:
+            # Prefer coordinates (bbox) if available
+            if bbox and isinstance(bbox, dict):
+                top_left = bbox.get("top_left", [])
+                bottom_right = bbox.get("bottom_right", [])
+                if len(top_left) == 2 and len(bottom_right) == 2:
+                    # Calculate center coordinates
+                    x = (top_left[1] + bottom_right[1]) / 2
+                    y = (top_left[0] + bottom_right[0]) / 2
+                    
+                    # Get window size for coordinate validation
+                    window_size = self.helper.get_window_size()
+                    coords = validate_coordinates(
+                        x, y,
+                        window_size['width'],
+                        window_size['height']
+                    )
+                    
+                    # Perform tap at coordinates using W3C Actions
+                    self.helper.perform_w3c_tap(coords['x'], coords['y'])
+                    logger.debug(f"Tapped at coordinates ({coords['x']}, {coords['y']}) from bbox")
+                    return True
+            
+            # Fall back to element lookup if no coordinates or coordinates failed
             if target_identifier:
-                # Tap by element identifier
-                result = self.mcp_client.call_tool("tap-element", {
-                    "selector": target_identifier,
-                    "strategy": "id"  # Default strategy, could be enhanced
-                })
-            elif bbox:
-                # Tap by coordinates - extract center from bbox
-                top_left = bbox.get("top_left", [0, 0])
-                bottom_right = bbox.get("bottom_right", [0, 0])
-                x = (top_left[1] + bottom_right[1]) // 2
-                y = (top_left[0] + bottom_right[0]) // 2
-                
-                # Use swipe with very short duration for tap
-                result = self.mcp_client.call_tool("swipe", {
-                    "startX": x,
-                    "startY": y,
-                    "endX": x,
-                    "endY": y,
-                    "duration": 100  # Very short duration = tap
-                })
-            else:
-                logger.error("tap() called without target_identifier or bbox")
-                return False
+                return self.helper.tap_element(target_identifier, strategy='id')
             
-            success = result.get("success", False)
-            if not success:
-                logger.warning(f"Tap failed: {result.get('message', 'Unknown error')}")
-            return success
-        except (MCPConnectionError, MCPError) as e:
-            logger.error(f"MCP error during tap: {e}")
+            logger.error("tap() called without target_identifier or bbox")
             return False
+            
         except Exception as e:
-            logger.error(f"Unexpected error during tap: {e}")
+            logger.error(f"Error during tap: {e}")
             return False
-
+    
     def input_text(self, target_identifier: str, text: str) -> bool:
-        """Input text via MCP."""
-        if not self._ensure_mcp_client():
+        """Input text into element."""
+        if not self._ensure_helper():
             return False
         
         try:
-            result = self.mcp_client.call_tool("send-keys", {
-                "selector": target_identifier,
-                "text": text,
-                "strategy": "id"  # Default strategy
-            })
-            success = result.get("success", False)
-            if not success:
-                logger.warning(f"Input text failed: {result.get('message', 'Unknown error')}")
-            return success
-        except (MCPConnectionError, MCPError) as e:
-            logger.error(f"MCP error during input_text: {e}")
-            return False
+            return self.helper.send_keys(target_identifier, text, strategy='id')
         except Exception as e:
-            logger.error(f"Unexpected error during input_text: {e}")
+            logger.error(f"Error during input_text: {e}")
             return False
-
-    def scroll(self, target_identifier: Optional[str], direction: str) -> bool:
-        """Scroll via MCP."""
-        if not self._ensure_mcp_client():
+    
+    def scroll(self, direction: str) -> bool:
+        """
+        Scroll in specified direction.
+        
+        Args:
+            direction: Scroll direction ('up', 'down', 'left', 'right')
+            
+        Returns:
+            True if scroll successful
+        """
+        if not self._ensure_helper():
             return False
         
         try:
-            # Map direction to scroll parameters
-            scroll_params = {
-                "direction": direction.lower(),
-                "distance": 500,  # Default scroll distance
-                "duration": 500   # Default duration
-            }
+            # Get window size
+            window_size = self.helper.get_window_size()
+            width = window_size['width']
+            height = window_size['height']
             
-            result = self.mcp_client.call_tool("scroll", scroll_params)
-            success = result.get("success", False)
-            if not success:
-                logger.warning(f"Scroll failed: {result.get('message', 'Unknown error')}")
-            return success
-        except (MCPConnectionError, MCPError) as e:
-            logger.error(f"MCP error during scroll: {e}")
-            return False
-        except Exception as e:
-            logger.error(f"Unexpected error during scroll: {e}")
-            return False
-
-    def long_press(self, target_identifier: str, duration: int) -> bool:
-        """Long press via MCP using swipe with longer duration."""
-        if not self._ensure_mcp_client():
-            return False
-        
-        try:
-            # For long press, we can use swipe with same start/end coordinates and longer duration
-            # First, try to find element to get its coordinates
-            find_result = self.mcp_client.call_tool("find-element", {
-                "selector": target_identifier,
-                "strategy": "id"
-            })
-            
-            if find_result.get("success", False):
-                element_data = find_result.get("data", {})
-                # Extract coordinates from element if available
-                # Otherwise, use a coordinate-based approach
-                # For now, use tap-element which might support long press
-                # Or use swipe with coordinates
-                logger.warning("Long press via element coordinates not fully implemented - using tap")
-                result = self.mcp_client.call_tool("tap-element", {
-                    "selector": target_identifier,
-                    "strategy": "id"
-                })
+            # Calculate scroll coordinates based on direction
+            direction_lower = direction.lower()
+            if direction_lower == 'up':
+                start_x, start_y = width / 2, height * 0.8
+                end_x, end_y = width / 2, height * 0.2
+            elif direction_lower == 'down':
+                start_x, start_y = width / 2, height * 0.2
+                end_x, end_y = width / 2, height * 0.8
+            elif direction_lower == 'left':
+                start_x, start_y = width * 0.8, height / 2
+                end_x, end_y = width * 0.2, height / 2
+            elif direction_lower == 'right':
+                start_x, start_y = width * 0.2, height / 2
+                end_x, end_y = width * 0.8, height / 2
             else:
-                logger.error(f"Could not find element for long press: {target_identifier}")
+                logger.error(f"Invalid scroll direction: {direction}")
                 return False
             
-            success = result.get("success", False)
-            if not success:
-                logger.warning(f"Long press failed: {result.get('message', 'Unknown error')}")
-            return success
-        except (MCPConnectionError, MCPError) as e:
-            logger.error(f"MCP error during long_press: {e}")
+            # Perform swipe for scrolling
+            driver = self.helper.get_driver()
+            if driver:
+                from selenium.webdriver.common.action_chains import ActionChains
+                from selenium.webdriver.common.actions import interaction
+                from selenium.webdriver.common.actions.action_builder import ActionBuilder
+                from selenium.webdriver.common.actions.pointer_input import PointerInput
+                
+                actions = ActionChains(driver)
+                actions.w3c_actions = ActionBuilder(
+                    driver, mouse=PointerInput(interaction.POINTER_TOUCH, "touch")
+                )
+                actions.w3c_actions.pointer_action.move_to_location(start_x, start_y)
+                actions.w3c_actions.pointer_action.pointer_down()
+                actions.w3c_actions.pointer_action.move_to_location(end_x, end_y)
+                actions.w3c_actions.pointer_action.pause(0.8)
+                actions.w3c_actions.pointer_action.pointer_up()
+                actions.perform()
+                
+                logger.debug(f"Scrolled {direction} from ({start_x}, {start_y}) to ({end_x}, {end_y})")
+                return True
+            
             return False
+            
         except Exception as e:
-            logger.error(f"Unexpected error during long_press: {e}")
+            logger.error(f"Error during scroll: {e}")
             return False
-
+    
+    def long_press(self, target_identifier: str, duration: int) -> bool:
+        """
+        Long press element.
+        
+        Args:
+            target_identifier: Element identifier
+            duration: Press duration in milliseconds
+            
+        Returns:
+            True if successful
+        """
+        if not self._ensure_helper():
+            return False
+        
+        try:
+            # Find element and get its center
+            element = self.helper.find_element(target_identifier, strategy='id')
+            x, y = self.helper._get_element_center(element)
+            
+            # Perform long press using W3C Actions with longer duration
+            driver = self.helper.get_driver()
+            if driver:
+                from selenium.webdriver.common.action_chains import ActionChains
+                from selenium.webdriver.common.actions import interaction
+                from selenium.webdriver.common.actions.action_builder import ActionBuilder
+                from selenium.webdriver.common.actions.pointer_input import PointerInput
+                
+                actions = ActionChains(driver)
+                actions.w3c_actions = ActionBuilder(
+                    driver, mouse=PointerInput(interaction.POINTER_TOUCH, "touch")
+                )
+                actions.w3c_actions.pointer_action.move_to_location(x, y)
+                actions.w3c_actions.pointer_action.pointer_down()
+                actions.w3c_actions.pointer_action.pause(duration / 1000.0)
+                actions.w3c_actions.pointer_action.pointer_up()
+                actions.perform()
+                
+                logger.debug(f"Long pressed element {target_identifier} for {duration}ms")
+                return True
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error during long_press: {e}")
+            return False
+    
     def press_back(self) -> bool:
-        """Press back via MCP. Note: MCP server may not have direct back button support."""
-        if not self._ensure_mcp_client():
+        """Press back button."""
+        if not self._ensure_helper():
+            logger.error("Cannot press back: AppiumHelper not available")
             return False
         
         try:
-            # MCP server doesn't have a direct back button tool
-            # We could use ADB command or Appium key press, but for now log a warning
-            logger.warning("press_back() not directly supported by MCP server - may need custom tool")
-            # Try to use swipe from edge as a workaround (Android back gesture)
-            # This is a workaround - ideally MCP server should have a back button tool
-            result = self.mcp_client.call_tool("swipe", {
-                "startX": 50,   # Left edge
-                "startY": 960,  # Middle of screen
-                "endX": 200,    # Swipe right
-                "endY": 960,
-                "duration": 300
-            })
-            success = result.get("success", False)
-            if not success:
-                logger.warning(f"Back press (swipe workaround) failed: {result.get('message', 'Unknown error')}")
-            return success
-        except (MCPConnectionError, MCPError) as e:
-            logger.error(f"MCP error during press_back: {e}")
+            driver = self.helper.get_driver()
+            if driver:
+                driver.back()
+                logger.info("[OK] Back press succeeded")
+                return True
             return False
         except Exception as e:
-            logger.error(f"Unexpected error during press_back: {e}")
+            logger.error(f"[ERROR] Error during press_back: {e}", exc_info=True)
             return False
-
+    
     def press_home(self) -> bool:
-        """Press home via MCP. Note: MCP server may not have direct home button support."""
-        if not self._ensure_mcp_client():
+        """Press home button."""
+        if not self._ensure_helper():
             return False
         
         try:
-            # MCP server doesn't have a direct home button tool
-            logger.warning("press_home() not directly supported by MCP server - may need custom tool")
-            # Similar workaround as back button
-            return False  # Not implemented yet
-        except (MCPConnectionError, MCPError) as e:
-            logger.error(f"MCP error during press_home: {e}")
+            driver = self.helper.get_driver()
+            if driver:
+                # Use Appium's press_keycode for Android HOME key (3)
+                driver.press_keycode(3)
+                logger.info("Home button pressed")
+                return True
             return False
         except Exception as e:
-            logger.error(f"Unexpected error during press_home: {e}")
+            logger.error(f"Error during press_home: {e}")
             return False
-
+    
     def wait_for_toast_to_dismiss(self, timeout_ms: int = 1200):
         """Wait for toast to dismiss."""
-        # TODO: Implement toast dismissal waiting logic
-        pass
-
-    def get_window_size(self):
+        time.sleep(timeout_ms / 1000.0)
+    
+    def get_window_size(self) -> Dict[str, int]:
         """Get window size."""
-        if not self._ensure_mcp_client():
+        if not self._ensure_helper():
             return {"width": 1080, "height": 1920}  # Default fallback
         
         try:
-            result = self.mcp_client.call_tool("get-window-size", {})
-            if result.get("success", False):
-                data = result.get("data", {})
-                # Extract width and height from response
-                width = data.get("width") or data.get("windowWidth")
-                height = data.get("height") or data.get("windowHeight")
-                if width and height:
-                    return {"width": int(width), "height": int(height)}
-            # Fallback to default
-            logger.warning("Could not get window size from MCP, using default")
-            return {"width": 1080, "height": 1920}
-        except (MCPConnectionError, MCPError) as e:
-            logger.error(f"MCP error getting window size: {e}")
-            return {"width": 1080, "height": 1920}
+            return self.helper.get_window_size()
         except Exception as e:
-            logger.error(f"Unexpected error getting window size: {e}")
+            logger.error(f"Error getting window size: {e}")
             return {"width": 1080, "height": 1920}
-
+    
     def start_video_recording(self):
         """Start video recording."""
         # TODO: Implement video recording start functionality
         pass
-
+    
     def stop_video_recording(self):
         """Stop video recording."""
         # TODO: Implement video recording stop functionality
         return None
-
+    
     def save_video_recording(self, data, path):
         """Save video recording."""
         # TODO: Implement video recording save functionality
         pass
-
+    
     def get_current_package(self) -> Optional[str]:
-        """Get current package via MCP session info."""
-        if not self._ensure_mcp_client():
+        """Get current package name (Android only)."""
+        if not self._ensure_helper():
             return None
         
         try:
-            result = self.mcp_client.call_tool("get-session-info", {})
-            if result.get("success", False):
-                data = result.get("data", {})
-                # Extract package from session info
-                package = data.get("package") or data.get("appPackage") or data.get("currentPackage")
-                if package:
-                    return str(package)
-            return None
-        except (MCPConnectionError, MCPError) as e:
-            logger.error(f"MCP error getting current package: {e}")
-            return None
+            return self.helper.get_current_package()
         except Exception as e:
-            logger.error(f"Unexpected error getting current package: {e}")
+            logger.warning(f"Error getting current package: {e}")
             return None
-
+    
     def get_current_activity(self) -> Optional[str]:
-        """Get current activity via MCP session info."""
-        if not self._ensure_mcp_client():
+        """Get current activity name (Android only)."""
+        if not self._ensure_helper():
             return None
         
         try:
-            result = self.mcp_client.call_tool("get-session-info", {})
-            if result.get("success", False):
-                data = result.get("data", {})
-                # Extract activity from session info
-                activity = data.get("activity") or data.get("appActivity") or data.get("currentActivity")
-                if activity:
-                    return str(activity)
-            return None
-        except (MCPConnectionError, MCPError) as e:
-            logger.error(f"MCP error getting current activity: {e}")
-            return None
+            return self.helper.get_current_activity()
         except Exception as e:
-            logger.error(f"Unexpected error getting current activity: {e}")
+            logger.error(f"Error getting current activity: {e}")
             return None
-
+    
     def get_current_app_context(self) -> Optional[Tuple[Optional[str], Optional[str]]]:
-        """Get current app context via MCP."""
+        """Get current app context (package, activity)."""
         package = self.get_current_package()
         activity = self.get_current_activity()
         return package, activity
-
+    
     def terminate_app(self, package_name: str) -> bool:
-        """Terminate app via MCP. Note: May not be directly supported."""
-        if not self._ensure_mcp_client():
+        """Terminate app."""
+        if not self._ensure_helper():
             return False
         
-        logger.warning(f"terminate_app({package_name}) not directly supported by MCP server")
-        # Could potentially use close-appium and reinitialize, but that's not ideal
-        return False  # Not implemented yet
-
+        try:
+            driver = self.helper.get_driver()
+            if driver:
+                driver.terminate_app(package_name)
+                logger.info(f"Terminated app: {package_name}")
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"Error terminating app: {e}")
+            return False
+    
     def launch_app(self) -> bool:
-        """Launch app via MCP. Note: App should be launched via initialize-appium."""
-        if not self._ensure_mcp_client():
+        """Launch app."""
+        if not self._ensure_helper():
             return False
         
-        logger.warning("launch_app() - app should be launched via initialize-appium tool")
-        # App is launched when session is initialized
-        return self._session_initialized
-
+        try:
+            driver = self.helper.get_driver()
+            if driver:
+                driver.launch_app()
+                logger.info("App launched")
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"Error launching app: {e}")
+            return False
+    
+    def start_activity(
+        self,
+        app_package: str,
+        app_activity: str,
+        wait_after_launch: float = 5.0
+    ) -> bool:
+        """
+        Start an Android app activity.
+        
+        Args:
+            app_package: Android app package name
+            app_activity: Android app activity name
+            wait_after_launch: Time to wait after launching activity (seconds)
+            
+        Returns:
+            True if activity was started successfully, False otherwise
+        """
+        if not self._ensure_helper():
+            return False
+        
+        try:
+            wait_ms = int(wait_after_launch * 1000)
+            success = self.helper.start_activity(app_package, app_activity, wait_ms)
+            if success:
+                logger.info(f"Successfully started activity: {app_package}/{app_activity}")
+            return success
+        except Exception as e:
+            logger.error(f"Error starting activity: {e}")
+            return False
+    
     def press_back_button(self) -> bool:
-        """Press back button via MCP."""
+        """Press back button (alias for press_back)."""
         return self.press_back()

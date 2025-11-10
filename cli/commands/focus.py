@@ -11,7 +11,7 @@ from cli.commands.base import CommandGroup, CommandHandler, CommandResult
 from cli.shared.context import CLIContext
 from cli.constants import messages as MSG
 from cli.constants import keys as KEY
-from cli.constants.config import DEFAULT_FOCUS_PRIORITY
+from cli.constants.keys import DEFAULT_FOCUS_PRIORITY
 
 
 class ListFocusAreasCommand(CommandHandler):

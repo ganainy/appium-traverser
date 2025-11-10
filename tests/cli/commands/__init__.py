@@ -1,3 +1,0 @@
-"""
-CLI command tests package.
-"""

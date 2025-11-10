@@ -7,10 +7,10 @@ from typing import Any, List, Optional, Tuple, Union
 
 try:
     # Import Config only when needed to avoid circular import
-    from config.config import Config
+    from config.app_config import Config
 except ImportError:
     # Import Config only when needed to avoid circular import
-    from config.config import Config
+    from config.app_config import Config
 
 class DatabaseManager:
     SCREENS_TABLE = "screens"

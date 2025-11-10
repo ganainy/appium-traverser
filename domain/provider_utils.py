@@ -2,20 +2,13 @@
 Provider-agnostic utilities for AI provider configuration.
 
 This module provides utilities for working with different AI providers (Gemini, OpenRouter, Ollama)
-in a provider-agnostic way, eliminating the need for provider-specific if/elif chains throughout
-the codebase.
+in a provider-agnostic way.
 """
 
 from typing import Optional, Tuple, Any
 
-
-# Provider-to-config-key mapping
-# Maps provider names to their corresponding configuration key names
-PROVIDER_API_KEY_MAP = {
-    'gemini': 'GEMINI_API_KEY',
-    'openrouter': 'OPENROUTER_API_KEY',
-    'ollama': 'OLLAMA_BASE_URL'  # Note: For Ollama, this is a URL, not an API key
-}
+from domain.providers.enums import AIProvider
+from domain.providers.registry import ProviderRegistry
 
 
 def get_provider_config_key(provider: str) -> Optional[str]:
@@ -34,7 +27,10 @@ def get_provider_config_key(provider: str) -> Optional[str]:
         >>> get_provider_config_key('ollama')
         'OLLAMA_BASE_URL'
     """
-    return PROVIDER_API_KEY_MAP.get(provider.lower())
+    strategy = ProviderRegistry.get_by_name(provider)
+    if strategy:
+        return strategy.get_api_key_name()
+    return None
 
 
 def get_provider_api_key(config: Any, provider: str, default_ollama_url: Optional[str] = None) -> Optional[str]:
@@ -57,27 +53,15 @@ def get_provider_api_key(config: Any, provider: str, default_ollama_url: Optiona
         >>> config = Config()
         >>> get_provider_api_key(config, 'gemini')
         'AIza...'
-        >>> get_provider_api_key(config, 'ollama', default_ollama_url='http://localhost:11434')
+        >>> from config.urls import ServiceURLs
+        >>> get_provider_api_key(config, 'ollama', default_ollama_url=ServiceURLs.OLLAMA)
         'http://localhost:11434'
     """
-    provider = provider.lower()
-    config_key = get_provider_config_key(provider)
-    
-    if not config_key:
+    strategy = ProviderRegistry.get_by_name(provider)
+    if not strategy:
         return None
     
-    # Get the value from config (supports both .get() method and getattr())
-    if hasattr(config, 'get'):
-        value = config.get(config_key)
-    else:
-        # Fallback for non-Config objects - use getattr but prefer get() if available
-        value = getattr(config, config_key, None)
-    
-    # For Ollama, use default URL if not configured
-    if provider == 'ollama' and not value and default_ollama_url:
-        return default_ollama_url
-    
-    return value
+    return strategy.get_api_key(config, default_ollama_url)
 
 
 def validate_provider_config(config: Any, provider: str, default_ollama_url: Optional[str] = None) -> Tuple[bool, Optional[str]]:
@@ -98,27 +82,15 @@ def validate_provider_config(config: Any, provider: str, default_ollama_url: Opt
         >>> config = Config()
         >>> validate_provider_config(config, 'gemini')
         (False, 'GEMINI_API_KEY is not set in configuration')
-        >>> validate_provider_config(config, 'ollama', default_ollama_url='http://localhost:11434')
+        >>> from config.urls import ServiceURLs
+        >>> validate_provider_config(config, 'ollama', default_ollama_url=ServiceURLs.OLLAMA)
         (True, None)
     """
-    provider = provider.lower()
-    
-    # Check if provider is supported
-    if provider not in PROVIDER_API_KEY_MAP:
+    strategy = ProviderRegistry.get_by_name(provider)
+    if not strategy:
         return False, f"Unsupported AI provider: {provider}"
     
-    config_key = PROVIDER_API_KEY_MAP[provider]
-    api_key_or_url = get_provider_api_key(config, provider, default_ollama_url)
-    
-    # For Ollama, it's okay if not set (will use default)
-    if provider == 'ollama':
-        return True, None
-    
-    # For other providers, API key is required
-    if not api_key_or_url:
-        return False, f"{config_key} is not set in configuration"
-    
-    return True, None
+    return strategy.validate_config(config)
 
 
 def get_missing_key_name(provider: str) -> str:
@@ -133,5 +105,8 @@ def get_missing_key_name(provider: str) -> str:
     Returns:
         The configuration key name, or a generic "API_KEY" if provider is unknown
     """
-    return PROVIDER_API_KEY_MAP.get(provider.lower(), "API_KEY")
+    strategy = ProviderRegistry.get_by_name(provider)
+    if strategy:
+        return strategy.get_api_key_name()
+    return "API_KEY"
 

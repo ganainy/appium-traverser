@@ -45,15 +45,9 @@ FILE_ANALYSIS_PDF = "analysis.pdf"
 ARG_DB_PATH = "--db-path"
 ARG_SCREENS_DIR = "--screens-dir"
 ARG_OUT_DIR = "--out-dir"
-# === AI provider keys and valid providers ===
-AI_PROVIDER_GEMINI = "gemini"
-AI_PROVIDER_OPENROUTER = "openrouter"
-AI_PROVIDER_OLLAMA = "ollama"
-VALID_AI_PROVIDERS = (AI_PROVIDER_GEMINI, AI_PROVIDER_OPENROUTER, AI_PROVIDER_OLLAMA)
 # === Service check command group (internal keys/magic strings) ===
 SERVICE_TELEMETRY = "telemetry"
 SERVICE_APPIUM = "Appium Server"
-SERVICE_MCP = "MCP Server"
 SERVICE_MOBSF = "MobSF Server"
 SERVICE_OLLAMA = "Ollama Service"
 SERVICE_PCAPDROID = "PCAPdroid"
@@ -69,18 +63,10 @@ CONFIG_PCAPDROID_API_KEY = "PCAPDROID_API_KEY"
 CONFIG_ENABLE_MOBSF_ANALYSIS = "ENABLE_MOBSF_ANALYSIS"
 CONFIG_MOBSF_API_KEY = "MOBSF_API_KEY"
 CONFIG_APPIUM_SERVER_URL = "APPIUM_SERVER_URL"
-CONFIG_MCP_SERVER_URL = "MCP_SERVER_URL"
 CONFIG_MOBSF_API_URL = "MOBSF_API_URL"
 CONFIG_APP_PACKAGE = "APP_PACKAGE"
 
-AI_PROVIDER_GEMINI = "gemini"
-AI_PROVIDER_OPENROUTER = "openrouter"
-AI_PROVIDER_OLLAMA = "ollama"
-VALID_AI_PROVIDERS = ("gemini", "openrouter", "ollama")
-
 APPIUM_STATUS_PATH = "/status"
-MCP_READY_PATH = "/ready"
-MCP_HEALTH_PATH = "/health"
 MOBSF_STATUS_PATH = "/server_status"
 OLLAMA_TAGS_PATH = "/api/tags"
 
@@ -220,6 +206,9 @@ FOCUS_AREA_DESCRIPTION = "description"
 FOCUS_AREA_PRIORITY = "priority"
 FOCUS_AREA_ENABLED = "enabled"
 
+# Focus area default values
+DEFAULT_FOCUS_PRIORITY = 999
+
 # === OpenRouter Service Constants ===
 # Config keys
 CONFIG_OPENROUTER_SHOW_FREE_ONLY = "OPENROUTER_SHOW_FREE_ONLY"
@@ -259,9 +248,6 @@ KEY_ENABLED = "enabled"
 KEY_ACTION = "action"
 KEY_HEURISTIC_SUPPORTS_IMAGE = "heuristic_supports_image"
 KEY_CURRENT_IMAGE_CONTEXT = "current_image_context"
-
-# String literals
-PROVIDER_OPENROUTER = "openrouter"
 
 # Subprocess creation flags
 SUBPROCESS_CREATION_FLAG = "creationflags"

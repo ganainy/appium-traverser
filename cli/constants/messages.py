@@ -413,7 +413,6 @@ INDEXES_MUST_BE_INTEGERS = "--from-index and --to-index must be integers (1-base
 
 # === OpenRouter Service Messages ===
 # Error messages
-ERR_OPENROUTER_IMPORT_FAILED = "Failed to import openrouter_models: {error}"
 ERR_OPENROUTER_MODELS_CACHE_NOT_FOUND = "OpenRouter models cache not found. Run 'python run_cli.py openrouter refresh-models --wait' first."
 ERR_OPENROUTER_MODEL_NOT_FOUND = "Model '{model_identifier}' not found."
 ERR_OPENROUTER_SELECT_MODEL_FAILED = "Failed to select OpenRouter model: {error}"

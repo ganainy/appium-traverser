@@ -193,7 +193,7 @@ class PackagesCommandGroup(CommandGroup):
     
     def __init__(self):
         """Initialize packages command group."""
-        super().__init__("packages", "Manage allowed external packages")  # Group name/desc not externalized for backward compat
+        super().__init__("packages", "Manage allowed external packages")
     
     def get_commands(self) -> list:
         return [

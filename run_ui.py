@@ -12,21 +12,22 @@ python run_ui.py
 import sys
 import argparse
 import os
-from config.config import Config
+from config.app_config import Config
 try:
     from PyQt6.QtWidgets import QApplication
 except ImportError:
     try:
         from PySide6.QtWidgets import QApplication
     except ImportError:
-        print("ERROR: Neither PyQt6 nor PySide6 is installed. Please install one of them.")
+        from ui.strings import RUN_UI_ERROR_NEITHER_QT
+        print(RUN_UI_ERROR_NEITHER_QT)
         sys.exit(1)
 from domain.ui_controller import CrawlerControllerWindow
 from utils.utils import LoggerManager
 
 def main():
     parser = argparse.ArgumentParser(description="Appium Traverser UI")
-    parser.add_argument("--provider", type=str, default=None, help="AI provider to use (gemini, openrouter, ollama)")
+    parser.add_argument("--provider", type=str, default=None, help="AI provider to use")
     parser.add_argument("--model", type=str, default=None, help="Model name/alias to use")
     args, unknown = parser.parse_known_args()
 
@@ -35,12 +36,20 @@ def main():
     # Set provider if given
     provider = args.provider or os.environ.get("AI_PROVIDER") or config.get("AI_PROVIDER")
     if not provider:
-        provider = input("Select AI provider (gemini, openrouter, ollama): ").strip().lower()
-    provider = provider.lower()
-    if provider not in ("gemini", "openrouter", "ollama"):
-        print(f"[ERROR] Invalid provider: {provider}")
+        from domain.providers.registry import ProviderRegistry
+        valid_providers = ProviderRegistry.get_all_names()
+        from ui.strings import CLI_SELECT_PROVIDER_PROMPT
+        provider = input(CLI_SELECT_PROVIDER_PROMPT.format(providers=', '.join(valid_providers))).strip().lower()
+    
+    from domain.providers.enums import AIProvider
+    from ui.strings import CLI_ERROR_PREFIX
+    try:
+        # Validate provider using enum
+        provider_enum = AIProvider.from_string(provider)
+        config.set("AI_PROVIDER", provider_enum.value)
+    except ValueError as e:
+        print(f"{CLI_ERROR_PREFIX} {e}")
         sys.exit(1)
-    config.set("AI_PROVIDER", provider)
 
     # Set model if given
     if args.model:

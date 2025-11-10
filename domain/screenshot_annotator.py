@@ -8,7 +8,7 @@ from PIL import Image, ImageDraw  # Added ImageDraw
 
 if TYPE_CHECKING:
     from infrastructure.appium_driver import AppiumDriver
-from config.config import Config
+from config.app_config import Config
 try:
     import utils.utils as utils
 except ImportError:
@@ -20,17 +20,17 @@ class ScreenshotAnnotator:
         self.cfg = app_config
         self.logger = logging.getLogger(__name__)
 
-        if not self.cfg.get('ANNOTATED_SCREENSHOTS_DIR'):
+        if not self.cfg.ANNOTATED_SCREENSHOTS_DIR:
             raise ValueError("ScreenshotAnnotator: ANNOTATED_SCREENSHOTS_DIR is required.")
         # SCREENSHOTS_DIR is for the raw screenshots where annotations.json will live
-        if not self.cfg.get('SCREENSHOTS_DIR'):
+        if not self.cfg.SCREENSHOTS_DIR:
             raise ValueError("ScreenshotAnnotator: SCREENSHOTS_DIR is required for master annotation file.")
         
         # Ensure the directory for SCREENSHOTS_DIR (raw screenshots) exists before resolving master_annotation_file_path
         # Config class should have already created this, but an extra check is fine.
-        if self.cfg.get('SCREENSHOTS_DIR'): # Check if the path is not None or empty
-             os.makedirs(str(self.cfg.get('SCREENSHOTS_DIR')), exist_ok=True)
-             self.master_annotation_file_path = os.path.join(str(self.cfg.get('SCREENSHOTS_DIR')), "annotations.json")
+        if self.cfg.SCREENSHOTS_DIR: # Check if the path is not None or empty
+             os.makedirs(str(self.cfg.SCREENSHOTS_DIR), exist_ok=True)
+             self.master_annotation_file_path = os.path.join(str(self.cfg.SCREENSHOTS_DIR), "annotations.json")
         else: # Should not happen if config is correctly loaded and SCREENSHOTS_DIR is mandatory
             self.logger.critical("SCREENSHOTS_DIR is not configured properly. Master annotation file path cannot be set.")
             # Potentially raise an error or set a flag indicating this annotator is partially non-functional
@@ -174,7 +174,7 @@ class ScreenshotAnnotator:
             filename_suffix = f"_action_{action_type}_no_specific_target_annotation.png"
             target_log_info = f"action_{action_type}_no_specific_target_annotation"
 
-        annotated_dir = str(self.cfg.get('ANNOTATED_SCREENSHOTS_DIR'))
+        annotated_dir = str(self.cfg.ANNOTATED_SCREENSHOTS_DIR)
         os.makedirs(annotated_dir, exist_ok=True)
         
         filename = f"annotated_s{screen_id}_step{step}{filename_suffix}"

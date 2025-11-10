@@ -13,9 +13,9 @@ if TYPE_CHECKING:
 
 # Import your main Config class
 try:
-    from config.config import Config  # Adjust path as necessary
+    from config.app_config import Config  # Adjust path as necessary
 except ImportError:
-    from config.config import Config  # Adjust path as necessary
+    from config.app_config import Config  # Adjust path as necessary
 
 class TrafficCaptureManager:
     def __init__(self, driver: 'AppiumDriver', app_config: Config):

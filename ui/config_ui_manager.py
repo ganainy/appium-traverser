@@ -311,7 +311,7 @@ class ConfigManager(QObject):
                             if index >= 0:
                                 widget.setCurrentIndex(index)
                                 if key == 'AI_PROVIDER':
-                                    UIComponents._update_model_types(value, self.main_controller.config_widgets)
+                                    UIComponents._update_model_types(value, self.main_controller.config_widgets, self)
                     elif isinstance(widget, QTextEdit):
                         if isinstance(value, list):
                             widget.setPlainText('\n'.join(value))
@@ -336,7 +336,7 @@ class ConfigManager(QObject):
         # AI_PROVIDER
         ai_provider = self.config.get('AI_PROVIDER', None)
         if ai_provider:
-            UIComponents._update_model_types(ai_provider, self.main_controller.config_widgets)
+            UIComponents._update_model_types(ai_provider, self.main_controller.config_widgets, self)
         self._update_crawl_mode_inputs_state()
         if loaded_any:
             self.main_controller.log_message("Configuration loaded from SQLite successfully.", 'green')

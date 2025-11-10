@@ -14,16 +14,36 @@ from pydantic import BaseModel, ValidationError, validator
 
 # LangChain imports for orchestration
 from langchain_core.runnables import RunnableLambda
+from langchain_core.prompts import PromptTemplate
 from langgraph.checkpoint.memory import MemorySaver
 
 # Always use absolute import for model_adapters
 from domain.model_adapters import create_model_adapter, Session
-from domain import constants as K
 from domain.provider_utils import get_provider_api_key, get_provider_config_key, validate_provider_config
+from config.numeric_constants import (
+    DEFAULT_AI_PROVIDER,
+    DEFAULT_MODEL_TEMP,
+    DEFAULT_MAX_TOKENS,
+    IMAGE_MAX_WIDTH_DEFAULT,
+    IMAGE_DEFAULT_QUALITY,
+    IMAGE_DEFAULT_FORMAT,
+    IMAGE_CROP_TOP_PCT_DEFAULT,
+    IMAGE_CROP_BOTTOM_PCT_DEFAULT,
+    IMAGE_BG_COLOR,
+    IMAGE_SHARPEN_RADIUS,
+    IMAGE_SHARPEN_PERCENT,
+    IMAGE_SHARPEN_THRESHOLD,
+    LONG_PRESS_MIN_DURATION_MS,
+    AI_LOG_FILENAME,
+)
+from config.urls import ServiceURLs
 from domain.prompts import JSON_OUTPUT_SCHEMA, AVAILABLE_ACTIONS, ACTION_DECISION_SYSTEM_PROMPT, CONTEXT_ANALYSIS_PROMPT, SYSTEM_PROMPT_TEMPLATE, SECOND_CALL_PROMPT
 
 # Update AgentAssistant to initialize AppiumDriver with a valid Config instance
-from config.config import Config
+from config.app_config import Config
+
+# Import XML simplification utility
+from utils.utils import simplify_xml_for_ai
 
 # Explicitly define the Tools class
 class Tools:
@@ -38,9 +58,24 @@ class ActionDecisionChain:
     def run(self, context: Dict[str, Any]) -> Dict[str, Any]:
         """Run the decision chain with the given context."""
         try:
-            return self.chain.invoke(context)
+            # The chain expects a dict with prompt variables
+            # Format the context for the prompt template
+            result = self.chain.invoke(context)
+            # If result is a string, try to parse as JSON
+            if isinstance(result, str):
+                try:
+                    return json.loads(result)
+                except json.JSONDecodeError:
+                    # Try to extract JSON from text if wrapped
+                    json_match = re.search(r'\{[^{}]*\}', result, re.DOTALL)
+                    if json_match:
+                        return json.loads(json_match.group())
+                    from config.numeric_constants import RESULT_TRUNCATION_LENGTH
+                    logging.warning(f"Could not parse JSON from chain result: {result[:RESULT_TRUNCATION_LENGTH]}")
+                    return {}
+            return result if isinstance(result, dict) else {}
         except Exception as e:
-            logging.error(f"Error running ActionDecisionChain: {e}")
+            logging.error(f"Error running ActionDecisionChain: {e}", exc_info=True)
             return {}
 
 # Define the Pydantic model for ActionData
@@ -95,18 +130,18 @@ class AgentAssistant:
         logging.debug("AI response cache initialized.")
 
         # Determine which AI provider to use
-        self.ai_provider = self.cfg.get('AI_PROVIDER', K.DEFAULT_AI_PROVIDER).lower()
+        self.ai_provider = self.cfg.get('AI_PROVIDER', DEFAULT_AI_PROVIDER).lower()
         logging.debug(f"Using AI provider: {self.ai_provider}")
 
         # Adapter provider override (for routing purposes without changing UI label)
         self._adapter_provider_override: Optional[str] = None
 
         # Get the appropriate API key based on the provider using provider-agnostic utility
-        is_valid, error_msg = validate_provider_config(self.cfg, self.ai_provider, K.DEFAULT_OLLAMA_URL)
+        is_valid, error_msg = validate_provider_config(self.cfg, self.ai_provider, ServiceURLs.OLLAMA)
         if not is_valid:
             raise ValueError(error_msg or f"Unsupported AI provider: {self.ai_provider}")
         
-        self.api_key = get_provider_api_key(self.cfg, self.ai_provider, K.DEFAULT_OLLAMA_URL)
+        self.api_key = get_provider_api_key(self.cfg, self.ai_provider, ServiceURLs.OLLAMA)
         if not self.api_key:
             # This should not happen if validation passed, but add safety check
             config_key = get_provider_config_key(self.ai_provider) or "API_KEY"
@@ -127,11 +162,11 @@ class AgentAssistant:
             'description': f"Direct model id '{self.actual_model_name}' for provider '{self.ai_provider}'",
             'generation_config': {
                 # Keep conservative defaults; adapters may override or apply safer fallbacks
-                'temperature': K.DEFAULT_MODEL_TEMP,
+                'temperature': DEFAULT_MODEL_TEMP,
                 'top_p': 0.95,
-                'max_output_tokens': K.DEFAULT_MAX_TOKENS
+                'max_output_tokens': DEFAULT_MAX_TOKENS
             },
-            'online': self.ai_provider in [K.DEFAULT_AI_PROVIDER, 'openrouter']
+            'online': self.ai_provider in [DEFAULT_AI_PROVIDER, 'openrouter']
         }
 
         # Initialize model using the adapter
@@ -140,18 +175,28 @@ class AgentAssistant:
         # Initialize provider-agnostic session
         self._init_session(user_id=None)
         
+        # Initialize AI interaction logger (must be before LangChain components)
+        self.ai_interaction_readable_logger = None
+        self._setup_ai_interaction_logger()
+        
+        # Track if we've logged the static prompt parts (schema and actions)
+        self._static_prompt_logged = False
+        
         # Initialize LangChain components for orchestration
         self._init_langchain_components()
         
         # Initialize action dispatch map
         self._init_action_dispatch_map()
 
-        self.ai_interaction_readable_logger = None
-
     def _init_session(self, user_id: Optional[str] = None):
         """Initialize a new provider-agnostic session."""
         now = time.time()
-        model = self.actual_model_name if hasattr(self, 'actual_model_name') else (self.model_alias if hasattr(self, 'model_alias') else self.cfg.get('DEFAULT_MODEL_TYPE', K.DEFAULT_MODEL_NAME))
+        # actual_model_name is always set in __init__ before this is called
+        # This fallback chain is defensive programming but should never execute
+        model = self.actual_model_name if hasattr(self, 'actual_model_name') else (self.model_alias if hasattr(self, 'model_alias') else self.cfg.get('DEFAULT_MODEL_TYPE', None))
+        if not model:
+            # This should never happen due to validation in __init__, but fail fast if it does
+            raise ValueError("No model available for session initialization")
         self.session = Session(
             session_id=str(uuid.uuid4()),
             provider=self.ai_provider,
@@ -183,6 +228,25 @@ class AgentAssistant:
                 # Plain string
                 prompt_text = str(prompt_input)
 
+            # Log the AI input (prompt) - only log dynamic parts to avoid repetition
+            if self.ai_interaction_readable_logger:
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                self.ai_interaction_readable_logger.info("=" * 80)
+                self.ai_interaction_readable_logger.info(f"AI INPUT - {timestamp}")
+                self.ai_interaction_readable_logger.info("=" * 80)
+                # Extract and log only the dynamic parts (everything after the static prompt)
+                # The static prompt starts with "You are an AI agent..." and ends before "Current screen XML:"
+                # We'll log everything from "Current screen XML:" onwards
+                if "Current screen XML:" in prompt_text:
+                    # Find where the dynamic part starts
+                    dynamic_start = prompt_text.find("Current screen XML:")
+                    dynamic_part = prompt_text[dynamic_start:]
+                    self.ai_interaction_readable_logger.info(dynamic_part)
+                else:
+                    # Fallback: log the full prompt if we can't find the marker
+                    self.ai_interaction_readable_logger.info(prompt_text)
+                self.ai_interaction_readable_logger.info("")
+
             try:
                 response_text, metadata = self.model_adapter.generate_response(
                     prompt=prompt_text,
@@ -190,18 +254,135 @@ class AgentAssistant:
                     image_format=self.cfg.get('IMAGE_FORMAT', None),
                     image_quality=self.cfg.get('IMAGE_QUALITY', None)
                 )
+                
+                # Log the AI response
+                if self.ai_interaction_readable_logger:
+                    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    self.ai_interaction_readable_logger.info("=" * 80)
+                    self.ai_interaction_readable_logger.info(f"AI RESPONSE - {timestamp}")
+                    self.ai_interaction_readable_logger.info("=" * 80)
+                    self.ai_interaction_readable_logger.info(response_text)
+                    self.ai_interaction_readable_logger.info("")
+                    self.ai_interaction_readable_logger.info("")
+                
                 return response_text
             except Exception as e:
                 logging.error(f"Error in LangChain LLM wrapper: {e}")
+                # Log error if logger is available
+                if self.ai_interaction_readable_logger:
+                    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    self.ai_interaction_readable_logger.info("=" * 80)
+                    self.ai_interaction_readable_logger.info(f"AI ERROR - {timestamp}")
+                    self.ai_interaction_readable_logger.info("=" * 80)
+                    self.ai_interaction_readable_logger.info(f"Error: {str(e)}")
+                    self.ai_interaction_readable_logger.info("")
+                    self.ai_interaction_readable_logger.info("")
                 return ""
 
         return RunnableLambda(_llm_call)
 
-    def _create_prompt_chain(self, prompt_template: str) -> str:
-        """Generate a prompt chain using the provided template."""
+    def _create_prompt_chain(self, prompt_template: str, llm_wrapper):
+        """Create a LangChain Runnable chain from a prompt template.
+        
+        Args:
+            prompt_template: The prompt template string with placeholders
+            llm_wrapper: The LLM Runnable wrapper
+            
+        Returns:
+            A Runnable chain: PromptTemplate | LLM | OutputParser
+        """
+        # Format the template with static values
         action_list_str = "\n".join([f"- {action}: {desc}" for action, desc in AVAILABLE_ACTIONS.items()])
-        json_output_guidance = JSON_OUTPUT_SCHEMA
-        return prompt_template.format(json_schema=json_output_guidance, action_list=action_list_str)
+        json_output_guidance = json.dumps(JSON_OUTPUT_SCHEMA, indent=2)
+        
+        # Create formatted prompt string
+        formatted_prompt = prompt_template.format(
+            json_schema=json_output_guidance,
+            action_list=action_list_str
+        )
+        
+        # Log static prompt parts once
+        if self.ai_interaction_readable_logger and not self._static_prompt_logged:
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self.ai_interaction_readable_logger.info("=" * 80)
+            self.ai_interaction_readable_logger.info(f"AI PROMPT CONFIGURATION - {timestamp}")
+            self.ai_interaction_readable_logger.info("=" * 80)
+            self.ai_interaction_readable_logger.info(formatted_prompt)
+            self.ai_interaction_readable_logger.info("")
+            self.ai_interaction_readable_logger.info("(Note: The above JSON schema and available actions are static and will not be repeated in subsequent logs)")
+            self.ai_interaction_readable_logger.info("")
+            self._static_prompt_logged = True
+        
+        # Create a PromptTemplate that accepts dynamic context variables
+        # We'll inject the formatted prompt as a system message
+        # For simplicity, create a chain that formats the prompt with context
+        def format_prompt_with_context(context: Dict[str, Any]) -> str:
+            """Format the prompt with context variables."""
+            # Build the full prompt with context
+            prompt_parts = [formatted_prompt]
+            
+            # Build dynamic parts separately for logging
+            dynamic_parts = []
+            
+            # Add context information
+            if context.get("xml_context"):
+                # XML is already simplified in _get_next_action_langchain, so use it directly
+                xml_string = context['xml_context']
+                
+                # Ensure it's a string (should already be simplified at this point)
+                if not isinstance(xml_string, str):
+                    xml_string = str(xml_string)
+                
+                # Use the simplified XML directly (no need to simplify again)
+                xml_part = f"\n\nCurrent screen XML:\n{xml_string}"
+                prompt_parts.append(xml_part)
+                dynamic_parts.append(xml_part)
+            
+            if context.get("previous_actions"):
+                actions_part = f"\n\nPrevious actions:\n{', '.join(context['previous_actions'][-5:])}"  # Last 5 actions
+                prompt_parts.append(actions_part)
+                dynamic_parts.append(actions_part)
+            
+            if context.get("last_action_feedback"):
+                feedback_part = f"\n\nLast action feedback: {context['last_action_feedback']}"
+                prompt_parts.append(feedback_part)
+                dynamic_parts.append(feedback_part)
+            
+            if context.get("current_screen_visit_count"):
+                visit_count_part = f"\n\nScreen visit count: {context['current_screen_visit_count']}"
+                prompt_parts.append(visit_count_part)
+                dynamic_parts.append(visit_count_part)
+            
+            closing_part = "\n\nPlease respond with a JSON object matching the schema above."
+            prompt_parts.append(closing_part)
+            dynamic_parts.append(closing_part)
+            
+            # Store dynamic parts in context for logging
+            context['_dynamic_prompt_parts'] = "\n".join(dynamic_parts)
+            
+            return "\n".join(prompt_parts)
+        
+        # Create chain: format prompt -> LLM -> parse JSON
+        def parse_json_output(llm_output: str) -> Dict[str, Any]:
+            """Parse JSON from LLM output."""
+            try:
+                # Try direct JSON parse
+                return json.loads(llm_output)
+            except json.JSONDecodeError:
+                # Try to extract JSON from markdown code blocks or text
+                json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', llm_output, re.DOTALL)
+                if json_match:
+                    return json.loads(json_match.group(1))
+                # Try to find JSON object in text
+                json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', llm_output, re.DOTALL)
+                if json_match:
+                    return json.loads(json_match.group())
+                logging.warning(f"Could not parse JSON from LLM output: {llm_output[:200]}")
+                return {}
+        
+        # Chain: format prompt -> LLM -> parse JSON
+        chain = RunnableLambda(format_prompt_with_context) | llm_wrapper | RunnableLambda(parse_json_output)
+        return chain
 
     def _init_langchain_components(self):
         """Initialize LangChain components for orchestration."""
@@ -211,11 +392,13 @@ class AgentAssistant:
             # Create the LLM wrapper
             self.langchain_llm = self._create_langchain_llm_wrapper()
 
-            # Create the action decision chain
-            self.action_decision_chain = ActionDecisionChain(chain=self._create_prompt_chain(ACTION_DECISION_SYSTEM_PROMPT))
+            # Create the action decision chain with proper Runnable chain
+            action_chain = self._create_prompt_chain(ACTION_DECISION_SYSTEM_PROMPT, self.langchain_llm)
+            self.action_decision_chain = ActionDecisionChain(chain=action_chain)
 
-            # Create the context analysis chain
-            self.context_analysis_chain = ActionDecisionChain(chain=self._create_prompt_chain(CONTEXT_ANALYSIS_PROMPT))
+            # Create the context analysis chain with proper Runnable chain
+            context_chain = self._create_prompt_chain(CONTEXT_ANALYSIS_PROMPT, self.langchain_llm)
+            self.context_analysis_chain = ActionDecisionChain(chain=context_chain)
 
             # Initialize memory checkpointer for cross-request context
             self.langchain_memory = MemorySaver()
@@ -229,36 +412,14 @@ class AgentAssistant:
     def _execute_click_action(self, action_data: Dict[str, Any]) -> bool:
         """Execute click action with proper argument handling."""
         target_id = action_data.get("target_identifier")
-        if not target_id:
-            # Try to use coordinates if available
-            bbox = action_data.get("target_bounding_box")
-            if bbox and isinstance(bbox, dict):
-                top_left = bbox.get("top_left", [])
-                bottom_right = bbox.get("bottom_right", [])
-                if len(top_left) == 2 and len(bottom_right) == 2:
-                    y1, x1 = top_left
-                    y2, x2 = bottom_right
-                    center_x = (x1 + x2) / 2
-                    center_y = (y1 + y2) / 2
-
-                    window_size = self.tools.driver.get_window_size()
-                    if window_size:
-                        screen_width = window_size['width']
-                        screen_height = window_size['height']
-
-                        center_x = max(0, min(center_x, screen_width - 1))
-                        center_y = max(0, min(center_y, screen_height - 1))
-
-                        logging.debug(f"Calculated tap coordinates: ({center_x}, {center_y}) from bbox {bbox}")
-                        return self.tools.driver.tap(None, {"top_left": [center_y, center_x], "bottom_right": [center_y, center_x]})
-                    else:
-                        logging.error("Cannot get screen size for coordinate validation")
-                        return False
-            else:
-                logging.error("Cannot execute click: No target identifier or valid bounding box provided")
-                return False
-        else:
-            return self.tools.driver.tap(target_id, None)
+        bbox = action_data.get("target_bounding_box")
+        
+        # Pass both target_identifier and bbox to driver.tap()
+        # The driver will call MCP server, which will:
+        # 1. Prefer coordinates (bbox) if available
+        # 2. Fall back to element lookup with multiple strategies if coordinates not available
+        # 3. Use element lookup as fallback if coordinates fail
+        return self.tools.driver.tap(target_id, bbox)
     
     def _execute_input_action(self, action_data: Dict[str, Any]) -> bool:
         """Execute input action with proper argument handling."""
@@ -277,9 +438,9 @@ class AgentAssistant:
         bbox = action_data.get("target_bounding_box")
         # Default duration from config
         try:
-            default_duration_ms = int(self.cfg.get('LONG_PRESS_MIN_DURATION_MS', K.DEFAULT_LONG_PRESS_MS))
+            default_duration_ms = int(self.cfg.get('LONG_PRESS_MIN_DURATION_MS', LONG_PRESS_MIN_DURATION_MS))
         except Exception:
-            default_duration_ms = K.DEFAULT_LONG_PRESS_MS
+            default_duration_ms = LONG_PRESS_MIN_DURATION_MS
         duration_ms = action_data.get("duration_ms", default_duration_ms)
         
         if not target_id and bbox and isinstance(bbox, dict):
@@ -315,13 +476,112 @@ class AgentAssistant:
         self.action_dispatch_map = {
             "click": self._execute_click_action,
             "input": self._execute_input_action,
-            "scroll_down": lambda: self.tools.driver.scroll(None, "down"),
-            "scroll_up": lambda: self.tools.driver.scroll(None, "up"),
-            "swipe_left": lambda: self.tools.driver.scroll(None, "left"),
-            "swipe_right": lambda: self.tools.driver.scroll(None, "right"),
+            "scroll_down": lambda action_data: self.tools.driver.scroll("down"),
+            "scroll_up": lambda action_data: self.tools.driver.scroll("up"),
+            "swipe_left": lambda action_data: self.tools.driver.scroll("left"),
+            "swipe_right": lambda action_data: self.tools.driver.scroll("right"),
             "back": self.tools.driver.press_back,
             "long_press": self._execute_long_press_action
         }
+    
+    def _normalize_action_type(self, action_type: str, action_data: Dict[str, Any]) -> str:
+        """Normalize generic action types to specific ones.
+        
+        Args:
+            action_type: The action type string (may be generic like "scroll" or "swipe")
+            action_data: The full action data dictionary for context
+            
+        Returns:
+            Normalized action type string matching one of the supported actions
+        """
+        # If action is already specific, return as-is
+        if action_type in self.action_dispatch_map:
+            return action_type
+        
+        # Map generic actions to specific ones
+        target_identifier = action_data.get("target_identifier", "").lower()
+        reasoning = action_data.get("reasoning", "").lower()
+        
+        if action_type == "scroll":
+            # Try to infer direction from context
+            if "up" in target_identifier or "up" in reasoning:
+                return "scroll_up"
+            elif "down" in target_identifier or "down" in reasoning:
+                return "scroll_down"
+            else:
+                # Default to scroll_down (most common)
+                logging.info(f"Generic 'scroll' action mapped to 'scroll_down' (default)")
+                return "scroll_down"
+        
+        elif action_type == "swipe":
+            # Try to infer direction from context
+            if "left" in target_identifier or "left" in reasoning:
+                return "swipe_left"
+            elif "right" in target_identifier or "right" in reasoning:
+                return "swipe_right"
+            else:
+                # Default to swipe_left (common for navigation)
+                logging.info(f"Generic 'swipe' action mapped to 'swipe_left' (default)")
+                return "swipe_left"
+        
+        # Return original if no mapping found
+        return action_type
+    
+    def execute_action(self, action_data: Dict[str, Any]) -> bool:
+        """Execute an action based on the action_data dictionary.
+        
+        Args:
+            action_data: Dictionary containing action information with at least an 'action' key.
+                        Expected keys: action, target_identifier, target_bounding_box, input_text, etc.
+        
+        Returns:
+            True if action executed successfully, False otherwise
+        """
+        try:
+            # Ensure driver is connected before executing
+            if not self._ensure_driver_connected():
+                logging.error("Cannot execute action: Driver not connected")
+                return False
+            
+            # Get the action type
+            action_type = action_data.get("action", "").lower()
+            
+            if not action_type:
+                logging.error("Cannot execute action: No action type specified")
+                return False
+            
+            # Map generic actions to specific ones if needed
+            action_type = self._normalize_action_type(action_type, action_data)
+            
+            # Look up the handler in the dispatch map
+            handler = self.action_dispatch_map.get(action_type)
+            
+            if not handler:
+                logging.error(f"Unknown action type: {action_type}. Available actions: {list(self.action_dispatch_map.keys())}")
+                return False
+            
+            # Execute the handler
+            try:
+                logging.info(f"Executing action: {action_type}")
+                # Some handlers expect action_data, others don't (like press_back)
+                if action_type == "back":
+                    result = handler()
+                else:
+                    result = handler(action_data)
+                
+                if result:
+                    logging.info(f"[OK] Successfully executed action: {action_type}")
+                else:
+                    logging.warning(f"[FAIL] Action execution returned False: {action_type}")
+                
+                return bool(result)
+            except Exception as e:
+                logging.error(f"[ERROR] Error executing action {action_type}: {e}", exc_info=True)
+                return False
+                
+        except Exception as e:
+            logging.error(f"Unexpected error in execute_action: {e}", exc_info=True)
+            return False
 
     def _initialize_model(self, model_config, safety_settings_override):
         """Initialize the AI model with appropriate settings using the adapter."""
@@ -360,39 +620,80 @@ class AgentAssistant:
             logging.error(f"Failed to initialize AI model: {e}", exc_info=True)
             raise
 
-    def _setup_ai_interaction_logger(self):
-        """Initializes only the human-readable logger (JSONL removed)."""
-        if self.ai_interaction_readable_logger and self.ai_interaction_readable_logger.handlers:
+    def _setup_ai_interaction_logger(self, force_recreate: bool = False):
+        """Initializes only the human-readable logger (JSONL removed).
+        
+        Args:
+            force_recreate: If True, close existing handlers and recreate them.
+        """
+        if self.ai_interaction_readable_logger and self.ai_interaction_readable_logger.handlers and not force_recreate:
             return  # Already configured
 
-        target_log_dir = self.cfg.get('LOG_DIR', None)
-        try:
-            if target_log_dir:
-                os.makedirs(target_log_dir, exist_ok=True)
-        except OSError as e:
-            logging.error(f"Could not create logs directory for AI interactions: {e}")
+        # Close existing file handlers if recreating
+        if force_recreate and self.ai_interaction_readable_logger:
+            for handler in list(self.ai_interaction_readable_logger.handlers):
+                if isinstance(handler, logging.FileHandler):
+                    try:
+                        handler.close()
+                    except Exception:
+                        pass
+                self.ai_interaction_readable_logger.removeHandler(handler)
 
+        # Use the LOG_DIR property which resolves the template properly
+        try:
+            target_log_dir = self.cfg.LOG_DIR if hasattr(self.cfg, 'LOG_DIR') else self.cfg.get('LOG_DIR', None)
+        except Exception as e:
+            logging.warning(f"Could not get LOG_DIR property: {e}, trying get() method")
+            target_log_dir = self.cfg.get('LOG_DIR', None)
+        
+        # Don't create directory here - it will be created when the file handler is created
+        # This allows path regeneration to work without directory locks
+        
         # Human-readable logger
-        self.ai_interaction_readable_logger = logging.getLogger('AIInteractionReadableLogger')
+        if not self.ai_interaction_readable_logger:
+            self.ai_interaction_readable_logger = logging.getLogger('AIInteractionReadableLogger')
         self.ai_interaction_readable_logger.setLevel(logging.INFO)
         self.ai_interaction_readable_logger.propagate = False
-        if self.ai_interaction_readable_logger.hasHandlers():
-            self.ai_interaction_readable_logger.handlers.clear()
+        if self.ai_interaction_readable_logger.hasHandlers() and not force_recreate:
+            return  # Already has handlers and not forcing recreate
 
         if target_log_dir:
-            try:
-                readable_path = os.path.join(target_log_dir, K.AI_LOG_FILENAME)
-                fh_readable = logging.FileHandler(readable_path, encoding='utf-8')
-                fh_readable.setLevel(logging.INFO)
-                fh_readable.setFormatter(logging.Formatter('%(message)s'))
-                self.ai_interaction_readable_logger.addHandler(fh_readable)
-                logging.info(f"AI interaction readable logger initialized at: {readable_path}")
-            except OSError as e:
-                logging.error(f"Could not create AI interactions readable log file: {e}")
-                self.ai_interaction_readable_logger.addHandler(logging.NullHandler())
+            # Check if we have a real device ID - don't create directory for unknown_device
+            # Get device info from path_manager if available
+            if hasattr(self.cfg, '_path_manager'):
+                path_manager = self.cfg._path_manager
+                device_name = path_manager.get_device_name()
+                device_udid = path_manager.get_device_udid()
+            else:
+                device_name = None
+                device_udid = None
+            has_real_device = device_name or device_udid
+            
+            # Only create directory and file handler if we have a real device or if forcing recreate
+            if has_real_device or force_recreate:
+                try:
+                    # Create directory only when actually creating the file handler
+                    os.makedirs(target_log_dir, exist_ok=True)
+                    readable_path = os.path.join(target_log_dir, AI_LOG_FILENAME)
+                    fh_readable = logging.FileHandler(readable_path, encoding='utf-8')
+                    fh_readable.setLevel(logging.INFO)
+                    fh_readable.setFormatter(logging.Formatter('%(message)s'))
+                    self.ai_interaction_readable_logger.addHandler(fh_readable)
+                    logging.info(f"AI interaction readable logger initialized at: {readable_path}")
+                except OSError as e:
+                    logging.error(f"Could not create AI interactions readable log file: {e}")
+                    if not self.ai_interaction_readable_logger.handlers:
+                        self.ai_interaction_readable_logger.addHandler(logging.NullHandler())
+            else:
+                # Delay file handler creation until device is initialized
+                # Use NullHandler for now to avoid creating directories
+                if not self.ai_interaction_readable_logger.handlers:
+                    self.ai_interaction_readable_logger.addHandler(logging.NullHandler())
+                logging.debug("AI interaction logger delayed - waiting for device initialization")
         else:
-            logging.error("Log directory not available, AI interaction readable log will not be saved.")
-            self.ai_interaction_readable_logger.addHandler(logging.NullHandler())
+            logging.warning("Log directory not available, AI interaction readable log will not be saved.")
+            if not self.ai_interaction_readable_logger.handlers:
+                self.ai_interaction_readable_logger.addHandler(logging.NullHandler())
 
 
     def _prepare_image_part(self, screenshot_bytes: Optional[bytes]) -> Optional[Image.Image]:
@@ -414,23 +715,23 @@ class AgentAssistant:
             original_size = len(screenshot_bytes)
             
             # Get AI provider for provider-specific optimizations
-            ai_provider = self.cfg.get('AI_PROVIDER', K.DEFAULT_AI_PROVIDER).lower()
+            ai_provider = self.cfg.get('AI_PROVIDER', DEFAULT_AI_PROVIDER).lower()
             
             # Get provider capabilities from config
             try:
-                from config.config import AI_PROVIDER_CAPABILITIES
+                from config.app_config import AI_PROVIDER_CAPABILITIES
             except ImportError:
-                from config.config import AI_PROVIDER_CAPABILITIES
+                from config.app_config import AI_PROVIDER_CAPABILITIES
             
-            capabilities = AI_PROVIDER_CAPABILITIES.get(ai_provider, AI_PROVIDER_CAPABILITIES.get(K.DEFAULT_AI_PROVIDER, {}))
+            capabilities = AI_PROVIDER_CAPABILITIES.get(ai_provider, AI_PROVIDER_CAPABILITIES.get(DEFAULT_AI_PROVIDER, {}))
             
             # Resolve preprocessing settings (global overrides take precedence)
-            max_width = self.cfg.get('IMAGE_MAX_WIDTH', None) or capabilities.get('image_max_width', K.IMAGE_MAX_WIDTH)
-            quality = self.cfg.get('IMAGE_QUALITY', None) or capabilities.get('image_quality', K.IMAGE_DEFAULT_QUALITY)
-            image_format = self.cfg.get('IMAGE_FORMAT', None) or capabilities.get('image_format', K.IMAGE_DEFAULT_FORMAT)
+            max_width = self.cfg.get('IMAGE_MAX_WIDTH', None) or capabilities.get('image_max_width', IMAGE_MAX_WIDTH_DEFAULT)
+            quality = self.cfg.get('IMAGE_QUALITY', None) or capabilities.get('image_quality', IMAGE_DEFAULT_QUALITY)
+            image_format = self.cfg.get('IMAGE_FORMAT', None) or capabilities.get('image_format', IMAGE_DEFAULT_FORMAT)
             crop_bars = self.cfg.get('IMAGE_CROP_BARS', True)
-            crop_top_pct = float(self.cfg.get('IMAGE_CROP_TOP_PERCENT', K.IMAGE_CROP_TOP_PCT) or 0.0)
-            crop_bottom_pct = float(self.cfg.get('IMAGE_CROP_BOTTOM_PERCENT', K.IMAGE_CROP_BOTTOM_PCT) or 0.0)
+            crop_top_pct = float(self.cfg.get('IMAGE_CROP_TOP_PERCENT', IMAGE_CROP_TOP_PCT_DEFAULT) or 0.0)
+            crop_bottom_pct = float(self.cfg.get('IMAGE_CROP_BOTTOM_PERCENT', IMAGE_CROP_BOTTOM_PCT_DEFAULT) or 0.0)
             
             logging.debug(
                 f"Image preprocessing settings -> provider: {ai_provider}, max_width: {max_width}, "
@@ -464,7 +765,7 @@ class AgentAssistant:
             if img.mode in ('RGBA', 'LA', 'P'):
                 # Create white background for transparent images
                 if img.mode == 'RGBA':
-                    background = Image.new('RGB', img.size, K.IMAGE_BG_COLOR)
+                    background = Image.new('RGB', img.size, IMAGE_BG_COLOR)
 
                     background.paste(img, mask=img.split()[-1])  # Use alpha channel as mask
                     img = background
@@ -476,16 +777,16 @@ class AgentAssistant:
             from PIL import ImageFilter
 
             # Mild sharpening to preserve text readability
-            img = img.filter(ImageFilter.UnsharpMask(radius=K.IMAGE_SHARPEN_RADIUS, percent=K.IMAGE_SHARPEN_PERCENT, threshold=K.IMAGE_SHARPEN_THRESHOLD))
+            img = img.filter(ImageFilter.UnsharpMask(radius=IMAGE_SHARPEN_RADIUS, percent=IMAGE_SHARPEN_PERCENT, threshold=IMAGE_SHARPEN_THRESHOLD))
             
             # Note: We return the processed PIL Image. Encoding (format/quality) is handled by model adapters.
             # Still, estimate potential savings for logging by encoding briefly to measure size.
             try:
                 compressed_buffer = io.BytesIO()
-                if image_format.upper() == K.IMAGE_DEFAULT_FORMAT:
+                if image_format.upper() == IMAGE_DEFAULT_FORMAT:
                     img.save(
                         compressed_buffer,
-                        format=K.IMAGE_DEFAULT_FORMAT,
+                        format=IMAGE_DEFAULT_FORMAT,
                         quality=quality,
                         optimize=True,
                         progressive=True,
@@ -517,21 +818,133 @@ class AgentAssistant:
 
 
     def _get_next_action_langchain(self, screenshot_bytes: Optional[bytes], xml_context: str, previous_actions: List[str], current_screen_visit_count: int, current_composite_hash: str, last_action_feedback: Optional[str] = None) -> Optional[Tuple[Dict[str, Any], float, int]]:
+        """Get the next action using LangChain decision chain.
+        
+        Args:
+            screenshot_bytes: Screenshot image bytes (optional, for future vision support)
+            xml_context: XML representation of current screen
+            previous_actions: List of previous action strings
+            current_screen_visit_count: Number of times current screen has been visited
+            current_composite_hash: Hash of current screen state
+            last_action_feedback: Feedback from last action execution
+            
+        Returns:
+            Tuple of (action_data dict, confidence float, token_count int) or None on error
+        """
         try:
+            # Prepare context for the chain
             context = {
                 "screenshot_bytes": screenshot_bytes,
-                "xml_context": xml_context,
-                "previous_actions": previous_actions,
-                "current_screen_visit_count": current_screen_visit_count,
-                "current_composite_hash": current_composite_hash,
-                "last_action_feedback": last_action_feedback
+                "xml_context": xml_context or "",
+                "previous_actions": previous_actions or [],
+                "current_screen_visit_count": current_screen_visit_count or 0,
+                "current_composite_hash": current_composite_hash or "",
+                "last_action_feedback": last_action_feedback or ""
             }
 
+            # Extract actual XML string and simplify it before sending to AI
+            xml_string_raw = xml_context
+            if isinstance(xml_context, dict):
+                # Handle nested MCP response structure: data.data.source or data.source
+                if 'data' in xml_context:
+                    data = xml_context['data']
+                    if isinstance(data, dict):
+                        # Check for nested data structure (data.data.source)
+                        if 'data' in data and isinstance(data['data'], dict):
+                            xml_string_raw = data['data'].get('source') or data['data'].get('xml') or str(xml_context)
+                        else:
+                            # Direct data.source
+                            xml_string_raw = data.get('source') or data.get('xml') or str(xml_context)
+                    else:
+                        xml_string_raw = str(xml_context)
+                else:
+                    xml_string_raw = str(xml_context)
+            elif not isinstance(xml_string_raw, str):
+                xml_string_raw = str(xml_string_raw)
+            
+            # Clean and simplify XML before sending to AI to remove unnecessary attributes
+            # Original XML is unlimited, simplified XML is limited to 15000 chars
+            xml_string_simplified = xml_string_raw
+            if xml_string_raw:
+                try:
+                    from config.numeric_constants import XML_SNIPPET_MAX_LEN_DEFAULT
+                    xml_string_simplified = simplify_xml_for_ai(
+                        xml_string=xml_string_raw,
+                        max_len=XML_SNIPPET_MAX_LEN_DEFAULT,  # Simplified XML limited to default max length
+                        provider=self.ai_provider,
+                        prune_noninteractive=True
+                    )
+                    logging.debug(f"XML simplified: {len(xml_string_raw)} -> {len(xml_string_simplified)} chars (provider: {self.ai_provider})")
+                except Exception as e:
+                    logging.warning(f"⚠️ XML simplification failed, using original: {e}")
+                    xml_string_simplified = xml_string_raw
+            
+            # Update context with simplified XML (format_prompt_with_context will use this)
+            context['xml_context'] = xml_string_simplified
+            context['_full_xml_context'] = xml_string_raw  # Store original for reference
+            
+            # Log the decision request context
+            if self.ai_interaction_readable_logger:
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                self.ai_interaction_readable_logger.info("=" * 80)
+                self.ai_interaction_readable_logger.info(f"DECISION REQUEST - {timestamp}")
+                self.ai_interaction_readable_logger.info("=" * 80)
+                self.ai_interaction_readable_logger.info(f"Previous actions: {previous_actions}")
+                self.ai_interaction_readable_logger.info(f"Screen visit count: {current_screen_visit_count}")
+                self.ai_interaction_readable_logger.info(f"Last action feedback: {last_action_feedback}")
+                self.ai_interaction_readable_logger.info(f"XML context length (original): {len(xml_string_raw) if xml_string_raw else 0} chars")
+                self.ai_interaction_readable_logger.info(f"XML context length (simplified): {len(xml_string_simplified) if xml_string_simplified else 0} chars")
+                self.ai_interaction_readable_logger.info("")
+                
+                # Log the simplified XML context that will be sent to AI
+                self.ai_interaction_readable_logger.info("=" * 80)
+                self.ai_interaction_readable_logger.info(f"FULL XML CONTEXT SENT TO AI (SIMPLIFIED) - {timestamp}")
+                self.ai_interaction_readable_logger.info("=" * 80)
+                self.ai_interaction_readable_logger.info(xml_string_simplified if xml_string_simplified else "(empty)")
+                self.ai_interaction_readable_logger.info("")
+
+            # Run the decision chain
             chain_result = self.action_decision_chain.run(context=context)
+            
+            # Log the parsed result
+            if self.ai_interaction_readable_logger:
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                self.ai_interaction_readable_logger.info("=" * 80)
+                self.ai_interaction_readable_logger.info(f"PARSED RESULT - {timestamp}")
+                self.ai_interaction_readable_logger.info("=" * 80)
+                self.ai_interaction_readable_logger.info(json.dumps(chain_result, indent=2) if chain_result else "None")
+                self.ai_interaction_readable_logger.info("")
+                self.ai_interaction_readable_logger.info("")
+            
+            # Validate and clean the result
+            if not chain_result:
+                logging.warning("Chain returned empty result")
+                return None
+            
             validated_data = self._validate_and_clean_action_data(chain_result)
-            return validated_data, 0.0, 0  # Adjusted return type
+            
+            # Return with metadata (confidence and token count are placeholders for now)
+            return validated_data, 0.0, 0
+            
         except ValidationError as e:
-            logging.error(f"Validation error: {e}")
+            logging.error(f"Validation error in action data: {e}")
+            if self.ai_interaction_readable_logger:
+                self.ai_interaction_readable_logger.info("=" * 80)
+                self.ai_interaction_readable_logger.info(f"VALIDATION ERROR - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                self.ai_interaction_readable_logger.info("=" * 80)
+                self.ai_interaction_readable_logger.info(f"Error: {str(e)}")
+                self.ai_interaction_readable_logger.info("")
+                self.ai_interaction_readable_logger.info("")
+            return None
+        except Exception as e:
+            logging.error(f"Error getting next action from LangChain: {e}", exc_info=True)
+            if self.ai_interaction_readable_logger:
+                self.ai_interaction_readable_logger.info("=" * 80)
+                self.ai_interaction_readable_logger.info(f"ERROR - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                self.ai_interaction_readable_logger.info("=" * 80)
+                self.ai_interaction_readable_logger.info(f"Error: {str(e)}")
+                self.ai_interaction_readable_logger.info("")
+                self.ai_interaction_readable_logger.info("")
             return None
 
 
@@ -543,6 +956,53 @@ class AgentAssistant:
             raise RuntimeError("Tools are not initialized.")
         if not hasattr(self.tools, 'driver') or not self.tools.driver:
             raise RuntimeError("Driver is not initialized or unavailable.")
+    
+    def _ensure_driver_connected(self) -> bool:
+        """Ensure the driver is connected to MCP and session is initialized.
+        
+        Returns:
+            True if driver is connected and ready, False otherwise
+        """
+        try:
+            try:
+                self._ensure_driver_initialized()
+            except RuntimeError:
+                return False
+            
+            driver = self.tools.driver
+            
+            # Check if session is already initialized
+            if hasattr(driver, '_session_initialized') and driver._session_initialized:
+                # Validate session is still active
+                if driver.validate_session():
+                    return True
+                else:
+                    logging.warning("Session validation failed, reinitializing...")
+                    driver._session_initialized = False
+            
+            # Initialize session if not initialized
+            if not driver._session_initialized:
+                app_package = self.cfg.get('APP_PACKAGE')
+                app_activity = self.cfg.get('APP_ACTIVITY')
+                # Get device UDID from path_manager if available
+                if hasattr(self.cfg, '_path_manager'):
+                    device_udid = self.cfg._path_manager.get_device_udid()
+                else:
+                    device_udid = None
+                
+                if not driver.initialize_session(
+                    app_package=app_package,
+                    app_activity=app_activity,
+                    device_udid=device_udid
+                ):
+                    logging.error("Failed to initialize Appium session")
+                    return False
+            
+            return True
+            
+        except Exception as e:
+            logging.error(f"Error ensuring driver connection: {e}", exc_info=True)
+            return False
 
     def _initialize_action_decision_chain(self):
         if not self.action_decision_chain:

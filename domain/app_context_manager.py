@@ -8,9 +8,9 @@ from typing import TYPE_CHECKING, List, Optional
 if TYPE_CHECKING:
     from infrastructure.appium_driver import AppiumDriver  # For type hinting
 try:
-    from config.config import Config  # Assuming Config class is in config.py in the same package
+    from config.app_config import Config  # Assuming Config class is in config.py in the same package
 except ImportError:
-    from config.config import Config  # Assuming Config class is in config.py in the same package
+    from config.app_config import Config  # Assuming Config class is in config.py in the same package
 
 class AppContextManager:
     """Manages the application context, including launching and ensuring the app is in focus,
@@ -89,13 +89,19 @@ class AppContextManager:
                 except Exception as e:
                     self.logger.warning(f"Failed to terminate app before retry: {e}")
 
-            # Attempt to launch
-            if not self.driver.launch_app(): 
+            # Attempt to launch using start_activity with proper wait time
+            target_activity = str(self.cfg.get('APP_ACTIVITY'))
+            activity_wait = float(self.cfg.get('ACTIVITY_LAUNCH_WAIT_TIME', 5.0))
+            
+            if not self.driver.start_activity(target_pkg, target_activity, wait_after_launch=activity_wait):
                 self.logger.error(f"Launch attempt {attempt + 1} failed for {target_pkg}")
                 continue
             
-            # Wait progressively longer
-            time.sleep(wait_time)
+            # Additional wait time (progressive)
+            if wait_time > activity_wait:
+                additional_wait = wait_time - activity_wait
+                self.logger.debug(f"Additional wait time: {additional_wait}s")
+                time.sleep(additional_wait)
             
             # Verify launch
             last_pkg = self.driver.get_current_package()
@@ -117,7 +123,10 @@ class AppContextManager:
         Attempts recovery by pressing back or relaunching the target app if out of context.
         Returns True if in expected context, False otherwise after recovery attempts.
         """
-        if not self.driver.driver: # Check if raw driver is active
+        # Check if driver is connected by trying to get current package
+        try:
+            test_package = self.driver.get_current_package()
+        except Exception:
             self.logger.error("Driver not connected, cannot ensure app context.")
             self.consecutive_context_failures += 1
             return False
@@ -140,10 +149,14 @@ class AppContextManager:
         if not context or context[0] is None: # Package name is crucial
             self.logger.warning("Could not get app context after retries. Attempting recovery.")
             # Directly try relaunching as the state is unknown
-            if self.driver.launch_app(): # Relaunches target app from cfg
+            target_package = str(self.cfg.get('APP_PACKAGE'))
+            target_activity = str(self.cfg.get('APP_ACTIVITY'))
+            activity_wait = float(self.cfg.get('ACTIVITY_LAUNCH_WAIT_TIME', 5.0))
+            
+            if self.driver.start_activity(target_package, target_activity, wait_after_launch=activity_wait):
                 time.sleep(float(self.cfg.get('WAIT_AFTER_ACTION'))) # type: ignore
                 context_after_relaunch = self.driver.get_current_app_context()
-                if context_after_relaunch and context_after_relaunch[0] == self.cfg.get('APP_PACKAGE'):
+                if context_after_relaunch and context_after_relaunch[0] == target_package:
                     self.logger.info("Recovery successful: Relaunched target application after unknown context.")
                     self.consecutive_context_failures = 0
                     return True
@@ -168,10 +181,11 @@ class AppContextManager:
             self.logger.warning(f"App context incorrect: In '{current_package}', expected one of {allowed_packages_set}.")
             self.consecutive_context_failures += 1
             
+            # Always attempt recovery, but log if we've had many failures
             if self.consecutive_context_failures >= self.cfg.get('MAX_CONSECUTIVE_CONTEXT_FAILURES'): # type: ignore
-                self.logger.error("Maximum consecutive context failures reached. No further recovery attempts this step.")
-                return False # Let AppCrawler decide termination
+                self.logger.warning(f"Maximum consecutive context failures ({self.consecutive_context_failures}) reached, but still attempting recovery...")
 
+            # Recovery attempt 1: Press back button
             self.logger.info("Attempting recovery: Pressing back button...")
             self.driver.press_back_button()
             time.sleep(float(self.cfg.get('WAIT_AFTER_ACTION')) / 2) # Shorter wait after back press
@@ -181,17 +195,26 @@ class AppContextManager:
                 self.logger.info("Recovery successful: Returned to target/allowed package after back press.")
                 self.consecutive_context_failures = 0
                 return True
+            
+            # Recovery attempt 2: Relaunch the app activity
+            self.logger.warning(f"Back button didn't work (current: {context_after_back[0] if context_after_back else 'Unknown'}). Relaunching target application activity...")
+            target_package = str(self.cfg.get('APP_PACKAGE'))
+            target_activity = str(self.cfg.get('APP_ACTIVITY'))
+            activity_wait = float(self.cfg.get('ACTIVITY_LAUNCH_WAIT_TIME', 5.0))
+            
+            if self.driver.start_activity(target_package, target_activity, wait_after_launch=activity_wait):
+                time.sleep(float(self.cfg.get('WAIT_AFTER_ACTION'))) # type: ignore
+                context_after_relaunch = self.driver.get_current_app_context()
+                if context_after_relaunch and context_after_relaunch[0] in allowed_packages_set:
+                    self.logger.info("Recovery successful: Relaunched target application activity.")
+                    self.consecutive_context_failures = 0
+                    return True
+                else:
+                    self.logger.warning(f"Activity relaunched but still not in correct context (current: {context_after_relaunch[0] if context_after_relaunch else 'Unknown'})")
             else:
-                self.logger.warning(f"Recovery still not successful after back press (current: {context_after_back[0] if context_after_back else 'Unknown'}). Relaunching target application.")
-                if self.driver.launch_app(): # Relaunches target app from cfg
-                    time.sleep(float(self.cfg.get('WAIT_AFTER_ACTION'))) # type: ignore
-                    context_after_relaunch = self.driver.get_current_app_context()
-                    if context_after_relaunch and context_after_relaunch[0] in allowed_packages_set:
-                        self.logger.info("Recovery successful: Relaunched target application.")
-                        self.consecutive_context_failures = 0
-                        return True
-                
-                current_pkg_after_all_attempts = self.driver.get_current_package() or "Unknown"
-                self.logger.error(f"All recovery attempts failed. Could not return to target/allowed application. Currently in '{current_pkg_after_all_attempts}'.")
-                # consecutive_context_failures already incremented
-                return False
+                self.logger.error(f"Failed to start activity: {target_package}/{target_activity}")
+            
+            current_pkg_after_all_attempts = self.driver.get_current_package() or "Unknown"
+            self.logger.error(f"All recovery attempts failed. Could not return to target/allowed application. Currently in '{current_pkg_after_all_attempts}'. Consecutive failures: {self.consecutive_context_failures}")
+            # consecutive_context_failures already incremented
+            return False

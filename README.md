@@ -30,8 +30,8 @@ pip install -r requirements.txt
  OPENROUTER_API_KEY=your_key
  OLLAMA_BASE_URL=http://localhost:11434
 
-# 4. Start external MCP server (separate process - see MCP Integration section)
-#TODO: Add MCP server setup instructions here
+# 4. Start Appium server (if not already running)
+npx appium -p 4723
 
 # 5. Start crawling
 python run_cli.py apps scan-health
@@ -48,7 +48,6 @@ python run_ui.py
 - **Intelligent State Management** - Visual and structural hashing for unique screen identification
 - **Loop Detection** - Prevents repetitive patterns
 - **Traffic Capture** - Optional network monitoring via PCAPdroid
-- **MCP Integration** - Standardized mobile device interaction protocol
 - **Focus Areas** - Customizable privacy-focused testing targets
 - **Comprehensive Reporting** - PDF reports with crawl analysis
 
@@ -72,23 +71,19 @@ python run_ui.py
 
 **Vision-capable Ollama models:** `llama3.2-vision`, `llava`, `bakllava`
 
-## MCP Integration
+## Appium Integration
 
-The Model Context Protocol (MCP) provides standardized mobile device interaction. The system connects to an **external MCP server** (not included in this codebase).
-
+The system uses Appium-Python-Client for direct mobile device interaction. No external server is required beyond the standard Appium server.
 
 ### Configuration
 
 ```json
 {
-  "MCP_SERVER_URL": "http://127.0.0.1:3000",
-  "MCP_CONNECTION_TIMEOUT": 5.0,
-  "MCP_REQUEST_TIMEOUT": 30.0,
-  "USE_LANGCHAIN_ORCHESTRATION": true
+  "APPIUM_SERVER_URL": "http://127.0.0.1:4723"
 }
 ```
 
-**Note:** You must obtain and configure an external MCP server separately.
+**Note:** Ensure Appium server is running on the configured port (default: 4723).
 
 ## Architecture
 
@@ -101,7 +96,9 @@ The Model Context Protocol (MCP) provides standardized mobile device interaction
 - **`domain/agent_assistant.py`** - AI-driven action orchestration
 - **`domain/model_adapters.py`** - Unified AI provider integration
 - **`domain/agent_tools.py`** - Device interaction tools
-- **`infrastructure/mcp_client.py`** - MCP server communication
+- **`infrastructure/appium_helper.py`** - Core Appium session management
+- **`infrastructure/device_detection.py`** - Device/emulator detection
+- **`infrastructure/capability_builder.py`** - W3C capability building
 - **`domain/screen_state_manager.py`** - State tracking and transitions
 
 ### Agent-Based Workflow
@@ -169,7 +166,6 @@ output_data/app_info/<device_id>/
 - Python 3.8+
 - Node.js & npm (for Appium)
 - Android SDK with ADB
-- External MCP server (obtain separately)
 
 ### Optional
 - MobSF (Docker or native)

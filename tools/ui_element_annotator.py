@@ -30,11 +30,11 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 try:
-    from config.config import Config
+    from config.app_config import Config
     from infrastructure.database import DatabaseManager
     from utils.utils import draw_rectangle_on_image
 except Exception:
-    from config.config import Config
+    from config.app_config import Config
     from infrastructure.database import DatabaseManager
     from utils.utils import draw_rectangle_on_image
 
@@ -151,21 +151,28 @@ def find_latest_existing_session(cfg: Config) -> Optional[Tuple[str, str]]:
         return None
     candidates = []
     try:
-        for name in os.listdir(base):
-            path = os.path.join(base, name)
-            if not os.path.isdir(path):
+        # Check in sessions/ subdirectory
+        sessions_dir = os.path.join(base, 'sessions')
+        search_dirs = [sessions_dir] if os.path.isdir(sessions_dir) else []
+        
+        for search_base in search_dirs:
+            if not os.path.isdir(search_base):
                 continue
-            if app_pkg in name:
-                db_dir = os.path.join(path, 'database')
-                if os.path.isdir(db_dir):
-                    for f in os.listdir(db_dir):
-                        if f.endswith('_crawl_data.db'):
-                            db_path = os.path.join(db_dir, f)
-                            try:
-                                mtime = os.path.getmtime(db_path)
-                            except Exception:
-                                mtime = 0
-                            candidates.append((mtime, path, db_path))
+            for name in os.listdir(search_base):
+                path = os.path.join(search_base, name)
+                if not os.path.isdir(path):
+                    continue
+                if app_pkg in name:
+                    db_dir = os.path.join(path, 'database')
+                    if os.path.isdir(db_dir):
+                        for f in os.listdir(db_dir):
+                            if f.endswith('_crawl_data.db'):
+                                db_path = os.path.join(db_dir, f)
+                                try:
+                                    mtime = os.path.getmtime(db_path)
+                                except Exception:
+                                    mtime = 0
+                                candidates.append((mtime, path, db_path))
     except Exception:
         return None
     if not candidates:

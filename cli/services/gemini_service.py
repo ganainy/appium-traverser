@@ -31,23 +31,28 @@ class GeminiService:
             - error_message: error message if failed, None otherwise
         """
         try:
-            from domain.gemini_models import background_refresh_gemini_models, get_gemini_api_key
-        except ImportError as e:
-            error_msg = MSG.ERR_GEMINI_IMPORT_FAILED.format(error=e)
+            from domain.providers.registry import ProviderRegistry
+            from domain.providers.enums import AIProvider
+            
+            provider = ProviderRegistry.get(AIProvider.GEMINI)
+            if not provider:
+                error_msg = "Gemini provider not found"
+                return False, None, error_msg
+        except Exception as e:
+            error_msg = f"Failed to get Gemini provider: {e}"
             return False, None, error_msg
         
         try:
-            api_key = get_gemini_api_key()
             if wait_for_completion:
                 from utils import LoadingIndicator
                 with LoadingIndicator("Refreshing Gemini models"):
-                    success, cache_path = background_refresh_gemini_models(
-                        api_key=api_key,
+                    success, cache_path = provider.refresh_models(
+                        self.context.config,
                         wait_for_completion=wait_for_completion
                     )
             else:
-                success, cache_path = background_refresh_gemini_models(
-                    api_key=api_key,
+                success, cache_path = provider.refresh_models(
+                    self.context.config,
                     wait_for_completion=wait_for_completion
                 )
             if success and cache_path:
@@ -78,48 +83,20 @@ class GeminiService:
             Tuple of (success, models_list)
         """
         try:
-            from domain.gemini_models import (
-                fetch_gemini_models,
-                load_gemini_models_cache,
-                save_gemini_models_to_cache,
-                get_gemini_api_key
-            )
-        except ImportError as e:
-            self.logger.error(MSG.ERR_GEMINI_IMPORT_FAILED.format(error=e))
+            from domain.providers.registry import ProviderRegistry
+            from domain.providers.enums import AIProvider
+            
+            provider = ProviderRegistry.get(AIProvider.GEMINI)
+            if not provider:
+                self.logger.error("Gemini provider not found")
+                return False, None
+        except Exception as e:
+            self.logger.error(f"Failed to get Gemini provider: {e}")
             return False, None
         
-        # If refresh requested, fetch fresh models
-        if refresh:
-            try:
-                from utils import LoadingIndicator
-                api_key = get_gemini_api_key()
-                with LoadingIndicator("Fetching Gemini models"):
-                    models = fetch_gemini_models(api_key)
-                if models:
-                    save_gemini_models_to_cache(models)
-                return True, models if models else []
-            except Exception as e:
-                self.logger.error(f"Failed to refresh Gemini models: {e}")
-                # Fall back to cache
-                pass
+        success, models = provider.get_models_full(self.context.config, refresh=refresh)
         
-        # Try to load from cache first
-        models = load_gemini_models_cache()
-        
-        # If no cache, try to fetch fresh
-        if not models:
-            try:
-                from utils import LoadingIndicator
-                api_key = get_gemini_api_key()
-                with LoadingIndicator("Fetching Gemini models"):
-                    models = fetch_gemini_models(api_key)
-                if models:
-                    save_gemini_models_to_cache(models)
-            except Exception as e:
-                self.logger.error(f"Failed to fetch Gemini models: {e}")
-                return False, None
-        
-        if not models:
+        if not success or not models:
             self.logger.error(MSG.ERR_GEMINI_MODELS_NOT_FOUND)
             return False, None
         
@@ -138,10 +115,15 @@ class GeminiService:
             - error: str (error message if failed)
         """
         try:
-            from domain.gemini_models import get_gemini_model_meta
-        except ImportError as e:
-            self.logger.error(MSG.ERR_GEMINI_IMPORT_FAILED.format(error=e))
-            return False, {K.KEY_SUCCESS: False, K.KEY_ERROR: MSG.ERR_GEMINI_IMPORT_FAILED.format(error=e)}
+            from domain.providers.registry import ProviderRegistry
+            from domain.providers.enums import AIProvider
+            
+            provider = ProviderRegistry.get(AIProvider.GEMINI)
+            if not provider:
+                return False, {K.KEY_SUCCESS: False, K.KEY_ERROR: "Gemini provider not found"}
+        except Exception as e:
+            self.logger.error(f"Failed to get Gemini provider: {e}")
+            return False, {K.KEY_SUCCESS: False, K.KEY_ERROR: f"Failed to get Gemini provider: {e}"}
         
         success, models = self.list_models()
         if not success or not models:
@@ -178,7 +160,8 @@ class GeminiService:
             # Store selected model in config
             model_id = selected_model.get("id") or selected_model.get("name")
             self.context.config.set(K.CONFIG_DEFAULT_MODEL_TYPE, model_id)
-            self.context.config.set(K.CONFIG_AI_PROVIDER, K.AI_PROVIDER_GEMINI)
+            from domain.providers.enums import AIProvider
+            self.context.config.set(K.CONFIG_AI_PROVIDER, AIProvider.GEMINI.value)
             
             # Ensure provider is set in the model dict
             if "provider" not in selected_model:
@@ -204,8 +187,9 @@ class GeminiService:
         Returns:
             Model metadata dict if found, None otherwise
         """
+        from domain.providers.enums import AIProvider
         current_provider = self.context.config.get(K.CONFIG_AI_PROVIDER, "")
-        if current_provider.lower() != K.AI_PROVIDER_GEMINI:
+        if current_provider.lower() != AIProvider.GEMINI.value:
             return None
         
         current_model = self.context.config.get(K.CONFIG_DEFAULT_MODEL_TYPE, "")
@@ -213,11 +197,16 @@ class GeminiService:
             return None
         
         try:
-            from domain.gemini_models import get_gemini_model_meta
-        except ImportError:
+            from domain.providers.registry import ProviderRegistry
+            from domain.providers.enums import AIProvider
+            
+            provider = ProviderRegistry.get(AIProvider.GEMINI)
+            if not provider:
+                return None
+        except Exception:
             return None
         
-        return get_gemini_model_meta(current_model)
+        return provider.get_model_meta(current_model)
     
     def show_model_details(self, model_identifier: Optional[str] = None) -> Tuple[bool, Optional[Dict]]:
         """Show detailed information about a Gemini model.
@@ -233,8 +222,9 @@ class GeminiService:
             - error: str (error message if failed)
             - model_identifier: str (model ID if error)
         """
+        from domain.providers.enums import AIProvider
         current_provider = self.context.config.get(K.CONFIG_AI_PROVIDER, "")
-        if current_provider.lower() != K.AI_PROVIDER_GEMINI:
+        if current_provider.lower() != AIProvider.GEMINI.value:
             return False, {
                 K.KEY_SUCCESS: False,
                 K.KEY_ERROR: MSG.ERR_GEMINI_NOT_SELECTED_PROVIDER
@@ -251,12 +241,17 @@ class GeminiService:
         
         # Get model metadata
         try:
-            from domain.gemini_models import get_gemini_model_meta
-        except ImportError as e:
-            self.logger.error(MSG.ERR_GEMINI_IMPORT_FAILED.format(error=e))
-            return False, {K.KEY_SUCCESS: False, K.KEY_ERROR: MSG.ERR_GEMINI_IMPORT_FAILED.format(error=e)}
+            from domain.providers.registry import ProviderRegistry
+            from domain.providers.enums import AIProvider
+            
+            provider = ProviderRegistry.get(AIProvider.GEMINI)
+            if not provider:
+                return False, {K.KEY_SUCCESS: False, K.KEY_ERROR: "Gemini provider not found"}
+        except Exception as e:
+            self.logger.error(f"Failed to get Gemini provider: {e}")
+            return False, {K.KEY_SUCCESS: False, K.KEY_ERROR: f"Failed to get Gemini provider: {e}"}
         
-        selected_model = get_gemini_model_meta(model_identifier)
+        selected_model = provider.get_model_meta(model_identifier)
         
         # If not in cache, try to fetch fresh
         if not selected_model:

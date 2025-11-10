@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from config.config import Config
+    from config.app_config import Config
 
 # Module-level constants for default fallback strings
 DEFAULT_SHUTDOWN_FLAG = 'crawler_shutdown.flag'
@@ -225,7 +225,12 @@ class CrawlerOrchestrator:
     def prepare_plan(self) -> CrawlerLaunchPlan:
         """Prepare a launch plan with validation."""
         # Get paths from configuration
-        project_root = self.config.get('PROJECT_ROOT')
+        # Use property directly since PROJECT_ROOT is a property, not a config key
+        project_root = self.config.PROJECT_ROOT if hasattr(self.config, 'PROJECT_ROOT') else self.config.get('PROJECT_ROOT')
+        if not project_root:
+            # Fallback: use BASE_DIR or current directory
+            project_root = getattr(self.config, 'BASE_DIR', None) or os.getcwd()
+        
         main_script_name = self.config.get('MAIN_SCRIPT_NAME', 'run_cli.py')
         main_script = os.path.join(project_root, main_script_name)
         
@@ -234,12 +239,24 @@ class CrawlerOrchestrator:
         log_dir = self.config.get('LOG_DIR') or os.path.join(output_data_dir, DEFAULT_LOG_SUBDIR)
         log_file_path = os.path.join(log_dir, self.config.get('LOG_FILE_NAME', DEFAULT_LOG_FILE))
         
-        # PID file path (use property to resolve placeholders)
+        # PID file path (resolve placeholders if present, provide fallback)
         pid_file_path = self.config.get('CRAWLER_PID_PATH')
+        if not pid_file_path:
+            pid_file_path = os.path.join(project_root, 'crawler.pid')
+        else:
+            # Resolve placeholders in PID file path
+            if '{OUTPUT_DATA_DIR}' in pid_file_path:
+                resolved_output_dir = self.config.get('OUTPUT_DATA_DIR') or os.path.join(project_root, DEFAULT_OUTPUT_DIR)
+                pid_file_path = pid_file_path.replace('{OUTPUT_DATA_DIR}', resolved_output_dir)
+            # Make path absolute
+            if not os.path.isabs(pid_file_path):
+                pid_file_path = os.path.join(project_root, pid_file_path)
         
         # Prepare environment
         env = os.environ.copy()
         env["PYTHONPATH"] = project_root + os.pathsep + env.get("PYTHONPATH", "")
+        # Set crawler mode flag
+        env["CRAWLER_MODE"] = "1"
         
         # Create the plan
         plan = CrawlerLaunchPlan(
@@ -305,7 +322,10 @@ class CrawlerOrchestrator:
             pid = self.backend.get_process_id()
             if pid:
                 try:
-                    Path(plan.pid_file_path).write_text(str(pid))
+                    pid_path = Path(plan.pid_file_path)
+                    # Ensure directory exists
+                    pid_path.parent.mkdir(parents=True, exist_ok=True)
+                    pid_path.write_text(str(pid))
                     self.logger.debug(f"Wrote PID {pid} to {plan.pid_file_path}")
                 except Exception as e:
                     self.logger.error(f"Failed to write PID file: {e}")
@@ -313,7 +333,10 @@ class CrawlerOrchestrator:
             # Start output monitoring
             self.backend.start_output_monitoring(self.output_parser)
         else:
-            self.logger.error("Failed to start crawler process")
+            error_msg = "Failed to start crawler process - check logs for details"
+            self.logger.error(error_msg)
+            # Also print to stderr so it's visible in CLI
+            print(f"ERROR: {error_msg}", file=sys.stderr, flush=True)
         
         return success
     
@@ -362,15 +385,27 @@ class CrawlerOrchestrator:
     
     def get_status(self) -> Dict[str, Any]:
         """Get the current status of the crawler."""
+        # Check if process is actually running
+        is_running = False
+        process_id = None
+        if self.backend:
+            is_running = self.backend.is_process_running()
+            process_id = self.backend.get_process_id()
+            # If we think it's running but process check says no, update state
+            if self._is_running and not is_running:
+                self.logger.warning("Process was marked as running but is no longer active")
+                self._is_running = False
+        
         status = {
-            "is_running": self._is_running and self.backend.is_process_running(),
+            "is_running": is_running,
             "is_paused": self.flag_controller.is_pause_flag_present(),
-            "process_id": self.backend.get_process_id(),
+            "process_id": process_id,
             "validation_passed": self._current_plan.validation_passed if self._current_plan else False,
             "validation_messages": self._current_plan.validation_messages if self._current_plan else [],
             "app_package": self.config.get('APP_PACKAGE', 'Not Set'),
             "app_activity": self.config.get('APP_ACTIVITY', 'Not Set'),
-            "output_dir": self.config.get('OUTPUT_DATA_DIR', 'Not Set')
+            "output_dir": self.config.get('OUTPUT_DATA_DIR', 'Not Set'),
+            "state": "running" if is_running else "stopped"
         }
         
         return status

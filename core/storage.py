@@ -6,7 +6,7 @@ import json
 import logging
 from typing import List, Optional, Dict, Any
 from datetime import datetime
-from .config import Configuration
+from .crawler_config import Configuration
 
 logger = logging.getLogger(__name__)
 

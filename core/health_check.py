@@ -14,36 +14,25 @@ from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 import requests
 
 if TYPE_CHECKING:
-    from config.config import Config
+    from config.app_config import Config
 
-# Try to import CLI constants, but make them optional for backward compatibility
-try:
-    from cli.constants import messages as MSG
-    from cli.constants import keys as KEYS
-    from cli.constants import config as CFG
-    from cli.services.process_utils import run_subprocess as cli_run_subprocess
-    CLI_CONSTANTS_AVAILABLE = True
-except ImportError:
-    CLI_CONSTANTS_AVAILABLE = False
-    # Fallback values if CLI constants not available
-    MSG = None
-    KEYS = None
-    CFG = None
-    cli_run_subprocess = None
+from cli.constants import messages as MSG
+from cli.constants import keys as KEYS
+from cli.services.process_utils import run_subprocess as cli_run_subprocess
 
-# Default Service URLs
-DEFAULT_APPIUM_URL = 'http://127.0.0.1:4723'
-DEFAULT_MOBSF_URL = 'http://localhost:8000/api/v1'
-DEFAULT_OLLAMA_URL = 'http://localhost:11434'
-DEFAULT_MCP_URL = 'http://localhost:3000/mcp'
-
-# Default Timeouts
-DEFAULT_HTTP_TIMEOUT = 3.0
-OLLAMA_API_TIMEOUT = 1.5
-OLLAMA_SUBPROC_TIMEOUT = 2.0
-
-# Default Settings
-DEFAULT_AI_PROVIDER = 'gemini'
+# Default Service URLs - now imported from config.urls
+from config.urls import ServiceURLs
+from config.numeric_constants import (
+    DEFAULT_AI_PROVIDER,
+    APPIUM_STATUS_TIMEOUT,
+    MCP_STATUS_TIMEOUT,
+    MOBSF_STATUS_TIMEOUT,
+    OLLAMA_API_TIMEOUT,
+    OLLAMA_CLI_TIMEOUT,
+)
+DEFAULT_APPIUM_URL = ServiceURLs.APPIUM
+DEFAULT_MOBSF_URL = ServiceURLs.MOBSF
+DEFAULT_OLLAMA_URL = ServiceURLs.OLLAMA
 
 # Module-level dictionary for all user-facing validation messages
 VALIDATION_MESSAGES = {
@@ -64,8 +53,6 @@ VALIDATION_MESSAGES = {
     "API_KEYS_ALL_GOOD": "API keys: All required keys present ✅",
     "TARGET_APP_TEMPLATE": "Target app: {package}",
     "TARGET_APP_NOT_SELECTED": "Target app: Not selected ❌",
-    "MCP_RUNNING": "MCP server at {url} is running ✅",
-    "MCP_NOT_ACCESSIBLE": "MCP server at {url} is not accessible ⚠️",
     "OLLAMA_SERVICE": "Ollama service",
     "MOBSF_NOT_ACCESSIBLE": " is not accessible ⚠️"
 }
@@ -121,66 +108,52 @@ class ValidationService:
         
         # Check Appium server
         appium_status = self.check_appium_server()
-        service_name = self._get_service_name('appium')
-        services[service_name] = appium_status
-        
-        # Check MCP server health
-        mcp_status = self.check_mcp_server_health()
-        service_name = self._get_service_name('mcp')
-        services[service_name] = mcp_status
+        services[KEYS.SERVICE_APPIUM] = appium_status
         
         # Check MobSF server
         mobsf_status = self.check_mobsf_server()
-        service_name = self._get_service_name('mobsf')
-        services[service_name] = mobsf_status
+        services[KEYS.SERVICE_MOBSF] = mobsf_status
         
         # Check Ollama service if needed
         ai_provider = self.config.get("AI_PROVIDER", DEFAULT_AI_PROVIDER).lower()
         if ai_provider == 'ollama':
             ollama_status = self.check_ollama_service()
-            service_name = self._get_service_name('ollama')
-            services[service_name] = ollama_status
+            services[KEYS.SERVICE_OLLAMA] = ollama_status
         
         # Check PCAPdroid (always show as separate service)
         pcapdroid_status = self.check_pcapdroid()
-        service_name = self._get_service_name('pcapdroid')
-        services[service_name] = pcapdroid_status
+        services[KEYS.SERVICE_PCAPDROID] = pcapdroid_status
         
         # Check API keys and environment
         api_issues, api_warnings = self.check_api_keys_and_env()
-        service_name = self._get_service_name('api_keys')
         if api_issues:
-            services[service_name] = {
-                self._get_status_key('status'): self._get_status_value('error'),
-                self._get_status_key('message'): '; '.join(api_issues)
+            services[KEYS.SERVICE_API_KEYS] = {
+                KEYS.STATUS_KEY_STATUS: KEYS.STATUS_ERROR,
+                KEYS.STATUS_KEY_MESSAGE: '; '.join(api_issues)
             }
         elif api_warnings:
-            services[service_name] = {
-                self._get_status_key('status'): self._get_status_value('warning'),
-                self._get_status_key('message'): '; '.join(api_warnings)
+            services[KEYS.SERVICE_API_KEYS] = {
+                KEYS.STATUS_KEY_STATUS: KEYS.STATUS_WARNING,
+                KEYS.STATUS_KEY_MESSAGE: '; '.join(api_warnings)
             }
         else:
-            ok_message = self._get_message('ok') if CLI_CONSTANTS_AVAILABLE else VALIDATION_MESSAGES["API_KEYS_ALL_GOOD"]
-            services[service_name] = {
-                self._get_status_key('status'): self._get_status_value('running'),
-                self._get_status_key('message'): ok_message
+            services[KEYS.SERVICE_API_KEYS] = {
+                KEYS.STATUS_KEY_STATUS: KEYS.STATUS_RUNNING,
+                KEYS.STATUS_KEY_MESSAGE: MSG.PRECHECK_STATUS_MESSAGE_OK
             }
         
         # Check target app
         # Use get() to properly check user store, env vars, and defaults in order
         app_package = self.config.get("APP_PACKAGE", None)
-        service_name = self._get_service_name('target_app')
         if app_package:
-            selected_msg = self._get_message('selected', app_package=app_package) if CLI_CONSTANTS_AVAILABLE else f"Selected: {app_package}"
-            services[service_name] = {
-                self._get_status_key('status'): self._get_status_value('running'),
-                self._get_status_key('message'): selected_msg
+            services[KEYS.SERVICE_TARGET_APP] = {
+                KEYS.STATUS_KEY_STATUS: KEYS.STATUS_RUNNING,
+                KEYS.STATUS_KEY_MESSAGE: MSG.PRECHECK_STATUS_MESSAGE_SELECTED.format(app_package=app_package)
             }
         else:
-            no_app_msg = self._get_message('no_app') if CLI_CONSTANTS_AVAILABLE else VALIDATION_MESSAGES["TARGET_APP_NOT_SELECTED"]
-            services[service_name] = {
-                self._get_status_key('status'): self._get_status_value('error'),
-                self._get_status_key('message'): no_app_msg
+            services[KEYS.SERVICE_TARGET_APP] = {
+                KEYS.STATUS_KEY_STATUS: KEYS.STATUS_ERROR,
+                KEYS.STATUS_KEY_MESSAGE: MSG.PRECHECK_STATUS_MESSAGE_NO_APP
             }
         
         return services
@@ -189,124 +162,35 @@ class ValidationService:
         """Check Appium server status and return detailed status dict."""
         try:
             appium_url = self._get_appium_url().rstrip('/')
-            status_path = self._get_path('appium_status')
-            timeout = self._get_timeout('appium_status')
-            response = requests.get(f"{appium_url}{status_path}", timeout=timeout)
+            response = requests.get(f"{appium_url}{KEYS.APPIUM_STATUS_PATH}", timeout=APPIUM_STATUS_TIMEOUT)
             
-            http_ok = self._get_http_code('ok')
-            if response.status_code == http_ok:
+            if response.status_code == KEYS.HTTP_CODE_OK:
                 status_data = response.json()
-                ready_key = self._get_json_key('ready')
-                value_key = self._get_json_key('value')
                 ready = (
-                    status_data.get(ready_key, False) or
-                    status_data.get(value_key, {}).get(ready_key, False)
+                    status_data.get(KEYS.JSON_KEY_READY, False) or
+                    status_data.get(KEYS.JSON_KEY_VALUE, {}).get(KEYS.JSON_KEY_READY, False)
                 )
                 if ready:
-                    reachable_msg = self._get_message('reachable', url=appium_url) if CLI_CONSTANTS_AVAILABLE else VALIDATION_MESSAGES["APPIUM_SUCCESS"]
                     return {
-                        self._get_status_key('status'): self._get_status_value('running'),
-                        self._get_status_key('message'): reachable_msg
+                        KEYS.STATUS_KEY_STATUS: KEYS.STATUS_RUNNING,
+                        KEYS.STATUS_KEY_MESSAGE: MSG.PRECHECK_STATUS_MESSAGE_REACHABLE.format(url=appium_url)
                     }
                 else:
-                    not_ready_msg = self._get_message('not_ready', url=appium_url) if CLI_CONSTANTS_AVAILABLE else VALIDATION_MESSAGES["APPIUM_NOT_ACCESSIBLE"]
                     return {
-                        self._get_status_key('status'): self._get_status_value('warning'),
-                        self._get_status_key('message'): not_ready_msg
+                        KEYS.STATUS_KEY_STATUS: KEYS.STATUS_WARNING,
+                        KEYS.STATUS_KEY_MESSAGE: MSG.PRECHECK_STATUS_MESSAGE_NOT_READY.format(url=appium_url)
                     }
             else:
-                http_msg = self._get_message('http', code=response.status_code, url=appium_url) if CLI_CONSTANTS_AVAILABLE else f"HTTP {response.status_code} at {appium_url}"
                 return {
-                    self._get_status_key('status'): self._get_status_value('error'),
-                    self._get_status_key('message'): http_msg
+                    KEYS.STATUS_KEY_STATUS: KEYS.STATUS_ERROR,
+                    KEYS.STATUS_KEY_MESSAGE: MSG.PRECHECK_STATUS_MESSAGE_HTTP.format(code=response.status_code, url=appium_url)
                 }
         except Exception as e:
             appium_url = self._get_appium_url()
             conn_fail_msg = self._format_connection_error(e, "Appium Server", appium_url)
             return {
-                self._get_status_key('status'): self._get_status_value('error'),
-                self._get_status_key('message'): conn_fail_msg
-            }
-    
-    def check_mcp_server_health(self) -> Dict[str, str]:
-        """Check MCP server health status using /health and /ready endpoints."""
-        try:
-            mcp_url = self._get_mcp_url()
-            base_url = mcp_url.rstrip('/mcp').rstrip('/')
-            ready_path = self._get_path('mcp_ready')
-            health_path = self._get_path('mcp_health')
-            timeout = self._get_timeout('mcp_status')
-            http_ok = self._get_http_code('ok')
-            http_unavailable = self._get_http_code('service_unavailable')
-            
-            try:
-                response = requests.get(f"{base_url}{ready_path}", timeout=timeout)
-                if response.status_code == http_ok:
-                    ready_data = response.json()
-                    # Extract from details if present, otherwise try top-level
-                    if "details" in ready_data:
-                        details = ready_data["details"]
-                    else:
-                        details = ready_data
-                    uptime_key = self._get_json_key('uptime_ms')
-                    tools_key = self._get_json_key('registered_tools')
-                    active_key = self._get_json_key('active_invocations')
-                    uptime_ms = details.get("uptimeMs", details.get(uptime_key, 0)) or 0
-                    registered_tools = details.get("registeredTools", details.get(tools_key, 0)) or 0
-                    active_invocations = details.get("activeInvocations", details.get(active_key, 0)) or 0
-                    
-                    if CLI_CONSTANTS_AVAILABLE:
-                        ready_msg = self._get_message('ready', url=base_url, tools=registered_tools, active=active_invocations, uptime=uptime_ms)
-                    else:
-                        ready_msg = VALIDATION_MESSAGES["MCP_RUNNING"].format(url=base_url)
-                    
-                    return {
-                        self._get_status_key('status'): self._get_status_value('running'),
-                        self._get_status_key('message'): ready_msg
-                    }
-                elif response.status_code == http_unavailable:
-                    not_ready_msg = self._get_message('not_ready_unavailable', url=base_url) if CLI_CONSTANTS_AVAILABLE else VALIDATION_MESSAGES["MCP_NOT_ACCESSIBLE"].format(url=base_url)
-                    return {
-                        self._get_status_key('status'): self._get_status_value('warning'),
-                        self._get_status_key('message'): not_ready_msg
-                    }
-                else:
-                    http_msg = self._get_message('http', code=response.status_code, url=f"{base_url}{ready_path}") if CLI_CONSTANTS_AVAILABLE else f"HTTP {response.status_code}"
-                    return {
-                        self._get_status_key('status'): self._get_status_value('error'),
-                        self._get_status_key('message'): http_msg
-                    }
-            except requests.exceptions.Timeout:
-                try:
-                    response = requests.get(f"{base_url}{health_path}", timeout=timeout)
-                    if response.status_code == http_ok:
-                        health_data = response.json()
-                        uptime_key = self._get_json_key('uptime_ms')
-                        uptime_ms = health_data.get(uptime_key, 0)
-                        health_alive_msg = self._get_message('health_alive', url=base_url, uptime=uptime_ms) if CLI_CONSTANTS_AVAILABLE else VALIDATION_MESSAGES["MCP_NOT_ACCESSIBLE"].format(url=base_url)
-                        return {
-                            self._get_status_key('status'): self._get_status_value('warning'),
-                            self._get_status_key('message'): health_alive_msg
-                        }
-                    else:
-                        http_msg = self._get_message('http', code=response.status_code, url=f"{base_url}{health_path}") if CLI_CONSTANTS_AVAILABLE else f"HTTP {response.status_code}"
-                        return {
-                            self._get_status_key('status'): self._get_status_value('error'),
-                            self._get_status_key('message'): http_msg
-                        }
-                except Exception as health_error:
-                    health_fail_msg = self._format_connection_error(health_error, "MCP Server", base_url)
-                    return {
-                        self._get_status_key('status'): self._get_status_value('error'),
-                        self._get_status_key('message'): health_fail_msg
-                    }
-        except Exception as e:
-            mcp_url = self._get_mcp_url()
-            base_url = mcp_url.rstrip('/mcp').rstrip('/') if mcp_url else "unknown"
-            mcp_fail_msg = self._format_connection_error(e, "MCP Server", base_url)
-            return {
-                self._get_status_key('status'): self._get_status_value('error'),
-                self._get_status_key('message'): mcp_fail_msg
+                KEYS.STATUS_KEY_STATUS: KEYS.STATUS_ERROR,
+                KEYS.STATUS_KEY_MESSAGE: conn_fail_msg
             }
     
     def check_mobsf_server(self) -> Dict[str, str]:
@@ -314,109 +198,86 @@ class ValidationService:
         # Only check MobSF if analysis is enabled
         if not self.config.get("ENABLE_MOBSF_ANALYSIS", False):
             return {
-                self._get_status_key('status'): self._get_status_value('warning'),
-                self._get_status_key('message'): "MobSF analysis is disabled (optional feature)"
+                KEYS.STATUS_KEY_STATUS: KEYS.STATUS_WARNING,
+                KEYS.STATUS_KEY_MESSAGE: "MobSF analysis is disabled (optional feature)"
             }
         
         try:
             mobsf_url = self._get_mobsf_url()
-            status_path = self._get_path('mobsf_status')
-            timeout = self._get_timeout('mobsf_status')
-            http_ok = self._get_http_code('ok')
-            response = requests.get(f"{mobsf_url}{status_path}", timeout=timeout)
-            if response.status_code == http_ok:
-                reachable_msg = self._get_message('reachable', url=mobsf_url) if CLI_CONSTANTS_AVAILABLE else VALIDATION_MESSAGES["APPIUM_SUCCESS"]
+            response = requests.get(f"{mobsf_url}{KEYS.MOBSF_STATUS_PATH}", timeout=MOBSF_STATUS_TIMEOUT)
+            if response.status_code == KEYS.HTTP_CODE_OK:
                 return {
-                    self._get_status_key('status'): self._get_status_value('running'),
-                    self._get_status_key('message'): reachable_msg
+                    KEYS.STATUS_KEY_STATUS: KEYS.STATUS_RUNNING,
+                    KEYS.STATUS_KEY_MESSAGE: MSG.PRECHECK_STATUS_MESSAGE_REACHABLE.format(url=mobsf_url)
                 }
             else:
-                http_msg = self._get_message('http', code=response.status_code, url=mobsf_url) if CLI_CONSTANTS_AVAILABLE else f"HTTP {response.status_code}"
                 return {
-                    self._get_status_key('status'): self._get_status_value('warning'),
-                    self._get_status_key('message'): http_msg
+                    KEYS.STATUS_KEY_STATUS: KEYS.STATUS_WARNING,
+                    KEYS.STATUS_KEY_MESSAGE: MSG.PRECHECK_STATUS_MESSAGE_HTTP.format(code=response.status_code, url=mobsf_url)
                 }
         except Exception as e:
             mobsf_url = self._get_mobsf_url()
             conn_fail_msg = self._format_connection_error(e, "MobSF Server", mobsf_url)
             return {
-                self._get_status_key('status'): self._get_status_value('warning'),
-                self._get_status_key('message'): conn_fail_msg
+                KEYS.STATUS_KEY_STATUS: KEYS.STATUS_WARNING,
+                KEYS.STATUS_KEY_MESSAGE: conn_fail_msg
             }
     
     def check_ollama_service(self) -> Dict[str, str]:
         """Check Ollama service status and return detailed status dict."""
         ollama_url = self._get_ollama_url()
-        tags_path = self._get_path('ollama_tags')
-        timeout = self._get_timeout('ollama_api')
-        http_ok = self._get_http_code('ok')
         
         try:
-            response = requests.get(f"{ollama_url}{tags_path}", timeout=timeout)
-            if response.status_code == http_ok:
-                api_reachable_msg = self._get_message('api_reachable', url=ollama_url) if CLI_CONSTANTS_AVAILABLE else VALIDATION_MESSAGES["APPIUM_SUCCESS"]
+            response = requests.get(f"{ollama_url}{KEYS.OLLAMA_TAGS_PATH}", timeout=OLLAMA_API_TIMEOUT)
+            if response.status_code == KEYS.HTTP_CODE_OK:
                 return {
-                    self._get_status_key('status'): self._get_status_value('running'),
-                    self._get_status_key('message'): api_reachable_msg
+                    KEYS.STATUS_KEY_STATUS: KEYS.STATUS_RUNNING,
+                    KEYS.STATUS_KEY_MESSAGE: MSG.PRECHECK_STATUS_MESSAGE_API_REACHABLE.format(url=ollama_url)
                 }
         except Exception:
             pass
         
         # Fallback to subprocess check
         try:
-            cli_timeout = self._get_timeout('ollama_cli')
-            if cli_run_subprocess:
-                result = cli_run_subprocess(
-                    ["ollama", "list"],
-                    timeout=cli_timeout,
-                    capture_output=True
-                )
-            else:
-                result = subprocess.run(
-                    ['ollama', 'list'],
-                    capture_output=True,
-                    text=True,
-                    timeout=cli_timeout,
-                    creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
-                )
+            result = cli_run_subprocess(
+                ["ollama", "list"],
+                timeout=OLLAMA_CLI_TIMEOUT,
+                capture_output=True
+            )
             
             if result.returncode == 0:
-                cli_msg = self._get_message('cli_accessible') if CLI_CONSTANTS_AVAILABLE else "CLI accessible"
                 return {
-                    self._get_status_key('status'): self._get_status_value('running'),
-                    self._get_status_key('message'): cli_msg
+                    KEYS.STATUS_KEY_STATUS: KEYS.STATUS_RUNNING,
+                    KEYS.STATUS_KEY_MESSAGE: MSG.PRECHECK_STATUS_MESSAGE_CLI_ACCESSIBLE
                 }
             else:
-                cli_not_msg = self._get_message('cli_not_accessible') if CLI_CONSTANTS_AVAILABLE else "CLI not accessible"
                 return {
-                    self._get_status_key('status'): self._get_status_value('error'),
-                    self._get_status_key('message'): cli_not_msg
+                    KEYS.STATUS_KEY_STATUS: KEYS.STATUS_ERROR,
+                    KEYS.STATUS_KEY_MESSAGE: MSG.PRECHECK_STATUS_MESSAGE_CLI_NOT_ACCESSIBLE
                 }
         except Exception:
-            not_accessible_msg = self._get_message('not_accessible', url=ollama_url) if CLI_CONSTANTS_AVAILABLE else VALIDATION_MESSAGES["OLLAMA_NOT_RUNNING"]
             return {
-                self._get_status_key('status'): self._get_status_value('error'),
-                self._get_status_key('message'): not_accessible_msg
+                KEYS.STATUS_KEY_STATUS: KEYS.STATUS_ERROR,
+                KEYS.STATUS_KEY_MESSAGE: MSG.PRECHECK_STATUS_MESSAGE_NOT_ACCESSIBLE.format(url=ollama_url)
             }
     
     def check_pcapdroid(self) -> Dict[str, str]:
         """Check PCAPdroid traffic capture status and return detailed status dict."""
         if self.config.get("ENABLE_TRAFFIC_CAPTURE", False):
             if not self.config.get("PCAPDROID_API_KEY", None):
-                missing_key_msg = self._get_message('missing_key', key="API key", env="PCAPDROID_API_KEY") if CLI_CONSTANTS_AVAILABLE else "API key not set (check PCAPDROID_API_KEY in .env)"
                 return {
-                    self._get_status_key('status'): self._get_status_value('warning'),
-                    self._get_status_key('message'): missing_key_msg
+                    KEYS.STATUS_KEY_STATUS: KEYS.STATUS_WARNING,
+                    KEYS.STATUS_KEY_MESSAGE: MSG.PRECHECK_STATUS_MESSAGE_MISSING_KEY.format(key="API key", env="PCAPDROID_API_KEY")
                 }
             else:
                 return {
-                    self._get_status_key('status'): self._get_status_value('running'),
-                    self._get_status_key('message'): "PCAPDroid API key is configured (traffic capture enabled)"
+                    KEYS.STATUS_KEY_STATUS: KEYS.STATUS_RUNNING,
+                    KEYS.STATUS_KEY_MESSAGE: "PCAPdroid API key is configured (traffic capture enabled)"
                 }
         else:
             return {
-                self._get_status_key('status'): self._get_status_value('warning'),
-                self._get_status_key('message'): "PCAPDroid traffic capture is disabled (optional feature)"
+                KEYS.STATUS_KEY_STATUS: KEYS.STATUS_WARNING,
+                KEYS.STATUS_KEY_MESSAGE: "PCAPdroid traffic capture is disabled (optional feature)"
             }
     
     # ========== Validation Interface (original ValidationService methods) ==========
@@ -441,7 +302,7 @@ class ValidationService:
         all_warnings.extend(ai_warnings)
         
         # Check API keys and environment variables
-        api_issues, api_warnings = self._check_api_keys_and_env()
+        api_issues, api_warnings = self.check_api_keys_and_env()
         all_issues.extend(api_issues)
         all_warnings.extend(api_warnings)
         
@@ -450,6 +311,8 @@ class ValidationService:
             all_issues.append(VALIDATION_MESSAGES["TARGET_APP_MISSING"])
         
         # Check required configuration by iterating over default constants
+        # Note: _get_required_config_keys() already conditionally includes
+        # PCAPDROID_API_KEY and MOBSF_API_KEY based on feature flags
         required_keys = self._get_required_config_keys()
         for key in required_keys:
             if not self.config.get(key, None):
@@ -470,7 +333,7 @@ class ValidationService:
         Get detailed status information about all services.
         
         Returns:
-            Dictionary with service status details (legacy format for UI compatibility)
+            Dictionary with service status details
         """
         details = {}
         
@@ -509,7 +372,7 @@ class ValidationService:
             }
         
         # API Keys status
-        api_issues, api_warnings = self._check_api_keys_and_env()
+        api_issues, api_warnings = self.check_api_keys_and_env()
         all_api_messages = api_issues + api_warnings
         details['api_keys'] = {
             'valid': len(api_issues) == 0,
@@ -527,21 +390,6 @@ class ValidationService:
             'message': VALIDATION_MESSAGES["TARGET_APP_TEMPLATE"].format(package=app_package) if app_package else VALIDATION_MESSAGES["TARGET_APP_NOT_SELECTED"]
         }
         
-        # MCP status - use check_mcp_server_health for consistency
-        mcp_status = self.check_mcp_server_health()
-        mcp_running = mcp_status.get(self._get_status_key('status')) == self._get_status_value('running')
-        mcp_url = self.config.get('MCP_SERVER_URL', DEFAULT_MCP_URL)
-        if mcp_running:
-            message = VALIDATION_MESSAGES["MCP_RUNNING"].format(url=mcp_url)
-        else:
-            message = VALIDATION_MESSAGES["MCP_NOT_ACCESSIBLE"].format(url=mcp_url)
-        details['mcp'] = {
-            'running': mcp_running,
-            'url': mcp_url,
-            'required': False,
-            'message': message
-        }
-        
         return details
     
     # ========== Internal Helper Methods ==========
@@ -550,10 +398,10 @@ class ValidationService:
         """Check if Appium server is running and accessible."""
         try:
             appium_url = self.config.get('APPIUM_SERVER_URL', DEFAULT_APPIUM_URL)
-            response = requests.get(f"{appium_url}/status", timeout=DEFAULT_HTTP_TIMEOUT)
-            if response.status_code == 200:
+            response = requests.get(f"{appium_url}{KEYS.APPIUM_STATUS_PATH}", timeout=APPIUM_STATUS_TIMEOUT)
+            if response.status_code == KEYS.HTTP_CODE_OK:
                 status_data = response.json()
-                if status_data.get('ready', False) or status_data.get('value', {}).get('ready', False):
+                if status_data.get(KEYS.JSON_KEY_READY, False) or status_data.get(KEYS.JSON_KEY_VALUE, {}).get(KEYS.JSON_KEY_READY, False):
                     return True
         except Exception as e:
             self.logger.debug(f"Appium server check failed: {e}")
@@ -563,8 +411,8 @@ class ValidationService:
         """Check if MobSF server is running and accessible."""
         try:
             mobsf_url = self.config.get('MOBSF_API_URL', DEFAULT_MOBSF_URL)
-            response = requests.get(f"{mobsf_url}/server_status", timeout=DEFAULT_HTTP_TIMEOUT)
-            if response.status_code == 200:
+            response = requests.get(f"{mobsf_url}{KEYS.MOBSF_STATUS_PATH}", timeout=MOBSF_STATUS_TIMEOUT)
+            if response.status_code == KEYS.HTTP_CODE_OK:
                 return True
         except Exception as e:
             self.logger.debug(f"MobSF server check failed: {e}")
@@ -575,8 +423,8 @@ class ValidationService:
         ollama_url = self.config.get('OLLAMA_BASE_URL', DEFAULT_OLLAMA_URL)
         
         try:
-            response = requests.get(f"{ollama_url}/api/tags", timeout=OLLAMA_API_TIMEOUT)
-            if response.status_code == 200:
+            response = requests.get(f"{ollama_url}{KEYS.OLLAMA_TAGS_PATH}", timeout=OLLAMA_API_TIMEOUT)
+            if response.status_code == KEYS.HTTP_CODE_OK:
                 self.logger.debug("Ollama service detected via HTTP API")
                 return True
         except requests.RequestException as e:
@@ -586,45 +434,49 @@ class ValidationService:
         
         # Fallback to subprocess check
         try:
-            result = subprocess.run(['ollama', 'list'],
-                                capture_output=True,
-                                text=True,
-                                timeout=OLLAMA_SUBPROC_TIMEOUT,
-                                creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0)
+            result = cli_run_subprocess(
+                ['ollama', 'list'],
+                timeout=OLLAMA_CLI_TIMEOUT,
+                capture_output=True
+            )
             if result.returncode == 0:
                 self.logger.debug("Ollama service detected via subprocess")
                 return True
-        except subprocess.TimeoutExpired:
-            self.logger.debug("Ollama subprocess check timed out")
-        except FileNotFoundError:
-            self.logger.debug("Ollama executable not found")
-        except subprocess.SubprocessError as e:
-            self.logger.debug(f"Ollama subprocess check failed: {e}")
         except Exception as e:
-            self.logger.debug(f"Unexpected error during Ollama subprocess check: {e}")
+            self.logger.debug(f"Ollama subprocess check failed: {e}")
         
         self.logger.debug("Ollama service not detected")
         return False
     
     def _check_ai_provider(self) -> Tuple[List[str], List[str]]:
-        """Check AI provider specific requirements."""
+        """Check AI provider specific requirements using provider registry."""
+        from domain.providers.registry import ProviderRegistry
+        
         issues = []
         warnings = []
-        ai_provider = self.config.get('AI_PROVIDER', DEFAULT_AI_PROVIDER).lower()
+        ai_provider = self.config.get('AI_PROVIDER', DEFAULT_AI_PROVIDER)
         
-        provider_config = self.AI_PROVIDER_REQUIREMENTS.get(ai_provider)
-        if not provider_config:
+        strategy = ProviderRegistry.get_by_name(ai_provider)
+        if not strategy:
             warnings.append(f"Unknown AI provider: {ai_provider}")
             return issues, warnings
         
-        service_check_method = provider_config.get('service_check')
-        if service_check_method:
-            check_method = getattr(self, service_check_method)
-            if not check_method():
-                issues.append(VALIDATION_MESSAGES["OLLAMA_NOT_RUNNING"])
+        # Validate provider configuration
+        is_valid, error_msg = strategy.validate_config(self.config)
+        if not is_valid and error_msg:
+            issues.append(error_msg)
         
-        if ai_provider == 'ollama' and not self.config.get('OLLAMA_BASE_URL', None):
-            warnings.append(VALIDATION_MESSAGES["OLLAMA_URL_NOT_SET"])
+        # Check dependencies
+        deps_ok, deps_msg = strategy.check_dependencies()
+        if not deps_ok:
+            issues.append(deps_msg)
+        
+        # Check service availability (Ollama-specific)
+        if strategy.provider.value == 'ollama':
+            if not self._check_ollama_service():
+                issues.append(VALIDATION_MESSAGES["OLLAMA_NOT_RUNNING"])
+            if not self.config.get('OLLAMA_BASE_URL', None):
+                warnings.append(VALIDATION_MESSAGES["OLLAMA_URL_NOT_SET"])
         
         return issues, warnings
     
@@ -637,29 +489,23 @@ class ValidationService:
         """
         issues = []
         warnings = []
-        ai_provider = self.config.get("AI_PROVIDER", DEFAULT_AI_PROVIDER).lower()
+        ai_provider = self.config.get("AI_PROVIDER", DEFAULT_AI_PROVIDER)
         
-        if ai_provider == 'gemini':
-            if not self.config.get("GEMINI_API_KEY", None):
-                if CLI_CONSTANTS_AVAILABLE:
-                    issues.append(self._get_message('missing_key', key="Gemini API key", env="GEMINI_API_KEY"))
-                else:
-                    issues.append(VALIDATION_MESSAGES["GEMINI_API_KEY_MISSING"])
-        elif ai_provider == 'openrouter':
-            if not self.config.get("OPENROUTER_API_KEY", None):
-                if CLI_CONSTANTS_AVAILABLE:
-                    issues.append(self._get_message('missing_key', key="OpenRouter API key", env="OPENROUTER_API_KEY"))
-                else:
-                    issues.append(VALIDATION_MESSAGES["OPENROUTER_API_KEY_MISSING"])
+        # Use provider strategy to check API keys
+        from domain.providers.registry import ProviderRegistry
+        strategy = ProviderRegistry.get_by_name(ai_provider)
+        if strategy:
+            is_valid, error_msg = strategy.validate_config(self.config)
+            if not is_valid and error_msg:
+                # Try to get a more user-friendly message
+                key_name = strategy.get_api_key_name()
+                issues.append(MSG.PRECHECK_STATUS_MESSAGE_MISSING_KEY.format(key=key_name.replace('_', ' ').title(), env=key_name))
         
         # Note: PCAPdroid API key is checked separately in check_pcapdroid() to avoid duplication
-        # Check MobSF API key if MobSF analysis is enabled
+        # Check MobSF API key if MobSF analysis is enabled - but make it a warning, not blocking
         if self.config.get('ENABLE_MOBSF_ANALYSIS', False):
             if not self.config.get('MOBSF_API_KEY', None):
-                if CLI_CONSTANTS_AVAILABLE:
-                    issues.append(self._get_message('missing_key', key="API key", env="MOBSF_API_KEY"))
-                else:
-                    issues.append("API key not set (check MOBSF_API_KEY in .env)")
+                warnings.append(MSG.PRECHECK_STATUS_MESSAGE_MISSING_KEY.format(key="API key", env="MOBSF_API_KEY"))
         
         return issues, warnings
     
@@ -677,151 +523,24 @@ class ValidationService:
         return check_dependencies(ai_provider)
     
     def _get_required_config_keys(self) -> List[str]:
-        """Get list of required configuration keys."""
-        return [
+        """Get list of required configuration keys.
+        
+        Note: PCAPDROID_API_KEY and MOBSF_API_KEY are optional and not included
+        here even when features are enabled, as they should be warnings, not
+        blocking issues. The crawler can run without them.
+        """
+        keys = [
             "APPIUM_SERVER_URL",
             "AI_PROVIDER",
-            "APP_PACKAGE",
-            "ENABLE_TRAFFIC_CAPTURE",
-            "PCAPDROID_API_KEY",
-            "ENABLE_MOBSF_ANALYSIS",
-            "MOBSF_API_KEY"
+            "APP_PACKAGE"
         ]
-    
-    # ========== Helper methods for CLI constants compatibility ==========
-    
-    def _get_service_name(self, service: str) -> str:
-        """Get service name, using CLI constants if available."""
-        if CLI_CONSTANTS_AVAILABLE:
-            service_map = {
-                'appium': KEYS.SERVICE_APPIUM,
-                'mcp': KEYS.SERVICE_MCP,
-                'mobsf': KEYS.SERVICE_MOBSF,
-                'ollama': KEYS.SERVICE_OLLAMA,
-                'pcapdroid': KEYS.SERVICE_PCAPDROID,
-                'api_keys': KEYS.SERVICE_API_KEYS,
-                'target_app': KEYS.SERVICE_TARGET_APP
-            }
-            return service_map.get(service, service)
-        return service
-    
-    def _get_status_key(self, key: str) -> str:
-        """Get status key name, using CLI constants if available."""
-        if CLI_CONSTANTS_AVAILABLE:
-            key_map = {
-                'status': KEYS.STATUS_KEY_STATUS,
-                'message': KEYS.STATUS_KEY_MESSAGE
-            }
-            return key_map.get(key, key)
-        return key
-    
-    def _get_status_value(self, value: str) -> str:
-        """Get status value, using CLI constants if available."""
-        if CLI_CONSTANTS_AVAILABLE:
-            value_map = {
-                'running': KEYS.STATUS_RUNNING,
-                'warning': KEYS.STATUS_WARNING,
-                'error': KEYS.STATUS_ERROR
-            }
-            return value_map.get(value, value)
-        return value
-    
-    def _get_path(self, path_type: str) -> str:
-        """Get path constant, using CLI constants if available."""
-        if CLI_CONSTANTS_AVAILABLE:
-            path_map = {
-                'appium_status': KEYS.APPIUM_STATUS_PATH,
-                'mcp_ready': KEYS.MCP_READY_PATH,
-                'mcp_health': KEYS.MCP_HEALTH_PATH,
-                'mobsf_status': KEYS.MOBSF_STATUS_PATH,
-                'ollama_tags': KEYS.OLLAMA_TAGS_PATH
-            }
-            return path_map.get(path_type, '/status')
-        # Fallback paths
-        path_fallbacks = {
-            'appium_status': '/status',
-            'mcp_ready': '/ready',
-            'mcp_health': '/health',
-            'mobsf_status': '/server_status',
-            'ollama_tags': '/api/tags'
-        }
-        return path_fallbacks.get(path_type, '/status')
-    
-    def _get_timeout(self, timeout_type: str) -> float:
-        """Get timeout value, using CLI constants if available."""
-        if CLI_CONSTANTS_AVAILABLE:
-            timeout_map = {
-                'appium_status': CFG.APPIUM_STATUS_TIMEOUT,
-                'mcp_status': CFG.MCP_STATUS_TIMEOUT,
-                'mobsf_status': CFG.MOBSF_STATUS_TIMEOUT,
-                'ollama_api': CFG.OLLAMA_API_TIMEOUT,
-                'ollama_cli': CFG.OLLAMA_CLI_TIMEOUT
-            }
-            return timeout_map.get(timeout_type, DEFAULT_HTTP_TIMEOUT)
-        # Fallback timeouts
-        timeout_fallbacks = {
-            'appium_status': DEFAULT_HTTP_TIMEOUT,
-            'mcp_status': DEFAULT_HTTP_TIMEOUT,
-            'mobsf_status': DEFAULT_HTTP_TIMEOUT,
-            'ollama_api': OLLAMA_API_TIMEOUT,
-            'ollama_cli': OLLAMA_SUBPROC_TIMEOUT
-        }
-        return timeout_fallbacks.get(timeout_type, DEFAULT_HTTP_TIMEOUT)
-    
-    def _get_http_code(self, code_type: str) -> int:
-        """Get HTTP code constant, using CLI constants if available."""
-        if CLI_CONSTANTS_AVAILABLE:
-            code_map = {
-                'ok': KEYS.HTTP_CODE_OK,
-                'service_unavailable': KEYS.HTTP_CODE_SERVICE_UNAVAILABLE
-            }
-            return code_map.get(code_type, 200)
-        # Fallback codes
-        code_fallbacks = {
-            'ok': 200,
-            'service_unavailable': 503
-        }
-        return code_fallbacks.get(code_type, 200)
-    
-    def _get_json_key(self, key_type: str) -> str:
-        """Get JSON key constant, using CLI constants if available."""
-        if CLI_CONSTANTS_AVAILABLE:
-            key_map = {
-                'ready': KEYS.JSON_KEY_READY,
-                'value': KEYS.JSON_KEY_VALUE,
-                'uptime_ms': KEYS.JSON_KEY_UPTIME_MS,
-                'registered_tools': KEYS.JSON_KEY_REGISTERED_TOOLS,
-                'active_invocations': KEYS.JSON_KEY_ACTIVE_INVOCATIONS
-            }
-            return key_map.get(key_type, key_type)
-        return key_type
-    
-    def _get_message(self, msg_type: str, **kwargs) -> str:
-        """Get message from CLI constants if available."""
-        if not CLI_CONSTANTS_AVAILABLE:
-            return ""
-        msg_map = {
-            'ok': MSG.PRECHECK_STATUS_MESSAGE_OK,
-            'selected': MSG.PRECHECK_STATUS_MESSAGE_SELECTED,
-            'no_app': MSG.PRECHECK_STATUS_MESSAGE_NO_APP,
-            'reachable': MSG.PRECHECK_STATUS_MESSAGE_REACHABLE,
-            'not_ready': MSG.PRECHECK_STATUS_MESSAGE_NOT_READY,
-            'http': MSG.PRECHECK_STATUS_MESSAGE_HTTP,
-            'conn_fail': MSG.PRECHECK_STATUS_MESSAGE_CONN_FAIL,
-            'ready': MSG.PRECHECK_STATUS_MESSAGE_READY,
-            'not_ready_unavailable': MSG.PRECHECK_STATUS_MESSAGE_NOT_READY_UNAVAILABLE,
-            'health_alive': MSG.PRECHECK_STATUS_MESSAGE_HEALTH_ALIVE,
-            'health_fail': MSG.PRECHECK_STATUS_MESSAGE_HEALTH_FAIL,
-            'mcp_fail': MSG.PRECHECK_STATUS_MESSAGE_MCP_FAIL,
-            'cli_accessible': MSG.PRECHECK_STATUS_MESSAGE_CLI_ACCESSIBLE,
-            'cli_not_accessible': MSG.PRECHECK_STATUS_MESSAGE_CLI_NOT_ACCESSIBLE,
-            'not_accessible': MSG.PRECHECK_STATUS_MESSAGE_NOT_ACCESSIBLE,
-            'api_reachable': MSG.PRECHECK_STATUS_MESSAGE_API_REACHABLE,
-            'missing_key': MSG.PRECHECK_STATUS_MESSAGE_MISSING_KEY,
-            'not_running_port': MSG.PRECHECK_STATUS_MESSAGE_NOT_RUNNING_PORT
-        }
-        msg_template = msg_map.get(msg_type, "")
-        return msg_template.format(**kwargs) if msg_template else ""
+        
+        # Note: We intentionally do NOT include PCAPDROID_API_KEY or MOBSF_API_KEY
+        # here, even when features are enabled, because these are optional features
+        # and missing keys should not block the crawler from starting.
+        # They are checked separately and added as warnings if missing.
+        
+        return keys
     
     def _extract_port_from_error(self, error_str: str, default_port: Optional[int] = None) -> Optional[int]:
         """
@@ -870,24 +589,13 @@ class ValidationService:
                     pass
         
         if port:
-            if CLI_CONSTANTS_AVAILABLE:
-                return self._get_message('not_running_port', port=port)
-            else:
-                return f"Not running on port {port}"
+            return MSG.PRECHECK_STATUS_MESSAGE_NOT_RUNNING_PORT.format(port=port)
         else:
-            # Fallback to generic message
-            if CLI_CONSTANTS_AVAILABLE:
-                return self._get_message('not_accessible', url=url)
-            else:
-                return f"Not accessible at {url}"
+            return MSG.PRECHECK_STATUS_MESSAGE_NOT_ACCESSIBLE.format(url=url)
     
     def _get_appium_url(self) -> str:
         """Get Appium URL from config."""
         return self.config.get('CONFIG_APPIUM_SERVER_URL') or self.config.get('APPIUM_SERVER_URL', DEFAULT_APPIUM_URL)
-    
-    def _get_mcp_url(self) -> str:
-        """Get MCP URL from config."""
-        return self.config.get('CONFIG_MCP_SERVER_URL') or self.config.get('MCP_SERVER_URL', DEFAULT_MCP_URL)
     
     def _get_mobsf_url(self) -> str:
         """Get MobSF URL from config."""

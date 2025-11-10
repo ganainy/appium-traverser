@@ -48,8 +48,103 @@ class UIComponents:
     ]
 
     @staticmethod
-    def _update_model_types(provider: str, config_widgets: Dict[str, Any]) -> None:
-        """Update the model types based on the selected AI provider."""
+    def _configure_image_context_for_provider(
+        strategy, config, config_widgets, capabilities, model_dropdown, no_selection_label
+    ):
+        """Configure image context UI based on provider strategy and capabilities."""
+        from domain.providers.enums import AIProvider
+        
+        auto_disable = capabilities.get("auto_disable_image_context", False)
+        if auto_disable:
+            config_widgets["ENABLE_IMAGE_CONTEXT"].setChecked(False)
+            config_widgets["ENABLE_IMAGE_CONTEXT"].setEnabled(False)
+            from ui.strings import IMAGE_CONTEXT_DISABLED_PAYLOAD_LIMIT
+            config_widgets["ENABLE_IMAGE_CONTEXT"].setToolTip(
+                IMAGE_CONTEXT_DISABLED_PAYLOAD_LIMIT.format(max_kb=capabilities.get('payload_max_size_kb', 500))
+            )
+            if "IMAGE_CONTEXT_WARNING" in config_widgets:
+                config_widgets["IMAGE_CONTEXT_WARNING"].setVisible(True)
+            UIComponents._add_image_context_warning(strategy.name, capabilities)
+        else:
+            # Enable image context - provider supports it
+            from ui.strings import IMAGE_CONTEXT_ENABLED_TOOLTIP
+            config_widgets["ENABLE_IMAGE_CONTEXT"].setEnabled(True)
+            config_widgets["ENABLE_IMAGE_CONTEXT"].setToolTip(IMAGE_CONTEXT_ENABLED_TOOLTIP)
+            config_widgets["ENABLE_IMAGE_CONTEXT"].setStyleSheet("")
+            if "IMAGE_CONTEXT_WARNING" in config_widgets:
+                config_widgets["IMAGE_CONTEXT_WARNING"].setVisible(False)
+            
+            # For OpenRouter, handle model-specific image support
+            if strategy.provider == AIProvider.OPENROUTER:
+                UIComponents._setup_openrouter_image_context_handler(
+                    strategy, config, config_widgets, model_dropdown, no_selection_label
+                )
+
+    @staticmethod
+    def _setup_openrouter_image_context_handler(
+        strategy, config, config_widgets, model_dropdown, no_selection_label
+    ):
+        """Set up OpenRouter-specific image context handling with model change listener."""
+        def _on_openrouter_model_changed(name: str):
+            try:
+                if "ENABLE_IMAGE_CONTEXT" not in config_widgets:
+                    return
+                
+                if name == no_selection_label:
+                    config_widgets["ENABLE_IMAGE_CONTEXT"].setEnabled(False)
+                    config_widgets["ENABLE_IMAGE_CONTEXT"].setChecked(False)
+                    from ui.strings import SELECT_MODEL_TO_CONFIGURE
+                    config_widgets["ENABLE_IMAGE_CONTEXT"].setToolTip(SELECT_MODEL_TO_CONFIGURE)
+                    if "IMAGE_CONTEXT_WARNING" in config_widgets:
+                        config_widgets["IMAGE_CONTEXT_WARNING"].setVisible(False)
+                    if "OPENROUTER_NON_FREE_WARNING" in config_widgets:
+                        config_widgets["OPENROUTER_NON_FREE_WARNING"].setVisible(False)
+                    return
+                
+                # Check model-specific image support
+                supports_image = strategy.supports_image_context(config, name)
+                if supports_image:
+                    config_widgets["ENABLE_IMAGE_CONTEXT"].setEnabled(True)
+                    config_widgets["ENABLE_IMAGE_CONTEXT"].setChecked(True)
+                    from ui.strings import MODEL_SUPPORTS_IMAGE_INPUTS
+                    config_widgets["ENABLE_IMAGE_CONTEXT"].setToolTip(MODEL_SUPPORTS_IMAGE_INPUTS)
+                    if "IMAGE_CONTEXT_WARNING" in config_widgets:
+                        config_widgets["IMAGE_CONTEXT_WARNING"].setVisible(False)
+                else:
+                    config_widgets["ENABLE_IMAGE_CONTEXT"].setEnabled(False)
+                    config_widgets["ENABLE_IMAGE_CONTEXT"].setChecked(False)
+                    from ui.strings import MODEL_DOES_NOT_SUPPORT_IMAGE_INPUTS, WARNING_MODEL_NO_IMAGE_SUPPORT
+                    config_widgets["ENABLE_IMAGE_CONTEXT"].setToolTip(MODEL_DOES_NOT_SUPPORT_IMAGE_INPUTS)
+                    if "IMAGE_CONTEXT_WARNING" in config_widgets:
+                        try:
+                            config_widgets["IMAGE_CONTEXT_WARNING"].setText(WARNING_MODEL_NO_IMAGE_SUPPORT)
+                        except Exception:
+                            pass
+                        config_widgets["IMAGE_CONTEXT_WARNING"].setVisible(True)
+                
+                # Show/hide non-free warning
+                try:
+                    if "OPENROUTER_NON_FREE_WARNING" in config_widgets:
+                        from domain.providers.registry import ProviderRegistry
+                        from domain.providers.enums import AIProvider
+                        
+                        provider = ProviderRegistry.get(AIProvider.OPENROUTER)
+                        if provider:
+                            is_free = provider.is_model_free(name)
+                            config_widgets["OPENROUTER_NON_FREE_WARNING"].setVisible(not is_free)
+                except Exception as e:
+                    logging.debug(f"Error toggling non-free warning: {e}")
+            except Exception as e:
+                logging.debug(f"Error toggling image context on model change: {e}")
+        
+        model_dropdown.currentTextChanged.connect(_on_openrouter_model_changed)
+
+    @staticmethod
+    def _update_model_types(provider: str, config_widgets: Dict[str, Any], config_handler: Any = None) -> None:
+        """Update the model types based on the selected AI provider using provider strategy."""
+        from domain.providers.registry import ProviderRegistry
+        from domain.providers.enums import AIProvider
+        
         model_dropdown = config_widgets["DEFAULT_MODEL_TYPE"]
         # Capture the current selection to restore it after repopulating
         previous_text = model_dropdown.currentText()
@@ -60,352 +155,76 @@ class UIComponents:
         model_dropdown.clear()
 
         # Always start with an explicit no-selection placeholder
-        NO_SELECTION_LABEL = "No model selected"
+        from ui.strings import NO_MODEL_SELECTED
+        NO_SELECTION_LABEL = NO_MODEL_SELECTED
         try:
             model_dropdown.addItem(NO_SELECTION_LABEL)
         except Exception:
             # Fallback: ensure dropdown has at least one item
-            model_dropdown.addItem("No model selected")
+            model_dropdown.addItem(NO_MODEL_SELECTED)
 
-        # Get provider capabilities from config
-        from config.config import AI_PROVIDER_CAPABILITIES
-
-        capabilities = AI_PROVIDER_CAPABILITIES.get(
-            provider.lower(), AI_PROVIDER_CAPABILITIES.get("gemini", {})
-        )
-
-        if provider.lower() == "gemini":
-            # Populate Gemini models using direct model IDs; do not auto-select
-            model_dropdown.addItems([
-                "gemini-2.5-flash-preview-05-20",
-                "gemini-2.5-flash-image",
-            ])
-            # Try to restore saved selection if present
+        # Get provider strategy
+        strategy = ProviderRegistry.get_by_name(provider)
+        if not strategy:
+            logging.warning(f"Unknown provider: {provider}")
+            model_dropdown.blockSignals(False)
+            return
+        
+        # Get provider capabilities
+        capabilities = strategy.get_capabilities()
+        
+        # Get config for provider methods
+        config = config_handler.config if config_handler and hasattr(config_handler, 'config') else None
+        if not config:
             try:
-                if previous_text:
-                    idx = model_dropdown.findText(previous_text)
-                    if idx >= 0:
-                        model_dropdown.setCurrentIndex(idx)
+                from config.app_config import Config
+                config = Config()
             except Exception:
-                pass
-            # Enable image context for Gemini
-            if "ENABLE_IMAGE_CONTEXT" in config_widgets:
-                config_widgets["ENABLE_IMAGE_CONTEXT"].setEnabled(True)
-                config_widgets["ENABLE_IMAGE_CONTEXT"].setToolTip(
-                    "Enable sending screenshots to AI for visual analysis. Disable for text-only analysis."
-                )
+                logging.warning("Could not get config for provider strategy")
+                model_dropdown.blockSignals(False)
+                return
 
-                # Reset styling when enabling
-                config_widgets["ENABLE_IMAGE_CONTEXT"].setStyleSheet("")
+        # Get models using provider strategy
+        try:
+            models = strategy.get_models(config)
+            if models:
+                model_dropdown.addItems(models)
+        except Exception as e:
+            logging.warning(f"Failed to get models from provider strategy: {e}")
+        
+        # Restore previous selection if available
+        try:
+            if previous_text:
+                idx = model_dropdown.findText(previous_text)
+                if idx >= 0:
+                    model_dropdown.setCurrentIndex(idx)
+        except Exception:
+            pass
 
-                # Hide warning label
-                if "IMAGE_CONTEXT_WARNING" in config_widgets:
-                    config_widgets["IMAGE_CONTEXT_WARNING"].setVisible(False)
-        elif provider.lower() == "ollama":
-            # Get available Ollama models dynamically using domain logic
-            try:
-                from domain.ollama_models import fetch_ollama_models, load_ollama_models_cache
-                
-                # Try to get base URL from config
-                base_url = None
-                try:
-                    base_url = config_handler.config.get("OLLAMA_BASE_URL", None)
-                except Exception:
-                    pass
-                
-                # Try to fetch fresh models, fall back to cache if that fails
-                models = None
-                try:
-                    models = fetch_ollama_models(base_url)
-                except Exception as fetch_error:
-                    logging.debug(f"Failed to fetch fresh Ollama models: {fetch_error}, trying cache")
-                    models = load_ollama_models_cache()
-                
-                model_items = []
-                vision_models = []
+        # Configure image context based on provider capabilities
+        if "ENABLE_IMAGE_CONTEXT" in config_widgets:
+            UIComponents._configure_image_context_for_provider(
+                strategy, config, config_widgets, capabilities, model_dropdown, NO_SELECTION_LABEL
+            )
 
-                if models:
-                    for model in models:
-                        model_name = model.get("name") or model.get("id", "")
-                        if not model_name:
-                            continue
-
-                        # Keep full model name with tag for display and API usage
-                        display_name = model_name
-                        vision_supported = model.get("vision_supported", False)
-
-                        if vision_supported:
-                            vision_models.append(display_name)
-
-                        model_items.append(display_name)
-
-                # If no models found, show a message
-                if not model_items:
-                    model_items = [
-                        "No Ollama models available - run 'ollama pull <model>'"
-                    ]
-                    logging.warning("No Ollama models found")
-
-                model_dropdown.addItems(model_items)
-
-                # Try to restore saved selection if present among items
-                try:
-                    if previous_text:
-                        idx = model_dropdown.findText(previous_text)
-                        if idx >= 0:
-                            model_dropdown.setCurrentIndex(idx)
-                except Exception:
-                    pass
-
-                logging.debug(f"Loaded {len(model_items)} Ollama models: {model_items}")
-
-            except ImportError as import_error:
-                # Fallback if domain module not available
-                logging.warning(f"Failed to import ollama_models: {import_error}")
-                model_dropdown.addItems(
-                    ['Ollama models module not available']
-                )
-            except Exception as e:
-                # Fallback if Ollama is not running or other error
-                logging.warning(f"Could not fetch Ollama models: {e}")
-                model_dropdown.addItems(
-                    [
-                        "Ollama not running - start Ollama service",
-                        "llama3.2(local)",
-                        "llama3.2-vision(local) 👁️",
-                    ]
-                )
-
-            # Enable image context for Ollama (vision models will handle it)
-            if "ENABLE_IMAGE_CONTEXT" in config_widgets:
-                config_widgets["ENABLE_IMAGE_CONTEXT"].setEnabled(True)
-                config_widgets["ENABLE_IMAGE_CONTEXT"].setToolTip(
-                    "Enable sending screenshots to AI for visual analysis. Vision-capable models will process images, others will use text-only."
-                )
-
-                # Reset styling when enabling
-                config_widgets["ENABLE_IMAGE_CONTEXT"].setStyleSheet("")
-
-                # Hide warning label
-                if "IMAGE_CONTEXT_WARNING" in config_widgets:
-                    config_widgets["IMAGE_CONTEXT_WARNING"].setVisible(False)
-        elif provider.lower() == "openrouter":
-            # Try to populate from cached OpenRouter models; fallback to presets
-            cached_models = UIComponents._load_openrouter_models_from_cache()
-            vision_models = []
-            free_only = False
+        # Provider-specific UI updates (OpenRouter needs special handling for free-only filter)
+        provider_enum = AIProvider.from_string(provider) if AIProvider.is_valid(provider) else None
+        if provider_enum == AIProvider.OPENROUTER:
+            # OpenRouter-specific: Handle free-only filter and ensure presets are available
+            # Note: Models are already populated by strategy.get_models() above
+            # This section only handles the free-only filter UI logic
             try:
                 if "OPENROUTER_SHOW_FREE_ONLY" in config_widgets:
-                    free_only = bool(
-                        config_widgets["OPENROUTER_SHOW_FREE_ONLY"].isChecked()
-                    )
-            except Exception:
-                free_only = False
-            if cached_models:
-                try:
-                    # Add dynamic models (id values), honoring free-only filter by model metadata
-                    model_ids = []
-                    total_models = len(cached_models)
-                    free_candidates = 0
-                    for m in cached_models:
-                        mid = m.get("id") or m.get("name")
-                        if not mid:
-                            continue
-                        if free_only:
-                            if UIComponents._is_openrouter_model_free(m):
-                                model_ids.append(mid)
-                        else:
-                            model_ids.append(mid)
+                    # Wire up free-only filter to re-populate models when toggled
+                    def _on_free_only_changed(_state: int):
                         try:
-                            if UIComponents._is_openrouter_model_free(m):
-                                free_candidates += 1
-                        except Exception:
-                            pass
-                    # Consult cache-derived vision capability first; fallback to heuristics
-                    for mid in model_ids:
-                        if UIComponents._is_openrouter_model_vision(mid):
-                            vision_models.append(mid)
-                    model_dropdown.addItems(model_ids)
-                    try:
-                        logging.info(
-                            f"OpenRouter models displayed: {len(model_ids)} (free-only={'on' if free_only else 'off'}; free-candidates={free_candidates}/{total_models})"
-                        )
-                    except Exception:
-                        pass
-                except Exception as e:
-                    logging.warning(f"Error loading cached OpenRouter models: {e}")
-                    model_dropdown.addItems(["openrouter-auto", "openrouter-auto-fast"])
-            else:
-                model_dropdown.addItems(["openrouter-auto", "openrouter-auto-fast"])
-
-            # Always include presets as safe options just after the placeholder if not already
-            for preset in ["openrouter-auto", "openrouter-auto-fast"]:
-                if model_dropdown.findText(preset) == -1:
-                    # Ensure placeholder remains at index 0
-                    insert_index = 1
-                    try:
-                        # Find first index after placeholder that doesn't equal NO_SELECTION_LABEL
-                        for i in range(model_dropdown.count()):
-                            if model_dropdown.itemText(i) != NO_SELECTION_LABEL:
-                                insert_index = max(1, i)
-                                break
-                    except Exception:
-                        insert_index = 1
-                    model_dropdown.insertItem(insert_index, preset)
-
-
-            # Restore saved selection if available; otherwise keep placeholder (no auto-selection)
-            try:
-                if previous_text:
-                    idx = model_dropdown.findText(previous_text)
-                    if idx >= 0:
-                        model_dropdown.setCurrentIndex(idx)
+                            UIComponents._update_model_types(provider, config_widgets, config_handler)
+                        except Exception as e:
+                            logging.debug(f"Failed to apply free-only filter: {e}")
+                    
+                    config_widgets["OPENROUTER_SHOW_FREE_ONLY"].stateChanged.connect(_on_free_only_changed)
             except Exception:
                 pass
-
-            # Handle image context tri-state based on provider capabilities and model metadata
-            if "ENABLE_IMAGE_CONTEXT" in config_widgets:
-                auto_disable = capabilities.get("auto_disable_image_context", False)
-                if auto_disable:
-                    config_widgets["ENABLE_IMAGE_CONTEXT"].setChecked(False)
-                    config_widgets["ENABLE_IMAGE_CONTEXT"].setEnabled(False)
-                    config_widgets["ENABLE_IMAGE_CONTEXT"].setToolTip(
-                        f"Image context disabled due to provider payload limits (max {capabilities.get('payload_max_size_kb', 500)} KB)."
-                    )
-                    if "IMAGE_CONTEXT_WARNING" in config_widgets:
-                        config_widgets["IMAGE_CONTEXT_WARNING"].setVisible(True)
-                    UIComponents._add_image_context_warning(provider, capabilities)
-                else:
-                    selected = model_dropdown.currentText()
-                    meta = UIComponents._get_openrouter_model_meta(selected)
-                    supports_image = None
-                    if isinstance(meta, dict):
-                        supports_image = meta.get("supports_image")
-                    # Determine tri-state: enabled, disabled, or unavailable
-                    if selected == NO_SELECTION_LABEL:
-                        # No model selected: disable image context and hide warnings
-                        config_widgets["ENABLE_IMAGE_CONTEXT"].setEnabled(False)
-                        config_widgets["ENABLE_IMAGE_CONTEXT"].setChecked(False)
-                        config_widgets["ENABLE_IMAGE_CONTEXT"].setToolTip(
-                            "Select a model to configure image inputs."
-                        )
-                        if "IMAGE_CONTEXT_WARNING" in config_widgets:
-                            config_widgets["IMAGE_CONTEXT_WARNING"].setVisible(False)
-                    elif supports_image is True:
-                        config_widgets["ENABLE_IMAGE_CONTEXT"].setEnabled(True)
-                        config_widgets["ENABLE_IMAGE_CONTEXT"].setChecked(True)
-                        config_widgets["ENABLE_IMAGE_CONTEXT"].setToolTip(
-                            "This model supports image inputs."
-                        )
-                        config_widgets["ENABLE_IMAGE_CONTEXT"].setStyleSheet("")
-                        if "IMAGE_CONTEXT_WARNING" in config_widgets:
-                            config_widgets["IMAGE_CONTEXT_WARNING"].setVisible(False)
-                    elif supports_image is False:
-                        # Disable and uncheck for non-vision models; show visible warning text
-                        config_widgets["ENABLE_IMAGE_CONTEXT"].setEnabled(False)
-                        config_widgets["ENABLE_IMAGE_CONTEXT"].setChecked(False)
-                        config_widgets["ENABLE_IMAGE_CONTEXT"].setToolTip(
-                            "This model does not support image inputs."
-                        )
-                        config_widgets["ENABLE_IMAGE_CONTEXT"].setStyleSheet("")
-                        if "IMAGE_CONTEXT_WARNING" in config_widgets:
-                            try:
-                                config_widgets["IMAGE_CONTEXT_WARNING"].setText("⚠️ This model does not support image inputs.")
-                            except Exception:
-                                pass
-                            config_widgets["IMAGE_CONTEXT_WARNING"].setVisible(True)
-                    else:
-                        # Unknown capability: apply unknown policy and heuristics for check state
-                        heuristic = UIComponents._is_openrouter_model_vision(selected)
-                        if heuristic:
-                            config_widgets["ENABLE_IMAGE_CONTEXT"].setEnabled(True)
-                            config_widgets["ENABLE_IMAGE_CONTEXT"].setChecked(True)
-                            config_widgets["ENABLE_IMAGE_CONTEXT"].setToolTip(
-                                "Capability unknown; metadata not available."
-                            )
-                            config_widgets["ENABLE_IMAGE_CONTEXT"].setStyleSheet("")
-                            if "IMAGE_CONTEXT_WARNING" in config_widgets:
-                                config_widgets["IMAGE_CONTEXT_WARNING"].setVisible(False)
-                        else:
-                            # Keep enabled but unchecked to avoid breaking inference
-                            config_widgets["ENABLE_IMAGE_CONTEXT"].setEnabled(True)
-                            config_widgets["ENABLE_IMAGE_CONTEXT"].setChecked(False)
-                            config_widgets["ENABLE_IMAGE_CONTEXT"].setToolTip(
-                                "Capability unknown; metadata not available."
-                            )
-                            if "IMAGE_CONTEXT_WARNING" in config_widgets:
-                                config_widgets["IMAGE_CONTEXT_WARNING"].setVisible(False)
-
-            # React to model changes to auto-toggle image context
-            def _on_openrouter_model_changed(name: str):
-                try:
-                    if "ENABLE_IMAGE_CONTEXT" in config_widgets:
-                        auto_disable_local = capabilities.get(
-                            "auto_disable_image_context", False
-                        )
-                        if not auto_disable_local:
-                            if name == NO_SELECTION_LABEL:
-                                # No model selected: disable image context and hide warnings
-                                config_widgets["ENABLE_IMAGE_CONTEXT"].setEnabled(False)
-                                config_widgets["ENABLE_IMAGE_CONTEXT"].setChecked(False)
-                                config_widgets["ENABLE_IMAGE_CONTEXT"].setToolTip("Select a model to configure image inputs.")
-                                if "IMAGE_CONTEXT_WARNING" in config_widgets:
-                                    config_widgets["IMAGE_CONTEXT_WARNING"].setVisible(False)
-                                # Also hide non-free warning explicitly when no selection
-                                if "OPENROUTER_NON_FREE_WARNING" in config_widgets:
-                                    config_widgets["OPENROUTER_NON_FREE_WARNING"].setVisible(False)
-                                return
-                            meta = UIComponents._get_openrouter_model_meta(name)
-                            supports_image = None
-                            if isinstance(meta, dict):
-                                supports_image = meta.get("supports_image")
-                            if supports_image is True:
-                                config_widgets["ENABLE_IMAGE_CONTEXT"].setEnabled(True)
-                                config_widgets["ENABLE_IMAGE_CONTEXT"].setChecked(True)
-                                config_widgets["ENABLE_IMAGE_CONTEXT"].setToolTip("This model supports image inputs.")
-                                if "IMAGE_CONTEXT_WARNING" in config_widgets:
-                                    config_widgets["IMAGE_CONTEXT_WARNING"].setVisible(False)
-                            elif supports_image is False:
-                                # Disable and uncheck for non-vision models; show visible warning text
-                                config_widgets["ENABLE_IMAGE_CONTEXT"].setEnabled(False)
-                                config_widgets["ENABLE_IMAGE_CONTEXT"].setChecked(False)
-                                config_widgets["ENABLE_IMAGE_CONTEXT"].setToolTip("This model does not support image inputs.")
-                                if "IMAGE_CONTEXT_WARNING" in config_widgets:
-                                    try:
-                                        config_widgets["IMAGE_CONTEXT_WARNING"].setText("⚠️ This model does not support image inputs.")
-                                    except Exception:
-                                        pass
-                                    config_widgets["IMAGE_CONTEXT_WARNING"].setVisible(True)
-                            else:
-                                heuristic = UIComponents._is_openrouter_model_vision(name)
-                                if heuristic:
-                                    config_widgets["ENABLE_IMAGE_CONTEXT"].setEnabled(True)
-                                    config_widgets["ENABLE_IMAGE_CONTEXT"].setChecked(True)
-                                    config_widgets["ENABLE_IMAGE_CONTEXT"].setToolTip("Capability unknown; metadata not available.")
-                                else:
-                                    config_widgets["ENABLE_IMAGE_CONTEXT"].setEnabled(True)
-                                    config_widgets["ENABLE_IMAGE_CONTEXT"].setChecked(False)
-                                    config_widgets["ENABLE_IMAGE_CONTEXT"].setToolTip("Capability unknown; metadata not available.")
-                                if "IMAGE_CONTEXT_WARNING" in config_widgets:
-                                    config_widgets["IMAGE_CONTEXT_WARNING"].setVisible(False)
-
-                except Exception as e:
-                    logging.debug(f"Error toggling image context on model change: {e}")
-
-
-
-                # Show or hide the non-free model warning
-                try:
-                    if "OPENROUTER_NON_FREE_WARNING" in config_widgets:
-                        if name == NO_SELECTION_LABEL:
-                            config_widgets["OPENROUTER_NON_FREE_WARNING"].setVisible(False)
-                        else:
-                            is_free = UIComponents._is_openrouter_model_free(name)
-                            config_widgets["OPENROUTER_NON_FREE_WARNING"].setVisible(not is_free)
-                except Exception as e:
-                    logging.debug(f"Error toggling non-free warning: {e}")
-
-            model_dropdown.currentTextChanged.connect(_on_openrouter_model_changed)
 
         # Unblock signals after updating
         model_dropdown.blockSignals(False)
@@ -444,7 +263,6 @@ class UIComponents:
             logging.error(f"Error adding image context warning: {e}")
 
     ADVANCED_FIELDS = {
-        "MCP_SERVER_URL": True,  # True means hide in basic mode
         "TARGET_DEVICE_UDID": True,  # True means hide in basic mode
         "DEFAULT_MODEL_TYPE": False,
         "XML_SNIPPET_MAX_LEN": True,
@@ -524,14 +342,14 @@ class UIComponents:
                 0
             )  # Default to Basic if not found
 
-        config_handler.ui_mode_dropdown.setToolTip(
-            "Basic mode hides advanced settings. Expert mode shows all settings."
-        )
+        from ui.strings import UI_MODE_TOOLTIP
+        config_handler.ui_mode_dropdown.setToolTip(UI_MODE_TOOLTIP)
         mode_layout.addWidget(mode_label)
         mode_layout.addWidget(config_handler.ui_mode_dropdown)
 
+        from ui.strings import RESET_TO_DEFAULTS_TOOLTIP
         reset_button = QPushButton("Reset Settings")
-        reset_button.setToolTip("Restore all configuration values to their defaults.")
+        reset_button.setToolTip(RESET_TO_DEFAULTS_TOOLTIP)
         reset_button.clicked.connect(config_handler.reset_settings)
         mode_layout.addWidget(reset_button)
         layout.addLayout(mode_layout)
@@ -767,8 +585,8 @@ class UIComponents:
         controller.action_history.setReadOnly(True)
         # Improve visibility and usability
         try:
-            controller.action_history.setPlaceholderText(
-                "No actions yet. Actions performed will appear here.")
+            from ui.strings import ACTION_HISTORY_PLACEHOLDER
+            controller.action_history.setPlaceholderText(ACTION_HISTORY_PLACEHOLDER)
         except Exception:
             pass
         controller.action_history.setStyleSheet("""
@@ -850,7 +668,9 @@ class UIComponents:
 
         config_widgets["APPIUM_SERVER_URL"] = QLabel()
         label_appium_url = QLabel("Server URL:")
-        label_appium_url.setToolTip(tooltips.get("APPIUM_SERVER_URL", "Appium server URL (e.g., http://127.0.0.1:4723)"))
+        from config.urls import ServiceURLs
+        from ui.strings import APPIUM_URL_TOOLTIP
+        label_appium_url.setToolTip(tooltips.get("APPIUM_SERVER_URL", APPIUM_URL_TOOLTIP.format(url=ServiceURLs.APPIUM)))
         appium_layout.addRow(label_appium_url, config_widgets["APPIUM_SERVER_URL"])
 
         config_widgets["TARGET_DEVICE_UDID"] = QComboBox()
@@ -931,7 +751,10 @@ class UIComponents:
 
         # AI Provider Selection
         config_widgets["AI_PROVIDER"] = QComboBox()
-        config_widgets["AI_PROVIDER"].addItems(["gemini", "ollama", "openrouter"])
+        # Use provider registry to get all available providers
+        from domain.providers.registry import ProviderRegistry
+        provider_names = ProviderRegistry.get_all_names()
+        config_widgets["AI_PROVIDER"].addItems(provider_names)
         label_ai_provider = QLabel("AI Provider: ")
         label_ai_provider.setToolTip(
             "The AI model provider to use for analysis and decision making."
@@ -948,9 +771,11 @@ class UIComponents:
         config_widgets["DEFAULT_MODEL_TYPE"] = QComboBox()
         # Start with explicit no-selection placeholder; provider change will populate
         try:
-            config_widgets["DEFAULT_MODEL_TYPE"].addItem("No model selected")
+            from ui.strings import NO_MODEL_SELECTED
+            config_widgets["DEFAULT_MODEL_TYPE"].addItem(NO_MODEL_SELECTED)
         except Exception:
-            config_widgets["DEFAULT_MODEL_TYPE"].addItems(["No model selected"])
+            from ui.strings import NO_MODEL_SELECTED
+            config_widgets["DEFAULT_MODEL_TYPE"].addItems([NO_MODEL_SELECTED])
         label_model_type = QLabel("Default Model Type: ")
         label_model_type.setToolTip(tooltips["DEFAULT_MODEL_TYPE"])
         # Place dropdown and refresh button side-by-side
@@ -979,8 +804,9 @@ class UIComponents:
 
         # Connect the AI provider selection to update model types and toggle refresh visibility
         def _on_provider_changed(provider: str):
-            UIComponents._update_model_types(provider, config_widgets)
-            is_or = provider.lower() == "openrouter"
+            UIComponents._update_model_types(provider, config_widgets, config_handler)
+            from domain.providers.enums import AIProvider
+            is_or = AIProvider.is_valid(provider) and AIProvider.from_string(provider) == AIProvider.OPENROUTER
             # Show OpenRouter controls only when OpenRouter is selected
             config_widgets["OPENROUTER_REFRESH_BTN"].setVisible(is_or)
             config_widgets["OPENROUTER_SHOW_FREE_ONLY"].setVisible(is_or)
@@ -999,9 +825,10 @@ class UIComponents:
         # Wire up free-only filter to re-populate models
         def _on_free_only_changed(_state: int):
             try:
-                current_provider = config_widgets["AI_PROVIDER"].currentText().lower()
-                if current_provider == "openrouter":
-                    UIComponents._update_model_types("openrouter", config_widgets)
+                current_provider = config_widgets["AI_PROVIDER"].currentText()
+                from domain.providers.enums import AIProvider
+                if AIProvider.is_valid(current_provider) and AIProvider.from_string(current_provider) == AIProvider.OPENROUTER:
+                    UIComponents._update_model_types(current_provider, config_widgets, config_handler)
             except Exception as e:
                 logging.debug(f"Failed to apply free-only filter: {e}")
 
@@ -1033,8 +860,9 @@ class UIComponents:
         image_context_layout.addStretch()
         ai_layout.addRow(image_context_layout)
 
+        from config.numeric_constants import XML_SNIPPET_MAX_LEN_MIN, XML_SNIPPET_MAX_LEN_MAX
         config_widgets["XML_SNIPPET_MAX_LEN"] = QSpinBox()
-        config_widgets["XML_SNIPPET_MAX_LEN"].setRange(5000, 500000)
+        config_widgets["XML_SNIPPET_MAX_LEN"].setRange(XML_SNIPPET_MAX_LEN_MIN, XML_SNIPPET_MAX_LEN_MAX)
         label_xml_snippet_max_len = QLabel("XML Snippet Max Length: ")
         label_xml_snippet_max_len.setToolTip(tooltips["XML_SNIPPET_MAX_LEN"])
         ai_layout.addRow(
@@ -1055,44 +883,53 @@ class UIComponents:
         form = QFormLayout(group)
 
         # Max width
+        from config.numeric_constants import IMAGE_MAX_WIDTH_MIN, IMAGE_MAX_WIDTH_MAX
         config_widgets["IMAGE_MAX_WIDTH"] = QSpinBox()
-        config_widgets["IMAGE_MAX_WIDTH"].setRange(240, 4000)
+        config_widgets["IMAGE_MAX_WIDTH"].setRange(IMAGE_MAX_WIDTH_MIN, IMAGE_MAX_WIDTH_MAX)
         label_max_width = QLabel("Max Screenshot Width (px): ")
-        label_max_width.setToolTip(tooltips.get("IMAGE_MAX_WIDTH", "Max width to resize screenshots before sending to AI. Smaller reduces payload; larger preserves detail."))
+        from ui.strings import MAX_SCREENSHOT_WIDTH_TOOLTIP
+        label_max_width.setToolTip(tooltips.get("IMAGE_MAX_WIDTH", MAX_SCREENSHOT_WIDTH_TOOLTIP))
         form.addRow(label_max_width, config_widgets["IMAGE_MAX_WIDTH"])
 
         # Format
         config_widgets["IMAGE_FORMAT"] = QComboBox()
         config_widgets["IMAGE_FORMAT"].addItems(["JPEG", "WEBP", "PNG"])
         label_format = QLabel("Image Format: ")
-        label_format.setToolTip(tooltips.get("IMAGE_FORMAT", "Choose output format for screenshots sent to AI."))
+        from ui.strings import IMAGE_FORMAT_TOOLTIP
+        label_format.setToolTip(tooltips.get("IMAGE_FORMAT", IMAGE_FORMAT_TOOLTIP))
         form.addRow(label_format, config_widgets["IMAGE_FORMAT"])
 
         # Quality
+        from config.numeric_constants import IMAGE_QUALITY_MIN, IMAGE_QUALITY_MAX
         config_widgets["IMAGE_QUALITY"] = QSpinBox()
-        config_widgets["IMAGE_QUALITY"].setRange(10, 100)
+        config_widgets["IMAGE_QUALITY"].setRange(IMAGE_QUALITY_MIN, IMAGE_QUALITY_MAX)
         label_quality = QLabel("Image Quality (%): ")
-        label_quality.setToolTip(tooltips.get("IMAGE_QUALITY", "Compression quality for lossy formats (JPEG/WEBP). Lower = smaller payload, higher = more detail."))
+        from ui.strings import IMAGE_QUALITY_TOOLTIP
+        label_quality.setToolTip(tooltips.get("IMAGE_QUALITY", IMAGE_QUALITY_TOOLTIP))
         form.addRow(label_quality, config_widgets["IMAGE_QUALITY"])
 
         # Crop bars toggle
         config_widgets["IMAGE_CROP_BARS"] = QCheckBox()
         label_crop_bars = QLabel("Crop Status/Navigation Bars: ")
-        label_crop_bars.setToolTip(tooltips.get("IMAGE_CROP_BARS", "Remove top/bottom bars to reduce payload while keeping UI content."))
+        from ui.strings import CROP_BARS_TOOLTIP
+        label_crop_bars.setToolTip(tooltips.get("IMAGE_CROP_BARS", CROP_BARS_TOOLTIP))
         form.addRow(label_crop_bars, config_widgets["IMAGE_CROP_BARS"])
 
         # Top crop percent
+        from config.numeric_constants import CROP_PERCENT_MIN, CROP_PERCENT_MAX
         config_widgets["IMAGE_CROP_TOP_PERCENT"] = QSpinBox()
-        config_widgets["IMAGE_CROP_TOP_PERCENT"].setRange(0, 50)
+        config_widgets["IMAGE_CROP_TOP_PERCENT"].setRange(CROP_PERCENT_MIN, CROP_PERCENT_MAX)
         label_crop_top = QLabel("Top Crop (% of height): ")
-        label_crop_top.setToolTip(tooltips.get("IMAGE_CROP_TOP_PERCENT", "Percentage of image height to crop from the top when cropping bars is enabled."))
+        from ui.strings import CROP_TOP_PERCENT_TOOLTIP
+        label_crop_top.setToolTip(tooltips.get("IMAGE_CROP_TOP_PERCENT", CROP_TOP_PERCENT_TOOLTIP))
         form.addRow(label_crop_top, config_widgets["IMAGE_CROP_TOP_PERCENT"])
 
         # Bottom crop percent
         config_widgets["IMAGE_CROP_BOTTOM_PERCENT"] = QSpinBox()
-        config_widgets["IMAGE_CROP_BOTTOM_PERCENT"].setRange(0, 50)
+        config_widgets["IMAGE_CROP_BOTTOM_PERCENT"].setRange(CROP_PERCENT_MIN, CROP_PERCENT_MAX)
         label_crop_bottom = QLabel("Bottom Crop (% of height): ")
-        label_crop_bottom.setToolTip(tooltips.get("IMAGE_CROP_BOTTOM_PERCENT", "Percentage of image height to crop from the bottom when cropping bars is enabled."))
+        from ui.strings import CROP_BOTTOM_PERCENT_TOOLTIP
+        label_crop_bottom.setToolTip(tooltips.get("IMAGE_CROP_BOTTOM_PERCENT", CROP_BOTTOM_PERCENT_TOOLTIP))
         form.addRow(label_crop_bottom, config_widgets["IMAGE_CROP_BOTTOM_PERCENT"])
 
         layout.addRow(group)
@@ -1100,22 +937,31 @@ class UIComponents:
 
     @staticmethod
     def _get_openrouter_cache_path() -> str:
-        # Delegate to central utility to avoid UI-only coupling
-        try:
-            from domain.openrouter_models import get_openrouter_cache_path
-        except ImportError:
-            from domain.openrouter_models import get_openrouter_cache_path
-        return get_openrouter_cache_path()
+        from domain.providers.registry import ProviderRegistry
+        from domain.providers.enums import AIProvider
+        
+        provider = ProviderRegistry.get(AIProvider.OPENROUTER)
+        if provider:
+            return provider._get_cache_path()
+        # Fallback if provider not available
+        traverser_ai_api_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        cache_dir = os.path.join(traverser_ai_api_dir, "output_data", "cache")
+        os.makedirs(cache_dir, exist_ok=True)
+        return os.path.join(cache_dir, "openrouter_models.json")
 
     @staticmethod
     def _load_openrouter_models_from_cache() -> Optional[list]:
         try:
-            # Delegate to central utility
-            try:
-                from domain.openrouter_models import load_openrouter_models_cache
-            except ImportError:
-                from domain.openrouter_models import load_openrouter_models_cache
-            return load_openrouter_models_cache()
+            from domain.providers.registry import ProviderRegistry
+            from domain.providers.enums import AIProvider
+            
+            provider = ProviderRegistry.get(AIProvider.OPENROUTER)
+            if provider:
+                # Create a dummy config for the provider method
+                from config.app_config import Config
+                config = Config()
+                return provider._load_models_cache()
+            return None
         except Exception as e:
             logging.debug(f"Failed to read OpenRouter cache: {e}")
             return None
@@ -1123,24 +969,26 @@ class UIComponents:
     @staticmethod
     def _save_openrouter_models_to_cache(models: List[Dict[str, Any]]) -> None:
         try:
-            try:
-                from domain.openrouter_models import save_openrouter_models_to_cache
-            except ImportError:
-                from domain.openrouter_models import save_openrouter_models_to_cache
-            save_openrouter_models_to_cache(models)
+            from domain.providers.registry import ProviderRegistry
+            from domain.providers.enums import AIProvider
+            
+            provider = ProviderRegistry.get(AIProvider.OPENROUTER)
+            if provider:
+                provider._save_models_to_cache(models)
         except Exception as e:
-            logging.debug(f"Failed to save OpenRouter cache via central utility: {e}")
+            logging.debug(f"Failed to save OpenRouter cache: {e}")
 
     @staticmethod
     def _is_openrouter_model_vision(model_id: str) -> bool:
         """Determine vision support using cache metadata; fallback to heuristics."""
         try:
-            # Delegate to central utility
-            try:
-                from domain.openrouter_models import is_openrouter_model_vision
-            except ImportError:
-                from domain.openrouter_models import is_openrouter_model_vision
-            return is_openrouter_model_vision(model_id)
+            from domain.providers.registry import ProviderRegistry
+            from domain.providers.enums import AIProvider
+            
+            provider = ProviderRegistry.get(AIProvider.OPENROUTER)
+            if provider:
+                return provider.is_model_vision(model_id)
+            return False
         except Exception as e:
             logging.debug(f"Failed to determine vision support: {e}")
             return False
@@ -1161,6 +1009,14 @@ class UIComponents:
         except Exception:
             pass
         try:
+            from domain.providers.registry import ProviderRegistry
+            from domain.providers.enums import AIProvider
+            
+            provider = ProviderRegistry.get(AIProvider.OPENROUTER)
+            if not provider:
+                logging.warning("OpenRouter provider not found")
+                return
+            
             api_key = config_handler.config.get("OPENROUTER_API_KEY", None)
             if not api_key:
                 logging.warning("OpenRouter refresh requested but API key is missing.")
@@ -1169,7 +1025,6 @@ class UIComponents:
                     "orange",
                 )
                 return
-            import requests
 
             # Proactively delete any stale cache before fetching fresh data
             try:
@@ -1186,90 +1041,12 @@ class UIComponents:
             except Exception as cache_err:
                 logging.debug(f"Could not delete OpenRouter cache: {cache_err}")
 
-            headers = {
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            }
-            resp = requests.get(
-                "https://openrouter.ai/api/v1/models", headers=headers, timeout=20
-            )
-            if resp.status_code != 200:
-                raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:200]}")
-            data = resp.json()
-            # OpenRouter returns {'data': [ ...models... ]}
-            models = data.get("data") or data.get("models") or []
-            # Enrich normalization using standardized fields and derived flags
-            normalized: List[Dict[str, Any]] = []
-            for m in models:
-                mid = m.get("id") or m.get("name")
-                if not mid:
-                    continue
-                name = m.get("name") or m.get("canonical_slug") or str(mid)
-                architecture = m.get("architecture") or {}
-                input_modalities = architecture.get("input_modalities") or []
-                output_modalities = architecture.get("output_modalities") or []
-                supported_parameters = m.get("supported_parameters") or []
-                pricing = m.get("pricing") if isinstance(m.get("pricing"), dict) else None
-                top_provider = m.get("top_provider") if isinstance(m.get("top_provider"), dict) else None
-                context_length = (
-                    m.get("context_length")
-                    or (top_provider or {}).get("context_length")
-                )
-                # Derived flags
-                supports_image = False
-                try:
-                    supports_image = "image" in (input_modalities or [])
-                except Exception:
-                    supports_image = False
-                def _val_is_zero(v: Any) -> bool:
-                    try:
-                        if isinstance(v, (int, float)):
-                            return v == 0
-                        if isinstance(v, str):
-                            s = v.strip().lower()
-                            return s == "0" or s == "$0" or "free" in s
-                        return False
-                    except Exception:
-                        return False
-
-                # Stricter free detection: prompt and completion must be zero; if image is supported, it must be zero too
-                prompt_zero = _val_is_zero((pricing or {}).get("prompt"))
-                completion_zero = _val_is_zero((pricing or {}).get("completion"))
-                image_zero = _val_is_zero((pricing or {}).get("image"))
-                is_free = (
-                    (prompt_zero and completion_zero and (not supports_image or image_zero))
-                    or ("(free" in name.lower())
-                    or (str(mid).lower().endswith(":free"))
-                )
-                supports_tools = "tools" in supported_parameters
-                supports_structured_outputs = "structured_outputs" in supported_parameters or "response_format" in supported_parameters
-
-                entry: Dict[str, Any] = {
-                    "id": mid,
-                    "name": name,
-                    "canonical_slug": m.get("canonical_slug"),
-                    "created": m.get("created") or m.get("created_at"),
-                    "description": m.get("description"),
-                    "context_length": context_length,
-                    "architecture": {
-                        "input_modalities": input_modalities,
-                        "output_modalities": output_modalities,
-                        "tokenizer": architecture.get("tokenizer"),
-                        "instruct_type": architecture.get("instruct_type"),
-                    },
-                    "supported_parameters": supported_parameters,
-                    "pricing": pricing,
-                    "top_provider": top_provider,
-                    "per_request_limits": m.get("per_request_limits"),
-                    # Derived flags
-                    "supports_image": supports_image,
-                    "is_free": is_free,
-                    "supports_tools": supports_tools,
-                    "supports_structured_outputs": supports_structured_outputs,
-                }
-                normalized.append(entry)
+            # Use provider to fetch and normalize models
+            normalized = provider._fetch_models(api_key)
+            
             if not normalized:
                 raise RuntimeError("No models returned from OpenRouter")
+            
             UIComponents._save_openrouter_models_to_cache(normalized)
             try:
                 logging.info(f"Fetched {len(normalized)} OpenRouter models from API.")
@@ -1279,7 +1056,7 @@ class UIComponents:
                 f"Fetched {len(normalized)} OpenRouter models.", "green"
             )
             # Re-populate dropdown from cache
-            UIComponents._update_model_types("openrouter", config_widgets)
+            UIComponents._update_model_types("openrouter", config_widgets, config_handler)
         except Exception as e:
             logging.warning(f"OpenRouter model fetch failed: {e}")
             try:
@@ -1304,12 +1081,13 @@ class UIComponents:
     def _is_openrouter_model_free(model_meta: Any) -> bool:
         """Determine free status strictly using prompt/completion/image pricing and known indicators."""
         try:
-            # Delegate to central utility
-            try:
-                from domain.openrouter_models import is_openrouter_model_free
-            except ImportError:
-                from domain.openrouter_models import is_openrouter_model_free
-            return is_openrouter_model_free(model_meta)
+            from domain.providers.registry import ProviderRegistry
+            from domain.providers.enums import AIProvider
+            
+            provider = ProviderRegistry.get(AIProvider.OPENROUTER)
+            if provider:
+                return provider.is_model_free(model_meta)
+            return False
         except Exception as e:
             logging.debug(f"Failed to determine free status: {e}")
             return False
@@ -1318,28 +1096,31 @@ class UIComponents:
     def _get_openrouter_model_meta(model_id: str) -> Optional[Dict[str, Any]]:
         """Lookup a model's metadata by id from the cache (supports both schemas)."""
         try:
-            # Delegate to central utility
-            try:
-                from domain.openrouter_models import get_openrouter_model_meta
-            except ImportError:
-                from domain.openrouter_models import get_openrouter_model_meta
-            return get_openrouter_model_meta(model_id)
+            from domain.providers.registry import ProviderRegistry
+            from domain.providers.enums import AIProvider
+            
+            provider = ProviderRegistry.get(AIProvider.OPENROUTER)
+            if provider:
+                return provider.get_model_meta(model_id)
+            return None
         except Exception as e:
             logging.debug(f"Failed to lookup model meta: {e}")
             return None
 
     @staticmethod
     def _background_refresh_openrouter_models() -> None:
-        """Background refresh delegating to central utility (UI-agnostic)."""
+        """Background refresh delegating to provider (UI-agnostic)."""
         try:
-            # Delegate to central utility
-            try:
-                from domain.openrouter_models import background_refresh_openrouter_models
-            except ImportError:
-                from domain.openrouter_models import background_refresh_openrouter_models
-            background_refresh_openrouter_models()
+            from domain.providers.registry import ProviderRegistry
+            from domain.providers.enums import AIProvider
+            from config.app_config import Config
+            
+            provider = ProviderRegistry.get(AIProvider.OPENROUTER)
+            if provider:
+                config = Config()
+                provider.refresh_models(config, wait_for_completion=False)
         except Exception as e:
-            logging.debug(f"Failed to queue background OpenRouter refresh via central utility: {e}")
+            logging.debug(f"Failed to queue background OpenRouter refresh: {e}")
 
     @staticmethod
     def _create_focus_areas_group(
@@ -1404,14 +1185,16 @@ class UIComponents:
         label_crawl_mode.setToolTip(tooltips["CRAWL_MODE"])
         crawler_layout.addRow(label_crawl_mode, config_widgets["CRAWL_MODE"])
 
+        from config.numeric_constants import MAX_CRAWL_STEPS_MIN, MAX_CRAWL_STEPS_MAX
         config_widgets["MAX_CRAWL_STEPS"] = QSpinBox()
-        config_widgets["MAX_CRAWL_STEPS"].setRange(1, 10000)
+        config_widgets["MAX_CRAWL_STEPS"].setRange(MAX_CRAWL_STEPS_MIN, MAX_CRAWL_STEPS_MAX)
         label_max_crawl_steps = QLabel("Max Steps: ")
         label_max_crawl_steps.setToolTip(tooltips["MAX_CRAWL_STEPS"])
         crawler_layout.addRow(label_max_crawl_steps, config_widgets["MAX_CRAWL_STEPS"])
 
+        from config.numeric_constants import MAX_CRAWL_DURATION_MIN_SECONDS, MAX_CRAWL_DURATION_MAX_SECONDS
         config_widgets["MAX_CRAWL_DURATION_SECONDS"] = QSpinBox()
-        config_widgets["MAX_CRAWL_DURATION_SECONDS"].setRange(60, 86400)
+        config_widgets["MAX_CRAWL_DURATION_SECONDS"].setRange(MAX_CRAWL_DURATION_MIN_SECONDS, MAX_CRAWL_DURATION_MAX_SECONDS)
         label_max_crawl_duration = QLabel("Max Duration (s): ")
         label_max_crawl_duration.setToolTip(tooltips["MAX_CRAWL_DURATION_SECONDS"])
         crawler_layout.addRow(
@@ -1432,8 +1215,9 @@ class UIComponents:
         label_stability_wait.setToolTip(tooltips["STABILITY_WAIT"])
         crawler_layout.addRow(label_stability_wait, config_widgets["STABILITY_WAIT"])
 
+        from config.numeric_constants import APP_LAUNCH_WAIT_TIME_MIN, APP_LAUNCH_WAIT_TIME_MAX
         config_widgets["APP_LAUNCH_WAIT_TIME"] = QSpinBox()
-        config_widgets["APP_LAUNCH_WAIT_TIME"].setRange(0, 300)
+        config_widgets["APP_LAUNCH_WAIT_TIME"].setRange(APP_LAUNCH_WAIT_TIME_MIN, APP_LAUNCH_WAIT_TIME_MAX)
         label_app_launch_wait_time = QLabel("App Launch Wait Time (s): ")
         label_app_launch_wait_time.setToolTip(tooltips["APP_LAUNCH_WAIT_TIME"])
         crawler_layout.addRow(
@@ -1441,8 +1225,9 @@ class UIComponents:
         )
 
         # Visual Similarity Threshold
+        from config.numeric_constants import VISUAL_SIMILARITY_THRESHOLD_MIN, VISUAL_SIMILARITY_THRESHOLD_MAX
         config_widgets["VISUAL_SIMILARITY_THRESHOLD"] = QSpinBox()
-        config_widgets["VISUAL_SIMILARITY_THRESHOLD"].setRange(0, 100)
+        config_widgets["VISUAL_SIMILARITY_THRESHOLD"].setRange(VISUAL_SIMILARITY_THRESHOLD_MIN, VISUAL_SIMILARITY_THRESHOLD_MAX)
         label_visual_similarity = QLabel("Visual Similarity Threshold: ")
         label_visual_similarity.setToolTip(tooltips["VISUAL_SIMILARITY_THRESHOLD"])
         crawler_layout.addRow(
@@ -1451,7 +1236,7 @@ class UIComponents:
 
         # Allowed External Packages - Use dedicated widget with CRUD support
         from ui.allowed_packages_widget import AllowedPackagesWidget
-        from config.config import Config
+        from config.app_config import Config
         config = Config()
         config_widgets["ALLOWED_EXTERNAL_PACKAGES_WIDGET"] = AllowedPackagesWidget(config)
         # Store a reference to the widget for compatibility with config manager
@@ -1469,8 +1254,9 @@ class UIComponents:
         error_handling_group = QGroupBox("Error Handling Settings")
         error_handling_layout = QFormLayout(error_handling_group)
 
+        from config.numeric_constants import MAX_CONSECUTIVE_FAILURES_MIN, MAX_CONSECUTIVE_FAILURES_MAX
         config_widgets["MAX_CONSECUTIVE_AI_FAILURES"] = QSpinBox()
-        config_widgets["MAX_CONSECUTIVE_AI_FAILURES"].setRange(1, 100)
+        config_widgets["MAX_CONSECUTIVE_AI_FAILURES"].setRange(MAX_CONSECUTIVE_FAILURES_MIN, MAX_CONSECUTIVE_FAILURES_MAX)
         label_max_ai_failures = QLabel("Max Consecutive AI Failures: ")
         label_max_ai_failures.setToolTip(tooltips["MAX_CONSECUTIVE_AI_FAILURES"])
         error_handling_layout.addRow(
@@ -1478,7 +1264,7 @@ class UIComponents:
         )
 
         config_widgets["MAX_CONSECUTIVE_MAP_FAILURES"] = QSpinBox()
-        config_widgets["MAX_CONSECUTIVE_MAP_FAILURES"].setRange(1, 100)
+        config_widgets["MAX_CONSECUTIVE_MAP_FAILURES"].setRange(MAX_CONSECUTIVE_FAILURES_MIN, MAX_CONSECUTIVE_FAILURES_MAX)
         label_max_map_failures = QLabel("Max Consecutive Map Failures: ")
         label_max_map_failures.setToolTip(tooltips["MAX_CONSECUTIVE_MAP_FAILURES"])
         error_handling_layout.addRow(
@@ -1486,7 +1272,7 @@ class UIComponents:
         )
 
         config_widgets["MAX_CONSECUTIVE_EXEC_FAILURES"] = QSpinBox()
-        config_widgets["MAX_CONSECUTIVE_EXEC_FAILURES"].setRange(1, 100)
+        config_widgets["MAX_CONSECUTIVE_EXEC_FAILURES"].setRange(MAX_CONSECUTIVE_FAILURES_MIN, MAX_CONSECUTIVE_FAILURES_MAX)
         label_max_exec_failures = QLabel("Max Consecutive Exec Failures: ")
         label_max_exec_failures.setToolTip(tooltips["MAX_CONSECUTIVE_EXEC_FAILURES"])
         error_handling_layout.addRow(
@@ -1582,16 +1368,17 @@ class UIComponents:
         logging.debug(f"Setting initial MobSF checkbox state: {is_mobsf_enabled}")
 
         # API URL field
+        from config.urls import ServiceURLs
         config_widgets["MOBSF_API_URL"] = QLineEdit()
-        config_widgets["MOBSF_API_URL"].setPlaceholderText(
-            "http://localhost:8000/api/v1"
-        )
+        from ui.strings import MOBSF_API_URL_PLACEHOLDER
+        config_widgets["MOBSF_API_URL"].setPlaceholderText(MOBSF_API_URL_PLACEHOLDER)
         label_mobsf_api_url = QLabel("MobSF API URL: ")
         label_mobsf_api_url.setToolTip(tooltips["MOBSF_API_URL"])
         mobsf_layout.addRow(label_mobsf_api_url, config_widgets["MOBSF_API_URL"])
 
         config_widgets["MOBSF_API_KEY"] = QLineEdit()
-        config_widgets["MOBSF_API_KEY"].setPlaceholderText("Your MobSF API Key")
+        from ui.strings import MOBSF_API_KEY_PLACEHOLDER
+        config_widgets["MOBSF_API_KEY"].setPlaceholderText(MOBSF_API_KEY_PLACEHOLDER)
         config_widgets["MOBSF_API_KEY"].setEchoMode(QLineEdit.EchoMode.Password)
         label_mobsf_api_key = QLabel("MobSF API Key: ")
         label_mobsf_api_key.setToolTip(tooltips["MOBSF_API_KEY"])

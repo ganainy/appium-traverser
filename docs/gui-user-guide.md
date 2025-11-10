@@ -57,7 +57,13 @@ pip install -r requirements.txt
 
 2. Configure environment (.env) with required API keys if applicable.
 
-3. Launch the UI:
+3. **Start required services:**
+   - **Appium Server** (in a separate terminal):
+     ```powershell
+     npx appium -p 4723 --relaxed-security
+     ```
+
+4. Launch the UI:
 ```powershell
 python run_ui.py
 ```

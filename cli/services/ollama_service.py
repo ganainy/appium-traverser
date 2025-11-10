@@ -31,23 +31,28 @@ class OllamaService:
             - error_message: error message if failed, None otherwise
         """
         try:
-            from domain.ollama_models import background_refresh_ollama_models
-        except ImportError as e:
-            error_msg = MSG.ERR_OLLAMA_IMPORT_FAILED.format(error=e)
+            from domain.providers.registry import ProviderRegistry
+            from domain.providers.enums import AIProvider
+            
+            provider = ProviderRegistry.get(AIProvider.OLLAMA)
+            if not provider:
+                error_msg = "Ollama provider not found"
+                return False, None, error_msg
+        except Exception as e:
+            error_msg = f"Failed to get Ollama provider: {e}"
             return False, None, error_msg
         
         try:
-            base_url = self.context.config.get(K.CONFIG_OLLAMA_BASE_URL)
             if wait_for_completion:
                 from utils import LoadingIndicator
                 with LoadingIndicator("Refreshing Ollama models"):
-                    success, cache_path = background_refresh_ollama_models(
-                        base_url=base_url,
+                    success, cache_path = provider.refresh_models(
+                        self.context.config,
                         wait_for_completion=wait_for_completion
                     )
             else:
-                success, cache_path = background_refresh_ollama_models(
-                    base_url=base_url,
+                success, cache_path = provider.refresh_models(
+                    self.context.config,
                     wait_for_completion=wait_for_completion
                 )
             if success and cache_path:
@@ -56,14 +61,12 @@ class OllamaService:
                 )
                 return True, cache_path, None
             elif not success:
-                # Refresh failed - get error message from domain layer
                 error_msg = "Failed to refresh Ollama models cache"
                 return False, None, error_msg
             else:
                 # Background refresh started but not completed yet
                 return True, None, None
         except RuntimeError as e:
-            # Clean error message from domain layer
             error_msg = str(e)
             return False, None, error_msg
         except Exception as e:
@@ -80,47 +83,20 @@ class OllamaService:
             Tuple of (success, models_list)
         """
         try:
-            from domain.ollama_models import (
-                fetch_ollama_models,
-                load_ollama_models_cache,
-                save_ollama_models_to_cache
-            )
-        except ImportError as e:
-            self.logger.error(MSG.ERR_OLLAMA_IMPORT_FAILED.format(error=e))
+            from domain.providers.registry import ProviderRegistry
+            from domain.providers.enums import AIProvider
+            
+            provider = ProviderRegistry.get(AIProvider.OLLAMA)
+            if not provider:
+                self.logger.error("Ollama provider not found")
+                return False, None
+        except Exception as e:
+            self.logger.error(f"Failed to get Ollama provider: {e}")
             return False, None
         
-        # If refresh requested, fetch fresh models
-        if refresh:
-            try:
-                from utils import LoadingIndicator
-                base_url = self.context.config.get(K.CONFIG_OLLAMA_BASE_URL)
-                with LoadingIndicator("Fetching Ollama models"):
-                    models = fetch_ollama_models(base_url)
-                if models:
-                    save_ollama_models_to_cache(models)
-                return True, models if models else []
-            except Exception as e:
-                self.logger.error(f"Failed to refresh Ollama models: {e}")
-                # Fall back to cache
-                pass
+        success, models = provider.get_models_full(self.context.config, refresh=refresh)
         
-        # Try to load from cache first
-        models = load_ollama_models_cache()
-        
-        # If no cache, try to fetch fresh
-        if not models:
-            try:
-                from utils import LoadingIndicator
-                base_url = self.context.config.get(K.CONFIG_OLLAMA_BASE_URL)
-                with LoadingIndicator("Fetching Ollama models"):
-                    models = fetch_ollama_models(base_url)
-                if models:
-                    save_ollama_models_to_cache(models)
-            except Exception as e:
-                self.logger.error(f"Failed to fetch Ollama models: {e}")
-                return False, None
-        
-        if not models:
+        if not success or not models:
             self.logger.error(MSG.ERR_OLLAMA_MODELS_NOT_FOUND)
             return False, None
         
@@ -140,10 +116,15 @@ class OllamaService:
             - error: str (error message if failed)
         """
         try:
-            from domain.ollama_models import is_ollama_model_vision
-        except ImportError as e:
-            self.logger.error(MSG.ERR_OLLAMA_IMPORT_FAILED.format(error=e))
-            return False, {K.KEY_SUCCESS: False, K.KEY_ERROR: MSG.ERR_OLLAMA_IMPORT_FAILED.format(error=e)}
+            from domain.providers.registry import ProviderRegistry
+            from domain.providers.enums import AIProvider
+            
+            provider = ProviderRegistry.get(AIProvider.OLLAMA)
+            if not provider:
+                return False, {K.KEY_SUCCESS: False, K.KEY_ERROR: "Ollama provider not found"}
+        except Exception as e:
+            self.logger.error(f"Failed to get Ollama provider: {e}")
+            return False, {K.KEY_SUCCESS: False, K.KEY_ERROR: f"Failed to get Ollama provider: {e}"}
         
         success, models = self.list_models()
         if not success or not models:
@@ -182,7 +163,8 @@ class OllamaService:
             # Save selection to config
             try:
                 # Ensure provider is set to ollama
-                self.context.config.set(K.CONFIG_AI_PROVIDER, K.AI_PROVIDER_OLLAMA)
+                from domain.providers.enums import AIProvider
+                self.context.config.set(K.CONFIG_AI_PROVIDER, AIProvider.OLLAMA.value)
                 # Save the model ID
                 self.context.config.set(K.CONFIG_DEFAULT_MODEL_TYPE, model_id)
                 self.logger.info(f"Selected Ollama model '{model_id}' saved to config")
@@ -209,19 +191,23 @@ class OllamaService:
         Returns:
             Selected model dictionary or None
         """
+        from domain.providers.registry import ProviderRegistry
+        from domain.providers.enums import AIProvider
+        
         current_provider = self.context.config.get(K.CONFIG_AI_PROVIDER, "")
         current_model = self.context.config.get(K.CONFIG_DEFAULT_MODEL_TYPE, "")
         
-        if current_provider.lower() != K.AI_PROVIDER_OLLAMA:
+        if current_provider.lower() != AIProvider.OLLAMA.value:
             return None
         
         try:
-            from domain.ollama_models import get_ollama_model_meta
-        except ImportError as e:
-            self.logger.error(MSG.ERR_OLLAMA_IMPORT_FAILED.format(error=e))
+            provider = ProviderRegistry.get(AIProvider.OLLAMA)
+            if not provider:
+                return None
+        except Exception:
             return None
         
-        return get_ollama_model_meta(current_model)
+        return provider.get_model_meta(current_model)
     
     def show_model_details(self, model_identifier: Optional[str] = None) -> Tuple[bool, Optional[Dict]]:
         """Show detailed information about an Ollama model.
@@ -238,8 +224,9 @@ class OllamaService:
             - error: str (error message if failed)
             - model_identifier: str (model ID if error)
         """
+        from domain.providers.enums import AIProvider
         current_provider = self.context.config.get(K.CONFIG_AI_PROVIDER, "")
-        if current_provider.lower() != K.AI_PROVIDER_OLLAMA:
+        if current_provider.lower() != AIProvider.OLLAMA.value:
             return False, {
                 K.KEY_SUCCESS: False,
                 K.KEY_ERROR: MSG.ERR_OLLAMA_NOT_SELECTED_PROVIDER
@@ -256,12 +243,17 @@ class OllamaService:
         
         # Get model metadata
         try:
-            from domain.ollama_models import get_ollama_model_meta
-        except ImportError as e:
-            self.logger.error(MSG.ERR_OLLAMA_IMPORT_FAILED.format(error=e))
-            return False, {K.KEY_SUCCESS: False, K.KEY_ERROR: MSG.ERR_OLLAMA_IMPORT_FAILED.format(error=e)}
+            from domain.providers.registry import ProviderRegistry
+            from domain.providers.enums import AIProvider
+            
+            provider = ProviderRegistry.get(AIProvider.OLLAMA)
+            if not provider:
+                return False, {K.KEY_SUCCESS: False, K.KEY_ERROR: "Ollama provider not found"}
+        except Exception as e:
+            self.logger.error(f"Failed to get Ollama provider: {e}")
+            return False, {K.KEY_SUCCESS: False, K.KEY_ERROR: f"Failed to get Ollama provider: {e}"}
         
-        selected_model = get_ollama_model_meta(model_identifier)
+        selected_model = provider.get_model_meta(model_identifier)
         
         # If not in cache, try to fetch fresh
         if not selected_model:

@@ -6,7 +6,7 @@ import logging
 from datetime import datetime
 from typing import List, Optional
 from enum import Enum
-from .config import Configuration
+from .crawler_config import Configuration
 from .storage import Storage
 
 logger = logging.getLogger(__name__)

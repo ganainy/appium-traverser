@@ -8,12 +8,12 @@ ensuring consistent behavior between CLI and GUI interfaces.
 import logging
 from typing import Any, Dict, List, Optional
 
-from core.config import Configuration
+from core.crawler_config import Configuration, ConfigurationError
 from core.storage import Storage
 from core.crawler import Crawler, CrawlerSession
 from cli.services.focus_area_service import FocusAreaService
 from cli.shared.context import CLIContext
-from config.config import Config
+from config.app_config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +51,7 @@ class GUICrawlerInterface:
             True if initialization successful, False otherwise
         """
         try:
-            # Initialize configuration
+            # Initialize configuration (validation happens automatically)
             if self._initial_config_data:
                 self.config = Configuration.from_dict(self._initial_config_data)
             else:
@@ -63,13 +63,6 @@ class GUICrawlerInterface:
                 }
                 self.config = Configuration(name="default", settings=default_settings, is_default=True)
 
-            # Validate configuration
-            try:
-                self.config.validate()
-            except Exception as e:
-                logger.error(f"Configuration validation failed: {e}")
-                return False
-
             # Initialize storage
             self.storage = Storage()
 
@@ -79,6 +72,9 @@ class GUICrawlerInterface:
             logger.info("Core modules initialized successfully for GUI interface")
             return True
 
+        except ConfigurationError as e:
+            logger.error(f"Configuration validation failed: {e}")
+            return False
         except Exception as e:
             logger.error(f"Failed to initialize core modules: {e}")
             return False

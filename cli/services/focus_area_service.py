@@ -8,7 +8,6 @@ from typing import Dict, List, Optional, Tuple
 from datetime import datetime, UTC
 
 from cli.constants import keys as KEYS
-from cli.constants import config as CONFIG
 from cli.constants import messages as MSG
 from cli.shared.context import CLIContext
 
@@ -103,7 +102,7 @@ class FocusAreaService:
         self,
         title: str,
         description: str = "",
-        priority: int = CONFIG.DEFAULT_FOCUS_PRIORITY,
+        priority: int = KEYS.DEFAULT_FOCUS_PRIORITY,
         enabled: bool = True
     ) -> Tuple[bool, Optional[str]]:
         """Add a new focus area.

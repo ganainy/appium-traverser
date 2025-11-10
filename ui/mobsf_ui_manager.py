@@ -142,7 +142,7 @@ logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %
 sys.path.insert(0, r'{api_dir_path}')
 
 try:
-    from config.config import Config
+    from config.app_config import Config
     from mobsf_manager import MobSFManager
     
     # Initialize Config using default SQLite-backed storage

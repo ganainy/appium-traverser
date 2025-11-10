@@ -1,3 +1,0 @@
-"""
-CLI service tests package.
-"""

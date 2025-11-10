@@ -5,7 +5,8 @@ This guide explains how to use the command-line interface (CLI) for the Appium T
 ## Table of Contents
 
 - [Prerequisites](#prerequisites)
-- [Installing ADB](#installing-adb)
+- [Installing Java](#installing-java)
+- [Installing Android SDK and ADB](#installing-android-sdk-and-adb)
 - [Starting Required Services](#starting-required-services)
 - [Quick Start](#quick-start)
 - [CLI Commands](#cli-commands)
@@ -35,24 +36,229 @@ This guide explains how to use the command-line interface (CLI) for the Appium T
 ## Prerequisites
 
 - Python 3.12 (use a virtual environment) - [Download](https://www.python.org/downloads/release/python-3120/)
-- Node.js & npm (for Appium and MCP server)
+- Java JDK 8 or later with JAVA_HOME set (see [Installing Java](#installing-java))
+- Node.js & npm (for Appium)
 - Appium installed with a compatible driver (e.g. uiautomator2)
-- Android SDK with ADB on PATH (see [Installing ADB](#installing-adb))
+- Android SDK with ADB on PATH and ANDROID_HOME set (see [Installing Android SDK and ADB](#installing-android-sdk-and-adb))
 - API keys (set in environment or .env):
   - `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `OLLAMA_BASE_URL` (for AI providers)
   - `MOBSF_API_KEY`, `PCAPDROID_API_KEY` (optional, for additional features)
 
-## Installing ADB
+## Installing Java
 
-1. Download [Android SDK Platform Tools](https://developer.android.com/tools/releases/platform-tools) and extract to `C:\platform-tools\`
-2. Add to PATH (PowerShell as Administrator):
+Appium requires Java to run. You need to install the Java Development Kit (JDK) and set the `JAVA_HOME` environment variable.
+
+### Step 1: Download Java JDK
+
+1. Download [Java JDK](https://www.oracle.com/java/technologies/downloads/#jdk25-windows) for Windows
+   - Choose the **x64 Installer** for easiest installation
+2. Run the installer and follow the installation wizard
+3. Note the installation path (typically `C:\Program Files\Java\jdk-<version>`)
+
+### Step 2: Set JAVA_HOME Environment Variable
+
+To set it permanently for your user (Windows):
+
+1. Open the **Environment Variables** window:
+   - Press `Win + R`, type `sysdm.cpl`, and press Enter
+   - Click the **Advanced** tab
+   - Click **Environment Variables**
+
+2. In the Environment Variables window:
+   - Under **"User variables"** (for just your account), click **New**
+   - For **Variable name**: enter `JAVA_HOME`
+   - For **Variable value**: enter your JDK path, such as:
+     ```
+     C:\Program Files\Java\jdk-25
+     ```
+   - Click **OK** and close all dialog boxes
+
+**Note:** Replace `jdk-25` with your actual JDK version folder name.
+
+### Step 3: Add Java to PATH (Optional but Recommended)
+
+To add Java's `bin` directory to your PATH for easier access:
+
+1. Open the **Environment Variables** window (same as Step 2):
+   - Press `Win + R`, type `sysdm.cpl`, and press Enter
+   - Click the **Advanced** tab
+   - Click **Environment Variables**
+
+2. In the Environment Variables window:
+   - Under **"User variables"**, find and select the **Path** variable
+   - Click **Edit**
+   - Click **New** to add a new entry
+   - Enter the path to Java's `bin` directory, such as:
+     ```
+     C:\Program Files\Java\jdk-25\bin
+     ```
+   - Click **OK** on all dialog boxes to save
+
+**Note:** Replace `jdk-25` with your actual JDK version folder name.
+
+### Step 4: Verify Installation
+
+1. Restart PowerShell to reload environment variables
+2. Verify Java is accessible:
    ```powershell
-   $currentPath = [Environment]::GetEnvironmentVariable("Path", "User")
-   [Environment]::SetEnvironmentVariable("Path", "$currentPath;C:\platform-tools", "User")
-   $env:Path += ";C:\platform-tools"
+   java -version
+   javac -version
    ```
-3. Verify: Restart PowerShell and run `adb version`
+3. Verify JAVA_HOME is set:
+   ```powershell
+   echo $env:JAVA_HOME
+   ```
+
+## Installing Android SDK and ADB
+
+### Step 1: Download Android Command Line Tools
+
+1. Go to: [https://developer.android.com/studio#command-tools](https://developer.android.com/studio#command-tools)
+2. Download **Command-line tools (Windows)** .zip file
+
+### Step 2: Folder Setup
+
+Extract the zip file to:
+
+```
+C:\Android\Sdk\cmdline-tools\latest\
+```
+
+**Important:** Inside the `latest` folder, there should be a `bin` folder. The structure should be:
+```
+C:\Android\Sdk\cmdline-tools\latest\bin\
+```
+
+### Step 3: Set ANDROID_HOME Environment Variable
+
+Run in PowerShell:
+
+```powershell
+setx ANDROID_HOME "C:\Android\Sdk"
+```
+
+**Note:** You need to reopen PowerShell for the environment variable to take effect.
+
+Then reopen PowerShell and verify:
+
+```powershell
+echo $env:ANDROID_HOME
+```
+
+### Step 4: Install SDK Components
+
+1. Navigate to the tools folder:
+
+```powershell
+cd C:\Android\Sdk\cmdline-tools\latest\bin
+```
+
+2. Accept licenses:
+
+```powershell
+.\sdkmanager.bat --licenses
+```
+
+Press `y` to accept all licenses when prompted.
+
+3. Install essential components:
+
+```powershell
+.\sdkmanager.bat "platform-tools" "platforms;android-34"
+```
+
+This will install:
+- **platform-tools** - Contains ADB and other essential tools
+- **platforms;android-34** - Android platform SDK (adjust version as needed)
+
+### Step 5: Add to Windows PATH
+
+Add platform-tools to your PATH so you can use `adb` from anywhere:
+
+```powershell
+setx PATH "$env:PATH;C:\Android\Sdk\platform-tools"
+```
+
+**Note:** You need to reopen PowerShell for PATH changes to take effect.
+
+### Step 6: Verify Installation
+
+1. **Reopen PowerShell** to reload environment variables
+2. Verify ADB is accessible:
+   ```powershell
+   adb version
+   ```
+3. Verify ANDROID_HOME is set:
+   ```powershell
+   echo $env:ANDROID_HOME
+   ```
 4. Enable USB debugging on your Android device (Settings → Developer options)
+
+✅ **Done!** Now you can use `adb`, `sdkmanager`, and all Android CLI tools anywhere.
+
+### Step 7: Set Android SDK Path for Appium (Required)
+
+Appium server requires `ANDROID_HOME` or `ANDROID_SDK_ROOT` to be set system-wide. Follow these steps:
+
+#### 1. 🕵️‍♂️ Detect your Android SDK path
+
+- **If you installed it manually** (as we just did), it should be:
+  ```
+  C:\Android\Sdk
+  ```
+
+- **If you installed it via Android Studio**, check:
+  ```
+  C:\Users\<YourUser>\AppData\Local\Android\Sdk
+  ```
+
+#### 2. ⚙️ Set the environment variables permanently
+
+Open **PowerShell as Administrator**, then run:
+
+```powershell
+setx ANDROID_HOME "C:\Android\Sdk" /M
+setx ANDROID_SDK_ROOT "C:\Android\Sdk" /M
+```
+
+**Note:** Replace `C:\Android\Sdk` with your actual SDK path if different.
+
+The `/M` flag sets them system-wide, so Appium and Node.js can both access them.
+
+#### 3. 🔄 Add tools to PATH
+
+Still in PowerShell as Administrator:
+
+```powershell
+setx PATH "$env:PATH;C:\Android\Sdk\platform-tools;C:\Android\Sdk\cmdline-tools\latest\bin" /M
+```
+
+**Note:** Replace `C:\Android\Sdk` with your actual SDK path if different.
+
+#### 4. 🔄 Restart Required
+
+**Important:** You must restart your PC (or at least restart PowerShell and the Appium server) for these system-wide changes to take effect.
+
+#### 5. ✅ Verify setup
+
+Open a **new PowerShell** (after restart) and run:
+
+```powershell
+echo $env:ANDROID_HOME
+echo $env:ANDROID_SDK_ROOT
+adb version
+```
+
+You should see:
+- Valid SDK path outputs for both `ANDROID_HOME` and `ANDROID_SDK_ROOT`
+- ADB version information
+
+If you see empty outputs, the environment variables weren't set correctly. Make sure you:
+- Ran PowerShell as Administrator
+- Used the `/M` flag for system-wide variables
+- Restarted your PC or at least PowerShell
+
+**Troubleshooting:** If Appium still can't find the Android SDK after setting these variables, ensure you've restarted the Appium server after setting the environment variables.
 
 ## Starting Required Services
 
@@ -60,16 +266,7 @@ Start these services in separate terminals before using the CLI:
 
 ### Appium Server (port 4723)
 ```powershell
-npx appium -p 4723
-```
-
-### MCP Server (port 3000)
-```powershell
-cd appium-mcp-server
-npm install          # First time only
-npm run build        # First time or after changes
-npm run start:http   # Start server
-# Or use: npm run dev  # For development with auto-reload
+npx appium -p 4723 --relaxed-security
 ```
 
 Verify services: `python run_cli.py precheck-services`
@@ -99,9 +296,6 @@ Verify services: `python run_cli.py precheck-services`
    PCAPDROID_API_KEY=your_key
    ```
    
-   **Optional API Keys:**
-   - **MOBSF_API_KEY**: Required if you want to perform static security analysis of Android applications using MobSF (Mobile Security Framework). This enables security scanning of APK files during analysis.
-   - **PCAPDROID_API_KEY**: Required if you want to capture network traffic during app crawling. PCAPdroid is an Android app that captures network packets, useful for privacy and security testing.
 
 3. **Basic workflow:**
    ```powershell
@@ -285,10 +479,7 @@ python run_cli.py gemini show-model-details      # Show detailed info (vision su
 ## Troubleshooting
 
 ### Service Issues
-- **Service not available:** Ensure Appium (port 4723) and MCP server (port 3000) are running
-- **Port 3000 in use (Windows):** `netstat -ano | findstr :3000` then `taskkill /PID <PID> /F`
-- **MCP build errors:** `cd appium-mcp-server && npm run clean && npm install && npm run build`
-- **MCP won't start:** Check `appium-mcp-server/mcp-server.log`, verify Node.js >= 18.0.0
+- **Service not available:** Ensure Appium (port 4723) is running
 
 ### Device Issues
 - **No device found:** Connect device via USB, enable USB debugging, run `adb devices`
@@ -296,7 +487,7 @@ python run_cli.py gemini show-model-details      # Show detailed info (vision su
 
 ### App/Crawler Issues
 - **No app selected:** Run `python run_cli.py apps scan-all` then `apps select <index>`
-- **Crawler not starting:** Check Appium/MCP server logs, verify device connection, check status with `crawler status`
+- **Crawler not starting:** Check Appium server logs, verify device connection, check status with `crawler status`
 
 ### Configuration Issues
 - **AI provider not configured:** Select a model using provider-specific commands (e.g., `python run_cli.py gemini select-model 1`), which automatically sets the provider.

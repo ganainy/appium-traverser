@@ -15,7 +15,7 @@ if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
 try:
-    from config.config import Config
+    from config.app_config import Config
     from utils.utils import LoggerManager
 except ImportError as e:
     sys.stderr.write(f"FATAL: Could not import required modules: {e}\n")

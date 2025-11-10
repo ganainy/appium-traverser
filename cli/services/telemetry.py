@@ -336,9 +336,7 @@ class TelemetryService:
             print(f"{MSG.UI_MODEL_ID}: {model_id}")
             print("==============================")
         else:
-            # Try to detect provider from context, default to OpenRouter for backward compatibility
-            # Since we don't have context here, we'll show a generic message
-            # The command handler should provide the specific error message
+            # No model selected - command handler should provide the specific error message
             print(MSG.UI_NO_OPENROUTER_MODEL_SELECTED)
     
     def print_model_selection(self, data: Dict[str, Any]) -> None:

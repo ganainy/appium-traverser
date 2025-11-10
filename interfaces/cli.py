@@ -12,12 +12,12 @@ import os
 from typing import Dict, Any, Optional
 
 
-from core.config import Configuration
+from core.crawler_config import Configuration, ConfigurationError
 from core.crawler import Crawler, CrawlerSession
 from core.storage import Storage
 from cli.services.focus_area_service import FocusAreaService
 from cli.shared.context import CLIContext
-from config.config import Config
+from config.app_config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -60,13 +60,11 @@ class CLICrawlerInterface:
                 "platform": self.config_data.get("platform", "android")
             }
 
+            # Initialize configuration (validation happens automatically)
             self.config = Configuration(
                 name="CLI Crawler Config",
                 settings=settings
             )
-
-            # Validate configuration
-            self.config.validate()
             logger.info("Core configuration validated")
 
             # Initialize storage
@@ -80,6 +78,9 @@ class CLICrawlerInterface:
 
             return True
 
+        except ConfigurationError as e:
+            logger.error(f"Configuration validation failed: {e}")
+            return False
         except Exception as e:
             logger.error(f"Failed to initialize core modules: {e}")
             return False
