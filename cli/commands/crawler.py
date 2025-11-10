@@ -39,6 +39,21 @@ class StartCrawlerCommand(CommandHandler):
             action="store_true",
             help=MSG.START_CMD_ANNOTATE_HELP
         )
+        parser.add_argument(
+            MSG.START_CMD_ENABLE_TRAFFIC_CAPTURE_ARG,
+            action="store_true",
+            help=MSG.START_CMD_ENABLE_TRAFFIC_CAPTURE_HELP
+        )
+        parser.add_argument(
+            MSG.START_CMD_ENABLE_VIDEO_RECORDING_ARG,
+            action="store_true",
+            help=MSG.START_CMD_ENABLE_VIDEO_RECORDING_HELP
+        )
+        parser.add_argument(
+            MSG.START_CMD_ENABLE_MOBSF_ANALYSIS_ARG,
+            action="store_true",
+            help=MSG.START_CMD_ENABLE_MOBSF_ANALYSIS_HELP
+        )
         parser.set_defaults(handler=self)
         return parser
     
@@ -52,7 +67,46 @@ class StartCrawlerCommand(CommandHandler):
                 exit_code=1
             )
 
-        success = crawler_service.start_crawler(annotate_after_run=args.annotate_offline_after_run)
+        # Prepare feature flags from CLI arguments
+        # Default behavior: all features are disabled unless explicitly enabled
+        feature_flags = {}
+        
+        # Handle traffic capture flag (argparse converts --enable-traffic-capture to enable_traffic_capture)
+        enable_tc = getattr(args, 'enable_traffic_capture', False)
+        if enable_tc:
+            feature_flags['ENABLE_TRAFFIC_CAPTURE'] = True
+        else:
+            # Default: disabled (overrides config if it's enabled)
+            feature_flags['ENABLE_TRAFFIC_CAPTURE'] = False
+        
+        # Handle video recording flag
+        enable_vr = getattr(args, 'enable_video_recording', False)
+        if enable_vr:
+            feature_flags['ENABLE_VIDEO_RECORDING'] = True
+        else:
+            # Default: disabled (overrides config if it's enabled)
+            feature_flags['ENABLE_VIDEO_RECORDING'] = False
+        
+        # Handle MobSF analysis flag
+        enable_mobsf = getattr(args, 'enable_mobsf_analysis', False)
+        if enable_mobsf:
+            # Check if MobSF API key is configured before starting crawler
+            mobsf_api_key = context.config.get(KEY.CONFIG_MOBSF_API_KEY)
+            if not mobsf_api_key:
+                return CommandResult(
+                    success=False,
+                    message=MSG.START_MOBSF_API_KEY_MISSING,
+                    exit_code=1
+                )
+            feature_flags['ENABLE_MOBSF_ANALYSIS'] = True
+        else:
+            # Default: disabled (overrides config if it's enabled)
+            feature_flags['ENABLE_MOBSF_ANALYSIS'] = False
+
+        success = crawler_service.start_crawler(
+            annotate_after_run=args.annotate_offline_after_run,
+            feature_flags=feature_flags
+        )
 
         if success:
             result_msg = MSG.START_SUCCESS

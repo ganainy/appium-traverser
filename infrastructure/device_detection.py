@@ -146,7 +146,6 @@ def detect_android_devices() -> List[DeviceInfo]:
                 type=device_type
             ))
         
-        logger.info(f'Found {len(devices)} Android devices')
         return devices
         
     except Exception as e:
@@ -166,7 +165,7 @@ def detect_all_devices() -> List[DeviceInfo]:
     # Sort by name
     android_devices.sort(key=lambda d: d.name)
     
-    logger.info(f'Total devices found: {len(android_devices)} Android')
+    logger.debug(f'Total devices found: {len(android_devices)} Android')
     
     return android_devices
 
@@ -232,7 +231,7 @@ def select_best_device(
         
         found_device = find_device_by_name(candidate_devices, device_name)
         if found_device:
-            logger.info(f'Selected device by name: {found_device.name} ({found_device.platform})')
+            logger.debug(f'Selected device by name: {found_device.name} ({found_device.platform})')
             return found_device
         
         logger.warning(f"Device with name containing '{device_name}' not found")
@@ -242,7 +241,7 @@ def select_best_device(
         platform_devices = find_devices_by_platform(devices, platform)
         if platform_devices:
             selected_device = platform_devices[0]
-            logger.info(f'Selected {platform} device: {selected_device.name}')
+            logger.debug(f'Selected {platform} device: {selected_device.name}')
             return selected_device
         
         logger.warning(f'No {platform} devices found')
@@ -250,7 +249,7 @@ def select_best_device(
     # Auto-select first available device
     selected_device = devices[0]
     if selected_device:
-        logger.info(f'Auto-selected device: {selected_device.name} ({selected_device.platform})')
+        logger.debug(f'Auto-selected device: {selected_device.name} ({selected_device.platform})')
         return selected_device
     
     return None

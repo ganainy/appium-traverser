@@ -159,7 +159,7 @@ LOOP_HISTORY_LENGTH = 6
 # ========== Logging Constants ==========
 
 # AI interaction log filename
-AI_LOG_FILENAME = 'ai_interactions_readable.log'
+AI_LOG_FILENAME = 'readable.log'
 
 # ========== Provider Defaults ==========
 

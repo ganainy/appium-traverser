@@ -387,7 +387,7 @@ class AgentAssistant:
     def _init_langchain_components(self):
         """Initialize LangChain components for orchestration."""
         try:
-            logging.info("Initializing LangChain components for AI orchestration")
+            logging.debug("Initializing LangChain components for AI orchestration")
 
             # Create the LLM wrapper
             self.langchain_llm = self._create_langchain_llm_wrapper()
@@ -403,7 +403,7 @@ class AgentAssistant:
             # Initialize memory checkpointer for cross-request context
             self.langchain_memory = MemorySaver()
 
-            logging.info("LangChain components initialized successfully")
+            logging.debug("LangChain components initialized successfully")
 
         except Exception as e:
             logging.error(f"Failed to initialize LangChain components: {e}", exc_info=True)
@@ -510,7 +510,7 @@ class AgentAssistant:
                 return "scroll_down"
             else:
                 # Default to scroll_down (most common)
-                logging.info(f"Generic 'scroll' action mapped to 'scroll_down' (default)")
+                logging.debug(f"Generic 'scroll' action mapped to 'scroll_down' (default)")
                 return "scroll_down"
         
         elif action_type == "swipe":
@@ -521,7 +521,7 @@ class AgentAssistant:
                 return "swipe_right"
             else:
                 # Default to swipe_left (common for navigation)
-                logging.info(f"Generic 'swipe' action mapped to 'swipe_left' (default)")
+                logging.debug(f"Generic 'swipe' action mapped to 'swipe_left' (default)")
                 return "swipe_left"
         
         # Return original if no mapping found
@@ -562,7 +562,7 @@ class AgentAssistant:
             
             # Execute the handler
             try:
-                logging.info(f"Executing action: {action_type}")
+                logging.debug(f"Executing action: {action_type}")
                 # Some handlers expect action_data, others don't (like press_back)
                 if action_type == "back":
                     result = handler()
@@ -570,7 +570,7 @@ class AgentAssistant:
                     result = handler(action_data)
                 
                 if result:
-                    logging.info(f"[OK] Successfully executed action: {action_type}")
+                    logging.debug(f"[OK] Successfully executed action: {action_type}")
                 else:
                     logging.warning(f"[FAIL] Action execution returned False: {action_type}")
                 
@@ -679,7 +679,7 @@ class AgentAssistant:
                     fh_readable.setLevel(logging.INFO)
                     fh_readable.setFormatter(logging.Formatter('%(message)s'))
                     self.ai_interaction_readable_logger.addHandler(fh_readable)
-                    logging.info(f"AI interaction readable logger initialized at: {readable_path}")
+                    logging.debug(f"AI interaction readable logger initialized at: {readable_path}")
                 except OSError as e:
                     logging.error(f"Could not create AI interactions readable log file: {e}")
                     if not self.ai_interaction_readable_logger.handlers:

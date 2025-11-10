@@ -10,6 +10,7 @@ import os
 import sys
 import time
 import base64
+import asyncio
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 
@@ -19,6 +20,8 @@ try:
     from core.controller import FlagController
     from domain.app_context_manager import AppContextManager
     from utils.paths import SessionPathManager
+    from domain.traffic_capture_manager import TrafficCaptureManager
+    from domain.video_recording_manager import VideoRecordingManager
 except ImportError as e:
     print(f"FATAL: Import error: {e}", file=sys.stderr, flush=True)
     import traceback
@@ -42,22 +45,20 @@ class CrawlerLoop:
             config: Configuration object
         """
         try:
-            print("CrawlerLoop.__init__ starting...", file=sys.stderr, flush=True)
             logger.debug("CrawlerLoop.__init__ starting...")
             self.config = config
-            print("Config set", file=sys.stderr, flush=True)
             
             self.agent_assistant: Optional[AgentAssistant] = None
             self.app_context_manager: Optional[AppContextManager] = None
+            self.traffic_capture_manager: Optional[TrafficCaptureManager] = None
+            self.video_recording_manager: Optional[VideoRecordingManager] = None
             self.step_count = 0
             self.previous_actions: List[str] = []
             self.current_screen_visit_count = 0
             self.current_composite_hash = ""
             self.last_action_feedback: Optional[str] = None
-            print("Instance variables set", file=sys.stderr, flush=True)
             
             # Set up flag controller
-            print("Setting up flag controller...", file=sys.stderr, flush=True)
             logger.debug("Setting up flag controller...")
             shutdown_flag_path = config.get('SHUTDOWN_FLAG_PATH') or os.path.join(
                 config.BASE_DIR or '.', DEFAULT_SHUTDOWN_FLAG
@@ -65,15 +66,13 @@ class CrawlerLoop:
             pause_flag_path = config.get('PAUSE_FLAG_PATH') or os.path.join(
                 config.BASE_DIR or '.', DEFAULT_PAUSE_FLAG
             )
-            print(f"Flag paths: shutdown={shutdown_flag_path}, pause={pause_flag_path}", file=sys.stderr, flush=True)
+            logger.debug(f"Flag paths: shutdown={shutdown_flag_path}, pause={pause_flag_path}")
             
             self.flag_controller = FlagController(shutdown_flag_path, pause_flag_path)
-            print("Flag controller created", file=sys.stderr, flush=True)
             logger.debug("Flag controller created")
             
             # Wait time between actions
             self.wait_after_action = float(config.get('WAIT_AFTER_ACTION', 2.0))
-            print("CrawlerLoop.__init__ completed", file=sys.stderr, flush=True)
             logger.debug("CrawlerLoop.__init__ completed")
         except SystemExit as e:
             print(f"SystemExit in CrawlerLoop.__init__: {e}", file=sys.stderr, flush=True)
@@ -92,40 +91,49 @@ class CrawlerLoop:
             True if initialization successful, False otherwise
         """
         try:
-            logger.info("Initializing crawler loop...")
+            logger.debug("Initializing crawler loop...")
             print("UI_STATUS: Initializing crawler...", flush=True)
             
             # Initialize AgentAssistant
-            logger.info("Creating AgentAssistant...")
+            logger.debug("Creating AgentAssistant...")
             self.agent_assistant = AgentAssistant(self.config)
-            logger.info("AgentAssistant created successfully")
+            logger.debug("AgentAssistant created successfully")
             
             # Ensure driver is connected
-            logger.info("Connecting to MCP driver...")
+            logger.debug("Connecting to MCP driver...")
             if not self.agent_assistant._ensure_driver_connected():
                 error_msg = "Failed to connect driver - check MCP server is running"
                 logger.error(error_msg)
                 print(f"UI_STATUS: {error_msg}", flush=True)
                 return False
             
-            logger.info("Driver connected successfully")
+            logger.debug("Driver connected successfully")
             
             # Now that device is initialized, set up file logging if it was delayed
             # This ensures the log directory is created with the correct device name
-            log_dir = self.config.get('LOG_DIR')
-            if log_dir and '{' in log_dir:
-                try:
-                    # Force path regeneration to get the correct path with device name
-                    path_manager = self.config._path_manager
-                    # Force regeneration to ensure we get the path with device name, not unknown_device
-                    log_dir_path = path_manager.get_log_dir(force_regenerate=True)
-                    log_dir = str(log_dir_path)
-                    
-                    # Verify the path doesn't contain unknown_device
-                    if 'unknown_device' in log_dir:
-                        logger.warning(f"Log directory still contains unknown_device: {log_dir}, skipping file logging setup")
-                    else:
-                        # Create the log directory and add file handler
+            try:
+                # Use the property which automatically resolves the template
+                log_dir = self.config.LOG_DIR
+            except Exception:
+                # Fallback: try to resolve manually
+                log_dir = self.config.get('LOG_DIR')
+                if log_dir and '{' in log_dir:
+                    try:
+                        # Force path regeneration to get the correct path with device name
+                        path_manager = self.config._path_manager
+                        # Force regeneration to ensure we get the path with device name, not unknown_device
+                        log_dir_path = path_manager.get_log_dir(force_regenerate=True)
+                        log_dir = str(log_dir_path)
+                    except Exception as e:
+                        logger.warning(f"Could not resolve log directory template: {e}")
+                        log_dir = None
+            
+            # Verify the path doesn't contain unknown_device and set up logging
+            if log_dir:
+                if 'unknown_device' in log_dir:
+                    logger.warning(f"Log directory still contains unknown_device: {log_dir}, skipping file logging setup")
+                else:
+                    try:
                         os.makedirs(log_dir, exist_ok=True)
                         log_file = os.path.join(log_dir, self.config.get('LOG_FILE_NAME', 'crawler.log'))
                         
@@ -136,9 +144,9 @@ class CrawlerLoop:
                             file_handler = logging.FileHandler(log_file, encoding='utf-8')
                             file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
                             root_logger.addHandler(file_handler)
-                            logger.info(f"File logging initialized at: {log_file}")
-                except Exception as e:
-                    logger.warning(f"Could not set up delayed file logging: {e}")
+                            logger.debug(f"File logging initialized at: {log_file}")
+                    except Exception as e:
+                        logger.warning(f"Could not set up delayed file logging: {e}")
             
             # Recreate AI interaction logger with correct path after device initialization
             # This ensures log files are created in the correct directory (with device name, not unknown_device)
@@ -150,20 +158,46 @@ class CrawlerLoop:
                     logger.warning(f"Could not recreate AI interaction logger: {e}")
             
             # Initialize AppContextManager for app context checking
-            logger.info("Initializing AppContextManager...")
+            logger.debug("Initializing AppContextManager...")
             self.app_context_manager = AppContextManager(
                 self.agent_assistant.tools.driver,
                 self.config
             )
-            logger.info("AppContextManager initialized successfully")
+            logger.debug("AppContextManager initialized successfully")
+            
+            # Initialize TrafficCaptureManager if traffic capture is enabled
+            if self.config.get('ENABLE_TRAFFIC_CAPTURE', False):
+                try:
+                    logger.debug("Initializing TrafficCaptureManager...")
+                    self.traffic_capture_manager = TrafficCaptureManager(
+                        self.agent_assistant.tools.driver,
+                        self.config
+                    )
+                    logger.debug("TrafficCaptureManager initialized successfully")
+                except Exception as e:
+                    logger.warning(f"Failed to initialize TrafficCaptureManager: {e}. Traffic capture will be disabled.")
+                    self.traffic_capture_manager = None
+            
+            # Initialize VideoRecordingManager if video recording is enabled
+            if self.config.get('ENABLE_VIDEO_RECORDING', False):
+                try:
+                    logger.debug("Initializing VideoRecordingManager...")
+                    self.video_recording_manager = VideoRecordingManager(
+                        self.agent_assistant.tools.driver,
+                        self.config
+                    )
+                    logger.debug("VideoRecordingManager initialized successfully")
+                except Exception as e:
+                    logger.warning(f"Failed to initialize VideoRecordingManager: {e}. Video recording will be disabled.")
+                    self.video_recording_manager = None
             
             # Ensure we're in the correct app before starting
-            logger.info("Ensuring we're in the correct app context...")
+            logger.debug("Ensuring we're in the correct app context...")
             if not self.app_context_manager.ensure_in_app():
                 logger.warning("Not in correct app context after initialization, but continuing...")
             
             # Note: App launch verification is now handled by the MCP server during session initialization
-            logger.info("Crawler loop initialized successfully")
+            logger.debug("Crawler loop initialized successfully")
             print("UI_STATUS: Crawler initialized", flush=True)
             return True
             
@@ -341,7 +375,6 @@ class CrawlerLoop:
             max_steps: Maximum number of steps to run (None for unlimited)
         """
         try:
-            logger.info("Starting crawler loop")
             print("UI_STATUS: Crawler started", flush=True)
             
             # Initialize with better error handling
@@ -367,6 +400,37 @@ class CrawlerLoop:
                 return
             
             print("UI_STATUS: Crawler running", flush=True)
+            
+            # Start traffic capture if enabled
+            if self.traffic_capture_manager:
+                try:
+                    logger.debug("Starting traffic capture...")
+                    # Get run_id from step_count (will be 0 initially, but that's okay)
+                    run_id = getattr(self, '_run_id', 0)
+                    # Use asyncio.run to handle async call
+                    asyncio.run(self.traffic_capture_manager.start_capture_async(
+                        run_id=run_id,
+                        step_num=0
+                    ))
+                    logger.debug("Traffic capture started successfully")
+                except Exception as e:
+                    logger.error(f"Failed to start traffic capture: {e}", exc_info=True)
+            
+            # Start video recording if enabled
+            if self.video_recording_manager:
+                try:
+                    logger.debug("Starting video recording...")
+                    run_id = getattr(self, '_run_id', 0)
+                    success = self.video_recording_manager.start_recording(
+                        run_id=run_id,
+                        step_num=0
+                    )
+                    if success:
+                        logger.debug("Video recording started successfully")
+                    else:
+                        logger.warning("Failed to start video recording")
+                except Exception as e:
+                    logger.error(f"Failed to start video recording: {e}", exc_info=True)
             
             # Main loop
             while True:
@@ -399,6 +463,61 @@ class CrawlerLoop:
             print("UI_STATUS: Crawler error", flush=True)
             print(f"UI_END: ERROR - {str(e)}", flush=True)
         finally:
+            # Stop traffic capture if it was started
+            if self.traffic_capture_manager and self.traffic_capture_manager.is_capturing():
+                try:
+                    logger.debug("Stopping traffic capture...")
+                    run_id = getattr(self, '_run_id', 0)
+                    pcap_path = asyncio.run(self.traffic_capture_manager.stop_capture_and_pull_async(
+                        run_id=run_id,
+                        step_num=self.step_count
+                    ))
+                    if pcap_path:
+                        logger.debug(f"Traffic capture saved to: {pcap_path}")
+                    else:
+                        logger.warning("Traffic capture stopped but file was not saved")
+                except Exception as e:
+                    logger.error(f"Error stopping traffic capture: {e}", exc_info=True)
+            
+            # Stop video recording if it was started
+            if self.video_recording_manager and self.video_recording_manager.is_recording():
+                try:
+                    logger.debug("Stopping video recording...")
+                    video_path = self.video_recording_manager.stop_recording_and_save()
+                    if video_path:
+                        logger.debug(f"Video recording saved to: {video_path}")
+                    else:
+                        logger.warning("Video recording stopped but file was not saved")
+                except Exception as e:
+                    logger.error(f"Error stopping video recording: {e}", exc_info=True)
+            
+            # Run MobSF analysis if enabled
+            mobsf_enabled = self.config.get('ENABLE_MOBSF_ANALYSIS', False)
+            
+            # Explicitly check for True boolean or "true" string
+            if mobsf_enabled is True or str(mobsf_enabled).lower() == 'true':
+                try:
+                    logger.info("Starting automatic MobSF analysis...")
+                    from infrastructure.mobsf_manager import MobSFManager
+                    package_name = self.config.get('APP_PACKAGE')
+                    if package_name:
+                        mobsf_manager = MobSFManager(self.config)
+                        success, result = mobsf_manager.perform_complete_scan(package_name)
+                        if success:
+                            logger.info("MobSF analysis completed successfully")
+                            if isinstance(result, dict):
+                                if result.get('pdf_report'):
+                                    logger.info(f"MobSF PDF Report: {result['pdf_report']}")
+                                if result.get('json_report'):
+                                    logger.info(f"MobSF JSON Report: {result['json_report']}")
+                        else:
+                            error_msg = result.get('error', 'Unknown error') if isinstance(result, dict) else str(result)
+                            logger.error(f"MobSF analysis failed: {error_msg}")
+                    else:
+                        logger.warning("APP_PACKAGE not configured, skipping MobSF analysis")
+                except Exception as e:
+                    logger.error(f"Error running MobSF analysis: {e}", exc_info=True)
+            
             # Disconnect driver
             if self.agent_assistant and self.agent_assistant.tools.driver:
                 try:
@@ -429,7 +548,7 @@ def run_crawler_loop(config: Optional[Config] = None):
         if config is None:
             config = Config()
         
-        print("CRAWLER_MODE detected, starting crawler loop...", file=sys.stderr, flush=True)
+        logger.debug("CRAWLER_MODE detected, starting crawler loop...")
         
         # Set up logging - always log to stdout so parent process can see it
         # Also try to log to file if LOG_DIR is available
@@ -441,46 +560,51 @@ def run_crawler_loop(config: Optional[Config] = None):
             # Fallback to regular stdout if wrapping fails
             handlers = [logging.StreamHandler(sys.stdout)]
         
-        log_dir = config.get('LOG_DIR')
-        if log_dir:
-            # Resolve placeholders in log_dir if present
-            if '{' in log_dir:
-                # Use the same SessionPathManager instance from config to ensure consistency
-                try:
-                    # Use config's path manager instead of creating a new instance
-                    path_manager = config._path_manager
-                    log_dir_path = path_manager.get_log_dir()
-                    log_dir = str(log_dir_path)
-                except Exception as e:
-                    # Fallback: try to resolve placeholders manually
-                    output_data_dir = config.get('OUTPUT_DATA_DIR') or 'output_data'
-                    if '{OUTPUT_DATA_DIR}' in log_dir:
-                        log_dir = log_dir.replace('{OUTPUT_DATA_DIR}', output_data_dir)
-                    if '{session_dir}' in log_dir:
-                        # Use proper sessions directory structure instead of crawler_session
-                        try:
-                            # Use config's path manager instead of creating a new instance
-                            path_manager = config._path_manager
-                            session_path = path_manager.get_session_path()
-                            log_dir = log_dir.replace('{session_dir}', str(session_path))
-                        except Exception:
-                            # Last resort: use sessions directory with unknown_device
-                            # But prefer device name if available
-                            # Get device info from path_manager if available
-                            if hasattr(config, '_path_manager'):
+        # Use the property which automatically resolves the template
+        try:
+            log_dir = config.LOG_DIR
+        except Exception:
+            # Fallback: try to resolve manually
+            log_dir = config.get('LOG_DIR')
+            if log_dir:
+                # Resolve placeholders in log_dir if present
+                if '{' in log_dir:
+                    # Use the same SessionPathManager instance from config to ensure consistency
+                    try:
+                        # Use config's path manager instead of creating a new instance
+                        path_manager = config._path_manager
+                        log_dir_path = path_manager.get_log_dir()
+                        log_dir = str(log_dir_path)
+                    except Exception as e:
+                        # Fallback: try to resolve placeholders manually
+                        output_data_dir = config.get('OUTPUT_DATA_DIR') or 'output_data'
+                        if '{OUTPUT_DATA_DIR}' in log_dir:
+                            log_dir = log_dir.replace('{OUTPUT_DATA_DIR}', output_data_dir)
+                        if '{session_dir}' in log_dir:
+                            # Use proper sessions directory structure instead of crawler_session
+                            try:
+                                # Use config's path manager instead of creating a new instance
                                 path_manager = config._path_manager
-                                device_name = path_manager.get_device_name()
-                                device_udid = path_manager.get_device_udid()
-                                timestamp = path_manager.get_timestamp()
-                            else:
-                                device_name = None
-                                device_udid = None
-                                timestamp = time.strftime('%Y%m%d_%H%M%S')
-                            device_id = device_name or device_udid or 'unknown_device'
-                            app_package = config.get('APP_PACKAGE') or 'unknown.app'
-                            app_package_safe = app_package.replace('.', '_')
-                            session_dir = os.path.join(output_data_dir, 'sessions', f'{device_id}_{app_package_safe}_{timestamp}')
-                            log_dir = log_dir.replace('{session_dir}', session_dir)
+                                session_path = path_manager.get_session_path()
+                                log_dir = log_dir.replace('{session_dir}', str(session_path))
+                            except Exception:
+                                # Last resort: use sessions directory with unknown_device
+                                # But prefer device name if available
+                                # Get device info from path_manager if available
+                                if hasattr(config, '_path_manager'):
+                                    path_manager = config._path_manager
+                                    device_name = path_manager.get_device_name()
+                                    device_udid = path_manager.get_device_udid()
+                                    timestamp = path_manager.get_timestamp()
+                                else:
+                                    device_name = None
+                                    device_udid = None
+                                    timestamp = time.strftime('%Y-%m-%d_%H-%M')
+                                device_id = device_name or device_udid or 'unknown_device'
+                                app_package = config.get('APP_PACKAGE') or 'unknown.app'
+                                app_package_safe = app_package.replace('.', '_')
+                                session_dir = os.path.join(output_data_dir, 'sessions', f'{device_id}_{app_package_safe}_{timestamp}')
+                                log_dir = log_dir.replace('{session_dir}', session_dir)
             
             # Only create log directory if we have a real device ID
             # This prevents creating directories with unknown_device
@@ -515,36 +639,26 @@ def run_crawler_loop(config: Optional[Config] = None):
             force=True  # Force reconfiguration in case logging was already set up
         )
         
-        logger.info("=" * 60)
-        logger.info("CRAWLER LOOP STARTING")
-        logger.info("=" * 60)
-        
         # Create and run crawler loop - use minimal logging to avoid daemon thread issues
         try:
             # Use direct print to stderr instead of logger to avoid threading issues
-            print("About to create CrawlerLoop...", file=sys.stderr, flush=True)
-            sys.stderr.flush()
+            logger.debug("About to create CrawlerLoop...")
             
             # Create crawler loop
-            print("Calling CrawlerLoop(config)...", file=sys.stderr, flush=True)
-            sys.stderr.flush()
+            logger.debug("Calling CrawlerLoop(config)...")
             
             # Try to create the crawler loop with explicit error handling
             try:
                 crawler = CrawlerLoop(config)
             except BaseException as be:
                 # Catch ALL exceptions including SystemExit, KeyboardInterrupt, etc.
-                print(f"BaseException caught during CrawlerLoop creation: {type(be).__name__}: {be}", file=sys.stderr, flush=True)
-                import traceback
-                traceback.print_exc(file=sys.stderr)
+                logger.error(f"BaseException caught during CrawlerLoop creation: {type(be).__name__}: {be}", exc_info=True)
                 # Don't re-raise immediately - give threads time
                 import time
                 time.sleep(1.0)
                 raise
             
-            print("CrawlerLoop created successfully", file=sys.stderr, flush=True)
-            sys.stderr.flush()
-            logger.info("CrawlerLoop instance created successfully")
+            logger.debug("CrawlerLoop created successfully")
         except SystemExit as e:
             print(f"SystemExit caught in CrawlerLoop creation: {e}", file=sys.stderr, flush=True)
             # Give threads time to finish

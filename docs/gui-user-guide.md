@@ -11,7 +11,7 @@ This guide explains how to use the Graphical User Interface (GUI) for the Appium
 - Android SDK with ADB available on PATH (see [Installing ADB](#installing-adb) below)
 - Optional services depending on features:
   - Ollama (for using local AI models)
-  - MobSF (for static analysis of APKs)
+  - MobSF (for static analysis of APKs) - See [official MobSF installation guide](https://github.com/MobSF/Mobile-Security-Framework-MobSF)
   - PCAPdroid (for traffic capture on device)
 - API keys / environment variables (set these in your environment or a .env file as needed):
   - GEMINI_API_KEY (for Gemini provider)
@@ -79,6 +79,9 @@ python run_ui.py
 
 - Configuration panel
   - Configure AI provider, model, crawl mode (steps/time), and other runtime settings
+  - **Traffic Capture:** Enable/disable PCAPdroid network traffic capture during crawl
+  - **Video Recording:** Enable/disable video recording of the entire crawl session
+  - **MobSF Analysis:** Enable/disable automatic MobSF security analysis after crawl completes
   - Save and auto-save settings to SQLite-backed user config store
 
 - Health App Scanner
@@ -122,6 +125,9 @@ If checks fail, the UI shows blocking issues (❌) or warnings (⚠️). You can
 - Use the pre-crawl validation button to diagnose missing services before starting a crawl.
 - Use the GUI to visually inspect action history and screenshots for faster debugging and analysis.
 - Configuration changes are saved to a SQLite-backed store; keep settings consistent across UI and CLI.
+- **Traffic Capture:** Check the "Enable Traffic Capture" checkbox to capture network traffic during crawl. Requires PCAPdroid app installed on device.
+- **Video Recording:** Check the "Enable Video Recording" checkbox to record the entire crawl session as an MP4 video.
+- **MobSF Analysis:** Check the "Enable MobSF Analysis" checkbox to automatically run security analysis after crawl completes. Requires MobSF server running. See [official MobSF installation guide](https://github.com/MobSF/Mobile-Security-Framework-MobSF) for setup instructions.
 
 ## Where to find more
 

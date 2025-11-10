@@ -51,16 +51,23 @@ class CrawlerService:
             self.logger.error(f"Failed to initialize crawler service: {e}")
             return False
     
-    def start_crawler(self, annotate_after_run: bool = False) -> bool:
+    def start_crawler(self, annotate_after_run: bool = False, feature_flags: Optional[Dict[str, Any]] = None) -> bool:
         """Start the crawler process.
         
         Args:
             annotate_after_run: Whether to run offline UI annotator after crawler completes
+            feature_flags: Optional dict of feature flags to override config (e.g., {'ENABLE_TRAFFIC_CAPTURE': True})
             
         Returns:
             True if started successfully, False otherwise
         """
         try:
+            # Apply feature flag overrides to config if provided
+            if feature_flags:
+                for flag_name, flag_value in feature_flags.items():
+                    self.context.config.set(flag_name, flag_value)
+                    self.logger.info(f"Applied feature flag override: {flag_name} = {flag_value}")
+            
             # Initialize if needed
             if not self._initialize_if_needed():
                 return False

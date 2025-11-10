@@ -290,6 +290,7 @@ Verify services: `python run_cli.py precheck-services`
    OLLAMA_BASE_URL=http://localhost:11434
    
    # Optional: For static security analysis of Android apps
+   # MobSF must be installed and running. See: https://github.com/MobSF/Mobile-Security-Framework-MobSF
    MOBSF_API_KEY=your_key
    
    # Optional: For network traffic capture during app crawling
@@ -328,6 +329,15 @@ python run_cli.py apps show-selected  # Show currently selected app
 ### Crawler Control
 ```powershell
 python run_cli.py crawler start [--annotate-offline-after-run]  # Start the crawler (optionally run offline UI annotation after completion)
+
+# Feature flags for crawler start (all disabled by default):
+python run_cli.py crawler start --enable-traffic-capture        # Enable PCAPdroid traffic capture during crawl
+python run_cli.py crawler start --enable-video-recording        # Enable video recording during crawl
+python run_cli.py crawler start --enable-mobsf-analysis         # Enable automatic MobSF analysis after crawl completes
+
+# Combine multiple flags:
+python run_cli.py crawler start --enable-traffic-capture --enable-video-recording --enable-mobsf-analysis
+
 python run_cli.py crawler stop                                   # Stop the crawler process
 python run_cli.py crawler pause                                  # Pause the crawler process
 python run_cli.py crawler resume                                 # Resume a paused crawler
@@ -453,6 +463,13 @@ python run_cli.py gemini show-model-details      # Show detailed info (vision su
 
 4. **Start crawler:**
    ```powershell
+   # Basic start
+   python run_cli.py crawler start
+   
+   # With optional features enabled
+   python run_cli.py crawler start --enable-traffic-capture --enable-video-recording --enable-mobsf-analysis
+   
+   # With offline annotation after completion
    python run_cli.py crawler start --annotate-offline-after-run
    ```
 
@@ -470,6 +487,9 @@ python run_cli.py gemini show-model-details      # Show detailed info (vision su
    - `database/` - Crawl data
    - `logs/` - Crawl logs
    - `reports/` - Analysis reports
+   - `traffic_captures/` - PCAP files (if traffic capture enabled)
+   - `video/` - Video recordings (if video recording enabled)
+   - `mobsf_scan_results/` - MobSF analysis results (if MobSF analysis enabled)
 
 6. **Generate report:**
    ```powershell
@@ -508,6 +528,9 @@ python run_cli.py gemini show-model-details      # Show detailed info (vision su
 - Use `python run_cli.py --help` to see all available commands
 - Configuration changes persist in the database
 - Crawler can be paused/resumed during execution
+- **Traffic Capture:** Requires PCAPdroid app installed on device and `PCAPDROID_API_KEY` set (optional but recommended)
+- **Video Recording:** Uses Appium's built-in screen recording; videos are saved as MP4 files
+- **MobSF Analysis:** Requires MobSF server running and `MOBSF_API_KEY` set; runs automatically after crawl completes if enabled. See [official MobSF installation guide](https://github.com/MobSF/Mobile-Security-Framework-MobSF) for setup instructions.
 
 ## Additional Resources
 

@@ -169,7 +169,10 @@ class Config:
     @property
     def SESSION_DIR(self):
         """Returns the absolute path to the session directory."""
-        return str(self._path_manager.get_session_path())
+        session_path = self._path_manager.get_session_path()
+        if session_path is None:
+            raise RuntimeError("Cannot get SESSION_DIR: device info not available. Set device info first using set_device_info().")
+        return str(session_path)
 
     @property
     def ENABLE_IMAGE_CONTEXT(self):
@@ -651,11 +654,9 @@ AUTO_HIDE_KEYBOARD_BEFORE_NON_INPUT = (
     True  # Auto-hide keyboard to prevent overlay-related no-ops
 )
 
-# MobSF Integration settings - URL and default for ENABLE flag only
-# API key should be set via environment variable MOBSF_API_KEY
-# MOBSF_API_URL is now in config.urls.ServiceURLs.MOBSF
+# MobSF Integration settings 
 MOBSF_API_KEY = None  # Will be loaded from environment variable
-ENABLE_MOBSF_ANALYSIS = True
+ENABLE_MOBSF_ANALYSIS = False 
 
 # Video Recording Settings
 ENABLE_VIDEO_RECORDING = False

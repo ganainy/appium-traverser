@@ -27,7 +27,7 @@ class PathConstants:
     # File patterns
     DB_FILE_SUFFIX = os.getenv("DB_FILE_SUFFIX", "_crawl_data.db")
     APP_INFO_FILE_PATTERN = os.getenv("APP_INFO_FILE_PATTERN", "device_{device_id}_app_info.json")
-    LOG_FILE_NAME = os.getenv("LOG_FILE_NAME", "main_traverser_final.log")
+    LOG_FILE_NAME = os.getenv("LOG_FILE_NAME", "full.log")
     
     # Cache file names
     GEMINI_MODELS_CACHE = "gemini_models.json"

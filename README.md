@@ -38,6 +38,9 @@ python run_cli.py apps scan-health
 python run_cli.py apps select 1
 python run_cli.py crawler start
 
+# Optional: Enable additional features
+python run_cli.py crawler start --enable-traffic-capture --enable-video-recording --enable-mobsf-analysis
+
 # OR use UI
 python run_ui.py
 ```
@@ -47,7 +50,9 @@ python run_ui.py
 - **AI-Powered Exploration** - Multiple provider support (Gemini, Ollama, OpenRouter)
 - **Intelligent State Management** - Visual and structural hashing for unique screen identification
 - **Loop Detection** - Prevents repetitive patterns
-- **Traffic Capture** - Optional network monitoring via PCAPdroid
+- **Traffic Capture** - Optional network monitoring via PCAPdroid during crawl (saves .pcap files)
+- **Video Recording** - Optional screen recording of entire crawl session (saves .mp4 files)
+- **MobSF Integration** - Optional automatic static security analysis after crawl completion
 - **Focus Areas** - Customizable privacy-focused testing targets
 - **Comprehensive Reporting** - PDF reports with crawl analysis
 
@@ -147,9 +152,11 @@ output_data/<device_id>_<app_package>_<timestamp>/
 ├── screenshots/
 ├── annotated_screenshots/
 ├── database/<app_package>_crawl_data.db
-├── traffic_captures/
+├── traffic_captures/        # PCAP files (if traffic capture enabled)
+├── video/                   # Video recordings (if video recording enabled)
 ├── logs/
 ├── reports/
+├── mobsf_scan_results/      # MobSF analysis results (if MobSF analysis enabled)
 └── extracted_apk/
 ```
 
@@ -179,6 +186,8 @@ output_data/app_info/<device_id>/
 
 ## MobSF Integration
 
+MobSF (Mobile Security Framework) must be installed and running before enabling MobSF analysis. For installation instructions, see the [official MobSF documentation](https://github.com/MobSF/Mobile-Security-Framework-MobSF).
+
 ### Docker Setup (Recommended)
 ```powershell
 # Basic (ephemeral)
@@ -191,6 +200,8 @@ docker run -d --name mobsf -p 8000:8000 `
   -v "C:\mobsf\signatures:/home/mobsf/Mobile-Security-Framework-MobSF/signatures" `
   opensecurity/mobile-security-framework-mobsf:latest
 ```
+
+**Note:** For native installation or other setup methods, refer to the [official MobSF installation guide](https://github.com/MobSF/Mobile-Security-Framework-MobSF).
 
 ### Configuration
 ```json

@@ -144,56 +144,17 @@ class AppiumDriver:
             # This ensures the output directory uses the correct device ID instead of "unknown_device"
             # Prefer device name over UDID for folder names (more readable)
             if hasattr(self.cfg, '_path_manager'):
-                old_path = self.cfg._path_manager._session_path
-                old_path_str = str(old_path) if old_path else None
-                
                 # Set device info in path manager (this will invalidate cached session path)
                 self.cfg._path_manager.set_device_info(udid=selected_device.id, name=selected_device.name)
                 logger.debug(f"Set device info in path manager: UDID={selected_device.id}, Name={selected_device.name}")
                 
-                # Force path regeneration if session path was already created with unknown_device
-                # This ensures the correct device ID is used even if path was created early
-                if old_path_str and "unknown_device" in old_path_str:
-                    logger.info(f"Regenerating session path: was '{old_path_str}', will use device: {selected_device.name}")
-                    
-                    # Force regeneration to get the new path
-                    new_path = self.cfg._path_manager.get_session_path(force_regenerate=True)
-                    new_path_str = str(new_path)
-                    
-                    # Try to rename the directory if it exists and is different
-                    import os
-                    from pathlib import Path
-                    old_path_obj = Path(old_path_str)
-                    new_path_obj = Path(new_path_str)
-                    
-                    if old_path_obj.exists() and old_path_obj != new_path_obj and not new_path_obj.exists():
-                        try:
-                            # Only rename if old directory exists and new one doesn't
-                            # This is safe because we're early in the process
-                            old_path_obj.rename(new_path_obj)
-                            logger.info(f"Renamed session directory from '{old_path_str}' to '{new_path_str}'")
-                        except Exception as e:
-                            logger.warning(f"Could not rename session directory from '{old_path_str}' to '{new_path_str}': {e}")
-                            logger.info(f"New session path will be: {new_path_str} (old directory may still exist)")
-                    else:
-                        logger.info(f"Session path regenerated: {new_path_str}")
-                    
-                    # Recreate AI interaction logger with new path if AgentAssistant exists
-                    # This ensures log files are created in the correct directory
-                    try:
-                        # Try to find and update AgentAssistant logger if it exists
-                        ai_logger = logging.getLogger('AIInteractionReadableLogger')
-                        if ai_logger and ai_logger.handlers:
-                            # Check if we can access the AgentAssistant instance
-                            # This is a bit of a hack, but we need to update the logger
-                            # The logger will be recreated on next use if needed
-                            logger.debug("AI interaction logger may need to be recreated with new path")
-                    except Exception:
-                        pass  # Not critical if we can't update it
+                # Get the session path (it will be generated with the correct device info)
+                session_path = self.cfg._path_manager.get_session_path(force_regenerate=False)
+                if session_path:
+                    logger.debug(f"Session path: {session_path}")
                 else:
-                    # Just regenerate to ensure we have the latest path
-                    new_path = self.cfg._path_manager.get_session_path(force_regenerate=True)
-                    logger.debug(f"Session path: {new_path}")
+                    # Path not created yet, this is OK - it will be created when needed
+                    logger.debug("Session path not created yet (device info may not be set)")
             
             # Build capabilities for Android
             capabilities = build_android_capabilities(
@@ -248,8 +209,8 @@ class AppiumDriver:
                 'udid': selected_device.id,
             }
             
-            logger.info(f"[OK] Appium session initialized: {session_state.session_id}")
-            logger.info(f"Session data: {self._session_info}")
+            logger.debug(f"[OK] Appium session initialized: {session_state.session_id}")
+            logger.debug(f"Session data: {self._session_info}")
             return True
             
         except AppiumError as e:
@@ -485,7 +446,7 @@ class AppiumDriver:
             driver = self.helper.get_driver()
             if driver:
                 driver.back()
-                logger.info("[OK] Back press succeeded")
+                logger.debug("[OK] Back press succeeded")
                 return True
             return False
         except Exception as e:
@@ -502,7 +463,7 @@ class AppiumDriver:
             if driver:
                 # Use Appium's press_keycode for Android HOME key (3)
                 driver.press_keycode(3)
-                logger.info("Home button pressed")
+                logger.debug("Home button pressed")
                 return True
             return False
         except Exception as e:
@@ -524,20 +485,86 @@ class AppiumDriver:
             logger.error(f"Error getting window size: {e}")
             return {"width": 1080, "height": 1920}
     
-    def start_video_recording(self):
-        """Start video recording."""
-        # TODO: Implement video recording start functionality
-        pass
+    def start_video_recording(self, **kwargs) -> bool:
+        """
+        Starts recording the screen using Appium's built-in method.
+        
+        Args:
+            **kwargs: Optional recording options to pass to start_recording_screen()
+            
+        Returns:
+            True if recording started successfully, False otherwise
+        """
+        if not self._ensure_helper():
+            logger.error("Cannot start video recording: AppiumHelper not available")
+            return False
+        
+        try:
+            driver = self.helper.get_driver()
+            if not driver:
+                logger.error("Cannot start video recording: Driver not available")
+                return False
+            
+            driver.start_recording_screen(**kwargs)
+            logger.info("Started video recording.")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to start video recording: {e}", exc_info=True)
+            return False
     
-    def stop_video_recording(self):
-        """Stop video recording."""
-        # TODO: Implement video recording stop functionality
-        return None
+    def stop_video_recording(self) -> Optional[str]:
+        """
+        Stops recording the screen and returns the video data as base64 string.
+        
+        Returns:
+            Video data as base64-encoded string, or None on error
+        """
+        if not self._ensure_helper():
+            logger.error("Cannot stop video recording: AppiumHelper not available")
+            return None
+        
+        try:
+            driver = self.helper.get_driver()
+            if not driver:
+                logger.error("Cannot stop video recording: Driver not available")
+                return None
+            
+            video_data = driver.stop_recording_screen()
+            logger.info("Stopped video recording.")
+            return video_data
+            
+        except Exception as e:
+            logger.error(f"Failed to stop video recording: {e}", exc_info=True)
+            return None
     
-    def save_video_recording(self, data, path):
-        """Save video recording."""
-        # TODO: Implement video recording save functionality
-        pass
+    def save_video_recording(self, video_data: str, file_path: str) -> bool:
+        """Saves the video data to a file.
+        
+        Args:
+            video_data: Video data as base64-encoded string
+            file_path: Path to save the video file
+            
+        Returns:
+            True if saved successfully, False otherwise
+        """
+        if not video_data:
+            logger.error("Video data is empty, cannot save video.")
+            return False
+        
+        try:
+            import os
+            # Ensure directory exists
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+            
+            with open(file_path, "wb") as f:
+                f.write(base64.b64decode(video_data))
+            
+            logger.info(f"Video saved to: {file_path}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to save video to {file_path}: {e}", exc_info=True)
+            return False
     
     def get_current_package(self) -> Optional[str]:
         """Get current package name (Android only)."""
@@ -576,7 +603,7 @@ class AppiumDriver:
             driver = self.helper.get_driver()
             if driver:
                 driver.terminate_app(package_name)
-                logger.info(f"Terminated app: {package_name}")
+                logger.debug(f"Terminated app: {package_name}")
                 return True
             return False
         except Exception as e:
@@ -592,7 +619,7 @@ class AppiumDriver:
             driver = self.helper.get_driver()
             if driver:
                 driver.launch_app()
-                logger.info("App launched")
+                logger.debug("App launched")
                 return True
             return False
         except Exception as e:
@@ -623,7 +650,7 @@ class AppiumDriver:
             wait_ms = int(wait_after_launch * 1000)
             success = self.helper.start_activity(app_package, app_activity, wait_ms)
             if success:
-                logger.info(f"Successfully started activity: {app_package}/{app_activity}")
+                logger.debug(f"Successfully started activity: {app_package}/{app_activity}")
             return success
         except Exception as e:
             logger.error(f"Error starting activity: {e}")

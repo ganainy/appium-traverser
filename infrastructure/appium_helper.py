@@ -119,7 +119,7 @@ class AppiumHelper:
         start_time = time.time()
         
         try:
-            logger.info(
+            logger.debug(
                 f'Initializing Appium session: platform={capabilities.get("platformName")}, '
                 f'automationName={capabilities.get("appium:automationName")}, '
                 f'deviceName={capabilities.get("appium:deviceName")}'
@@ -192,7 +192,7 @@ class AppiumHelper:
             duration = (time.time() - start_time) * 1000
             session_id = self.driver.session_id
             
-            logger.info(
+            logger.debug(
                 f'Appium session initialized successfully: sessionId={session_id}, '
                 f'duration={duration:.0f}ms'
             )
@@ -386,7 +386,7 @@ class AppiumHelper:
                             element = self.driver.find_element(AppiumBy.XPATH, xpath_exact)
                             if element.is_displayed():
                                 duration = (time.time() - start_time) * 1000
-                                logger.info(f'Found element with XPath (resource-id): {selector} in {duration:.0f}ms')
+                                logger.debug(f'Found element with XPath (resource-id): {selector} in {duration:.0f}ms')
                                 return element
                         except (NoSuchElementException, TimeoutException):
                             pass
@@ -398,7 +398,7 @@ class AppiumHelper:
                             element = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR, uiautomator_selector)
                             if element.is_displayed():
                                 duration = (time.time() - start_time) * 1000
-                                logger.info(f'Found element with UIAutomator: {selector} in {duration:.0f}ms')
+                                logger.debug(f'Found element with UIAutomator: {selector} in {duration:.0f}ms')
                                 return element
                         except (NoSuchElementException, TimeoutException):
                             pass
@@ -411,7 +411,7 @@ class AppiumHelper:
                                 element = self.driver.find_element(by, package_prefixed)
                                 if element.is_displayed():
                                     duration = (time.time() - start_time) * 1000
-                                    logger.info(f'Found element with package-prefixed ID: {package_prefixed} in {duration:.0f}ms')
+                                    logger.debug(f'Found element with package-prefixed ID: {package_prefixed} in {duration:.0f}ms')
                                     return element
                             except (NoSuchElementException, TimeoutException):
                                 # Also try XPath with package prefix
@@ -420,7 +420,7 @@ class AppiumHelper:
                                     element = self.driver.find_element(AppiumBy.XPATH, xpath_prefixed)
                                     if element.is_displayed():
                                         duration = (time.time() - start_time) * 1000
-                                        logger.info(f'Found element with XPath (prefixed resource-id): {xpath_prefixed} in {duration:.0f}ms')
+                                        logger.debug(f'Found element with XPath (prefixed resource-id): {xpath_prefixed} in {duration:.0f}ms')
                                         return element
                                 except (NoSuchElementException, TimeoutException):
                                     pass
@@ -431,7 +431,7 @@ class AppiumHelper:
                             element = self.driver.find_element(AppiumBy.ACCESSIBILITY_ID, selector)
                             if element.is_displayed():
                                 duration = (time.time() - start_time) * 1000
-                                logger.info(f'Found element with accessibility id: {selector} in {duration:.0f}ms')
+                                logger.debug(f'Found element with accessibility id: {selector} in {duration:.0f}ms')
                                 return element
                         except (NoSuchElementException, TimeoutException):
                             pass

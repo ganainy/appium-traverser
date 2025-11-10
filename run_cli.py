@@ -43,13 +43,12 @@ def main():
     
     if provider:
         from domain.providers.enums import AIProvider
-        from ui.strings import CLI_ERROR_PREFIX
         try:
             # Validate provider using enum
             provider_enum = AIProvider.from_string(provider)
             config.set("AI_PROVIDER", provider_enum.value)
         except ValueError as e:
-            print(f"{CLI_ERROR_PREFIX} {e}")
+            print(f"[ERROR] {e}")
             sys.exit(1)
 
     # Set model if given

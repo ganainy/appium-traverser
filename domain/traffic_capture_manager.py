@@ -38,7 +38,8 @@ class TrafficCaptureManager:
             # Validate necessary configs for PCAPdroid
             required_pcap_configs = [
                 'APP_PACKAGE', 'TRAFFIC_CAPTURE_OUTPUT_DIR', 'WAIT_AFTER_ACTION',
-                'PCAPDROID_PACKAGE', 'PCAPDROID_ACTIVITY', 'DEVICE_PCAP_DIR' 
+                'PCAPDROID_PACKAGE', 'DEVICE_PCAP_DIR' 
+                # PCAPDROID_ACTIVITY is optional - will be constructed if not provided
                 # PCAPDROID_API_KEY is optional but recommended
                 # CLEANUP_DEVICE_PCAP_FILE is optional
             ]
@@ -48,6 +49,19 @@ class TrafficCaptureManager:
                     if cfg_key == 'DEVICE_PCAP_DIR' and self.cfg.get(cfg_key) is None:
                         continue
                     raise ValueError(f"TrafficCaptureManager: Required config '{cfg_key}' not found or is None.")
+            
+            # Construct PCAPDROID_ACTIVITY if not provided
+            # According to PCAPdroid API docs: https://github.com/emanuele-f/PCAPdroid/blob/master/docs/app_api.md
+            # The correct activity is: com.emanuelef.remote_capture/.activities.CaptureCtrl
+            if not self.cfg.get('PCAPDROID_ACTIVITY'):
+                pcapdroid_package = self.cfg.get('PCAPDROID_PACKAGE')
+                if pcapdroid_package:
+                    # Default PCAPdroid activity format: package_name/.activities.CaptureCtrl
+                    default_activity = f"{pcapdroid_package}/.activities.CaptureCtrl"
+                    logging.debug(f"PCAPDROID_ACTIVITY not set, using default: {default_activity}")
+                    # Set it in config for this session (doesn't persist)
+                    self.cfg.set('PCAPDROID_ACTIVITY', default_activity)
+            
             logging.debug("TrafficCaptureManager initialized and enabled.")
         else:
             logging.debug("TrafficCaptureManager initialized but traffic capture is DISABLED in config.")
@@ -63,12 +77,6 @@ class TrafficCaptureManager:
             full_command = [adb_executable] + command_list
             
             logging.debug(f"--- Running ADB for Capture (async_wrapper): {' '.join(full_command)}")
-            
-            # subprocess.run is blocking, use asyncio.to_thread for non-blocking behavior in async context
-            # Or, for simpler cases where the ADB command is quick, direct run might be acceptable,
-            # but true async would use asyncio.create_subprocess_shell or a library.
-            # For now, let's simulate with a direct run as it's simpler to integrate.
-            # If these ADB commands are long-running, proper async subprocess is better.
             
             # Using asyncio.to_thread to run the blocking subprocess.run in a separate thread
             def run_sync_subprocess():
@@ -87,7 +95,12 @@ class TrafficCaptureManager:
                 logging.debug(f"--- ADB STDOUT (Capture):\n{result.stdout.strip()}")
             if result.stderr and not suppress_stderr:
                 logging.error(f"--- ADB STDERR (Capture):\n{result.stderr.strip()}")
-            return result.stdout.strip(), result.returncode
+            # Combine stdout and stderr for error detection (stderr often contains error messages)
+            # ADB 'am start' may return 0 even if activity doesn't exist, but stderr will have the error
+            combined_output = result.stdout.strip()
+            if result.stderr:
+                combined_output += "\n" + result.stderr.strip()
+            return combined_output, result.returncode
         except FileNotFoundError:
             logging.error(f"ADB command ('{adb_executable}') not found. Ensure ADB is in PATH or ADB_EXECUTABLE_PATH is configured.")
             return "ADB_NOT_FOUND", -1
@@ -128,28 +141,61 @@ class TrafficCaptureManager:
 
 
         # This is where the final PCAP file will be saved locally after pulling
-        self.local_pcap_file_path = os.path.join(
-            str(self.cfg.get('TRAFFIC_CAPTURE_OUTPUT_DIR')), 
-            self.pcap_filename_on_device
-        )
-        os.makedirs(str(self.cfg.get('TRAFFIC_CAPTURE_OUTPUT_DIR')), exist_ok=True)
+        # --- MODIFIED PATH RESOLUTION ---
+        # Resolve the path *now*, when the function is called, not in __init__.
+        # We trust the config system to have resolved this path by this point.
+        traffic_capture_dir = None
+        try:
+            # Trust the TRAFFIC_CAPTURE_OUTPUT_DIR property to return the fully resolved path
+            traffic_capture_dir = str(self.cfg.TRAFFIC_CAPTURE_OUTPUT_DIR)
+        except Exception as e:
+            logging.error(f"Could not resolve self.cfg.TRAFFIC_CAPTURE_OUTPUT_DIR: {e}. Falling back.")
+            
+        if not traffic_capture_dir:
+            try:
+                # Fallback: Try to build it from SESSION_DIR manually
+                session_dir = str(self.cfg.SESSION_DIR)
+                # We check for template chars here as a *fallback* sanity check, not as the primary logic.
+                if session_dir and '{' not in session_dir:
+                    traffic_capture_dir = os.path.join(session_dir, 'traffic_captures')
+                else:
+                    logging.warning(f"Could not use SESSION_DIR as fallback (might be unresolved): {session_dir}")
+                    traffic_capture_dir = None
+            except Exception as e:
+                logging.warning(f"Could not get SESSION_DIR as fallback: {e}")
+
+        # Final hardcoded fallback if all else fails
+        if not traffic_capture_dir:
+            logging.error("All path resolution attempts failed, using hardcoded 'output_data/traffic_captures' fallback. Paths are not configured correctly.")
+            traffic_capture_dir = os.path.join('output_data', 'traffic_captures')
+        
+        # Ensure the path is absolute (os.path.join may not be if base is relative)
+        traffic_capture_dir = os.path.abspath(traffic_capture_dir)
+        os.makedirs(traffic_capture_dir, exist_ok=True)
+            
+        self.local_pcap_file_path = os.path.join(traffic_capture_dir, self.pcap_filename_on_device)
+        # --- END MODIFIED BLOCK ---
 
         logging.debug(f"Attempting to start traffic capture for app: {target_app_package}")
         logging.debug(f"PCAPdroid filename on device (pcap_name extra): {self.pcap_filename_on_device}")
         logging.debug(f"Local save path after pull: {self.local_pcap_file_path}")
         logging.debug("Ensure PCAPdroid is installed, granted remote control & VPN permissions.")
 
+        # According to PCAPdroid API docs: https://github.com/emanuele-f/PCAPdroid/blob/master/docs/app_api.md
+        # Command format: adb shell am start -e action [ACTION] -e api_key [API_KEY] -e [SETTINGS] -n com.emanuelef.remote_capture/.activities.CaptureCtrl
+        # The pcap_name is just the filename (not full path), file will be saved to Download/PCAPdroid/
+        pcap_filename_only = os.path.basename(self.pcap_filename_on_device)
+        
         start_command_args = [
             'shell', 'am', 'start',
             '-n', pcapdroid_activity,
             '-e', 'action', 'start',
-            '-e', 'pcap_dump_mode', 'pcap_file', # As per documentation
+            '-e', 'pcap_dump_mode', 'pcap_file',
             '-e', 'app_filter', target_app_package,
-            '-e', 'pcap_name', self.pcap_filename_on_device, # This sets filename in Download/PCAPdroid/
-            # Optional: enable TLS decryption if PCAPdroid is set up for it (requires root/special setup)
-            # '-e', 'tls_decryption', 'true' # Add to config if desired
+            '-e', 'pcap_name', pcap_filename_only,  # Just filename, not full path
         ]
-        if self.cfg.get('PCAPDROID_TLS_DECRYPTION', False): # Example config flag
+        
+        if self.cfg.get('PCAPDROID_TLS_DECRYPTION', False):
             start_command_args.extend(['-e', 'tls_decryption', 'true'])
 
         if self.cfg.get('PCAPDROID_API_KEY'):
@@ -160,14 +206,25 @@ class TrafficCaptureManager:
 
         stdout, retcode = await self._run_adb_command_async(start_command_args)
 
+        # Check both return code and stderr for errors
+        # ADB 'am start' may return 0 even if activity doesn't exist, but stderr will have the error
         if retcode != 0:
             logging.error(f"Failed to send PCAPdroid 'start' command. ADB retcode: {retcode}. Output: {stdout}")
-            self.pcap_filename_on_device = None # Reset on failure
+            self.pcap_filename_on_device = None
+            self.local_pcap_file_path = None
+            self._is_currently_capturing = False
+            return False
+        
+        # Also check stdout/stderr for error messages even if retcode is 0
+        error_indicators = ['Error', 'error', 'does not exist', 'Activity class', 'Unable to resolve']
+        if any(indicator in stdout for indicator in error_indicators):
+            logging.error(f"PCAPdroid 'start' command failed (error in output). Output: {stdout}")
+            self.pcap_filename_on_device = None
             self.local_pcap_file_path = None
             self._is_currently_capturing = False
             return False
 
-        logging.debug(f"PCAPdroid 'start' command sent successfully for {target_app_package}. Capture should be initializing.")
+        logging.info(f"PCAPdroid 'start' command sent successfully for {target_app_package}. Capture should be initializing.")
         self._is_currently_capturing = True
         
         # Wait for PCAPdroid to initialize (configurable)
@@ -189,7 +246,12 @@ class TrafficCaptureManager:
         pcapdroid_activity = str(self.cfg.get('PCAPDROID_ACTIVITY'))
 
         logging.debug("Attempting to stop PCAPdroid traffic capture...")
-        stop_command_args = ['shell', 'am', 'start', '-n', pcapdroid_activity, '-e', 'action', 'stop']
+        # According to PCAPdroid API docs: use -n with activity name and -e action stop
+        stop_command_args = [
+            'shell', 'am', 'start',
+            '-n', pcapdroid_activity,
+            '-e', 'action', 'stop'
+        ]
         if self.cfg.get('PCAPDROID_API_KEY'):
             stop_command_args.extend(['-e', 'api_key', str(self.cfg.get('PCAPDROID_API_KEY'))])
 
@@ -259,7 +321,12 @@ class TrafficCaptureManager:
         pcapdroid_activity = str(self.cfg.get('PCAPDROID_ACTIVITY'))
 
         logging.debug("Querying PCAPdroid capture status...")
-        status_command_args = ['shell', 'am', 'start', '-n', pcapdroid_activity, '-e', 'action', 'get_status']
+        # According to PCAPdroid API docs: use -n with activity name and -e action get_status
+        status_command_args = [
+            'shell', 'am', 'start',
+            '-n', pcapdroid_activity,
+            '-e', 'action', 'get_status'
+        ]
         if self.cfg.get('PCAPDROID_API_KEY'):
             status_command_args.extend(['-e', 'api_key', str(self.cfg.get('PCAPDROID_API_KEY'))])
 

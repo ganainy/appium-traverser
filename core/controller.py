@@ -236,7 +236,11 @@ class CrawlerOrchestrator:
         
         # Resolve paths
         output_data_dir = self.config.get('OUTPUT_DATA_DIR') or os.path.join(project_root, DEFAULT_OUTPUT_DIR)
-        log_dir = self.config.get('LOG_DIR') or os.path.join(output_data_dir, DEFAULT_LOG_SUBDIR)
+        try:
+            log_dir = self.config.LOG_DIR
+        except Exception:
+            # Fallback if property fails
+            log_dir = self.config.get('LOG_DIR') or os.path.join(output_data_dir, DEFAULT_LOG_SUBDIR)
         log_file_path = os.path.join(log_dir, self.config.get('LOG_FILE_NAME', DEFAULT_LOG_FILE))
         
         # PID file path (resolve placeholders if present, provide fallback)
@@ -257,6 +261,15 @@ class CrawlerOrchestrator:
         env["PYTHONPATH"] = project_root + os.pathsep + env.get("PYTHONPATH", "")
         # Set crawler mode flag
         env["CRAWLER_MODE"] = "1"
+        
+        # Get the timestamp from the orchestrator's path manager
+        # This ensures the timestamp is generated ONCE by the parent process
+        try:
+            session_timestamp = self.config._path_manager.get_timestamp()
+            env["CRAWLER_SESSION_TIMESTAMP"] = session_timestamp
+            self.logger.debug(f"Passing session timestamp to crawler: {session_timestamp}")
+        except Exception as e:
+            self.logger.error(f"Could not get session timestamp to pass to crawler: {e}")
         
         # Create the plan
         plan = CrawlerLaunchPlan(

@@ -8,10 +8,12 @@ import os
 import re
 import subprocess
 import time
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 
 import requests
 
+if TYPE_CHECKING:
+    from config.app_config import Config
 
 
 class MobSFManager:
@@ -20,9 +22,10 @@ class MobSFManager:
     of Android applications.
     """
 
-    def __init__(self, app_config: Config):
+    def __init__(self, app_config: 'Config'):
         """
-        Initialize the MobSF Manager with configuration settings
+        Initialize the MobSF Manager with configuration settings.
+        Note: This should only be instantiated when MobSF analysis is enabled.
         """
         from config.urls import ServiceURLs
         self.cfg = app_config
@@ -32,13 +35,59 @@ class MobSFManager:
             'Authorization': self.api_key
         }
         
-        # Ensure OUTPUT_DATA_DIR exists
-        output_dir = str(self.cfg.OUTPUT_DATA_DIR if hasattr(self.cfg, 'OUTPUT_DATA_DIR') else self.cfg.get('OUTPUT_DATA_DIR', 'output_data'))
-        # Use session directory for MobSF results if available
-        session_dir = self.cfg.SESSION_DIR if hasattr(self.cfg, 'SESSION_DIR') else output_dir
-        self.scan_results_dir = os.path.join(session_dir, 'mobsf_scan_results')
-        os.makedirs(self.scan_results_dir, exist_ok=True)
+        # --- MODIFICATION ---
+        # We REMOVE the path resolution from __init__
+        # It will be handled by a property method (scan_results_dir)
+        # or within the specific methods (extract_apk_from_device)
+        
+        # self.scan_results_dir = os.path.join(session_dir, 'mobsf_scan_results')
+        # os.makedirs(self.scan_results_dir, exist_ok=True)
         logging.debug(f"MobSFManager initialized with API URL: {self.api_url}")
+
+    @property
+    def scan_results_dir(self) -> str:
+        """
+        Lazily resolve the scan results directory path.
+        This ensures SESSION_DIR is resolved by the time we need it.
+        """
+        session_dir = None
+        
+        # Try 1: Use SESSION_DIR property (resolves template via SessionPathManager)
+        try:
+            # Trust the SESSION_DIR property to return the fully resolved path
+            session_dir = str(self.cfg.SESSION_DIR)
+            # A template check is only useful for a *warning*
+            if '{' in session_dir or '}' in session_dir:
+                logging.warning(f"SESSION_DIR property still contains a template: {session_dir}. Paths may be incorrect.")
+                # Don't set to None; let it use the template path if that's what was returned
+                # This makes the error more obvious (a folder named "{session_dir}")
+                # Re-thinking: No, falling back is safer than creating a literal template dir.
+                session_dir = None
+        except Exception as e:
+            logging.warning(f"Could not get SESSION_DIR property: {e}, trying fallback")
+        
+        # Try 2: Fall back to OUTPUT_DATA_DIR
+        if not session_dir:
+            try:
+                output_dir = self.cfg.OUTPUT_DATA_DIR if hasattr(self.cfg, 'OUTPUT_DATA_DIR') else self.cfg.get('OUTPUT_DATA_DIR', 'output_data')
+                session_dir = str(output_dir)
+                if '{' in session_dir or '}' in session_dir:
+                    logging.warning(f"OUTPUT_DATA_DIR also contains template: {session_dir}, using hardcoded fallback")
+                    session_dir = None
+            except Exception as e:
+                logging.warning(f"Could not get OUTPUT_DATA_DIR: {e}, using hardcoded fallback")
+        
+        # Try 3: Final hardcoded fallback
+        if not session_dir:
+            logging.error("All path resolution attempts failed, using hardcoded 'output_data' fallback for MobSF results.")
+            session_dir = 'output_data'
+        
+        # Create scan results directory
+        results_path = os.path.join(session_dir, 'mobsf_scan_results')
+        results_path = os.path.abspath(results_path) # Ensure it's an absolute path
+        os.makedirs(results_path, exist_ok=True)
+        return results_path
+
 
     def _make_api_request(self, endpoint: str, method: str = 'GET', 
                           data: Optional[Dict[str, Any]] = None, 
@@ -102,6 +151,11 @@ class MobSFManager:
         Returns:
             Path to the extracted APK file, or None if extraction failed
         """
+        # Guard: Only extract APK if MobSF analysis is enabled
+        if not self.cfg.get('ENABLE_MOBSF_ANALYSIS', False):
+            logging.warning("MobSF analysis is disabled, skipping APK extraction")
+            return None
+        
         try:
             logging.debug(f"Extracting APK for package {package_name} from connected device")
             
@@ -139,14 +193,43 @@ class MobSFManager:
             
             logging.debug(f"Found base APK path: {base_apk_path}")
 
-            # Create output directory if it doesn't exist
-            output_dir_base = str(self.cfg.OUTPUT_DATA_DIR if hasattr(self.cfg, 'OUTPUT_DATA_DIR') else self.cfg.get('OUTPUT_DATA_DIR', 'output_data'))
-            session_dir = self.cfg.SESSION_DIR if hasattr(self.cfg, 'SESSION_DIR') else output_dir_base
+            # --- MODIFIED PATH RESOLUTION ---
+            # Resolve the path *now*, not in __init__
+            session_dir = None
+            
+            # Try 1: Use SESSION_DIR property
+            try:
+                session_dir = str(self.cfg.SESSION_DIR)
+                if '{' in session_dir or '}' in session_dir:
+                    logging.warning(f"SESSION_DIR property still contains a template: {session_dir}. Fallback.")
+                    session_dir = None
+            except Exception as e:
+                logging.warning(f"Could not get SESSION_DIR property: {e}, trying fallback")
+            
+            # Try 2: Fall back to OUTPUT_DATA_DIR
+            if not session_dir:
+                try:
+                    output_dir_base = self.cfg.OUTPUT_DATA_DIR if hasattr(self.cfg, 'OUTPUT_DATA_DIR') else self.cfg.get('OUTPUT_DATA_DIR', 'output_data')
+                    session_dir = str(output_dir_base)
+                    # Check if it's still a template
+                    if '{' in session_dir or '}' in session_dir:
+                        logging.warning(f"OUTPUT_DATA_DIR also contains template: {session_dir}, using hardcoded fallback")
+                        session_dir = None
+                except Exception as e:
+                    logging.warning(f"Could not get OUTPUT_DATA_DIR: {e}, using hardcoded fallback")
+            
+            # Try 3: Final hardcoded fallback
+            if not session_dir:
+                logging.error("All path resolution attempts failed, using hardcoded 'output_data' fallback for APK extraction.")
+                session_dir = 'output_data'
+            
             output_dir = os.path.join(session_dir, 'extracted_apk')
+            output_dir = os.path.abspath(output_dir) # Ensure absolute path
             os.makedirs(output_dir, exist_ok=True)
             
             # Generate the local APK filename
             local_apk = os.path.join(output_dir, f"{package_name}.apk")
+            # --- END MODIFIED BLOCK ---
             
             # Pull the APK from the device
             logging.debug(f"Pulling APK from {base_apk_path} to {local_apk}")
@@ -261,6 +344,9 @@ class MobSFManager:
             return None
         
         if output_path is None:
+            # --- MODIFICATION ---
+            # This now calls the @property method, which resolves the path
+            # just-in-time.
             output_path = os.path.join(self.scan_results_dir, f"{file_hash}_report.pdf")
         
         try:
@@ -289,6 +375,9 @@ class MobSFManager:
             return None
         
         if output_path is None:
+            # --- MODIFICATION ---
+            # This now calls the @property method, which resolves the path
+            # just-in-time.
             output_path = os.path.join(self.scan_results_dir, f"{file_hash}_report.json")
         
         try:
@@ -327,6 +416,12 @@ class MobSFManager:
         Returns:
             Tuple of (success, scan_summary)
         """
+        # Double-check that MobSF is enabled before proceeding
+        # (This is the check I mentioned - it is correct in your original file)
+        if not self.cfg.get('ENABLE_MOBSF_ANALYSIS', False):
+            logging.warning("MobSF analysis is disabled, skipping APK extraction and scan")
+            return False, {"error": "MobSF analysis is disabled"}
+        
         # Extract APK from device
         apk_path = self.extract_apk_from_device(package_name)
         if not apk_path:
