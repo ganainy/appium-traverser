@@ -167,6 +167,10 @@ class ConfigManager(QObject):
         config_data = {}
 
         if key and key in self.main_controller.config_widgets:
+            # Skip service-managed keys - they're handled separately
+            if key in ['CRAWLER_AVAILABLE_ACTIONS', 'CRAWLER_ACTION_DECISION_PROMPT', 'CRAWLER_SYSTEM_PROMPT_TEMPLATE']:
+                return  # These are managed via services, not config
+            
             # Save only the specific key that triggered the change
             widget = self.main_controller.config_widgets[key]
             value = self._get_widget_value(key, widget)
@@ -177,6 +181,9 @@ class ConfigManager(QObject):
             for k, widget in self.main_controller.config_widgets.items():
                 # Skip UI indicator widgets that aren't actual config settings
                 if k in ['IMAGE_CONTEXT_WARNING']:
+                    continue
+                # Skip service-managed keys - they're handled separately
+                if k in ['CRAWLER_AVAILABLE_ACTIONS', 'CRAWLER_ACTION_DECISION_PROMPT', 'CRAWLER_SYSTEM_PROMPT_TEMPLATE']:
                     continue
                 value = self._get_widget_value(k, widget)
                 if value is not None:  # Skip None values (e.g., read-only QLabel widgets)
@@ -263,16 +270,27 @@ class ConfigManager(QObject):
             text = widget.toPlainText()
             if key == 'ALLOWED_EXTERNAL_PACKAGES':
                 return [line.strip() for line in text.split('\n') if line.strip()]
+            elif key == 'CRAWLER_AVAILABLE_ACTIONS':
+                # Actions are now managed via service, not config
+                # This widget is display-only, return None to skip saving
+                return None
             else:
                 return text
         return None
     
     def load_config(self):
         """Load configuration from the SQLite user config store."""
+        # Load service-managed data first
+        self._load_actions_from_service()
+        self._load_prompts_from_service()
+        
         # Try to load all config keys from Config (which uses SQLite and env)
         loaded_any = False
         for key, widget in self.main_controller.config_widgets.items():
             if key in ['IMAGE_CONTEXT_WARNING', 'ALLOWED_EXTERNAL_PACKAGES_WIDGET']:
+                continue
+            # Skip service-managed keys - they're loaded separately
+            if key in ['CRAWLER_AVAILABLE_ACTIONS', 'CRAWLER_ACTION_DECISION_PROMPT', 'CRAWLER_SYSTEM_PROMPT_TEMPLATE']:
                 continue
             value = self.config.get(key, None)
             if value is not None:
@@ -306,7 +324,18 @@ class ConfigManager(QObject):
                         if key == 'ENABLE_MOBSF_ANALYSIS':
                             logging.debug(f"Set ENABLE_MOBSF_ANALYSIS checkbox to: {bool(value)}")
                     elif isinstance(widget, QComboBox):
-                        if isinstance(value, str):
+                        if key == 'DEFAULT_MODEL_TYPE':
+                            # Handle None/empty model selection - set to "No model selected"
+                            if not value or (isinstance(value, str) and value.strip() == ''):
+                                from ui.strings import NO_MODEL_SELECTED
+                                index = widget.findText(NO_MODEL_SELECTED)
+                                if index >= 0:
+                                    widget.setCurrentIndex(index)
+                            elif isinstance(value, str):
+                                index = widget.findText(value)
+                                if index >= 0:
+                                    widget.setCurrentIndex(index)
+                        elif isinstance(value, str):
                             index = widget.findText(value)
                             if index >= 0:
                                 widget.setCurrentIndex(index)
@@ -315,6 +344,9 @@ class ConfigManager(QObject):
                     elif isinstance(widget, QTextEdit):
                         if isinstance(value, list):
                             widget.setPlainText('\n'.join(value))
+                        elif isinstance(value, dict):
+                            # For dict values (like CRAWLER_AVAILABLE_ACTIONS), format as JSON
+                            widget.setPlainText(json.dumps(value, indent=2))
                         else:
                             widget.setPlainText(str(value))
                 except (ValueError, TypeError) as e:
@@ -337,6 +369,19 @@ class ConfigManager(QObject):
         ai_provider = self.config.get('AI_PROVIDER', None)
         if ai_provider:
             UIComponents._update_model_types(ai_provider, self.main_controller.config_widgets, self)
+            # After updating model types, ensure model dropdown shows correct selection
+            model_type = self.config.get('DEFAULT_MODEL_TYPE', None)
+            model_dropdown = self.main_controller.config_widgets.get('DEFAULT_MODEL_TYPE')
+            if model_dropdown:
+                if not model_type or (isinstance(model_type, str) and model_type.strip() == ''):
+                    from ui.strings import NO_MODEL_SELECTED
+                    index = model_dropdown.findText(NO_MODEL_SELECTED)
+                    if index >= 0:
+                        model_dropdown.setCurrentIndex(index)
+                elif isinstance(model_type, str):
+                    index = model_dropdown.findText(model_type)
+                    if index >= 0:
+                        model_dropdown.setCurrentIndex(index)
         self._update_crawl_mode_inputs_state()
         if loaded_any:
             self.main_controller.log_message("Configuration loaded from SQLite successfully.", 'green')
@@ -391,7 +436,6 @@ class ConfigManager(QObject):
                     self.main_controller.config_widgets['APP_PACKAGE'].setText(package_name)
                 if 'APP_ACTIVITY' in self.main_controller.config_widgets:
                     self.main_controller.config_widgets['APP_ACTIVITY'].setText(activity_name)
-                self.main_controller.log_message(f"Selected app: {selected_data.get('app_name', '')}", 'blue')
                 
                 # Save the selected app information to config
                 self.save_config()
@@ -448,4 +492,91 @@ class ConfigManager(QObject):
                 # on QTextEdit to avoid excessive saving.
                 pass
         logging.debug("Connected widgets for auto-saving.")
+    
+    def _get_actions_service(self):
+        """Get CrawlerActionsService instance."""
+        try:
+            from cli.services.crawler_actions_service import CrawlerActionsService
+            from cli.shared.context import CLIContext
+            context = CLIContext()
+            context.config = self.config
+            return CrawlerActionsService(context)
+        except Exception as e:
+            logging.error(f"Failed to get actions service: {e}")
+            return None
+    
+    def _get_prompts_service(self):
+        """Get CrawlerPromptsService instance."""
+        try:
+            from cli.services.crawler_prompts_service import CrawlerPromptsService
+            from cli.shared.context import CLIContext
+            context = CLIContext()
+            context.config = self.config
+            return CrawlerPromptsService(context)
+        except Exception as e:
+            logging.error(f"Failed to get prompts service: {e}")
+            return None
+    
+    def _load_actions_from_service(self):
+        """Load actions from service and display in widget."""
+        if 'CRAWLER_AVAILABLE_ACTIONS' not in self.main_controller.config_widgets:
+            return
+        
+        widget = self.main_controller.config_widgets['CRAWLER_AVAILABLE_ACTIONS']
+        if not isinstance(widget, QTextEdit):
+            return
+        
+        service = self._get_actions_service()
+        if not service:
+            # Fall back to config property
+            actions_dict = self.config.CRAWLER_AVAILABLE_ACTIONS
+            if actions_dict:
+                widget.setPlainText(json.dumps(actions_dict, indent=2))
+            return
+        
+        try:
+            actions = service.get_actions()
+            if actions:
+                # Convert to dict format
+                actions_dict = {action['name']: action['description'] for action in actions}
+                widget.setPlainText(json.dumps(actions_dict, indent=2))
+            else:
+                # Fall back to config defaults
+                actions_dict = self.config.CRAWLER_AVAILABLE_ACTIONS
+                if actions_dict:
+                    widget.setPlainText(json.dumps(actions_dict, indent=2))
+        except Exception as e:
+            logging.error(f"Failed to load actions from service: {e}")
+            # Fall back to config
+            actions_dict = self.config.CRAWLER_AVAILABLE_ACTIONS
+            if actions_dict:
+                widget.setPlainText(json.dumps(actions_dict, indent=2))
+    
+    def _load_prompts_from_service(self):
+        """Load prompts from service and display in widgets."""
+        prompts_service = self._get_prompts_service()
+        if not prompts_service:
+            return
+        
+        try:
+            prompts = prompts_service.get_prompts()
+            prompts_by_name = {p['name']: p['template'] for p in prompts}
+            
+            # Load ACTION_DECISION_PROMPT
+            if 'CRAWLER_ACTION_DECISION_PROMPT' in self.main_controller.config_widgets:
+                widget = self.main_controller.config_widgets['CRAWLER_ACTION_DECISION_PROMPT']
+                if isinstance(widget, QTextEdit):
+                    prompt_text = prompts_by_name.get('ACTION_DECISION_PROMPT') or self.config.CRAWLER_ACTION_DECISION_PROMPT
+                    if prompt_text:
+                        widget.setPlainText(prompt_text)
+            
+            # Load SYSTEM_PROMPT_TEMPLATE
+            if 'CRAWLER_SYSTEM_PROMPT_TEMPLATE' in self.main_controller.config_widgets:
+                widget = self.main_controller.config_widgets['CRAWLER_SYSTEM_PROMPT_TEMPLATE']
+                if isinstance(widget, QTextEdit):
+                    prompt_text = prompts_by_name.get('SYSTEM_PROMPT_TEMPLATE') or self.config.CRAWLER_SYSTEM_PROMPT_TEMPLATE
+                    if prompt_text:
+                        widget.setPlainText(prompt_text)
+        except Exception as e:
+            logging.error(f"Failed to load prompts from service: {e}")
     

@@ -72,7 +72,10 @@ class CrawlerLoop:
             logger.debug("Flag controller created")
             
             # Wait time between actions
-            self.wait_after_action = float(config.get('WAIT_AFTER_ACTION', 2.0))
+            wait_after_action = config.get('WAIT_AFTER_ACTION')
+            if wait_after_action is None:
+                raise ValueError("WAIT_AFTER_ACTION must be set in configuration")
+            self.wait_after_action = float(wait_after_action)
             logger.debug("CrawlerLoop.__init__ completed")
         except SystemExit as e:
             print(f"SystemExit in CrawlerLoop.__init__: {e}", file=sys.stderr, flush=True)
@@ -92,7 +95,6 @@ class CrawlerLoop:
         """
         try:
             logger.debug("Initializing crawler loop...")
-            print("UI_STATUS: Initializing crawler...", flush=True)
             
             # Initialize AgentAssistant
             logger.debug("Creating AgentAssistant...")
@@ -104,7 +106,7 @@ class CrawlerLoop:
             if not self.agent_assistant._ensure_driver_connected():
                 error_msg = "Failed to connect driver - check MCP server is running"
                 logger.error(error_msg)
-                print(f"UI_STATUS: {error_msg}", flush=True)
+                print(f"STATUS: {error_msg}", flush=True)
                 return False
             
             logger.debug("Driver connected successfully")
@@ -135,7 +137,10 @@ class CrawlerLoop:
                 else:
                     try:
                         os.makedirs(log_dir, exist_ok=True)
-                        log_file = os.path.join(log_dir, self.config.get('LOG_FILE_NAME', 'crawler.log'))
+                        log_file_name = self.config.get('LOG_FILE_NAME')
+                        if not log_file_name:
+                            log_file_name = 'full.log'  # Use default from module constant if not set
+                        log_file = os.path.join(log_dir, log_file_name)
                         
                         # Add file handler to root logger if not already present
                         root_logger = logging.getLogger()
@@ -198,13 +203,12 @@ class CrawlerLoop:
             
             # Note: App launch verification is now handled by the MCP server during session initialization
             logger.debug("Crawler loop initialized successfully")
-            print("UI_STATUS: Crawler initialized", flush=True)
             return True
             
         except Exception as e:
             error_msg = f"Failed to initialize crawler loop: {e}"
             logger.error(error_msg, exc_info=True)
-            print(f"UI_STATUS: Initialization failed - {str(e)}", flush=True)
+            print(f"STATUS: Initialization failed - {str(e)}", flush=True)
             return False
     
     def check_shutdown_flag(self) -> bool:
@@ -297,7 +301,7 @@ class CrawlerLoop:
             
             # Increment step count
             self.step_count += 1
-            print(f"UI_STEP: {self.step_count}")
+            print(f"STEP: {self.step_count}")
             logger.info(f"Starting step {self.step_count}")
             
             # CRITICAL: Ensure we're in the correct app BEFORE getting screen state and making AI decisions
@@ -324,6 +328,7 @@ class CrawlerLoop:
                 return True  # Continue despite error
             
             # Get next action from AI
+            ai_decision_start = time.time()
             action_result = self.agent_assistant._get_next_action_langchain(
                 screenshot_bytes=screen_state.get("screenshot_bytes"),
                 xml_context=screen_state.get("xml_context", ""),
@@ -332,6 +337,7 @@ class CrawlerLoop:
                 current_composite_hash=self.current_composite_hash,
                 last_action_feedback=self.last_action_feedback
             )
+            ai_decision_time = time.time() - ai_decision_start  # Time in seconds
             
             if not action_result:
                 logger.warning("AI did not return a valid action")
@@ -342,11 +348,22 @@ class CrawlerLoop:
             
             # Log the action
             action_str = f"{action_data.get('action', 'unknown')} on {action_data.get('target_identifier', 'unknown')}"
-            print(f"UI_ACTION: {action_str}")
+            reasoning = action_data.get('reasoning', '')
+            print(f"ACTION: {action_str}")
+            if reasoning:
+                print(f"REASONING: {reasoning}")
+            print(f"AI_DECISION_TIME: {ai_decision_time:.3f}s")
             logger.info(f"AI decided: {action_str}")
+            if reasoning:
+                logger.info(f"AI reasoning: {reasoning}")
+            logger.info(f"AI decision time: {ai_decision_time:.3f}s")
             
-            # Execute the action
+            # Execute the action (includes element finding)
+            element_find_start = time.time()
             success = self.agent_assistant.execute_action(action_data)
+            element_find_time = time.time() - element_find_start  # Time in seconds
+            print(f"ELEMENT_FIND_TIME: {element_find_time:.3f}s")
+            logger.info(f"Element find and execution time: {element_find_time:.3f}s")
             
             if success:
                 self.last_action_feedback = "Action executed successfully"
@@ -375,7 +392,6 @@ class CrawlerLoop:
             max_steps: Maximum number of steps to run (None for unlimited)
         """
         try:
-            print("UI_STATUS: Crawler started", flush=True)
             
             # Initialize with better error handling
             try:
@@ -383,8 +399,8 @@ class CrawlerLoop:
             except Exception as init_error:
                 error_msg = f"Exception during initialization: {init_error}"
                 logger.error(error_msg, exc_info=True)
-                print(f"UI_STATUS: {error_msg}", flush=True)
-                print("UI_END: FAILED", flush=True)
+                print(f"STATUS: {error_msg}", flush=True)
+                print("END: FAILED", flush=True)
                 # Give threads time to finish before exit
                 import time
                 time.sleep(0.5)
@@ -392,14 +408,13 @@ class CrawlerLoop:
             
             if not init_success:
                 logger.error("Failed to initialize crawler loop")
-                print("UI_STATUS: Crawler initialization failed", flush=True)
-                print("UI_END: FAILED", flush=True)
+                print("STATUS: Crawler initialization failed", flush=True)
+                print("END: FAILED", flush=True)
                 # Give threads time to finish before exit
                 import time
                 time.sleep(0.5)
                 return
             
-            print("UI_STATUS: Crawler running", flush=True)
             
             # Start traffic capture if enabled
             if self.traffic_capture_manager:
@@ -451,17 +466,17 @@ class CrawlerLoop:
             
             # Cleanup
             logger.info("Crawler loop completed")
-            print("UI_STATUS: Crawler completed")
-            print("UI_END: COMPLETED")
+            print("STATUS: Crawler completed")
+            print("END: COMPLETED")
             
         except KeyboardInterrupt:
             logger.info("Crawler interrupted by user")
-            print("UI_STATUS: Crawler interrupted", flush=True)
-            print("UI_END: INTERRUPTED", flush=True)
+            print("STATUS: Crawler interrupted", flush=True)
+            print("END: INTERRUPTED", flush=True)
         except Exception as e:
             logger.error(f"Fatal error in crawler loop: {e}", exc_info=True)
-            print("UI_STATUS: Crawler error", flush=True)
-            print(f"UI_END: ERROR - {str(e)}", flush=True)
+            print("STATUS: Crawler error", flush=True)
+            print(f"END: ERROR - {str(e)}", flush=True)
         finally:
             # Stop traffic capture if it was started
             if self.traffic_capture_manager and self.traffic_capture_manager.is_capturing():

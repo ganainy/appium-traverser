@@ -14,6 +14,8 @@ This guide explains how to use the command-line interface (CLI) for the Appium T
   - [App Management](#app-management)
   - [Crawler Control](#crawler-control)
   - [Configuration](#configuration)
+  - [Actions](#actions)
+  - [Prompts](#prompts)
   - [Focus Areas (for privacy testing)](#focus-areas-for-privacy-testing)
   - [External Packages](#external-packages)
   - [Analysis and Reporting](#analysis-and-reporting)
@@ -43,6 +45,16 @@ This guide explains how to use the command-line interface (CLI) for the Appium T
 - API keys (set in environment or .env):
   - `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `OLLAMA_BASE_URL` (for AI providers)
   - `MOBSF_API_KEY`, `PCAPDROID_API_KEY` (optional, for additional features)
+
+### Virtual environment (required)
+
+This project expects you to run the CLI from a Python virtual environment. Create and activate a venv from the project root. Examples:
+
+- PowerShell (Windows):
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+```
 
 ## Installing Java
 
@@ -266,10 +278,17 @@ Start these services in separate terminals before using the CLI:
 
 ### Appium Server (port 4723)
 ```powershell
+#Run in seperate terminal and leave it running
 npx appium -p 4723 --relaxed-security
 ```
 
-Verify services: `python run_cli.py precheck-services`
+Ensure the project's virtual environment is active before running CLI commands (see "Virtual environment" under Prerequisites).
+
+```powershell
+python run_cli.py precheck-services
+```
+
+
 
 ## Quick Start
 
@@ -312,6 +331,8 @@ Verify services: `python run_cli.py precheck-services`
 
 ## CLI Commands
 
+Note: Ensure the project's virtual environment is active before running CLI commands (see "Prerequisites → Virtual environment").
+
 ### Device Management
 ```powershell
 python run_cli.py device list
@@ -349,13 +370,45 @@ python run_cli.py crawler status                                 # Show current 
 python run_cli.py config show                    # Display current configuration (optionally filter by key name)
 python run_cli.py config set MAX_CRAWL_STEPS=15  # Set configuration value (can set multiple: key1=value1 key2=value2)
 python run_cli.py config set CRAWL_MODE=time     # Set crawl mode (e.g., 'time' for time-based crawling)
+
+# With confirmation prompt
+python run_cli.py config reset
+
+# Skip confirmation
+python run_cli.py config reset --yes
+```
+
+### Actions
+
+Actions define what the crawler can do during app exploration (e.g., click, scroll, swipe). You can customize the available actions and their descriptions to guide the AI agent's decision-making.
+
+```powershell
+python run_cli.py actions list                                    # List all configured crawler actions
+python run_cli.py actions add "swipe_up" --description "Swipe up to scroll"  # Add a new action
+python run_cli.py actions edit 1 --description "Updated description"         # Edit an action by ID or name
+python run_cli.py actions remove "swipe_up"                       # Remove an action by ID or name
+```
+
+### Prompts
+
+Prompt templates control how the AI agent makes decisions during crawling. You can customize the prompts used for action decisions and system instructions to fine-tune the crawler's behavior.
+
+```powershell
+python run_cli.py prompts list                                                           # List all configured prompt templates
+python run_cli.py prompts add "ACTION_DECISION_PROMPT" --template "Your prompt template here"  # Add a new prompt template
+python run_cli.py prompts edit "ACTION_DECISION_PROMPT" --template "Updated template"          # Edit a prompt template
+python run_cli.py prompts remove "ACTION_DECISION_PROMPT"                                     # Remove a prompt template
 ```
 
 ### Focus Areas (for privacy testing)
+
+Focus areas help guide the crawler to prioritize exploring specific types of pages or content during crawling. This is particularly useful for privacy testing, where you want the crawler to actively seek out privacy-related pages (e.g., "Privacy Policy", "Settings", "Account Settings", "Data Usage") rather than just randomly exploring the app.
+
 ```powershell
-python run_cli.py focus add "Look for Privacy Policies" --priority 1  # Add a focus area that the crawler should focus on exploring related pages of (e.g., "Privacy Policy", "Settings")
+python run_cli.py focus add "Privacy Policy" --description "Look for privacy policy pages" --priority 1  # Add a focus area
 python run_cli.py focus list                                 # List all configured focus areas
-python run_cli.py focus remove <id>                          # Remove a focus area by ID or name
+python run_cli.py focus edit <id_or_name> --title "New Title" --description "Updated description"  # Edit a focus area
+python run_cli.py focus remove <id_or_name>                  # Remove a focus area by ID or name
 ```
 
 ### External Packages
@@ -384,6 +437,7 @@ The CLI supports three AI providers: **Gemini**, **OpenRouter**, and **Ollama**.
 ```powershell
 python run_cli.py --provider ollama --model "llama3.2-vision" apps scan-all
 ```
+```
 
 ### Ollama Commands
 
@@ -394,6 +448,7 @@ python run_cli.py ollama list-models             # List models (use --no-refresh
 python run_cli.py ollama select-model <index_or_name>  # Select model
 python run_cli.py ollama show-selection          # Show current selection
 python run_cli.py ollama show-model-details      # Show detailed info (vision support, etc.)
+```
 ```
 
 ### OpenRouter Commands
@@ -407,6 +462,7 @@ python run_cli.py openrouter show-selection      # Show current selection
 python run_cli.py openrouter show-model-details  # Show detailed info (pricing, vision, etc.)
 python run_cli.py openrouter configure-image-context --enable|--disable  # Configure vision
 ```
+```
 
 ### Gemini Commands
 
@@ -417,6 +473,7 @@ python run_cli.py gemini list-models             # List models (use --no-refresh
 python run_cli.py gemini select-model <index_or_name>  # Select model
 python run_cli.py gemini show-selection          # Show current selection
 python run_cli.py gemini show-model-details      # Show detailed info (vision support, token limits, etc.)
+```
 ```
 
 ### Tips
@@ -491,10 +548,7 @@ python run_cli.py gemini show-model-details      # Show detailed info (vision su
    - `video/` - Video recordings (if video recording enabled)
    - `mobsf_scan_results/` - MobSF analysis results (if MobSF analysis enabled)
 
-6. **Generate report:**
-   ```powershell
-   python run_cli.py analysis generate-pdf --target-index 1
-   ```
+
 
 ## Troubleshooting
 
@@ -527,7 +581,6 @@ python run_cli.py gemini show-model-details      # Show detailed info (vision su
 - Use `-v` or `--verbose` for detailed logging
 - Use `python run_cli.py --help` to see all available commands
 - Configuration changes persist in the database
-- Crawler can be paused/resumed during execution
 - **Traffic Capture:** Requires PCAPdroid app installed on device and `PCAPDROID_API_KEY` set (optional but recommended)
 - **Video Recording:** Uses Appium's built-in screen recording; videos are saved as MP4 files
 - **MobSF Analysis:** Requires MobSF server running and `MOBSF_API_KEY` set; runs automatically after crawl completes if enabled. See [official MobSF installation guide](https://github.com/MobSF/Mobile-Security-Framework-MobSF) for setup instructions.

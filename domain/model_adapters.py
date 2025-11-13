@@ -78,13 +78,36 @@ class GeminiAdapter(ModelAdapter):
     
     def __init__(self, api_key: str, model_name: str):
         self.api_key = api_key
-        self.model_name = model_name
+        self.original_model_name = model_name
+        self.model_name = self._normalize_model_name(model_name)
         self.model = None
         self._model_info = {
             "provider": "Google",
             "model_family": "Gemini",
             "model_name": model_name
         }
+    
+    def _normalize_model_name(self, model_name: str) -> str:
+        """Normalize the model name for Google Gemini API.
+        
+        Removes provider prefixes (e.g., 'google/') and suffixes (e.g., ':free')
+        to convert formats like 'google/gemini-flash-2.5:free' to 'gemini-flash-2.5'.
+        """
+        normalized = model_name
+        
+        # Remove provider prefix (e.g., 'google/')
+        if '/' in normalized:
+            normalized = normalized.split('/', 1)[-1]
+        
+        # Remove suffix after colon (e.g., ':free')
+        if ':' in normalized:
+            normalized = normalized.split(':', 1)[0]
+        
+        # Log if normalization occurred
+        if normalized != model_name:
+            logging.debug(f"Normalized Gemini model name: '{model_name}' -> '{normalized}'")
+        
+        return normalized
     
     def initialize(self, model_config: Dict[str, Any], safety_settings: Optional[Dict] = None) -> None:
         """Initialize the Gemini model."""
@@ -105,14 +128,14 @@ class GeminiAdapter(ModelAdapter):
                 max_output_tokens=generation_config_dict.get('max_output_tokens', 1024)
             )
             
-            # Initialize the model
+            # Initialize the model with normalized name
             self.model = GenerativeModel(
                 model_name=self.model_name,
                 generation_config=generation_config,
                 safety_settings=safety_settings
             )
             
-            logging.debug(f"Gemini model initialized: {self.model_name}")
+            logging.debug(f"Gemini model initialized: {self.original_model_name} (normalized: {self.model_name})")
             
         except Exception as e:
             logging.error(f"Failed to initialize Gemini model: {e}", exc_info=True)
@@ -743,9 +766,34 @@ def check_dependencies(provider: str) -> tuple[bool, str]:
     return True, ""  # Default case
 
 def create_model_adapter(provider: str, api_key: str, model_name: str) -> ModelAdapter:
-    """Factory function to create the appropriate model adapter."""
+    """Factory function to create the appropriate model adapter.
+    
+    Args:
+        provider: AI provider name (gemini, openrouter, ollama)
+        api_key: API key or URL for the provider
+        model_name: Model name/identifier to use
+        
+    Returns:
+        ModelAdapter instance
+        
+    Raises:
+        ValueError: If provider is unsupported or model_name is missing/invalid
+    """
     from domain.providers.enums import AIProvider
     from domain.providers.registry import ProviderRegistry
+    
+    # Validate model name
+    if not model_name or (isinstance(model_name, str) and model_name.strip() in ["", "No model selected"]):
+        # Get provider name for error message
+        provider_display = provider or "your selected provider"
+        error_msg = (
+            f"No AI model selected for {provider_display}. "
+            f"Please select a model before using AI features.\n"
+            f"To enable AI filtering:\n"
+            f"  1. Run: python run_cli.py {provider_display} list-models\n"
+            f"  2. Then: python run_cli.py {provider_display} select-model <model>"
+        )
+        raise ValueError(error_msg)
     
     # Use enum for type safety
     try:

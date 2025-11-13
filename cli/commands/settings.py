@@ -4,7 +4,7 @@ Configuration commands for CLI operations.
 This module provides CLI commands for managing application-wide settings:
 - show: Display current configuration values
 - set: Set configuration values using KEY=VALUE pairs
-- reset: Reset configuration to defaults (if implemented)
+- reset: Reset configuration to defaults (clears all stored config, actions, and prompts)
 
 These commands work with config.app_config.Config to manage user preferences
 and application settings stored in SQLite.
@@ -22,6 +22,7 @@ from cli.constants import keys as KEYS
 __all__ = [
     "ShowConfigCommand",
     "SetConfigCommand",
+    "ResetConfigCommand",
     "ConfigCommandGroup",
 ]
 
@@ -125,6 +126,70 @@ class SetConfigCommand(CommandHandler):
         )
 
 
+class ResetConfigCommand(CommandHandler):
+    """Command to reset configuration to defaults."""
+
+    @property
+    def name(self) -> str:
+        return MSG.RESET_CONFIG_CMD_NAME
+
+    @property
+    def description(self) -> str:
+        return MSG.RESET_CONFIG_CMD_DESC
+
+    def register(self, subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
+        parser = subparsers.add_parser(
+            self.name,
+            help=self.description,
+            description=self.description
+        )
+
+        parser.add_argument(
+            "--yes",
+            action="store_true",
+            help="Skip confirmation prompt"
+        )
+
+        self.add_common_arguments(parser)
+        parser.set_defaults(handler=self)
+        return parser
+
+    def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
+        # Ask for confirmation unless --yes flag is used
+        if not args.yes:
+            try:
+                response = input(MSG.RESET_CONFIG_CONFIRM_PROMPT)
+                if response.lower() not in ('yes', 'y'):
+                    return CommandResult(
+                        success=False,
+                        message=MSG.RESET_CONFIG_CANCELLED,
+                        exit_code=0
+                    )
+            except (EOFError, KeyboardInterrupt):
+                return CommandResult(
+                    success=False,
+                    message=MSG.RESET_CONFIG_CANCELLED,
+                    exit_code=0
+                )
+
+        try:
+            # Use the internal reset_settings method
+            context.config.reset_settings()
+            return CommandResult(
+                success=True,
+                message=MSG.RESET_CONFIG_SUCCESS,
+                exit_code=0
+            )
+        except Exception as e:
+            error_msg = MSG.RESET_CONFIG_FAIL.format(error=str(e))
+            context.services.get(KEYS.TELEMETRY_SERVICE).print_error(error_msg)
+            return CommandResult(
+                success=False,
+                message=error_msg,
+                exit_code=1
+            )
+
+
 class ConfigCommandGroup(CommandGroup):
     """Command group for configuration operations."""
 
@@ -139,5 +204,6 @@ class ConfigCommandGroup(CommandGroup):
         return [
             ShowConfigCommand(),
             SetConfigCommand(),
+            ResetConfigCommand(),
         ]
 

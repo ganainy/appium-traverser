@@ -97,6 +97,10 @@ MODEL_PRICING = "pricing"
 # === Focus command group ===
 FOCUS_SERVICE = "focus"
 TELEMETRY_SERVICE = "telemetry"
+# === Actions command group ===
+ACTIONS_SERVICE = "actions"
+# === Prompts command group ===
+PROMPTS_SERVICE = "prompts"
 # === Device command group ===
 DEVICE_SERVICE = "device"
 TELEMETRY_SERVICE = "telemetry"

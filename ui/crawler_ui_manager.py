@@ -347,6 +347,19 @@ class CrawlerManager(QObject):
     
     def _start_crawler_process(self):
         """Internal method to start the actual crawler process."""
+        # Check if AI model is selected
+        model_type = self.config.get('DEFAULT_MODEL_TYPE', None)
+        if not model_type or (isinstance(model_type, str) and model_type.strip() == ''):
+            self.main_controller.log_message(
+                "ERROR: No AI model selected. Please select an AI model before starting a crawl.",
+                'red'
+            )
+            self.main_controller.log_message(
+                "Use the model dropdown in the configuration panel or run: python run_cli.py <provider> select-model <model>",
+                'red'
+            )
+            return
+        
         # Check if the required dependencies are installed for the selected AI provider
         try:
             from domain.model_adapters import check_dependencies

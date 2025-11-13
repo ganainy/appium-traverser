@@ -571,22 +571,27 @@ class AppiumHelper:
         start_time = time.time()
         
         def _send():
-            element = self.find_element(selector, strategy)
+            # Re-find element right before each operation to avoid StaleElementReferenceException
+            # This ensures we always have a fresh reference to the element
             
-            # Ensure element is focused
+            # Find element and focus it
+            element = self.find_element(selector, strategy)
             try:
                 element.click()
             except Exception:
                 logger.debug('Failed to click element before sending keys, continuing...')
             
-            # Clear element if requested
+            # Clear element if requested (re-find to avoid stale reference)
             if clear_first:
                 try:
+                    element = self.find_element(selector, strategy)
                     element.clear()
                 except Exception:
                     logger.debug('Failed to clear element value, continuing...')
             
-            # Send keys
+            # Re-find element right before send_keys to ensure fresh reference
+            # This prevents StaleElementReferenceException
+            element = self.find_element(selector, strategy)
             element.send_keys(text)
             
             # Hide keyboard on mobile

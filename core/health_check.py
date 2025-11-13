@@ -40,7 +40,7 @@ VALIDATION_MESSAGES = {
     "APPIUM_SUCCESS": "is running ✅",
     "APPIUM_NOT_ACCESSIBLE": "is not accessible ❌",
     "MOBSF_WARN": "⚠️ MobSF server is not running (optional)",
-    "TARGET_APP_MISSING": "❌ No target app selected",
+    "TARGET_APP_MISSING": "❌ No target app selected (use: python run_cli.py apps select <index_or_package>)",
     "MISSING_CONFIG": "❌ Missing required configuration: {key}",
     "OLLAMA_NOT_RUNNING": "❌ Ollama service is not running",
     "OLLAMA_URL_NOT_SET": "⚠️ Ollama base URL not set (using default localhost:11434)",
@@ -54,7 +54,8 @@ VALIDATION_MESSAGES = {
     "TARGET_APP_TEMPLATE": "Target app: {package}",
     "TARGET_APP_NOT_SELECTED": "Target app: Not selected ❌",
     "OLLAMA_SERVICE": "Ollama service",
-    "MOBSF_NOT_ACCESSIBLE": " is not accessible ⚠️"
+    "MOBSF_NOT_ACCESSIBLE": " is not accessible ⚠️",
+    "AI_MODEL_NOT_SELECTED": "❌ No AI model selected. Please select a model before starting a crawl (use: python run_cli.py <provider> select-model <model>)"
 }
 
 
@@ -311,6 +312,7 @@ class ValidationService:
             all_issues.append(VALIDATION_MESSAGES["TARGET_APP_MISSING"])
         
         # Check required configuration by iterating over default constants
+        # Note: APP_PACKAGE is checked separately above with a better message
         # Note: _get_required_config_keys() already conditionally includes
         # PCAPDROID_API_KEY and MOBSF_API_KEY based on feature flags
         required_keys = self._get_required_config_keys()
@@ -478,6 +480,11 @@ class ValidationService:
             if not self.config.get('OLLAMA_BASE_URL', None):
                 warnings.append(VALIDATION_MESSAGES["OLLAMA_URL_NOT_SET"])
         
+        # Check if AI model is selected
+        model_type = self.config.get('DEFAULT_MODEL_TYPE', None)
+        if not model_type or (isinstance(model_type, str) and model_type.strip() == ''):
+            issues.append(VALIDATION_MESSAGES["AI_MODEL_NOT_SELECTED"])
+        
         return issues, warnings
     
     def check_api_keys_and_env(self) -> Tuple[List[str], List[str]]:
@@ -525,20 +532,20 @@ class ValidationService:
     def _get_required_config_keys(self) -> List[str]:
         """Get list of required configuration keys.
         
-        Note: PCAPDROID_API_KEY and MOBSF_API_KEY are optional and not included
+        Note: 
+        - APPIUM_SERVER_URL has a hardcoded default (http://127.0.0.1:4723) so it's not required
+        - PCAPDROID_API_KEY and MOBSF_API_KEY are optional and not included
         here even when features are enabled, as they should be warnings, not
         blocking issues. The crawler can run without them.
         """
         keys = [
-            "APPIUM_SERVER_URL",
-            "AI_PROVIDER",
-            "APP_PACKAGE"
+            "AI_PROVIDER"
         ]
         
-        # Note: We intentionally do NOT include PCAPDROID_API_KEY or MOBSF_API_KEY
-        # here, even when features are enabled, because these are optional features
-        # and missing keys should not block the crawler from starting.
-        # They are checked separately and added as warnings if missing.
+        # Note: We intentionally do NOT include:
+        # - APPIUM_SERVER_URL: Has hardcoded default (http://127.0.0.1:4723) in ServiceURLs.APPIUM
+        # - APP_PACKAGE: Checked separately above with a better message that includes the command
+        # - PCAPDROID_API_KEY or MOBSF_API_KEY: Optional features, checked separately as warnings
         
         return keys
     

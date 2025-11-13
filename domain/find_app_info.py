@@ -88,10 +88,7 @@ def _check_ai_filtering_prerequisites(config):
     # Determine which AI provider to use (use whatever user set in config)
     provider = config.get("AI_PROVIDER")
     if not provider:
-        print(
-            "Error: AI_PROVIDER not set in configuration. AI Filtering will be globally unavailable.",
-            file=sys.stderr,
-        )
+        
         result["enabled"] = False
         return result
     
@@ -137,11 +134,8 @@ def _check_ai_filtering_prerequisites(config):
         result["api_key_or_url"] = default_ollama_url
     
     # Validate model selection
+    # Note: Detailed error messages are provided by the model adapter factory
     if not model_type:
-        print(
-            "Error: DEFAULT_MODEL_TYPE missing in Config. AI Filtering will be globally unavailable.",
-            file=sys.stderr,
-        )
         result["enabled"] = False
         return result
     
@@ -367,6 +361,20 @@ def generate_app_info_cache():
     if not can_enable_ai_filtering:
         print(
             "Warning: AI filtering is not available. All apps will be marked with unknown health status.",
+            file=sys.stderr,
+        )
+        
+        # Show instructions on how to select a model
+        print(
+            "To enable AI filtering, select a provider and model:",
+            file=sys.stderr,
+        )
+        print(
+            "  python run_cli.py <provider> list-models  # provider: gemini, openrouter, or ollama",
+            file=sys.stderr,
+        )
+        print(
+            "  python run_cli.py <provider> select-model <model>",
             file=sys.stderr,
         )
 
@@ -639,6 +647,11 @@ Return the complete JSON classification for all {num_apps} apps now:"""
                 if names_filled > 0:
                     print(f"  ✓ Filled in {names_filled} missing app names")
                 
+            except ValueError as e:
+                # Catch model validation errors from create_model_adapter
+                # These include helpful instructions on how to select a model
+                ai_filter_error = str(e)
+                print(f"  ✗ {ai_filter_error}", file=sys.stderr)
             except json.JSONDecodeError as e:
                 ai_filter_error = f"Failed to parse AI response as JSON: {e}"
                 print(f"  ✗ {ai_filter_error}", file=sys.stderr)
@@ -673,18 +686,7 @@ Return the complete JSON classification for all {num_apps} apps now:"""
             ]
     else:
         # AI filtering prerequisites not met
-        reason = []
-        if not can_enable_ai_filtering:
-            reason.append("prerequisites check failed")
-        if not default_ai_model_name:
-            reason.append("model name not configured")
-        if not provider_api_key_or_url:
-            reason.append("API key/URL not configured")
-        
-        ai_filter_error = f"AI filtering disabled: {', '.join(reason)}"
-        print(f"  ✗ {ai_filter_error}", file=sys.stderr)
-        print(f"  All apps will be marked with unknown health status (is_health_app: null)")
-        
+        # Error messages already printed in _check_ai_filtering_prerequisites()
         # Mark all apps as unknown
         unified_apps = [
             {**app, "is_health_app": None}

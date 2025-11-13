@@ -11,40 +11,6 @@ An automated Android app testing tool powered by pluggable AI model adapters (Ge
 - **CLI Controller** - Command-line interface for automation and scripting. See [`docs/cli-user-guide.md`](docs/cli-user-guide.md:1).
 - **UI Controller** - Graphical user interface for interactive use. See [`docs/gui-user-guide.md`](docs/gui-user-guide.md:1).
 
-## Quick Start
-
-```powershell
-# 1. Install prerequisites
-npm install -g appium
-appium driver install uiautomator2
-
-# 2. Setup project
-git clone <repository-url>
-cd appium-traverser-master-arbeit
-py -3 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-
-# 3. Configure .env with API keys
- GEMINI_API_KEY=your_key
- OPENROUTER_API_KEY=your_key
- OLLAMA_BASE_URL=http://localhost:11434
-
-# 4. Start Appium server (if not already running)
-npx appium -p 4723
-
-# 5. Start crawling
-python run_cli.py apps scan-health
-python run_cli.py apps select 1
-python run_cli.py crawler start
-
-# Optional: Enable additional features
-python run_cli.py crawler start --enable-traffic-capture --enable-video-recording --enable-mobsf-analysis
-
-# OR use UI
-python run_ui.py
-```
-
 ## Features
 
 - **AI-Powered Exploration** - Multiple provider support (Gemini, Ollama, OpenRouter)
@@ -124,11 +90,11 @@ For GUI usage and interactive workflows see the GUI user guide:
 
 ## Configuration Management
 
-All preferences stored in SQLite (`config.db`). Four-layer precedence:
-1. Runtime cache
-2. SQLite database
-3. Environment variables
-4. Pydantic defaults
+Simplified two-layer configuration system:
+- **Secrets (API keys)**: Environment variables only (never stored in SQLite)
+- **Everything else**: SQLite only (int, str, bool, float values)
+
+On first launch, simple type defaults are automatically populated into SQLite from module constants. Complex types (dict, list) are excluded and remain in code only.
 
 **Environment Variables (.env):**
 ```env
@@ -138,6 +104,8 @@ OLLAMA_BASE_URL=http://localhost:11434
 MOBSF_API_KEY=your_mobsf_key
 PCAPDROID_API_KEY=your_pcapdroid_key
 ```
+
+**Note:** All non-secret configuration values are stored in SQLite (`config.db`). Secrets are read from environment variables only and never persisted to disk.
 
 **System Variables:**
 ```

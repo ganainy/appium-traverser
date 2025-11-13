@@ -29,8 +29,11 @@ class MobSFManager:
         """
         from config.urls import ServiceURLs
         self.cfg = app_config
-        self.api_key = self.cfg.get('MOBSF_API_KEY', '')
-        self.api_url = self.cfg.get('MOBSF_API_URL', ServiceURLs.MOBSF)
+        self.api_key = self.cfg.get('MOBSF_API_KEY') or ''
+        # MOBSF_API_URL must be set in configuration (no hardcoded fallback)
+        self.api_url = self.cfg.get('MOBSF_API_URL')
+        if not self.api_url:
+            raise ValueError("MOBSF_API_URL must be set in configuration")
         self.headers = {
             'Authorization': self.api_key
         }
@@ -69,8 +72,12 @@ class MobSFManager:
         # Try 2: Fall back to OUTPUT_DATA_DIR
         if not session_dir:
             try:
-                output_dir = self.cfg.OUTPUT_DATA_DIR if hasattr(self.cfg, 'OUTPUT_DATA_DIR') else self.cfg.get('OUTPUT_DATA_DIR', 'output_data')
-                session_dir = str(output_dir)
+                output_dir = self.cfg.OUTPUT_DATA_DIR if hasattr(self.cfg, 'OUTPUT_DATA_DIR') else self.cfg.get('OUTPUT_DATA_DIR')
+                if not output_dir:
+                    logging.warning("OUTPUT_DATA_DIR is not set, cannot determine session directory")
+                    session_dir = None
+                else:
+                    session_dir = str(output_dir)
                 if '{' in session_dir or '}' in session_dir:
                     logging.warning(f"OUTPUT_DATA_DIR also contains template: {session_dir}, using hardcoded fallback")
                     session_dir = None
@@ -209,8 +216,12 @@ class MobSFManager:
             # Try 2: Fall back to OUTPUT_DATA_DIR
             if not session_dir:
                 try:
-                    output_dir_base = self.cfg.OUTPUT_DATA_DIR if hasattr(self.cfg, 'OUTPUT_DATA_DIR') else self.cfg.get('OUTPUT_DATA_DIR', 'output_data')
-                    session_dir = str(output_dir_base)
+                    output_dir_base = self.cfg.OUTPUT_DATA_DIR if hasattr(self.cfg, 'OUTPUT_DATA_DIR') else self.cfg.get('OUTPUT_DATA_DIR')
+                    if not output_dir_base:
+                        logging.warning("OUTPUT_DATA_DIR is not set, cannot determine session directory")
+                        session_dir = None
+                    else:
+                        session_dir = str(output_dir_base)
                     # Check if it's still a template
                     if '{' in session_dir or '}' in session_dir:
                         logging.warning(f"OUTPUT_DATA_DIR also contains template: {session_dir}, using hardcoded fallback")

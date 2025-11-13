@@ -43,8 +43,12 @@ from cli.constants.keys import CONFIG_OUTPUT_DATA_DIR
 # --- Refactored Centralized Configuration Class ---
 class Config:
     """
-    Central configuration class with three-layer precedence:
-    user storage (SQLite) > environment > module defaults
+    Central configuration class with simplified two-layer system:
+    - Secrets: Environment variables only (API keys, sensitive data)
+    - Everything else: SQLite only (int, str, bool, float values)
+    
+    On first launch, SQLite is populated with simple defaults from module constants.
+    Module defaults are only used for initial population, not as runtime fallback.
     """
     def __init__(self, user_store: Optional[UserConfigStore] = None):
         self._defaults = type('Defaults', (), {})()  # Empty defaults object as placeholder
@@ -65,6 +69,18 @@ class Config:
         self._path_manager = SessionPathManager(self)
         # Collect default settings snapshot for to_dict() and reset_settings()
         self._default_snapshot = self._collect_default_settings()
+        # Initialize SQLite with simple defaults on first launch
+        self._user_store.initialize_simple_defaults(self._default_snapshot)
+        # Initialize ALLOWED_EXTERNAL_PACKAGES separately (it's a list, not a simple type)
+        # Check if it's already in the database, and if not, initialize it
+        # This handles both first launch and existing databases that don't have this key
+        existing_value = self._user_store.get('ALLOWED_EXTERNAL_PACKAGES')
+        if existing_value is None:
+            module_globals = globals()
+            if 'ALLOWED_EXTERNAL_PACKAGES' in module_globals:
+                allowed_packages = module_globals['ALLOWED_EXTERNAL_PACKAGES']
+                if isinstance(allowed_packages, list):
+                    self._user_store.set('ALLOWED_EXTERNAL_PACKAGES', allowed_packages)
 
     def _init_paths(self):
         # Initialize path-related attributes used across the project
@@ -101,7 +117,11 @@ class Config:
             return template
         placeholder = f"{{{CONFIG_OUTPUT_DATA_DIR}}}"
         if placeholder in template:
-            return template.replace(placeholder, self.OUTPUT_DATA_DIR or "output_data")
+            output_dir = self.OUTPUT_DATA_DIR
+            if not output_dir:
+                # If OUTPUT_DATA_DIR is not set, return None instead of using fallback
+                return None
+            return template.replace(placeholder, output_dir)
         return template
 
     def _is_secret(self, key: str) -> bool:
@@ -111,7 +131,30 @@ class Config:
         return key == upper_key and upper_key.endswith("_KEY")
 
     def get(self, key: str, default: Any = None) -> Any:
-        # Layer 1: user storage (SQLite)
+        """Get configuration value with simplified two-layer system.
+        
+        - If secret: check environment variables only
+        - If not secret: check SQLite only
+        
+        Args:
+            key: Configuration key
+            default: Default value to return if not found
+            
+        Returns:
+            Configuration value or default
+        """
+        # Check if this is a secret (API keys, etc.)
+        if self._is_secret(key):
+            # Secrets: environment variables only
+            normalized_key = key.upper()
+            env_value = self._env.get(key)
+            if env_value is None and normalized_key != key:
+                env_value = self._env.get(normalized_key)
+            if env_value is not None:
+                return env_value
+            return default
+        
+        # Non-secrets: SQLite only
         user_value = self._user_store.get(key)
         if user_value is not None and user_value != "":
             return user_value
@@ -120,20 +163,7 @@ class Config:
             alt_user_value = self._user_store.get(normalized_key)
             if alt_user_value is not None and alt_user_value != "":
                 return alt_user_value
-
-        # Layer 2: environment variables
-        env_value = self._env.get(key)
-        if env_value is None and normalized_key != key:
-            env_value = self._env.get(normalized_key)
-        if env_value is not None:
-            return env_value
-
-        # Layer 3: module defaults (fallback)
-        module = globals()
-        if key in module:
-            return module[key]
-        if normalized_key in module:
-            return module[normalized_key]
+        
         return default
 
     def to_dict(self) -> Dict[str, Any]:
@@ -227,7 +257,11 @@ class Config:
         # This is a special case that we handle directly since it's not session-based
         template = self.get("CRAWLER_PID_PATH")
         if template and f"{{{CONFIG_OUTPUT_DATA_DIR}}}" in template:
-            template = template.replace(f"{{{CONFIG_OUTPUT_DATA_DIR}}}", self.OUTPUT_DATA_DIR or "output_data")
+            output_dir = self.OUTPUT_DATA_DIR
+            if not output_dir:
+                # If OUTPUT_DATA_DIR is not set, return None instead of using fallback
+                return None
+            template = template.replace(f"{{{CONFIG_OUTPUT_DATA_DIR}}}", output_dir)
         return str(Path(template).resolve()) if template else None
 
     @property
@@ -251,6 +285,29 @@ class Config:
             return stored_list
 
         return []
+    
+    @property
+    def CRAWLER_AVAILABLE_ACTIONS(self):
+        """Return crawler actions as a dict from user store, or defaults."""
+        # Try to get from user store first
+        actions = self._user_store.get_crawler_actions_full()
+        if actions:
+            return {action["name"]: action["description"] for action in actions if action.get("enabled", True)}
+        
+        # Fall back to module default
+        return globals().get("CRAWLER_AVAILABLE_ACTIONS", {})
+    
+    @property
+    def CRAWLER_ACTION_DECISION_PROMPT(self):
+        """Return action decision prompt from user store, or None."""
+        prompt = self._user_store.get_crawler_prompt_by_name("ACTION_DECISION_PROMPT")
+        return prompt["template"] if prompt else None
+    
+    @property
+    def CRAWLER_SYSTEM_PROMPT_TEMPLATE(self):
+        """Return system prompt template from user store, or None."""
+        prompt = self._user_store.get_crawler_prompt_by_name("SYSTEM_PROMPT_TEMPLATE")
+        return prompt["template"] if prompt else None
 
     @property
     def USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY(self):
@@ -305,37 +362,99 @@ class Config:
         logging.info("Resetting configuration to defaults")
         try:
             self._user_store.reset_preferences(self._default_snapshot)
+            # Also reset ALLOWED_EXTERNAL_PACKAGES (it's a list, not in _default_snapshot)
+            module_globals = globals()
+            if 'ALLOWED_EXTERNAL_PACKAGES' in module_globals:
+                allowed_packages = module_globals['ALLOWED_EXTERNAL_PACKAGES']
+                if isinstance(allowed_packages, list):
+                    self._user_store.set('ALLOWED_EXTERNAL_PACKAGES', allowed_packages)
         except Exception:
             logging.exception("Failed to reset user preferences to defaults.")
             raise
 
     def _get_user_savable_config(self) -> Dict[str, Any]:
         """
-        Return a dictionary of configuration values intended for user-facing display
-        and persistence. This gathers module-level uppercase defaults and overlays
-        any persisted values from the user store.
+        Return a dictionary of configuration values intended for user-facing display.
+        
+        Includes all types (int, str, bool, float, dict, list) that are stored in SQLite.
+        App-specific keys (APP_PACKAGE, APP_ACTIVITY) are included but will be None/empty
+        on first launch since they're not initialized from module defaults.
+        
+        Excludes:
+        - Path templates with placeholders (e.g., "{session_dir}")
+        - Documentation constants (ACTION_DESC_*)
+        - Key constants (CONFIG_OUTPUT_DATA_DIR, etc.)
         """
         module = globals()
         result: Dict[str, Any] = {}
+        
+        # Keys to exclude (documentation or key constants)
+        excluded_keys = {
+            'CONFIG_OUTPUT_DATA_DIR',  # Key constant, not a config value
+        }
+        
+        # App-specific keys that should be empty on first launch (not initialized from module defaults)
+        app_specific_keys = {
+            'APP_PACKAGE',  # App-specific, should be set per project
+            'APP_ACTIVITY',  # App-specific, should be set per project
+        }
+        
         for k, v in module.items():
-            if k.isupper():
-                try:
-                    stored = self._user_store.get(k)
-                    if stored is not None:
-                        result[k] = stored
+            if not k.isupper():
+                continue
+            
+            # Skip excluded keys
+            if k in excluded_keys:
+                continue
+            
+            # Skip ACTION_DESC_* constants (documentation strings)
+            if k.startswith('ACTION_DESC_'):
+                continue
+            
+            # Exclude path templates with placeholders (they're resolved dynamically)
+            # But allow complex types (dict, list) even if they contain strings with placeholders
+            if isinstance(v, str) and '{' in v:
+                continue
+            
+            # Include all types: int, str, bool, float, dict, list
+            # Get from SQLite if available, otherwise use module default
+            # UserConfigStore handles JSON deserialization for complex types automatically
+            try:
+                stored = self._user_store.get(k)
+                if stored is not None and stored != "":
+                    result[k] = stored
+                else:
+                    # For app-specific keys, use None/empty on first launch instead of module default
+                    if k in app_specific_keys:
+                        result[k] = None
                     else:
                         result[k] = v
-                except Exception:
+            except Exception:
+                # For app-specific keys, use None/empty on first launch instead of module default
+                if k in app_specific_keys:
+                    result[k] = None
+                else:
                     result[k] = v
+        
         return result
 
     def _collect_default_settings(self) -> Dict[str, Any]:
+        """Collect default settings from module constants.
+        
+        Only includes simple types (int, str, bool, float) for SQLite storage.
+        Complex types (dict, list) and None are excluded.
+        
+        Returns:
+            Dictionary of simple type defaults for initial SQLite population
+        """
         module = globals()
         defaults: Dict[str, Any] = {}
         for key, value in module.items():
             if not key.isupper():
                 continue
-            if isinstance(value, (str, int, float, bool, dict, list)) or value is None:
+            # Only include simple types for SQLite storage
+            # Exclude dict, list, and None
+            if isinstance(value, (int, str, bool, float)):
                 defaults[key] = copy.deepcopy(value)
         return defaults
     
@@ -508,21 +627,23 @@ class Config:
 # ============================================================================
 # DEFAULT CONFIGURATION VALUES
 # ============================================================================
-# These are FALLBACK defaults used when no user configuration exists.
+# These defaults are used ONLY for initial SQLite population on first launch.
 # 
-# Configuration precedence (highest to lowest):
-#   1. User Store (SQLite database) - persistent user settings
-#   2. Environment variables
-#   3. These module defaults (fallback only)
+# Simplified two-layer configuration system:
+#   - Secrets (API keys): Environment variables only (never stored in SQLite)
+#   - Everything else: SQLite only (int, str, bool, float values)
+#
+# On first launch, simple type defaults (int, str, bool, float) are automatically
+# populated into SQLite. Complex types (dict, list) and None are excluded.
 #
 # IMPORTANT: These values in this file are NOT the active configuration!
 # To see actual active values at runtime, use: config.get("KEY_NAME")
 # 
-# User-facing settings are prefixed with DEFAULT_ for clarity.
+# Module defaults are NOT used as runtime fallback - only for initial population.
 # ============================================================================
 
-APP_PACKAGE = "de.deltacity.android.blutspende"
-APP_ACTIVITY = "de.deltacity.android.blutspende.activities.SplashScreenActivity"
+APP_PACKAGE = None  # App-specific, must be set by user (not initialized on first launch)
+APP_ACTIVITY = None  # App-specific, must be set by user (not initialized on first launch)
 # Package constants are now in config.package_constants
 from config.package_constants import PackageConstants
 ALLOWED_EXTERNAL_PACKAGES = PackageConstants.get_allowed_external_packages([
@@ -567,7 +688,7 @@ TARGET_DEVICE_NAME = None
 USE_COORDINATE_FALLBACK = True
 
 AI_PROVIDER = "gemini"  # Available providers: 'gemini', 'openrouter', 'ollama'
-DEFAULT_MODEL_TYPE = "google/gemini-flash-2.5:free"  # Free model from OpenRouter
+DEFAULT_MODEL_TYPE = None  # No default model - user must select a model before crawling
 ENABLE_IMAGE_CONTEXT = False
 # XML and cache constants are now in config.numeric_constants
 from config.numeric_constants import (
@@ -581,32 +702,23 @@ AI_SAFETY_SETTINGS = {}
 PROMPT_COMPACT_MODE = True
 XML_INTERACTIVE_ONLY = True
 
+# Crawler available actions (dict format: {"action_name": "description", ...})
+CRAWLER_AVAILABLE_ACTIONS = {
+    "click": "Perform a click action on the target element.",
+    "input": "Input text into the target element.",
+    "long_press": "Perform a long press action on the target element.",
+    "scroll_down": "Scroll the view downward to reveal more content below.",
+    "scroll_up": "Scroll the view upward to reveal more content above.",
+    "swipe_left": "Swipe left to navigate or reveal content on the right.",
+    "swipe_right": "Swipe right to navigate or reveal content on the left.",
+    "back": "Press the back button to return to the previous screen."
+}
+
 CRAWL_MODE = "steps"
 MAX_CRAWL_STEPS = 10
 MAX_CRAWL_DURATION_SECONDS = 600
 CONTINUE_EXISTING_RUN = False
 VISUAL_SIMILARITY_THRESHOLD = 5
-
-AVAILABLE_ACTIONS = [
-    "click",
-    "input",
-    "scroll_down",
-    "scroll_up",
-    "swipe_left",
-    "swipe_right",
-    "back",
-    "long_press",
-]
-ACTION_DESC_CLICK = "Click the specified element."
-ACTION_DESC_INPUT = "Input the provided text into the specified element."
-ACTION_DESC_SCROLL_DOWN = "Scroll the screen down to reveal more content."
-ACTION_DESC_SCROLL_UP = "Scroll the screen up to reveal previous content."
-ACTION_DESC_BACK = "Press the device's back button."
-ACTION_DESC_SWIPE_LEFT = "Swipe content from right to left (e.g., for carousels)."
-ACTION_DESC_SWIPE_RIGHT = "Swipe content from left to right (e.g., for carousels)."
-ACTION_DESC_LONG_PRESS = (
-    "Press and hold on the specified element to open contextual options or menus."
-)
 
 LONG_PRESS_MIN_DURATION_MS = 600
 
@@ -627,17 +739,6 @@ CLEANUP_DEVICE_PCAP_FILE = True
 MAX_CONSECUTIVE_NO_OP_FAILURES = 2
 # Enforce choosing different actions sooner to avoid loops
 MAX_SAME_ACTION_REPEAT = 2
-FALLBACK_ACTIONS_SEQUENCE = [
-    {"action": "scroll_down", "target_identifier": None, "input_text": None},
-    {"action": "scroll_up", "target_identifier": None, "input_text": None},
-    # Try content discovery via lateral gestures before backing out
-    {"action": "swipe_left", "target_identifier": None, "input_text": None},
-    {"action": "swipe_right", "target_identifier": None, "input_text": None},
-    # Attempt a generic long_press which can reveal contextual menus
-    {"action": "long_press", "target_identifier": None, "input_text": None},
-    # Finally, back out of the current screen if gestures did not help
-    {"action": "back", "target_identifier": None, "input_text": None},
-]
 USE_ADB_INPUT_FALLBACK = True
 
 # Safety tap configuration and toast handling defaults

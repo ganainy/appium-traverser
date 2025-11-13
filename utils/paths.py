@@ -96,7 +96,9 @@ class SessionPathManager:
 
     def _get_app_package(self) -> str:
         if not self._app_package:
-            self._app_package = self.config.get(SessionKeys.APP_PACKAGE) or "unknown.app"
+            self._app_package = self.config.get(SessionKeys.APP_PACKAGE)
+            if not self._app_package:
+                raise ValueError("APP_PACKAGE must be set in configuration")
         assert self._app_package is not None
         return self._app_package
 
@@ -157,7 +159,7 @@ class SessionPathManager:
         # Check the cached path first
         if self._session_path and self._session_path.exists():
             logger = logging.getLogger(__name__)
-            logger.warning(f"Session directory already exists at {self._session_path}. Cannot change device info. Ignoring.")
+            logger.debug(f"Session directory already exists at {self._session_path}. Cannot change device info. Ignoring.")
             return
         
         # Also check if a directory exists for the CURRENT device/app/timestamp combination
@@ -172,7 +174,7 @@ class SessionPathManager:
                 potential_path = Path(base_dir) / "sessions" / f"{current_device_id}_{app_package_safe}_{self._timestamp}"
                 if potential_path.exists():
                     logger = logging.getLogger(__name__)
-                    logger.warning(f"Session directory already exists at {potential_path}. Cannot change device info. Ignoring.")
+                    logger.debug(f"Session directory already exists at {potential_path}. Cannot change device info. Ignoring.")
                     # Update cached path to the existing one
                     self._session_path = potential_path.resolve()
                     return
@@ -207,11 +209,12 @@ class SessionPathManager:
             force_regenerate: If True, force regeneration of the path even if cached.
         """
         # Prefer device name over UDID for folder names (more readable)
-        # Fallback: UDID -> unknown_device
         # Use instance variables instead of config.get()
         device_name = self._device_name
         device_udid = self._device_udid
-        current_device_id = device_name or device_udid or "unknown_device"
+        current_device_id = device_name or device_udid
+        if not current_device_id:
+            raise ValueError("Device ID (TARGET_DEVICE_NAME or TARGET_DEVICE_UDID) must be set in configuration")
         
         # Sanitize device ID for use in file paths (replace invalid characters)
         current_device_id = re.sub(r'[^\w.-]', '_', current_device_id)
@@ -383,7 +386,9 @@ class SessionPathManager:
         """
         try:
             # 1. Get the DB template and extract the subdirectory and suffix
-            db_template = config.get(SessionKeys.DB_NAME_TEMPLATE, "")  # e.g., "{session_dir}/database/{package}_crawl_data.db"
+            db_template = config.get(SessionKeys.DB_NAME_TEMPLATE)  # e.g., "{session_dir}/database/{package}_crawl_data.db"
+            if not db_template:
+                raise ValueError("DB_NAME_TEMPLATE must be set in configuration")
             db_template_relative = db_template.replace(f"{{{SessionKeys.SESSION_DIR_KEY}}}/", "")  # "database/{package}_crawl_data.db"
 
             if SessionKeys.PACKAGE_KEY not in db_template_relative:

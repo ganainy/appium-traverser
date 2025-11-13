@@ -91,7 +91,10 @@ class AppContextManager:
 
             # Attempt to launch using start_activity with proper wait time
             target_activity = str(self.cfg.get('APP_ACTIVITY'))
-            activity_wait = float(self.cfg.get('ACTIVITY_LAUNCH_WAIT_TIME', 5.0))
+            activity_wait_value = self.cfg.get('ACTIVITY_LAUNCH_WAIT_TIME')
+            if activity_wait_value is None:
+                raise ValueError("ACTIVITY_LAUNCH_WAIT_TIME must be set in configuration")
+            activity_wait = float(activity_wait_value)
             
             if not self.driver.start_activity(target_pkg, target_activity, wait_after_launch=activity_wait):
                 self.logger.error(f"Launch attempt {attempt + 1} failed for {target_pkg}")
@@ -151,7 +154,10 @@ class AppContextManager:
             # Directly try relaunching as the state is unknown
             target_package = str(self.cfg.get('APP_PACKAGE'))
             target_activity = str(self.cfg.get('APP_ACTIVITY'))
-            activity_wait = float(self.cfg.get('ACTIVITY_LAUNCH_WAIT_TIME', 5.0))
+            activity_wait_value = self.cfg.get('ACTIVITY_LAUNCH_WAIT_TIME')
+            if activity_wait_value is None:
+                raise ValueError("ACTIVITY_LAUNCH_WAIT_TIME must be set in configuration")
+            activity_wait = float(activity_wait_value)
             
             if self.driver.start_activity(target_package, target_activity, wait_after_launch=activity_wait):
                 time.sleep(float(self.cfg.get('WAIT_AFTER_ACTION'))) # type: ignore
@@ -200,7 +206,10 @@ class AppContextManager:
             self.logger.warning(f"Back button didn't work (current: {context_after_back[0] if context_after_back else 'Unknown'}). Relaunching target application activity...")
             target_package = str(self.cfg.get('APP_PACKAGE'))
             target_activity = str(self.cfg.get('APP_ACTIVITY'))
-            activity_wait = float(self.cfg.get('ACTIVITY_LAUNCH_WAIT_TIME', 5.0))
+            activity_wait_value = self.cfg.get('ACTIVITY_LAUNCH_WAIT_TIME')
+            if activity_wait_value is None:
+                raise ValueError("ACTIVITY_LAUNCH_WAIT_TIME must be set in configuration")
+            activity_wait = float(activity_wait_value)
             
             if self.driver.start_activity(target_package, target_activity, wait_after_launch=activity_wait):
                 time.sleep(float(self.cfg.get('WAIT_AFTER_ACTION'))) # type: ignore

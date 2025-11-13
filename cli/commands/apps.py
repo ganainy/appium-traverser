@@ -285,7 +285,7 @@ class SelectAppCommand(CommandHandler):
             package = selected_app.get(PACKAGE_NAME, DEFAULT_UNKNOWN)
             return CommandResult(
                 success=True,
-                message=MSG_SELECT_APP_SUCCESS.format(name=name, package=package)
+                message=""
             )
         else:
             return CommandResult(
@@ -339,7 +339,7 @@ class ShowSelectedAppCommand(CommandHandler):
             
             return CommandResult(
                 success=True,
-                message=MSG_SELECT_APP_SUCCESS.format(name=name, package=package)
+                message=""
             )
         elif app_package:
             print(f"\n{HEADER_SELECTED_APP}")
@@ -349,7 +349,7 @@ class ShowSelectedAppCommand(CommandHandler):
             
             return CommandResult(
                 success=True,
-                message=MSG_SELECT_APP_SUCCESS.format(name=app_package, package=app_package)
+                message=""
             )
         else:
             print(MSG_NO_APP_SELECTED)

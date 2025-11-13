@@ -286,6 +286,10 @@ class UIComponents:
         "IMAGE_CROP_BARS": True,
         "IMAGE_CROP_TOP_PERCENT": True,
         "IMAGE_CROP_BOTTOM_PERCENT": True,
+        # Crawler prompt templates
+        "CRAWLER_ACTION_DECISION_PROMPT": True,
+        "CRAWLER_SYSTEM_PROMPT_TEMPLATE": True,
+        "CRAWLER_AVAILABLE_ACTIONS": True,
     }
 
     @staticmethod
@@ -868,6 +872,52 @@ class UIComponents:
         ai_layout.addRow(
             label_xml_snippet_max_len, config_widgets["XML_SNIPPET_MAX_LEN"]
         )
+
+        # Crawler Available Actions (read-only, managed via CLI: actions list/add/edit/remove)
+        config_widgets["CRAWLER_AVAILABLE_ACTIONS"] = QTextEdit()
+        config_widgets["CRAWLER_AVAILABLE_ACTIONS"].setMinimumHeight(120)
+        config_widgets["CRAWLER_AVAILABLE_ACTIONS"].setMaximumHeight(180)
+        config_widgets["CRAWLER_AVAILABLE_ACTIONS"].setReadOnly(True)  # Read-only, managed via CLI
+        label_available_actions = QLabel("Available Actions: ")
+        available_actions_tooltip = (
+            "JSON dict defining which actions the crawler can use (read-only). "
+            "Manage via CLI: 'python run_cli.py actions list/add/edit/remove'. "
+            "Format: {\"action_name\": \"description\", ...}. "
+            "Example: {\"click\": \"Click the element\", \"scroll_down\": \"Scroll down\"}"
+        )
+        label_available_actions.setToolTip(available_actions_tooltip)
+        config_widgets["CRAWLER_AVAILABLE_ACTIONS"].setToolTip(available_actions_tooltip)
+        ai_layout.addRow(label_available_actions, config_widgets["CRAWLER_AVAILABLE_ACTIONS"])
+        
+        # Crawler Action Decision Prompt (read-only, managed via CLI: prompts list/add/edit/remove)
+        config_widgets["CRAWLER_ACTION_DECISION_PROMPT"] = QTextEdit()
+        config_widgets["CRAWLER_ACTION_DECISION_PROMPT"].setMinimumHeight(120)
+        config_widgets["CRAWLER_ACTION_DECISION_PROMPT"].setMaximumHeight(180)
+        config_widgets["CRAWLER_ACTION_DECISION_PROMPT"].setReadOnly(True)  # Read-only, managed via CLI
+        label_action_prompt = QLabel("Action Decision Prompt: ")
+        action_prompt_tooltip = (
+            "Prompt template for action decisions (read-only). "
+            "Manage via CLI: 'python run_cli.py prompts list/add/edit/remove'. "
+            "Name: ACTION_DECISION_PROMPT"
+        )
+        label_action_prompt.setToolTip(action_prompt_tooltip)
+        config_widgets["CRAWLER_ACTION_DECISION_PROMPT"].setToolTip(action_prompt_tooltip)
+        ai_layout.addRow(label_action_prompt, config_widgets["CRAWLER_ACTION_DECISION_PROMPT"])
+        
+        # Crawler System Prompt Template (read-only, managed via CLI: prompts list/add/edit/remove)
+        config_widgets["CRAWLER_SYSTEM_PROMPT_TEMPLATE"] = QTextEdit()
+        config_widgets["CRAWLER_SYSTEM_PROMPT_TEMPLATE"].setMinimumHeight(120)
+        config_widgets["CRAWLER_SYSTEM_PROMPT_TEMPLATE"].setMaximumHeight(180)
+        config_widgets["CRAWLER_SYSTEM_PROMPT_TEMPLATE"].setReadOnly(True)  # Read-only, managed via CLI
+        label_system_prompt = QLabel("System Prompt Template: ")
+        system_prompt_tooltip = (
+            "System prompt template for the AI agent (read-only). "
+            "Manage via CLI: 'python run_cli.py prompts list/add/edit/remove'. "
+            "Name: SYSTEM_PROMPT_TEMPLATE"
+        )
+        label_system_prompt.setToolTip(system_prompt_tooltip)
+        config_widgets["CRAWLER_SYSTEM_PROMPT_TEMPLATE"].setToolTip(system_prompt_tooltip)
+        ai_layout.addRow(label_system_prompt, config_widgets["CRAWLER_SYSTEM_PROMPT_TEMPLATE"])
 
         layout.addRow(ai_group)
         return ai_group

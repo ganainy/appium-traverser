@@ -66,6 +66,8 @@ def run(args: Optional[List[str]] = None) -> int:
         from cli.services.openrouter_service import OpenRouterService
         from cli.services.ollama_service import OllamaService
         from cli.services.gemini_service import GeminiService
+        from cli.services.crawler_actions_service import CrawlerActionsService
+        from cli.services.crawler_prompts_service import CrawlerPromptsService
 
         context.services.register("device", DeviceService(context))
         context.services.register("app_scan", AppScanService(context))
@@ -77,6 +79,8 @@ def run(args: Optional[List[str]] = None) -> int:
         context.services.register("openrouter", OpenRouterService(context))
         context.services.register("ollama", OllamaService(context))
         context.services.register("gemini", GeminiService(context))
+        context.services.register("actions", CrawlerActionsService(context))
+        context.services.register("prompts", CrawlerPromptsService(context))
 
         # Set up signal handler for graceful shutdown (Ctrl+C)
         from core.signal_handler import setup_cli_signal_handler
@@ -114,10 +118,12 @@ def _register_commands(registry: CommandRegistry) -> None:
     # Import command modules (lazy loading to avoid circular imports)
     try:
         from cli.commands import (
+            actions,
             analysis,
             apps,
             settings,
             crawler,
+            crawler_prompts,
             device,
             focus,
             gemini,
@@ -145,6 +151,8 @@ def _register_commands(registry: CommandRegistry) -> None:
         openrouter_group = openrouter.OpenRouterCommandGroup()
         analysis_group = analysis.AnalysisCommandGroup()
         packages_group = packages.PackagesCommandGroup()
+        actions_group = actions.CrawlerActionsCommandGroup()
+        prompts_group = crawler_prompts.CrawlerPromptsCommandGroup()
 
         # Register groups instead of individual commands
         registry.add_group(config_group)
@@ -158,6 +166,8 @@ def _register_commands(registry: CommandRegistry) -> None:
         registry.add_group(openrouter_group)
         registry.add_group(analysis_group)
         registry.add_group(packages_group)
+        registry.add_group(actions_group)
+        registry.add_group(prompts_group)
 
         logging.debug(f"Registered {len(registry.groups)} groups and {len(registry.standalone_commands)} standalone commands.")
 

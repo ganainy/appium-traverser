@@ -37,7 +37,7 @@ from config.numeric_constants import (
     AI_LOG_FILENAME,
 )
 from config.urls import ServiceURLs
-from domain.prompts import JSON_OUTPUT_SCHEMA, AVAILABLE_ACTIONS, ACTION_DECISION_SYSTEM_PROMPT, CONTEXT_ANALYSIS_PROMPT, SYSTEM_PROMPT_TEMPLATE, SECOND_CALL_PROMPT
+from domain.prompts import JSON_OUTPUT_SCHEMA, get_available_actions, ACTION_DECISION_SYSTEM_PROMPT, CONTEXT_ANALYSIS_PROMPT, SYSTEM_PROMPT_TEMPLATE
 
 # Update AgentAssistant to initialize AppiumDriver with a valid Config instance
 from config.app_config import Config
@@ -292,7 +292,9 @@ class AgentAssistant:
             A Runnable chain: PromptTemplate | LLM | OutputParser
         """
         # Format the template with static values
-        action_list_str = "\n".join([f"- {action}: {desc}" for action, desc in AVAILABLE_ACTIONS.items()])
+        # Get available actions from config property (reads from database or defaults)
+        available_actions = get_available_actions(self.cfg)
+        action_list_str = "\n".join([f"- {action}: {desc}" for action, desc in available_actions.items()])
         json_output_guidance = json.dumps(JSON_OUTPUT_SCHEMA, indent=2)
         
         # Create formatted prompt string
@@ -393,7 +395,11 @@ class AgentAssistant:
             self.langchain_llm = self._create_langchain_llm_wrapper()
 
             # Create the action decision chain with proper Runnable chain
-            action_chain = self._create_prompt_chain(ACTION_DECISION_SYSTEM_PROMPT, self.langchain_llm)
+            # Use config property (reads from database or None)
+            action_decision_prompt = self.cfg.CRAWLER_ACTION_DECISION_PROMPT
+            if not action_decision_prompt:
+                action_decision_prompt = ACTION_DECISION_SYSTEM_PROMPT
+            action_chain = self._create_prompt_chain(action_decision_prompt, self.langchain_llm)
             self.action_decision_chain = ActionDecisionChain(chain=action_chain)
 
             # Create the context analysis chain with proper Runnable chain
@@ -812,9 +818,15 @@ class AgentAssistant:
     def _build_system_prompt(self, xml_context: str, previous_actions: List[str], available_actions: List[str], 
                             current_screen_visit_count: int, current_composite_hash: str, 
                             last_action_feedback: Optional[str] = None) -> str:
-        action_list_str = "\n".join([f"- {action}: {desc}" for action, desc in AVAILABLE_ACTIONS.items()])
+        # Get available actions from config property (reads from database or defaults)
+        available_actions_dict = get_available_actions(self.cfg)
+        action_list_str = "\n".join([f"- {action}: {desc}" for action, desc in available_actions_dict.items()])
         json_output_guidance = JSON_OUTPUT_SCHEMA
-        return SYSTEM_PROMPT_TEMPLATE.format(json_schema=json_output_guidance, action_list=action_list_str)
+        # Use config property (reads from database or None)
+        system_prompt_template = self.cfg.CRAWLER_SYSTEM_PROMPT_TEMPLATE
+        if not system_prompt_template:
+            system_prompt_template = SYSTEM_PROMPT_TEMPLATE
+        return system_prompt_template.format(json_schema=json_output_guidance, action_list=action_list_str)
 
 
     def _get_next_action_langchain(self, screenshot_bytes: Optional[bytes], xml_context: str, previous_actions: List[str], current_screen_visit_count: int, current_composite_hash: str, last_action_feedback: Optional[str] = None) -> Optional[Tuple[Dict[str, Any], float, int]]:

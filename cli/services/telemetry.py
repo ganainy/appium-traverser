@@ -157,7 +157,14 @@ class TelemetryService:
         for key, value in sorted(config.items()):
             if filter_key and filter_key.lower() not in key.lower():
                 continue
-            print(f"  {key}: {value}")
+            
+            # Special formatting for CRAWLER_AVAILABLE_ACTIONS
+            if key == "CRAWLER_AVAILABLE_ACTIONS" and isinstance(value, dict):
+                print(f"  {key}:")
+                for i, (action, description) in enumerate(sorted(value.items()), 1):
+                    print(f"    {i}. {action}: {description}")
+            else:
+                print(f"  {key}: {value}")
         
         print("============================")
     
