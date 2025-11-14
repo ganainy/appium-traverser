@@ -12,7 +12,7 @@ from core.crawler_config import Configuration, ConfigurationError
 from core.storage import Storage
 from core.crawler import Crawler, CrawlerSession
 from cli.services.focus_area_service import FocusAreaService
-from cli.shared.context import CLIContext
+from cli.shared.context import ApplicationContext
 from config.app_config import Config
 
 logger = logging.getLogger(__name__)
@@ -268,7 +268,7 @@ class GUICrawlerInterface:
     # --- Focus Area CRUD GUI methods ---
     def _get_focus_service(self) -> FocusAreaService:
         """Get a FocusAreaService instance."""
-        context = CLIContext()
+        context = ApplicationContext()
         context.config = Config()
         return FocusAreaService(context)
     

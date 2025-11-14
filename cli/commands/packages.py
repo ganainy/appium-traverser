@@ -7,7 +7,7 @@ import logging
 from typing import Optional
 
 from cli.commands.base import CommandGroup, CommandHandler, CommandResult
-from cli.shared.context import CLIContext
+from cli.shared.context import ApplicationContext
 from cli.constants import messages as MSG
 from cli.constants import keys as KEYS
 
@@ -40,7 +40,7 @@ class ListPackagesCommand(CommandHandler):
         parser.set_defaults(handler=self)
         return parser
     
-    def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
+    def run(self, args: argparse.Namespace, context: ApplicationContext) -> CommandResult:
         from cli.services.packages_service import PackagesService
 
         packages_service = PackagesService(context)
@@ -86,7 +86,7 @@ class AddPackageCommand(CommandHandler):
         parser.set_defaults(handler=self)
         return parser
     
-    def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
+    def run(self, args: argparse.Namespace, context: ApplicationContext) -> CommandResult:
         from cli.services.packages_service import PackagesService
 
         packages_service = PackagesService(context)
@@ -127,7 +127,7 @@ class RemovePackageCommand(CommandHandler):
         parser.set_defaults(handler=self)
         return parser
     
-    def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
+    def run(self, args: argparse.Namespace, context: ApplicationContext) -> CommandResult:
         from cli.services.packages_service import PackagesService
 
         packages_service = PackagesService(context)
@@ -169,7 +169,7 @@ class ClearPackagesCommand(CommandHandler):
         parser.set_defaults(handler=self)
         return parser
     
-    def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
+    def run(self, args: argparse.Namespace, context: ApplicationContext) -> CommandResult:
         from cli.services.packages_service import PackagesService
 
         telemetry = context.services.get(KEYS.TELEMETRY_SERVICE)

@@ -21,7 +21,7 @@ except ImportError:
     COLORAMA_AVAILABLE = False
 
 from cli.commands.base import CommandGroup, CommandHandler, CommandResult
-from cli.shared.context import CLIContext
+from cli.shared.context import ApplicationContext
 from cli.constants.keys import (
     SERVICE_APP_SCAN,
     CACHE_KEY_ALL, CACHE_KEY_HEALTH,
@@ -71,7 +71,7 @@ class BaseListAppsCommand(CommandHandler):
         parser.set_defaults(handler=self)
         return parser
     
-    def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
+    def run(self, args: argparse.Namespace, context: ApplicationContext) -> CommandResult:
         """Execute the command."""
         app_service = context.services.get(SERVICE_APP_SCAN)
         if not app_service:
@@ -170,7 +170,7 @@ class ScanAppsCommand(CommandHandler):
         parser.set_defaults(handler=self)
         return parser
 
-    def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
+    def run(self, args: argparse.Namespace, context: ApplicationContext) -> CommandResult:
         """Execute the command."""
         app_service = context.services.get(SERVICE_APP_SCAN)
         if not app_service:
@@ -255,7 +255,7 @@ class SelectAppCommand(CommandHandler):
         parser.set_defaults(handler=self)
         return parser
     
-    def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
+    def run(self, args: argparse.Namespace, context: ApplicationContext) -> CommandResult:
         """Execute the command."""
         app_service = context.services.get(SERVICE_APP_SCAN)
         if not app_service:
@@ -285,7 +285,7 @@ class SelectAppCommand(CommandHandler):
             package = selected_app.get(PACKAGE_NAME, DEFAULT_UNKNOWN)
             return CommandResult(
                 success=True,
-                message=""
+                message=MSG_SELECT_APP_SUCCESS
             )
         else:
             return CommandResult(
@@ -319,7 +319,7 @@ class ShowSelectedAppCommand(CommandHandler):
         parser.set_defaults(handler=self)
         return parser
     
-    def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
+    def run(self, args: argparse.Namespace, context: ApplicationContext) -> CommandResult:
         """Execute the command."""
         # Get configuration values directly from config
         last_selected = context.config.get_deserialized_config_value(CONFIG_LAST_SELECTED_APP)

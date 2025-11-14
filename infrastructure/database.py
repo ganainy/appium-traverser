@@ -18,12 +18,19 @@ class DatabaseManager:
 
     def __init__(self, app_config: Config):
         self.cfg = app_config
-        self.db_path = str(self.cfg.get('DB_NAME'))
+        # Use the DB_NAME property which resolves the template, not get() which returns the raw template
+        # The property uses path_manager.get_db_path() to resolve {session_dir} and {package} placeholders
+        self.db_path = str(self.cfg.DB_NAME)
         self.conn: Optional[sqlite3.Connection] = None
         self._conn_thread_ident: Optional[int] = None # Stores the thread ID that owns self.conn
 
         if not self.db_path:
             raise ValueError("DatabaseManager: DB_NAME must be configured in the Config object.")
+        
+        # Verify the path is resolved (not a template string)
+        if '{' in self.db_path or '}' in self.db_path:
+            raise ValueError(f"DatabaseManager: DB_NAME path contains unresolved template: {self.db_path}. "
+                           f"Device info may not be available yet. Ensure device info is set before initializing DatabaseManager.")
 
     def connect(self) -> bool:
         current_thread_id = threading.get_ident()
@@ -195,6 +202,8 @@ class DatabaseManager:
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
             ai_response_time_ms REAL,
             total_tokens INTEGER,
+            ai_input_prompt TEXT,
+            element_find_time_ms REAL,
             FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE,
             FOREIGN KEY (from_screen_id) REFERENCES {self.SCREENS_TABLE}(screen_id) ON DELETE SET NULL,
             FOREIGN KEY (to_screen_id) REFERENCES {self.SCREENS_TABLE}(screen_id) ON DELETE SET NULL,
@@ -227,6 +236,30 @@ class DatabaseManager:
             self._execute_sql(f"CREATE INDEX IF NOT EXISTS idx_screens_visual_hash ON {self.SCREENS_TABLE}(visual_hash);", commit=True)
             self._execute_sql(sql_create_runs, commit=True)
             self._execute_sql(sql_create_steps_log, commit=True)
+            # Add new columns if they don't exist (for existing databases)
+            # SQLite doesn't support IF NOT EXISTS for ALTER TABLE, so we catch the error
+            # Check if columns exist first to avoid error logging
+            cursor = self.conn.cursor()
+            cursor.execute("PRAGMA table_info(steps_log)")
+            existing_columns = [row[1] for row in cursor.fetchall()]
+            
+            if "ai_input_prompt" not in existing_columns:
+                try:
+                    self._execute_sql("ALTER TABLE steps_log ADD COLUMN ai_input_prompt TEXT;", commit=True)
+                except sqlite3.Error as e:
+                    # Column might have been added by another thread, ignore
+                    logging.debug(f"Column ai_input_prompt already exists or could not be added: {e}")
+            else:
+                logging.debug("Column ai_input_prompt already exists, skipping ALTER TABLE")
+            
+            if "element_find_time_ms" not in existing_columns:
+                try:
+                    self._execute_sql("ALTER TABLE steps_log ADD COLUMN element_find_time_ms REAL;", commit=True)
+                except sqlite3.Error as e:
+                    # Column might have been added by another thread, ignore
+                    logging.debug(f"Column element_find_time_ms already exists or could not be added: {e}")
+            else:
+                logging.debug("Column element_find_time_ms already exists, skipping ALTER TABLE")
             self._execute_sql(f"CREATE INDEX IF NOT EXISTS idx_steps_log_run_step ON steps_log(run_id, step_number);", commit=True)
             self._execute_sql(f"CREATE INDEX IF NOT EXISTS idx_steps_log_from_screen ON steps_log(from_screen_id);", commit=True)
             self._execute_sql(sql_create_transitions_simplified, commit=True)
@@ -311,15 +344,18 @@ class DatabaseManager:
                         to_screen_id: Optional[int], action_description: Optional[str],
                         ai_suggestion_json: Optional[str], mapped_action_json: Optional[str],
                         execution_success: bool, error_message: Optional[str],
-                        ai_response_time: Optional[float] = None, total_tokens: Optional[int] = None) -> Optional[int]:
+                        ai_response_time: Optional[float] = None, total_tokens: Optional[int] = None,
+                        ai_input_prompt: Optional[str] = None, element_find_time_ms: Optional[float] = None) -> Optional[int]:
         sql = """
         INSERT INTO steps_log
         (run_id, step_number, from_screen_id, to_screen_id, action_description,
-         ai_suggestion_json, mapped_action_json, execution_success, error_message, ai_response_time_ms, total_tokens)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ai_suggestion_json, mapped_action_json, execution_success, error_message, ai_response_time_ms, total_tokens,
+         ai_input_prompt, element_find_time_ms)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         params = (run_id, step_number, from_screen_id, to_screen_id, action_description,
-                  ai_suggestion_json, mapped_action_json, execution_success, error_message, ai_response_time, total_tokens)
+                  ai_suggestion_json, mapped_action_json, execution_success, error_message, ai_response_time, total_tokens,
+                  ai_input_prompt, element_find_time_ms)
         step_log_id = self._execute_sql(sql, params, commit=True)
         return step_log_id if isinstance(step_log_id, int) else None
 

@@ -7,7 +7,7 @@ import argparse
 from typing import List
 
 from cli.commands.base import CommandGroup, CommandHandler, CommandResult
-from cli.shared.context import CLIContext
+from cli.shared.context import ApplicationContext
 from cli.constants import messages as MSG
 from cli.constants import keys as KEY
 
@@ -36,7 +36,7 @@ class TestMobSFConnectionCommand(CommandHandler):
         parser.set_defaults(handler=self)
         return parser
     
-    def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
+    def run(self, args: argparse.Namespace, context: ApplicationContext) -> CommandResult:
         """Execute the command."""
         mobsf_service = context.services.get(KEY.MOBSF_SERVICE)
         if not mobsf_service:
@@ -93,7 +93,7 @@ class AnalyzeAppCommand(CommandHandler):
         parser.set_defaults(handler=self)
         return parser
     
-    def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
+    def run(self, args: argparse.Namespace, context: ApplicationContext) -> CommandResult:
         """Execute the command."""
         mobsf_service = context.services.get(KEY.MOBSF_SERVICE)
         if not mobsf_service:

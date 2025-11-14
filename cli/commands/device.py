@@ -9,7 +9,7 @@ from typing import List
 
 from cli.commands.base import CommandGroup, CommandHandler, CommandResult
 from cli.argument_parser import add_common_arguments
-from cli.shared.context import CLIContext
+from cli.shared.context import ApplicationContext
 from cli.constants import messages as MSG
 from cli.constants import keys as KEY
 
@@ -38,7 +38,7 @@ class ListDevicesCommand(CommandHandler):
         parser.set_defaults(handler=self)
         return parser
     
-    def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
+    def run(self, args: argparse.Namespace, context: ApplicationContext) -> CommandResult:
         """Execute the command."""
         device_service = context.services.get(KEY.DEVICE_SERVICE)
         if not device_service:
@@ -87,7 +87,7 @@ class SelectDeviceCommand(CommandHandler):
         parser.set_defaults(handler=self)
         return parser
     
-    def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
+    def run(self, args: argparse.Namespace, context: ApplicationContext) -> CommandResult:
         """Execute the command."""
         device_service = context.services.get(KEY.DEVICE_SERVICE)
         if not device_service:
@@ -146,7 +146,7 @@ class AutoSelectDeviceCommand(CommandHandler):
         parser.set_defaults(handler=self)
         return parser
     
-    def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
+    def run(self, args: argparse.Namespace, context: ApplicationContext) -> CommandResult:
         """Execute the command."""
         device_service = context.services.get(KEY.DEVICE_SERVICE)
         if not device_service:

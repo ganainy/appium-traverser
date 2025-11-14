@@ -17,7 +17,7 @@ import argparse
 from typing import List, Dict, Any, Optional
 
 from cli.commands.base import CommandGroup, CommandHandler, CommandResult
-from cli.shared.context import CLIContext
+from cli.shared.context import ApplicationContext
 from cli.constants import messages as MSG
 from cli.constants import keys as KEY
 
@@ -43,7 +43,7 @@ class ListCrawlerActionsCommand(CommandHandler):
         parser.set_defaults(handler=self)
         return parser
     
-    def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
+    def run(self, args: argparse.Namespace, context: ApplicationContext) -> CommandResult:
         """Execute the list command."""
         actions_service: Optional[Any] = context.services.get(KEY.ACTIONS_SERVICE)
         if actions_service is None:
@@ -115,7 +115,7 @@ class AddCrawlerActionCommand(CommandHandler):
         parser.set_defaults(handler=self)
         return parser
     
-    def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
+    def run(self, args: argparse.Namespace, context: ApplicationContext) -> CommandResult:
         """Execute the add command."""
         actions_service: Optional[Any] = context.services.get(KEY.ACTIONS_SERVICE)
         if actions_service is None:
@@ -202,7 +202,7 @@ class EditCrawlerActionCommand(CommandHandler):
         parser.set_defaults(handler=self)
         return parser
     
-    def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
+    def run(self, args: argparse.Namespace, context: ApplicationContext) -> CommandResult:
         """Execute the edit command."""
         actions_service: Optional[Any] = context.services.get(KEY.ACTIONS_SERVICE)
         if actions_service is None:
@@ -283,7 +283,7 @@ class RemoveCrawlerActionCommand(CommandHandler):
         parser.set_defaults(handler=self)
         return parser
     
-    def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
+    def run(self, args: argparse.Namespace, context: ApplicationContext) -> CommandResult:
         """Execute the remove command."""
         actions_service: Optional[Any] = context.services.get(KEY.ACTIONS_SERVICE)
         if actions_service is None:

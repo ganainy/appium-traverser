@@ -8,7 +8,7 @@ import argparse
 from typing import Dict, List, Optional
 
 from cli.commands.base import CommandGroup, CommandHandler, CommandResult
-from cli.shared.context import CLIContext
+from cli.shared.context import ApplicationContext
 from cli.constants import messages as MSG
 from cli.constants import keys as K
 
@@ -39,7 +39,7 @@ class RefreshModelsCommand(CommandHandler):
         parser.set_defaults(**{K.HANDLER: self})
         return parser
     
-    def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
+    def run(self, args: argparse.Namespace, context: ApplicationContext) -> CommandResult:
         gemini_service = context.services.get(K.GEMINI_SERVICE)
         if not gemini_service:
             return CommandResult(
@@ -99,7 +99,7 @@ class ListModelsCommand(CommandHandler):
         parser.set_defaults(**{K.HANDLER: self})
         return parser
     
-    def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
+    def run(self, args: argparse.Namespace, context: ApplicationContext) -> CommandResult:
         gemini_service = context.services.get(K.GEMINI_SERVICE)
         if not gemini_service:
             return CommandResult(
@@ -160,7 +160,7 @@ class SelectModelCommand(CommandHandler):
         parser.set_defaults(**{K.HANDLER: self})
         return parser
     
-    def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
+    def run(self, args: argparse.Namespace, context: ApplicationContext) -> CommandResult:
         gemini_service = context.services.get(K.GEMINI_SERVICE)
         if not gemini_service:
             return CommandResult(
@@ -215,7 +215,7 @@ class ShowSelectionCommand(CommandHandler):
         parser.set_defaults(**{K.HANDLER: self})
         return parser
     
-    def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
+    def run(self, args: argparse.Namespace, context: ApplicationContext) -> CommandResult:
         gemini_service = context.services.get(K.GEMINI_SERVICE)
         if not gemini_service:
             return CommandResult(
@@ -276,7 +276,7 @@ class ShowModelDetailsCommand(CommandHandler):
         parser.set_defaults(**{K.HANDLER: self})
         return parser
     
-    def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
+    def run(self, args: argparse.Namespace, context: ApplicationContext) -> CommandResult:
         gemini_service = context.services.get(K.GEMINI_SERVICE)
         if not gemini_service:
             return CommandResult(

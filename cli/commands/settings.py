@@ -15,7 +15,7 @@ import argparse
 from typing import List, Optional
 
 from cli.commands.base import CommandGroup, CommandHandler, CommandResult
-from cli.shared.context import CLIContext
+from cli.shared.context import ApplicationContext
 from cli.constants import messages as MSG
 from cli.constants import keys as KEYS
 
@@ -55,7 +55,7 @@ class ShowConfigCommand(CommandHandler):
         parser.set_defaults(handler=self)
         return parser
 
-    def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
+    def run(self, args: argparse.Namespace, context: ApplicationContext) -> CommandResult:
         config_data = context.config._get_user_savable_config()
         
         # Filter if needed
@@ -107,7 +107,7 @@ class SetConfigCommand(CommandHandler):
         parser.set_defaults(handler=self)
         return parser
 
-    def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
+    def run(self, args: argparse.Namespace, context: ApplicationContext) -> CommandResult:
         # Use config directly
         success = context.config.set_and_save_from_pairs(
             args.key_value_pairs, 
@@ -154,7 +154,7 @@ class ResetConfigCommand(CommandHandler):
         parser.set_defaults(handler=self)
         return parser
 
-    def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
+    def run(self, args: argparse.Namespace, context: ApplicationContext) -> CommandResult:
         # Ask for confirmation unless --yes flag is used
         if not args.yes:
             try:

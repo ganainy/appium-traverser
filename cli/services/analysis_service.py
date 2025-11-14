@@ -8,7 +8,6 @@ This service provides functionality to:
 - List runs for specific targets
 - Generate PDF analysis reports
 - Get analysis summaries with metrics
-- Run offline UI annotation
 
 The service works with SQLite databases containing crawl session data and integrates
 with the RunAnalyzer from domain.analysis_viewer for detailed analysis operations.
@@ -21,7 +20,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from cli.shared.context import CLIContext
+from cli.shared.context import ApplicationContext
 from cli.shared.command_result import CommandResult
 from cli.constants import keys as CKeys
 from cli.constants import messages as CMsg
@@ -40,7 +39,7 @@ class AnalysisService:
     and summary metrics extraction.
     """
     
-    def __init__(self, context: CLIContext):
+    def __init__(self, context: ApplicationContext):
         self.context = context
         self.logger = logging.getLogger(__name__)
         self.discovered_analysis_targets: List[Dict[str, Any]] = []
@@ -378,21 +377,85 @@ class AnalysisService:
             self.logger.error(CMsg.ERR_DATABASE_ERROR_DETERMINING_RUN_ID.format(error=e))
             return None
     
-    def run_offline_ui_annotator(self, session_dir: str, db_path: str) -> bool:
-        """Run offline UI annotator for a session.
+    def find_latest_session_dir(self) -> Optional[Tuple[str, str]]:
+        """Find the latest session directory by modification timestamp.
         
-        Args:
-            session_dir: Session directory path
-            db_path: Database file path
-            
+        Scans the sessions directory and returns the session with the greatest
+        modification timestamp along with its database path.
+        
         Returns:
-            True if successful, False otherwise
+            Tuple of (session_dir, db_path) if found, None otherwise
         """
-        # Get the AnnotationService from the context
-        annotation_service = self.context.services.get(CKeys.SERVICE_ANNOTATION)
-        if not annotation_service:
-            self.logger.error(CMsg.ERR_ANNOTATION_SERVICE_NOT_AVAILABLE)
-            return False
+        output_data_dir = self.context.config.get(CKeys.CONFIG_OUTPUT_DATA_DIR)
+        if not output_data_dir:
+            self.logger.error(CMsg.ERR_OUTPUT_DATA_DIR_NOT_CONFIGURED)
+            return None
+        
+        sessions_dir = Path(output_data_dir) / "sessions"
+        if not sessions_dir.is_dir():
+            self.logger.error(f"Sessions directory not found: {sessions_dir}")
+            return None
+        
+        candidates = []
+        session_dirs_found = []
+        for session_dir in sessions_dir.iterdir():
+            if not session_dir.is_dir():
+                continue
             
-        # Delegate to the AnnotationService
-        return annotation_service.run_offline_annotator(session_dir, db_path)
+            # Resolve to absolute path
+            session_dir = session_dir.resolve()
+            session_dirs_found.append(str(session_dir))
+            
+            # Try to parse the session directory to get target info
+            target_info = SessionPathManager.parse_session_dir(session_dir, self.context.config)
+            db_path = None
+            
+            if target_info:
+                db_path = target_info.get(CKeys.KEY_DB_PATH)
+            
+            # If parsing failed or no db_path, try to find database file directly
+            if not db_path:
+                self.logger.debug(f"Could not get db_path from parsing, trying direct search for: {session_dir}")
+                # Look for database files in common locations
+                db_candidates = []
+                # Check database subdirectory
+                db_dir = session_dir / "database"
+                if db_dir.is_dir():
+                    db_candidates.extend(db_dir.glob("*_crawl_data.db"))
+                # If no database found, we can't use this session
+                if not db_candidates:
+                    self.logger.debug(f"No database file found in {session_dir}")
+                    continue
+                # Use the first database file found
+                db_path = str(db_candidates[0])
+                
+            db_path_obj = Path(db_path)
+            if not db_path_obj.exists():
+                self.logger.debug(f"Database file does not exist: {db_path} (for session: {session_dir})")
+                continue
+            
+            # Use modification time of the session directory
+            try:
+                mtime = os.path.getmtime(session_dir)
+                candidates.append((mtime, str(session_dir), db_path))
+                self.logger.debug(f"Found valid session: {session_dir} with db: {db_path}")
+            except OSError as e:
+                self.logger.warning(f"Could not get mtime for {session_dir}: {e}")
+                continue
+        
+        if not candidates:
+            # If no sessions with databases found, log which directories were checked
+            self.logger.warning(
+                f"No valid session directories with database files found. "
+                f"Found {len(session_dirs_found)} session directories, but none contain database files. "
+                f"This may happen if the crawler run was very short and didn't write any data. "
+                f"Session directories: {session_dirs_found[:3]}{'...' if len(session_dirs_found) > 3 else ''}"
+            )
+            return None
+        
+        # Sort by modification time (descending) and return the latest
+        candidates.sort(key=lambda x: x[0], reverse=True)
+        _, session_dir, db_path = candidates[0]
+        self.logger.info(f"Selected latest session: {session_dir} (mtime: {candidates[0][0]})")
+        return (session_dir, db_path)
+    

@@ -6,14 +6,14 @@ MobSF service for managing MobSF security analysis operations.
 import logging
 from typing import Dict, Any, Optional, Tuple
 
-from cli.shared.context import CLIContext
+from cli.shared.context import ApplicationContext
 from cli.constants import keys as KEYS
 
 
 class MobSFService:
     """Service for managing MobSF security analysis operations."""
     
-    def __init__(self, context: CLIContext):
+    def __init__(self, context: ApplicationContext):
         """Initialize the MobSF service."""
         self.context = context
         self.config = context.config

@@ -19,24 +19,10 @@ import sys
 import json
 import argparse
 from typing import Optional, Dict, Any, Tuple
-
-# Ensure project root is on sys.path for absolute imports
 from pathlib import Path
-from utils.paths import find_project_root
 
-SCRIPT_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = find_project_root(SCRIPT_DIR)
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-
-try:
-    from config.app_config import Config
-    from infrastructure.database import DatabaseManager
-    from utils.utils import draw_rectangle_on_image
-except Exception:
-    from config.app_config import Config
-    from infrastructure.database import DatabaseManager
-    from utils.utils import draw_rectangle_on_image
+# DO NOT import project-specific modules at top level to avoid circular imports
+# All project imports (Config, DatabaseManager, etc.) must be inside main()
 
 
 def is_normalized_bbox(bbox: Dict[str, Any]) -> bool:
@@ -131,7 +117,7 @@ def generate_index_html(dir_path: str):
         pass
 
 
-def select_latest_run(dm: DatabaseManager) -> Optional[int]:
+def select_latest_run(dm: "DatabaseManager") -> Optional[int]:
     try:
         rows = dm.execute_query("SELECT run_id, status, start_time FROM runs ORDER BY start_time DESC LIMIT 1")
         if rows:
@@ -143,7 +129,7 @@ def select_latest_run(dm: DatabaseManager) -> Optional[int]:
 
 
 
-def find_latest_existing_session(cfg: Config) -> Optional[Tuple[str, str]]:
+def find_latest_existing_session(cfg: "Config") -> Optional[Tuple[str, str]]:
     """Find the latest session directory for the current APP_PACKAGE with an existing DB file."""
     base = getattr(cfg, 'OUTPUT_DATA_DIR', None) or 'output_data'
     app_pkg = getattr(cfg, 'APP_PACKAGE', None)
@@ -183,6 +169,33 @@ def find_latest_existing_session(cfg: Config) -> Optional[Tuple[str, str]]:
 
 
 def main():
+    # Import project-specific modules here to avoid circular import issues when run as subprocess
+    # This ensures imports happen in a clean context after the module is fully loaded
+    try:
+        # First, find project root without importing from utils.paths (to avoid circular import)
+        # Look for marker files to find project root
+        SCRIPT_DIR = Path(__file__).resolve().parent
+        markers = ["pyproject.toml", "setup.py", "setup.cfg", ".git", "README.md"]
+        PROJECT_ROOT = SCRIPT_DIR
+        for parent in [SCRIPT_DIR] + list(SCRIPT_DIR.parents):
+            if any((parent / marker).exists() for marker in markers):
+                PROJECT_ROOT = parent
+                break
+        
+        # Add project root to sys.path for absolute imports
+        if str(PROJECT_ROOT) not in sys.path:
+            sys.path.insert(0, str(PROJECT_ROOT))
+        
+        # Now import project-specific modules (after sys.path is set up)
+        from config.app_config import Config
+        from infrastructure.database import DatabaseManager
+        from utils.utils import draw_rectangle_on_image
+    except Exception as e:
+        print(f"FATAL: Could not import required modules: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc(file=sys.stderr)
+        sys.exit(1)
+    
     parser = argparse.ArgumentParser(description="Offline UI element annotator: overlays bounding boxes from DB onto screenshots.")
     parser.add_argument("--run-id", type=int, default=None, help="Run ID to annotate. If omitted, latest run is used.")
     parser.add_argument("--limit", type=int, default=0, help="Limit number of steps processed (0 = no limit).")

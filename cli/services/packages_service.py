@@ -5,13 +5,13 @@ Package management service for CLI operations.
 import logging
 from typing import List
 
-from cli.shared.context import CLIContext
+from cli.shared.context import ApplicationContext
 
 
 class PackagesService:
     """Service for managing allowed external packages operations."""
     
-    def __init__(self, context: CLIContext):
+    def __init__(self, context: ApplicationContext):
         """
         Initialize packages service.
         

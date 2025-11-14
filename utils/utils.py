@@ -7,7 +7,8 @@ import sys
 import threading
 import time
 
-from config.app_config import Config
+# Config import moved to lazy import to avoid circular dependencies
+# Import Config only when needed, not at module level
 
 import hashlib
 import shutil

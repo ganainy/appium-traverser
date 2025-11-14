@@ -181,8 +181,8 @@ AUTO_SELECT_DEVICE_FAIL = "Failed to auto-select device"
 # === Crawler command group ===
 START_CMD_NAME = "start"
 START_CMD_DESC = "Start the crawler process"
-START_CMD_ANNOTATE_ARG = "--annotate-offline-after-run"
-START_CMD_ANNOTATE_HELP = "Run offline UI annotator after crawler exits"
+START_CMD_GENERATE_PDF_ARG = "--generate-pdf"
+START_CMD_GENERATE_PDF_HELP = "Generate PDF report after crawler exits"
 START_CMD_ENABLE_TRAFFIC_CAPTURE_ARG = "--enable-traffic-capture"
 START_CMD_ENABLE_TRAFFIC_CAPTURE_HELP = "Enable PCAPdroid traffic capture during crawl"
 START_CMD_ENABLE_VIDEO_RECORDING_ARG = "--enable-video-recording"
@@ -192,7 +192,6 @@ START_CMD_ENABLE_MOBSF_ANALYSIS_HELP = "Enable automatic MobSF analysis after cr
 START_MOBSF_API_KEY_MISSING = "Cannot start crawler: --enable-mobsf-analysis is set but MOBSF_API_KEY is not configured. Please set MOBSF_API_KEY in your .env file."
 START_SUCCESS = "Crawler started successfully"
 START_FAIL = "Failed to start crawler"
-START_ANNOTATE_WILL_RUN = ". Offline annotation will run after completion."
 
 STOP_CMD_NAME = "stop"
 STOP_CMD_DESC = "Stop the crawler process"
@@ -282,6 +281,15 @@ CMD_PRINT_ANALYSIS_SUMMARY_DESC = "Print summary metrics for analysis target"
 MSG_ANALYSIS_SUMMARY_SUCCESS = "Analysis summary printed successfully"
 ERR_ANALYSIS_SUMMARY_FAILED = "Failed to print analysis summary"
 
+# GeneratePDFCommand
+CMD_GENERATE_PDF_DESC = "Generate PDF report for a session"
+CMD_GENERATE_PDF_ARG_SESSION_DIR = "--session-dir"
+CMD_GENERATE_PDF_ARG_SESSION_DIR_HELP = "Session directory path (optional, uses latest if not provided)"
+MSG_GENERATE_PDF_SUCCESS = "PDF generation completed successfully"
+ERR_GENERATE_PDF_FAILED = "PDF generation failed"
+ERR_GENERATE_PDF_NO_SESSION = "No session directory found"
+ERR_GENERATE_PDF_SESSION_NOT_FOUND = "Session directory not found: {session_dir}"
+
 # Apps command group
 APPS_GROUP_DESC = "App management commands"
 
@@ -302,6 +310,7 @@ CMD_LIST_ALL_DESC = "List ALL apps from the latest merged cache"
 # SelectAppCommand
 CMD_SELECT_DESC = "Select an app by index or name"
 ARG_HELP_APP_IDENTIFIER = "App index (1-based) or name/package"
+MSG_SELECT_APP_SUCCESS = "App selected successfully"
 ERR_SELECT_APP_FAILED = "Failed to select app: {app_identifier}"
 
 # ShowSelectedAppCommand
@@ -367,14 +376,10 @@ ERR_FAILED_TO_DETERMINE_RUN_ID = "Failed to determine a run_id for {operation} f
 ERR_DATABASE_FILE_NOT_FOUND = "Database file not found for {operation}: {db_path}"
 ERR_ERROR_DURING_OPERATION = "Error {operation} target {app_package}, run {run_id}: {error}"
 ERR_PROJECT_ROOT_NOT_CONFIGURED = "PROJECT_ROOT is not configured."
-ERR_OFFLINE_UI_ANNOTATOR_FAILED = "Offline UI annotation failed (code {returncode}). Output:\n{stdout}\n{stderr}"
-ERR_FAILED_TO_RUN_OFFLINE_UI_ANNOTATOR = "Failed to run offline UI annotator: {error}"
-ERR_ANNOTATION_SERVICE_NOT_AVAILABLE = "Annotation service not available"
 ERR_DATABASE_ERROR_DETERMINING_RUN_ID = "Database error determining run ID: {error}"
 ERR_COULD_NOT_DISCOVER_ANALYSIS_TARGETS = "Could not discover analysis targets."
 
 # Analysis service success messages
-MSG_OFFLINE_UI_ANNOTATION_COMPLETED = "Offline UI annotation completed successfully."
 MSG_USING_RUN_ID_LATEST = "Using Run ID: {run_id} (latest/only)"
 MSG_USING_RUN_ID_FIRST_AVAILABLE = "Could not determine latest run, using first available Run ID: {run_id}"
 MSG_NO_RUNS_FOUND = "No runs found in the database."

@@ -349,7 +349,7 @@ python run_cli.py apps show-selected  # Show currently selected app
 
 ### Crawler Control
 ```powershell
-python run_cli.py crawler start [--annotate-offline-after-run]  # Start the crawler (optionally run offline UI annotation after completion)
+python run_cli.py crawler start [--generate-pdf]                # Start the crawler (optionally generate PDF report after completion)
 
 # Feature flags for crawler start (all disabled by default):
 python run_cli.py crawler start --enable-traffic-capture        # Enable PCAPdroid traffic capture during crawl
@@ -358,6 +358,7 @@ python run_cli.py crawler start --enable-mobsf-analysis         # Enable automat
 
 # Combine multiple flags:
 python run_cli.py crawler start --enable-traffic-capture --enable-video-recording --enable-mobsf-analysis
+python run_cli.py crawler start --generate-pdf  # Generate PDF report after completion
 
 python run_cli.py crawler stop                                   # Stop the crawler process
 python run_cli.py crawler pause                                  # Pause the crawler process
@@ -422,10 +423,16 @@ python run_cli.py packages remove com.example.app  # Remove a package from the a
 ```powershell
 python run_cli.py analysis list-targets                      # List all available analysis targets (crawl sessions: each target is a specific crawl of an app with stored data)
 python run_cli.py analysis list-runs --target-index 1        # List all crawl runs for a specific target (by index)
-python run_cli.py analysis generate-pdf --target-index 1     # Generate a PDF analysis report for a specific session 
+python run_cli.py analysis generate-analysis-pdf --target-index 1     # Generate a PDF analysis report for a specific session (target-based)
+
+# Session-based commands (use latest session if --session-dir not provided):
+python run_cli.py analysis generate-pdf                      # Generate PDF report for latest session
+python run_cli.py analysis generate-pdf --session-dir <path> # Generate PDF report for specific session
 ```
 
 **Note:** A "target" is a crawl session (a specific instance of crawling an app), not just the app itself. Each crawl creates a new session directory named `{device_id}_{app_package}_{timestamp}`, so if you crawl the same app multiple times, you'll have multiple targets - one for each crawl session.
+
+**Session-based commands:** The `generate-pdf` command can work on a specific session directory or automatically use the latest session (by modification timestamp) if `--session-dir` is not provided.
 
 ## AI Model Management
 
@@ -526,8 +533,8 @@ python run_cli.py gemini show-model-details      # Show detailed info (vision su
    # With optional features enabled
    python run_cli.py crawler start --enable-traffic-capture --enable-video-recording --enable-mobsf-analysis
    
-   # With offline annotation after completion
-   python run_cli.py crawler start --annotate-offline-after-run
+   # With PDF generation after completion
+   python run_cli.py crawler start --generate-pdf
    ```
 
 5. **Monitor and control:**
@@ -540,7 +547,6 @@ python run_cli.py gemini show-model-details      # Show detailed info (vision su
 6. **View results:**
    Results are in: `output_data/<device_id>_<app_package>_<timestamp>/`
    - `screenshots/` - Captured screenshots
-   - `annotated_screenshots/` - AI-annotated (if enabled)
    - `database/` - Crawl data
    - `logs/` - Crawl logs
    - `reports/` - Analysis reports

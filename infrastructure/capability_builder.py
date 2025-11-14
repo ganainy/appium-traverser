@@ -125,6 +125,8 @@ def build_android_capabilities(
         'appium:ignoreHiddenApiPolicyError': True,
         'appium:allowTestPackages': True,
         'appium:allowInsecure': ['adb_shell'],
+        # Note: Performance settings (waitForIdleTimeout, snapshotMaxDepth, ignoreUnimportantViews)
+        # are applied via driver.update_settings() after session initialization, not via capabilities
         **additional_caps
     }
     

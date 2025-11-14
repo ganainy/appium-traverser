@@ -57,6 +57,10 @@ class CrawlerLoop:
             self.current_screen_visit_count = 0
             self.current_composite_hash = ""
             self.last_action_feedback: Optional[str] = None
+            self.db_manager = None
+            self.screen_state_manager = None
+            self.current_run_id: Optional[int] = None
+            self.current_from_screen_id: Optional[int] = None
             
             # Set up flag controller
             logger.debug("Setting up flag controller...")
@@ -201,6 +205,83 @@ class CrawlerLoop:
             if not self.app_context_manager.ensure_in_app():
                 logger.warning("Not in correct app context after initialization, but continuing...")
             
+            # Initialize database to ensure it exists even if no screens are saved
+            # This is important for post-run tasks like PDF generation
+            # IMPORTANT: This must be done AFTER all managers are initialized and device name is resolved
+            # to ensure the database is created in the correct session directory (not unknown_device)
+            try:
+                logger.debug("Initializing database and ensuring file exists...")
+                from infrastructure.database import DatabaseManager
+                
+                # Ensure the database path is resolved (not a template string)
+                # The DB_NAME property uses path_manager.get_db_path() which resolves the template
+                db_path = self.config.DB_NAME
+                logger.debug(f"Resolved database path: {db_path}")
+                
+                # Verify the path is resolved (not a template)
+                if '{' in db_path or '}' in db_path:
+                    logger.error(f"Database path contains unresolved template: {db_path}. Device info may not be available yet.")
+                    raise ValueError(f"Database path template not resolved: {db_path}")
+                
+                # Verify the path doesn't contain "unknown_device" (device name should be resolved by now)
+                if 'unknown_device' in db_path:
+                    logger.error(f"Database path still contains 'unknown_device': {db_path}. Device info not resolved yet.")
+                    raise ValueError(f"Database path contains 'unknown_device': device info must be resolved before database initialization.")
+                
+                db_manager = DatabaseManager(self.config)
+                
+                # Verify DatabaseManager got the resolved path
+                if db_manager.db_path != db_path:
+                    logger.warning(f"DatabaseManager path mismatch. Expected: {db_path}, Got: {db_manager.db_path}")
+                
+                # The connect() method should be responsible for
+                # creating the database and its schema if it doesn't exist.
+                # connect() will call _create_tables() automatically
+                self.db_manager = db_manager
+                if self.db_manager.connect():
+                    logger.debug("Database connection successful, tables created.")
+                    
+                    # Initialize ScreenStateManager
+                    from domain.screen_state_manager import ScreenStateManager
+                    self.screen_state_manager = ScreenStateManager(
+                        self.db_manager,
+                        self.agent_assistant.tools.driver,
+                        self.config
+                    )
+                    logger.debug("ScreenStateManager initialized successfully.")
+                    
+                    # Get or create run_id
+                    app_package = self.config.get('APP_PACKAGE')
+                    app_activity = self.config.get('APP_ACTIVITY')
+                    if app_package and app_activity:
+                        self.current_run_id = self.db_manager.get_or_create_run_info(app_package, app_activity)
+                        if self.current_run_id:
+                            # Initialize ScreenStateManager for this run
+                            self.screen_state_manager.initialize_for_run(
+                                self.current_run_id,
+                                app_package,
+                                app_activity,
+                                is_continuation=False
+                            )
+                            logger.info(f"Initialized run ID: {self.current_run_id} for {app_package}")
+                        else:
+                            logger.warning("Failed to get or create run_id")
+                    
+                    # Keep connection open for step logging during execution
+                    # Don't close it here - we'll use it during execution
+                    
+                    # Final verification
+                    if os.path.exists(db_path):
+                        logger.info(f"Database file successfully created on init: {db_path}")
+                    else:
+                        logger.error(f"Database file STILL missing after init: {db_path}")
+                else:
+                    # This is a critical failure for post-run tasks, so log as an error.
+                    logger.error("Failed to initialize database. Post-run tasks will likely fail.")
+            except Exception as e:
+                # This is also critical.
+                logger.error(f"Could not initialize database: {e}. Post-run tasks will likely fail.", exc_info=True)
+            
             # Note: App launch verification is now handled by the MCP server during session initialization
             logger.debug("Crawler loop initialized successfully")
             return True
@@ -327,6 +408,33 @@ class CrawlerLoop:
                 logger.error("Failed to get screen state")
                 return True  # Continue despite error
             
+            # Process current screen state to get screen ID
+            from_screen_id = None
+            if self.screen_state_manager and self.current_run_id:
+                try:
+                    from domain.screen_state_manager import ScreenRepresentation
+                    import utils.utils as utils
+                    
+                    # Create screen representation from current state
+                    xml_str = screen_state.get("xml_context", "")
+                    screenshot_bytes = screen_state.get("screenshot_bytes")
+                    
+                    if xml_str and screenshot_bytes:
+                        xml_hash = utils.calculate_xml_hash(xml_str)
+                        visual_hash = utils.calculate_visual_hash(screenshot_bytes)
+                        composite_hash = f"{xml_hash}_{visual_hash}"
+                        
+                        # Get screen ID from database or create new one
+                        screen_data = self.db_manager.get_screen_by_composite_hash(composite_hash)
+                        if screen_data:
+                            from_screen_id = screen_data[0]  # screen_id is first column
+                        else:
+                            # Screen not in DB yet, will be created during process_and_record_state
+                            # For now, we'll get it after processing
+                            pass
+                except Exception as e:
+                    logger.warning(f"Error getting from_screen_id: {e}")
+            
             # Get next action from AI
             ai_decision_start = time.time()
             action_result = self.agent_assistant._get_next_action_langchain(
@@ -342,9 +450,30 @@ class CrawlerLoop:
             if not action_result:
                 logger.warning("AI did not return a valid action")
                 self.last_action_feedback = "AI decision failed"
+                # Log failed step
+                if self.db_manager and self.current_run_id:
+                    try:
+                        import json
+                        self.db_manager.insert_step_log(
+                            run_id=self.current_run_id,
+                            step_number=self.step_count,
+                            from_screen_id=from_screen_id,
+                            to_screen_id=None,
+                            action_description="AI decision failed",
+                            ai_suggestion_json=None,
+                            mapped_action_json=None,
+                            execution_success=False,
+                            error_message="AI did not return a valid action",
+                            ai_response_time=ai_decision_time * 1000.0,  # Convert to ms
+                            total_tokens=None,
+                            ai_input_prompt=None,
+                            element_find_time_ms=None
+                        )
+                    except Exception as e:
+                        logger.error(f"Error logging failed step: {e}")
                 return True  # Continue despite error
             
-            action_data, confidence, token_count = action_result
+            action_data, confidence, token_count, ai_input_prompt = action_result
             
             # Log the action
             action_str = f"{action_data.get('action', 'unknown')} on {action_data.get('target_identifier', 'unknown')}"
@@ -362,8 +491,62 @@ class CrawlerLoop:
             element_find_start = time.time()
             success = self.agent_assistant.execute_action(action_data)
             element_find_time = time.time() - element_find_start  # Time in seconds
+            element_find_time_ms = element_find_time * 1000.0  # Convert to milliseconds
             print(f"ELEMENT_FIND_TIME: {element_find_time:.3f}s")
             logger.info(f"Element find and execution time: {element_find_time:.3f}s")
+            
+            # Get to_screen_id after action execution
+            to_screen_id = None
+            if success and self.screen_state_manager and self.current_run_id:
+                try:
+                    # Get new screen state after action
+                    new_screen_state = self.get_screen_state()
+                    if new_screen_state:
+                        from domain.screen_state_manager import ScreenRepresentation
+                        import utils.utils as utils
+                        
+                        xml_str = new_screen_state.get("xml_context", "")
+                        screenshot_bytes = new_screen_state.get("screenshot_bytes")
+                        
+                        if xml_str and screenshot_bytes:
+                            xml_hash = utils.calculate_xml_hash(xml_str)
+                            visual_hash = utils.calculate_visual_hash(screenshot_bytes)
+                            composite_hash = f"{xml_hash}_{visual_hash}"
+                            
+                            # Get screen ID from database
+                            screen_data = self.db_manager.get_screen_by_composite_hash(composite_hash)
+                            if screen_data:
+                                to_screen_id = screen_data[0]
+                except Exception as e:
+                    logger.warning(f"Error getting to_screen_id: {e}")
+            
+            # Log step to database
+            if self.db_manager and self.current_run_id:
+                try:
+                    import json
+                    ai_suggestion_json = json.dumps(action_data) if action_data else None
+                    mapped_action_json = json.dumps(action_data) if action_data else None
+                    action_description = action_str
+                    error_message = None if success else "Action execution failed"
+                    
+                    self.db_manager.insert_step_log(
+                        run_id=self.current_run_id,
+                        step_number=self.step_count,
+                        from_screen_id=from_screen_id,
+                        to_screen_id=to_screen_id,
+                        action_description=action_description,
+                        ai_suggestion_json=ai_suggestion_json,
+                        mapped_action_json=mapped_action_json,
+                        execution_success=success,
+                        error_message=error_message,
+                        ai_response_time=ai_decision_time * 1000.0,  # Convert to ms
+                        total_tokens=token_count if token_count else None,
+                        ai_input_prompt=ai_input_prompt,
+                        element_find_time_ms=element_find_time_ms
+                    )
+                    logger.debug(f"Logged step {self.step_count} to database")
+                except Exception as e:
+                    logger.error(f"Error logging step to database: {e}", exc_info=True)
             
             if success:
                 self.last_action_feedback = "Action executed successfully"
@@ -400,7 +583,6 @@ class CrawlerLoop:
                 error_msg = f"Exception during initialization: {init_error}"
                 logger.error(error_msg, exc_info=True)
                 print(f"STATUS: {error_msg}", flush=True)
-                print("END: FAILED", flush=True)
                 # Give threads time to finish before exit
                 import time
                 time.sleep(0.5)
@@ -409,7 +591,6 @@ class CrawlerLoop:
             if not init_success:
                 logger.error("Failed to initialize crawler loop")
                 print("STATUS: Crawler initialization failed", flush=True)
-                print("END: FAILED", flush=True)
                 # Give threads time to finish before exit
                 import time
                 time.sleep(0.5)
@@ -464,19 +645,60 @@ class CrawlerLoop:
                 if not should_continue:
                     break
             
+            # Update run status to COMPLETED
+            if self.db_manager and self.current_run_id:
+                try:
+                    from datetime import datetime
+                    end_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    self.db_manager.update_run_status(self.current_run_id, "COMPLETED", end_time)
+                    logger.info(f"Updated run {self.current_run_id} status to COMPLETED")
+                except Exception as e:
+                    logger.error(f"Error updating run status: {e}")
+            
+            # Close database connection
+            if self.db_manager:
+                try:
+                    self.db_manager.close()
+                    logger.debug("Database connection closed")
+                except Exception as e:
+                    logger.warning(f"Error closing database: {e}")
+            
             # Cleanup
             logger.info("Crawler loop completed")
             print("STATUS: Crawler completed")
-            print("END: COMPLETED")
             
         except KeyboardInterrupt:
             logger.info("Crawler interrupted by user")
+            # Update run status to INTERRUPTED
+            if self.db_manager and self.current_run_id:
+                try:
+                    from datetime import datetime
+                    end_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    self.db_manager.update_run_status(self.current_run_id, "INTERRUPTED", end_time)
+                except Exception as e:
+                    logger.error(f"Error updating run status: {e}")
+            if self.db_manager:
+                try:
+                    self.db_manager.close()
+                except Exception:
+                    pass
             print("STATUS: Crawler interrupted", flush=True)
-            print("END: INTERRUPTED", flush=True)
         except Exception as e:
             logger.error(f"Fatal error in crawler loop: {e}", exc_info=True)
+            # Update run status to FAILED
+            if self.db_manager and self.current_run_id:
+                try:
+                    from datetime import datetime
+                    end_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    self.db_manager.update_run_status(self.current_run_id, "FAILED", end_time)
+                except Exception as e:
+                    logger.error(f"Error updating run status: {e}")
+            if self.db_manager:
+                try:
+                    self.db_manager.close()
+                except Exception:
+                    pass
             print("STATUS: Crawler error", flush=True)
-            print(f"END: ERROR - {str(e)}", flush=True)
         finally:
             # Stop traffic capture if it was started
             if self.traffic_capture_manager and self.traffic_capture_manager.is_capturing():

@@ -6,7 +6,7 @@ Ollama service for managing AI model selection and metadata.
 import logging
 from typing import Dict, List, Optional, Tuple
 
-from cli.shared.context import CLIContext
+from cli.shared.context import ApplicationContext
 from cli.constants import keys as K
 from cli.constants import messages as MSG
 
@@ -14,7 +14,7 @@ from cli.constants import messages as MSG
 class OllamaService:
     """Service for managing Ollama AI models."""
     
-    def __init__(self, context: CLIContext):
+    def __init__(self, context: ApplicationContext):
         self.context = context
         self.logger = logging.getLogger(__name__)
     

@@ -16,7 +16,7 @@ from core.crawler_config import Configuration, ConfigurationError
 from core.crawler import Crawler, CrawlerSession
 from core.storage import Storage
 from cli.services.focus_area_service import FocusAreaService
-from cli.shared.context import CLIContext
+from cli.shared.context import ApplicationContext
 from config.app_config import Config
 
 logger = logging.getLogger(__name__)
@@ -132,7 +132,6 @@ class CLICrawlerInterface:
                     # Complete the session
                     logger.info("FIX: Completing simulated crawling")
                     print("UI_STATUS: Crawling simulation completed")
-                    print("UI_END: COMPLETED")
                     
                     self.current_session.complete()
                     self.crawler.storage.save_session(self.current_session)
@@ -339,7 +338,7 @@ class CLICrawlerInterface:
     # --- Focus Area CRUD CLI methods ---
     def _get_focus_service(self) -> FocusAreaService:
         """Get a FocusAreaService instance."""
-        context = CLIContext()
+        context = ApplicationContext()
         context.config = Config()
         return FocusAreaService(context)
     

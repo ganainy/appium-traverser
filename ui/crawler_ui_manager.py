@@ -140,16 +140,9 @@ class CrawlerManager(QObject):
     
     def _on_end_callback(self, end_status: str):
         """Handle end callback from orchestrator."""
+        # Log the status but don't play audio here - let handle_process_finished handle it
+        # This callback is just for logging purposes, not for determining completion
         self.main_controller.log_message(f"Final status: {end_status}", "blue")
-        # Play audio based on final status content
-        try:
-            if hasattr(self.main_controller, '_audio_alert'):
-                if end_status.startswith('COMPLETED'):
-                    self.main_controller._audio_alert('finish')
-                else:
-                    self.main_controller._audio_alert('error')
-        except Exception:
-            pass
     
     def _on_log_callback(self, message: str):
         """Handle log callback from orchestrator."""
@@ -578,10 +571,16 @@ class CrawlerManager(QObject):
         except Exception:
             pass
 
-        # Play audio alert on normal finish (single beep)
+        # Play audio alert based on exit status and exit code
+        # This is the primary mechanism for detecting crawler completion
         try:
-            if exit_status == QProcess.ExitStatus.NormalExit and hasattr(self.main_controller, '_audio_alert'):
-                self.main_controller._audio_alert('finish')
+            if hasattr(self.main_controller, '_audio_alert'):
+                # Success: Normal exit with exit code 0
+                if exit_status == QProcess.ExitStatus.NormalExit and exit_code == 0:
+                    self.main_controller._audio_alert('finish')
+                # Error: Crash or non-zero exit code
+                else:
+                    self.main_controller._audio_alert('error')
         except Exception:
             pass
 
@@ -717,20 +716,13 @@ class CrawlerManager(QObject):
                 self.main_controller.status_label.setText(f"Status: {status_text}")
 
             # Check for UI_END_PREFIX:final_status
+            # Note: Audio alerts are handled by handle_process_finished based on exit code/status
+            # This is just for logging purposes
             end_match = re.search(r'UI_END:(.*?)($|\n)', output)
             if end_match:
                 final_status = end_match.group(1).strip()
                 # Log final status line for visibility
                 self.main_controller.log_message(f"Final status: {final_status}", 'blue')
-                # Play audio based on final status content
-                try:
-                    if hasattr(self.main_controller, '_audio_alert'):
-                        if final_status.startswith('COMPLETED'):
-                            self.main_controller._audio_alert('finish')
-                        else:
-                            self.main_controller._audio_alert('error')
-                except Exception:
-                    pass
                 
             # Check for UI_FOCUS output lines
             focus_match = re.search(r'UI_FOCUS:(.*?)($|\n)', output)

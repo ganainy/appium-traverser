@@ -10,7 +10,7 @@ from typing import Dict, List, Optional, Tuple
 
 from cli.constants import keys as KEYS
 from cli.constants import messages as MSG
-from cli.shared.context import CLIContext
+from cli.shared.context import ApplicationContext
 from cli.shared.service_names import DATABASE_SERVICE
 
 

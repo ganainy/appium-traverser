@@ -497,8 +497,8 @@ class ConfigManager(QObject):
         """Get CrawlerActionsService instance."""
         try:
             from cli.services.crawler_actions_service import CrawlerActionsService
-            from cli.shared.context import CLIContext
-            context = CLIContext()
+            from cli.shared.context import ApplicationContext
+            context = ApplicationContext()
             context.config = self.config
             return CrawlerActionsService(context)
         except Exception as e:
@@ -509,8 +509,8 @@ class ConfigManager(QObject):
         """Get CrawlerPromptsService instance."""
         try:
             from cli.services.crawler_prompts_service import CrawlerPromptsService
-            from cli.shared.context import CLIContext
-            context = CLIContext()
+            from cli.shared.context import ApplicationContext
+            context = ApplicationContext()
             context.config = self.config
             return CrawlerPromptsService(context)
         except Exception as e:

@@ -8,7 +8,7 @@ import argparse
 from typing import List
 
 from cli.commands.base import CommandGroup, CommandHandler, CommandResult
-from cli.shared.context import CLIContext
+from cli.shared.context import ApplicationContext
 from cli.constants import messages as MSG
 from cli.constants import keys as KEY
 
@@ -35,9 +35,9 @@ class StartCrawlerCommand(CommandHandler):
         )
         self.add_common_arguments(parser)
         parser.add_argument(
-            MSG.START_CMD_ANNOTATE_ARG,
+            MSG.START_CMD_GENERATE_PDF_ARG,
             action="store_true",
-            help=MSG.START_CMD_ANNOTATE_HELP
+            help=MSG.START_CMD_GENERATE_PDF_HELP
         )
         parser.add_argument(
             MSG.START_CMD_ENABLE_TRAFFIC_CAPTURE_ARG,
@@ -57,7 +57,7 @@ class StartCrawlerCommand(CommandHandler):
         parser.set_defaults(handler=self)
         return parser
     
-    def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
+    def run(self, args: argparse.Namespace, context: ApplicationContext) -> CommandResult:
         """Execute the command."""
         crawler_service = context.services.get(KEY.CRAWLER_SERVICE)
         if not crawler_service:
@@ -103,15 +103,17 @@ class StartCrawlerCommand(CommandHandler):
             # Default: disabled (overrides config if it's enabled)
             feature_flags['ENABLE_MOBSF_ANALYSIS'] = False
 
+        # Get generate_pdf flag (argparse converts --generate-pdf to generate_pdf)
+        generate_pdf_after_run = getattr(args, 'generate_pdf', False)
+        
         success = crawler_service.start_crawler(
-            annotate_after_run=args.annotate_offline_after_run,
+            generate_pdf_after_run=generate_pdf_after_run,
             feature_flags=feature_flags
         )
 
         if success:
             result_msg = MSG.START_SUCCESS
-            if args.annotate_offline_after_run:
-                result_msg += MSG.START_ANNOTATE_WILL_RUN
+            
             return CommandResult(success=True, message=result_msg)
         else:
             return CommandResult(
@@ -145,7 +147,7 @@ class StopCrawlerCommand(CommandHandler):
         parser.set_defaults(handler=self)
         return parser
     
-    def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
+    def run(self, args: argparse.Namespace, context: ApplicationContext) -> CommandResult:
         """Execute the command."""
         crawler_service = context.services.get(KEY.CRAWLER_SERVICE)
         if not crawler_service:
@@ -194,7 +196,7 @@ class PauseCrawlerCommand(CommandHandler):
         parser.set_defaults(handler=self)
         return parser
     
-    def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
+    def run(self, args: argparse.Namespace, context: ApplicationContext) -> CommandResult:
         """Execute the command."""
         crawler_service = context.services.get(KEY.CRAWLER_SERVICE)
         if not crawler_service:
@@ -243,7 +245,7 @@ class ResumeCrawlerCommand(CommandHandler):
         parser.set_defaults(handler=self)
         return parser
     
-    def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
+    def run(self, args: argparse.Namespace, context: ApplicationContext) -> CommandResult:
         """Execute the command."""
         crawler_service = context.services.get(KEY.CRAWLER_SERVICE)
         if not crawler_service:
@@ -292,7 +294,7 @@ class StatusCrawlerCommand(CommandHandler):
         parser.set_defaults(handler=self)
         return parser
     
-    def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
+    def run(self, args: argparse.Namespace, context: ApplicationContext) -> CommandResult:
         """Execute the command."""
         crawler_service = context.services.get(KEY.CRAWLER_SERVICE)
         if not crawler_service:

@@ -17,7 +17,7 @@ import argparse
 from typing import List, Dict, Any, Optional
 
 from cli.commands.base import CommandGroup, CommandHandler, CommandResult
-from cli.shared.context import CLIContext
+from cli.shared.context import ApplicationContext
 from cli.constants import messages as MSG
 from cli.constants import keys as KEY
 
@@ -43,7 +43,7 @@ class ListCrawlerPromptsCommand(CommandHandler):
         parser.set_defaults(handler=self)
         return parser
     
-    def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
+    def run(self, args: argparse.Namespace, context: ApplicationContext) -> CommandResult:
         """Execute the list command."""
         prompts_service: Optional[Any] = context.services.get(KEY.PROMPTS_SERVICE)
         if prompts_service is None:
@@ -123,7 +123,7 @@ class AddCrawlerPromptCommand(CommandHandler):
         parser.set_defaults(handler=self)
         return parser
     
-    def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
+    def run(self, args: argparse.Namespace, context: ApplicationContext) -> CommandResult:
         """Execute the add command."""
         prompts_service: Optional[Any] = context.services.get(KEY.PROMPTS_SERVICE)
         if prompts_service is None:
@@ -210,7 +210,7 @@ class EditCrawlerPromptCommand(CommandHandler):
         parser.set_defaults(handler=self)
         return parser
     
-    def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
+    def run(self, args: argparse.Namespace, context: ApplicationContext) -> CommandResult:
         """Execute the edit command."""
         prompts_service: Optional[Any] = context.services.get(KEY.PROMPTS_SERVICE)
         if prompts_service is None:
@@ -291,7 +291,7 @@ class RemoveCrawlerPromptCommand(CommandHandler):
         parser.set_defaults(handler=self)
         return parser
     
-    def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
+    def run(self, args: argparse.Namespace, context: ApplicationContext) -> CommandResult:
         """Execute the remove command."""
         prompts_service: Optional[Any] = context.services.get(KEY.PROMPTS_SERVICE)
         if prompts_service is None:

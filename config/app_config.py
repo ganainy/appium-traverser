@@ -755,6 +755,15 @@ AUTO_HIDE_KEYBOARD_BEFORE_NON_INPUT = (
     True  # Auto-hide keyboard to prevent overlay-related no-ops
 )
 
+# Appium performance settings
+APPIUM_IMPLICIT_WAIT = 5000  # Implicit wait timeout in milliseconds (reduced from 10000 for faster element finding)
+APPIUM_MAX_RETRIES = 3  # Maximum retry attempts for Appium operations
+APPIUM_RETRY_DELAY = 1.0  # Delay between retries in seconds
+APPIUM_WAIT_FOR_IDLE_TIMEOUT = 0  # Disable idle waiting for faster element finding
+APPIUM_SNAPSHOT_MAX_DEPTH = 25  # Limit XML tree depth to reduce scanning overhead
+APPIUM_IGNORE_UNIMPORTANT_VIEWS = True  # Filter out non-interactive elements
+APPIUM_DISABLE_WINDOW_ANIMATION = True  # Skip animation waits
+
 # MobSF Integration settings 
 MOBSF_API_KEY = None  # Will be loaded from environment variable
 ENABLE_MOBSF_ANALYSIS = False 

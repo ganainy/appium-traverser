@@ -1,5 +1,5 @@
 """
-CLI context providing shared dependencies to commands and services.
+Application context providing shared dependencies to commands and services.
 """
 
 import logging
@@ -41,17 +41,17 @@ class ServiceRegistry:
         return name in self._services
 
 
-class CLIContext:
+class ApplicationContext:
     """
-    Shared context for CLI operations.
+    Shared context for application operations.
     
     Provides access to configuration, logging, and shared utilities
-    across all CLI commands and services.
+    across all CLI commands, GUI components, and services.
     """
     
     def __init__(self, verbose: bool = False):
         """
-        Initialize CLI context.
+        Initialize application context.
         
         Args:
             verbose: Enable verbose logging
@@ -121,7 +121,7 @@ class CLIContext:
             log_file=str(log_file_path)
         )
         
-        logging.debug(f"CLI Application Logging Initialized. Level: {self._log_level}. File: '{log_file_path}'")
+        logging.debug(f"Application Logging Initialized. Level: {self._log_level}. File: '{log_file_path}'")
     
     @property
     def config(self) -> Config:

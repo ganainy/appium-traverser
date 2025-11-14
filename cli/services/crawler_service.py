@@ -6,10 +6,11 @@ Crawler service for managing crawl processes and lifecycle.
 import errno
 import logging
 import os
+import time
 from pathlib import Path
 from typing import Optional, Dict, Any
 
-from cli.shared.context import CLIContext
+from cli.shared.context import ApplicationContext
 from cli.constants.keys import (
     PROCESS_STATUS_KEY, PROCESS_ID_KEY, STATE_KEY,
     TARGET_APP_KEY, OUTPUT_DIR_KEY
@@ -25,7 +26,7 @@ from core.adapters import create_process_backend
 class CrawlerService:
     """Service for managing crawler processes using core interface."""
     
-    def __init__(self, context: CLIContext):
+    def __init__(self, context: ApplicationContext):
         """Initialize the crawler service."""
         self.context = context
         self.logger = logging.getLogger(__name__)
@@ -51,11 +52,15 @@ class CrawlerService:
             self.logger.error(f"Failed to initialize crawler service: {e}")
             return False
     
-    def start_crawler(self, annotate_after_run: bool = False, feature_flags: Optional[Dict[str, Any]] = None) -> bool:
+    def start_crawler(
+        self,
+        generate_pdf_after_run: bool = False,
+        feature_flags: Optional[Dict[str, Any]] = None
+    ) -> bool:
         """Start the crawler process.
         
         Args:
-            annotate_after_run: Whether to run offline UI annotator after crawler completes
+            generate_pdf_after_run: Whether to generate PDF report after crawler completes
             feature_flags: Optional dict of feature flags to override config (e.g., {'ENABLE_TRAFFIC_CAPTURE': True})
             
         Returns:
@@ -75,20 +80,58 @@ class CrawlerService:
             # Now we know orchestrator exists
             success = self.orchestrator.start_crawler()
             
-            # Handle offline annotation if requested
-            if success and annotate_after_run:
+            # Handle post-run tasks if requested
+            # Run in main thread to avoid SQLite threading issues
+            if success and generate_pdf_after_run:
+                # Wait for crawler to complete, then run post-run tasks in main thread
+                self.logger.info("Waiting for crawler to complete...")
+                while self.backend.is_process_running():
+                    time.sleep(2)  # Check every 2 seconds
+                
+                self.logger.info("Crawler completed. Running post-run tasks...")
+                
+                # Get analysis service
                 analysis_service = self.context.services.get("analysis")
-                if analysis_service:
-                    # Wait for crawler to complete, then run annotation
-                    # Note: In a real implementation, we'd need to monitor the process
-                    # This is a simplified version
-                    self.logger.info("Offline annotation will run after completion.")
-                    # In a full implementation, we would:
-                    # 1. Monitor the crawler process
-                    # 2. When it completes, get the latest session data
-                    # 3. Call analysis_service.run_offline_ui_annotator with the session info
+                if not analysis_service:
+                    self.logger.warning("Analysis service not available for post-run tasks.")
                 else:
-                    self.logger.warning("Analysis service not available for offline annotation.")
+                    # Wait a moment for filesystem to catch up, then find latest session
+                    # Retry multiple times with increasing delays in case the directory/database is still being created
+                    session_info = None
+                    max_attempts = 10
+                    for attempt in range(max_attempts):
+                        if attempt > 0:
+                            # Progressive delay: 1s, 2s, 3s, etc. up to 5s max
+                            delay = min(attempt, 5)
+                            time.sleep(delay)
+                        session_info = analysis_service.find_latest_session_dir()
+                        if session_info:
+                            break
+                        if attempt < max_attempts - 1:
+                            self.logger.debug(f"Attempt {attempt + 1}/{max_attempts}: Session directory not found yet, retrying in {min(attempt + 1, 5)}s...")
+                    
+                    if not session_info:
+                        self.logger.error("Could not find latest session directory for post-run tasks after retries. The database file may not have been created yet, or the session may not have written any data.")
+                    else:
+                        session_dir, db_path = session_info
+                        self.logger.info(f"Found latest session: {session_dir}")
+                        
+                        # Run PDF generation if requested
+                        if generate_pdf_after_run:
+                            self.logger.info("Generating PDF report...")
+                            # Parse session directory to get target info
+                            from utils.paths import SessionPathManager
+                            target_info = SessionPathManager.parse_session_dir(Path(session_dir), self.context.config)
+                            if target_info:
+                                pdf_success, pdf_result = analysis_service.generate_analysis_pdf(target_info)
+                                if pdf_success:
+                                    pdf_path = pdf_result.get("pdf_path", "Unknown")
+                                    self.logger.info(f"PDF generation completed successfully. PDF saved to: {pdf_path}")
+                                else:
+                                    error = pdf_result.get("error", "Unknown error")
+                                    self.logger.error(f"PDF generation failed: {error}")
+                            else:
+                                self.logger.error("Could not parse session directory for PDF generation.")
             
             return success
         except Exception as e:

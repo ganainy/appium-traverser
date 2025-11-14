@@ -182,6 +182,13 @@ class RunAnalyzer:
             metrics['Avg AI Response Time'] = f"{avg_time:.0f} ms"
         else:
             metrics['Avg AI Response Time'] = "N/A"
+        
+        valid_element_find_times = [s['element_find_time_ms'] for s in steps if 'element_find_time_ms' in s.keys() and s['element_find_time_ms'] is not None]
+        if valid_element_find_times:
+            avg_element_time = sum(valid_element_find_times) / len(valid_element_find_times)
+            metrics['Avg Element Find Time'] = f"{avg_element_time:.0f} ms"
+        else:
+            metrics['Avg Element Find Time'] = "N/A"
             
         # Robustness Metrics
         stuck_steps = sum(1 for s in steps if s['from_screen_id'] == s['to_screen_id'])
@@ -218,6 +225,7 @@ class RunAnalyzer:
                 <tr><th colspan="2">Efficiency</th></tr>
                 <tr><td>Steps per New Screen</td><td>{Steps per New Screen}</td></tr>
                 <tr><td>Avg. AI Response Time</td><td>{Avg AI Response Time}</td></tr>
+                <tr><td>Avg. Element Find Time</td><td>{Avg Element Find Time}</td></tr>
                 <tr><td>Total Token Usage</td><td>{Total Token Usage}</td></tr>
                 
                 <tr><th colspan="2">Robustness</th></tr>
@@ -231,7 +239,7 @@ class RunAnalyzer:
         return html.format(**{k: metrics.get(k, 'N/A') for k in [
             'Total Duration', 'Final Status', 'Total Steps', 'Unique Screens Discovered',
             'Unique Transitions', 'Activity Coverage', 'Action Distribution', 'Steps per New Screen',
-            'Avg AI Response Time', 'Total Token Usage', 'Action Success Rate', 'Execution Failures', 'Stuck Steps (No-Op)'
+            'Avg AI Response Time', 'Avg Element Find Time', 'Total Token Usage', 'Action Success Rate', 'Execution Failures', 'Stuck Steps (No-Op)'
         ]})
 
     def _fetch_run_and_steps_data(self, run_id: int) -> Tuple[Optional[sqlite3.Row], Optional[List[sqlite3.Row]]]:
@@ -399,16 +407,25 @@ class RunAnalyzer:
                 html_parts.append(f"<h4>FROM SCREEN</h4>")
                 html_parts.append(f"<p class='feature-item'><strong class='feature-title'>Activity:</strong>{escape(step['from_activity_name'] or 'N/A')}</p>")
 
-                html_parts.append(f"<h4>AI INPUT CONTEXT (Approximated)</h4>")
-                prev_action_display_html = "N/A (Start of run)"
-                if i > 0: prev_action_display_html = escape(steps[i-1]['action_description'] or "N/A")
-                html_parts.append(f"<p class='feature-item'><strong class='feature-title'>Last Action (Previous Step):</strong>{prev_action_display_html}</p>")
+                html_parts.append(f"<h4>AI INPUT PROMPT</h4>")
+                if 'ai_input_prompt' in step.keys() and step['ai_input_prompt']:
+                    # Truncate very long prompts for display
+                    prompt_text = step['ai_input_prompt']
+                    if len(prompt_text) > 2000:
+                        prompt_text = prompt_text[:2000] + "\n\n... (truncated, full prompt available in database)"
+                    html_parts.append(f"<pre style='max-height: 200px; overflow: auto;'>{escape(prompt_text)}</pre>")
+                else:
+                    html_parts.append(f"<p class='feature-item'><em>AI input prompt not available</em></p>")
 
                 html_parts.append(f"<h4>AI OUTPUT</h4>")
                 ai_sugg_text_html, ai_reas_text_html, ai_response_time_html = "N/A", "N/A", ""
                 
                 if 'ai_response_time_ms' in step.keys() and step['ai_response_time_ms'] is not None:
-                    ai_response_time_html = f"<p class='feature-item'><strong class='feature-title'>Response Time:</strong>{step['ai_response_time_ms']/1000:.2f} seconds</p>"
+                    ai_response_time_html = f"<p class='feature-item'><strong class='feature-title'>AI Decision Time:</strong>{step['ai_response_time_ms']/1000:.2f} seconds</p>"
+                
+                if 'element_find_time_ms' in step.keys() and step['element_find_time_ms'] is not None:
+                    element_find_time_html = f"<p class='feature-item'><strong class='feature-title'>Element Find Time:</strong>{step['element_find_time_ms']/1000:.2f} seconds</p>"
+                    ai_response_time_html += element_find_time_html
 
                 if step['ai_suggestion_json']:
                     try:

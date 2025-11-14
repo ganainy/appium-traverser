@@ -13,7 +13,7 @@ import subprocess
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from cli.shared.context import CLIContext
+from cli.shared.context import ApplicationContext
 from cli.constants.keys import (
     CONFIG_APP_INFO_OUTPUT_DIR,
     CONFIG_CURRENT_HEALTH_APP_LIST_FILE,
@@ -45,7 +45,7 @@ from domain.find_app_info import generate_app_info_cache
 class AppScanService:
     """Service for scanning and managing installed Android applications."""
     
-    def __init__(self, context: CLIContext):
+    def __init__(self, context: ApplicationContext):
         """Initialize the AppScanService.
         
         Args:

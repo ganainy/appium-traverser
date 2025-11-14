@@ -9,14 +9,14 @@ from datetime import datetime, UTC
 
 from cli.constants import keys as KEYS
 from cli.constants import messages as MSG
-from cli.shared.context import CLIContext
+from cli.shared.context import ApplicationContext
 
 _MAX_FOCUS_AREAS = 10
 
 class FocusAreaService:
     """Service for managing privacy focus areas using UserConfigStore."""
     
-    def __init__(self, context: CLIContext):
+    def __init__(self, context: ApplicationContext):
         self.context = context
         self.config = context.config
         self.logger = logging.getLogger(__name__)

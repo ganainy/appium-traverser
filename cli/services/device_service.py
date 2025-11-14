@@ -6,14 +6,14 @@ Device service for ADB device management.
 import logging
 from typing import List, Optional
 
-from cli.shared.context import CLIContext
+from cli.shared.context import ApplicationContext
 from utils.adb_utils import AdbAdapter
 
 
 class DeviceService:
     """Service for managing ADB devices."""
     
-    def __init__(self, context: CLIContext):
+    def __init__(self, context: ApplicationContext):
         self.context = context
         self.logger = logging.getLogger(__name__)
         self.adb_adapter = AdbAdapter()

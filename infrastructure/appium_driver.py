@@ -67,7 +67,7 @@ class AppiumDriver:
             # Create helper with config values
             max_retries = self.cfg.get('APPIUM_MAX_RETRIES', 3)
             retry_delay = self.cfg.get('APPIUM_RETRY_DELAY', 1.0)
-            implicit_wait = self.cfg.get('APPIUM_IMPLICIT_WAIT', 10000)
+            implicit_wait = self.cfg.get('APPIUM_IMPLICIT_WAIT', 5000)
             
             self.helper = AppiumHelper(
                 max_retries=max_retries,
@@ -347,11 +347,11 @@ class AppiumDriver:
             # Calculate scroll coordinates based on direction
             direction_lower = direction.lower()
             if direction_lower == 'up':
-                start_x, start_y = width / 2, height * 0.8
-                end_x, end_y = width / 2, height * 0.2
-            elif direction_lower == 'down':
                 start_x, start_y = width / 2, height * 0.2
                 end_x, end_y = width / 2, height * 0.8
+            elif direction_lower == 'down':
+                start_x, start_y = width / 2, height * 0.8
+                end_x, end_y = width / 2, height * 0.2
             elif direction_lower == 'left':
                 start_x, start_y = width * 0.8, height / 2
                 end_x, end_y = width * 0.2, height / 2

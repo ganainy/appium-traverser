@@ -7,7 +7,7 @@ import argparse
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional
 
-from cli.shared.context import CLIContext
+from cli.shared.context import ApplicationContext
 from cli.constants import messages as MSG
 
 
@@ -68,7 +68,7 @@ class CommandHandler(ABC):
         pass
     
     @abstractmethod
-    def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
+    def run(self, args: argparse.Namespace, context: ApplicationContext) -> CommandResult:
         """
         Execute the command.
         

@@ -9,7 +9,7 @@ from typing import List, Optional
 
 from cli.commands.base import CommandRegistry
 from cli.argument_parser import build_parser
-from cli.shared.context import CLIContext
+from cli.shared.context import ApplicationContext
 
 
 # def _get_banner() -> str:
@@ -50,7 +50,7 @@ def run(args: Optional[List[str]] = None) -> int:
         parsed_args = parser.parse_args(args)
 
         # Initialize CLI context (after parsing to get verbose flag)
-        context = CLIContext(verbose=getattr(parsed_args, 'verbose', False))
+        context = ApplicationContext(verbose=getattr(parsed_args, 'verbose', False))
 
         # Register telemetry service
         from cli.services.telemetry import TelemetryService

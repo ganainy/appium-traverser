@@ -7,7 +7,7 @@ import argparse
 from typing import List
 
 from cli.commands.base import CommandGroup, CommandHandler, CommandResult
-from cli.shared.context import CLIContext
+from cli.shared.context import ApplicationContext
 from cli.constants.messages import (
     ANALYSIS_GROUP_DESC,
     CMD_LIST_ANALYSIS_TARGETS_DESC,
@@ -31,6 +31,13 @@ from cli.constants.messages import (
     CMD_PRINT_ANALYSIS_SUMMARY_DESC,
     MSG_ANALYSIS_SUMMARY_SUCCESS,
     ERR_ANALYSIS_SUMMARY_FAILED,
+    CMD_GENERATE_PDF_DESC,
+    CMD_GENERATE_PDF_ARG_SESSION_DIR,
+    CMD_GENERATE_PDF_ARG_SESSION_DIR_HELP,
+    MSG_GENERATE_PDF_SUCCESS,
+    ERR_GENERATE_PDF_FAILED,
+    ERR_GENERATE_PDF_NO_SESSION,
+    ERR_GENERATE_PDF_SESSION_NOT_FOUND,
 )
 
 
@@ -58,7 +65,7 @@ class ListAnalysisTargetsCommand(CommandHandler):
         parser.set_defaults(handler=self)
         return parser
     
-    def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
+    def run(self, args: argparse.Namespace, context: ApplicationContext) -> CommandResult:
         """Execute the command."""
         from cli.services.analysis_service import AnalysisService
         
@@ -126,7 +133,7 @@ class ListRunsForTargetCommand(CommandHandler):
         parser.set_defaults(handler=self)
         return parser
     
-    def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
+    def run(self, args: argparse.Namespace, context: ApplicationContext) -> CommandResult:
         """Execute the command."""
         from cli.services.analysis_service import AnalysisService
         
@@ -215,7 +222,7 @@ class GenerateAnalysisPDFCommand(CommandHandler):
         parser.set_defaults(handler=self)
         return parser
     
-    def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
+    def run(self, args: argparse.Namespace, context: ApplicationContext) -> CommandResult:
         """Execute the command."""
         from cli.services.analysis_service import AnalysisService
         
@@ -289,7 +296,7 @@ class PrintAnalysisSummaryCommand(CommandHandler):
         parser.set_defaults(handler=self)
         return parser
     
-    def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
+    def run(self, args: argparse.Namespace, context: ApplicationContext) -> CommandResult:
         """Execute the command."""
         from cli.services.analysis_service import AnalysisService
         
@@ -337,6 +344,98 @@ class PrintAnalysisSummaryCommand(CommandHandler):
             )
 
 
+class GeneratePDFCommand(CommandHandler):
+    """Handle generate-pdf command."""
+    
+    @property
+    def name(self) -> str:
+        """Get command name."""
+        return "generate-pdf"
+    
+    @property
+    def description(self) -> str:
+        """Get command description."""
+        return CMD_GENERATE_PDF_DESC
+    
+    def register(self, subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
+        """Register the command with the argument parser."""
+        parser = subparsers.add_parser(
+            self.name,
+            help=self.description,
+            description=self.description
+        )
+        self.add_common_arguments(parser)
+        parser.add_argument(
+            CMD_GENERATE_PDF_ARG_SESSION_DIR,
+            type=str,
+            default=None,
+            help=CMD_GENERATE_PDF_ARG_SESSION_DIR_HELP
+        )
+        parser.add_argument(
+            "--pdf-output-name",
+            help=ARG_HELP_PDF_OUTPUT_NAME
+        )
+        parser.set_defaults(handler=self)
+        return parser
+    
+    def run(self, args: argparse.Namespace, context: ApplicationContext) -> CommandResult:
+        """Execute the command."""
+        from cli.services.analysis_service import AnalysisService
+        from pathlib import Path
+        from utils.paths import SessionPathManager
+        
+        service = AnalysisService(context)
+        
+        # Get session directory and parse to get target info
+        if args.session_dir:
+            session_dir = args.session_dir
+            session_path = Path(session_dir)
+            if not session_path.exists():
+                return CommandResult(
+                    success=False,
+                    message=ERR_GENERATE_PDF_SESSION_NOT_FOUND.format(session_dir=session_dir),
+                    exit_code=1
+                )
+            target_info = SessionPathManager.parse_session_dir(session_path, context.config)
+        else:
+            # Use latest session
+            session_info = service.find_latest_session_dir()
+            if not session_info:
+                return CommandResult(
+                    success=False,
+                    message=ERR_GENERATE_PDF_NO_SESSION,
+                    exit_code=1
+                )
+            session_dir, _ = session_info
+            target_info = SessionPathManager.parse_session_dir(Path(session_dir), context.config)
+        
+        if not target_info:
+            return CommandResult(
+                success=False,
+                message=ERR_GENERATE_PDF_FAILED,
+                exit_code=1
+            )
+        
+        # Generate PDF
+        success, result_data = service.generate_analysis_pdf(
+            target_info,
+            getattr(args, 'pdf_output_name', None)
+        )
+        
+        if success:
+            pdf_path = result_data.get('pdf_path', 'Unknown location')
+            return CommandResult(
+                success=True,
+                message=f"{MSG_GENERATE_PDF_SUCCESS} PDF saved to: {pdf_path}"
+            )
+        else:
+            return CommandResult(
+                success=False,
+                message=result_data.get('error', ERR_GENERATE_PDF_FAILED),
+                exit_code=1
+            )
+
+
 class AnalysisCommandGroup(CommandGroup):
     """Analysis command group."""
     
@@ -351,4 +450,5 @@ class AnalysisCommandGroup(CommandGroup):
             ListRunsForTargetCommand(),
             GenerateAnalysisPDFCommand(),
             PrintAnalysisSummaryCommand(),
+            GeneratePDFCommand(),
         ]

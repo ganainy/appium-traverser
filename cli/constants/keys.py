@@ -37,7 +37,6 @@ KEY_SUCCESS_RATE = "success_rate"
 # Directory and file names
 DIR_REPORTS = "reports"
 DIR_SCREENSHOTS = "screenshots"
-DIR_ANNOTATED_SCREENSHOTS = "annotated_screenshots"
 DIR_TOOLS = "tools"
 FILE_ANALYSIS_PDF = "analysis.pdf"
 
@@ -127,7 +126,6 @@ Centralizes service names, config keys, JSON keys, and other string literals.
 # Service names
 SERVICE_APP_SCAN = "app_scan"
 SERVICE_CONFIG = "config"
-SERVICE_ANNOTATION = "annotation"
 
 # Cache key types
 CACHE_KEY_ALL = "all"

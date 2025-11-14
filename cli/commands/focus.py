@@ -8,7 +8,7 @@ import argparse
 from typing import List
 
 from cli.commands.base import CommandGroup, CommandHandler, CommandResult
-from cli.shared.context import CLIContext
+from cli.shared.context import ApplicationContext
 from cli.constants import messages as MSG
 from cli.constants import keys as KEY
 from cli.constants.keys import DEFAULT_FOCUS_PRIORITY
@@ -35,7 +35,7 @@ class ListFocusAreasCommand(CommandHandler):
         parser.set_defaults(handler=self)
         return parser
     
-    def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
+    def run(self, args: argparse.Namespace, context: ApplicationContext) -> CommandResult:
         focus_service = context.services.get(KEY.FOCUS_SERVICE)
         if not focus_service:
             return CommandResult(
@@ -107,7 +107,7 @@ class AddFocusAreaCommand(CommandHandler):
         parser.set_defaults(handler=self)
         return parser
     
-    def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
+    def run(self, args: argparse.Namespace, context: ApplicationContext) -> CommandResult:
         focus_service = context.services.get(KEY.FOCUS_SERVICE)
         if not focus_service:
             return CommandResult(
@@ -196,7 +196,7 @@ class EditFocusAreaCommand(CommandHandler):
         parser.set_defaults(handler=self)
         return parser
     
-    def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
+    def run(self, args: argparse.Namespace, context: ApplicationContext) -> CommandResult:
         focus_service = context.services.get(KEY.FOCUS_SERVICE)
         if not focus_service:
             return CommandResult(
@@ -265,7 +265,7 @@ class RemoveFocusAreaCommand(CommandHandler):
         parser.set_defaults(handler=self)
         return parser
     
-    def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
+    def run(self, args: argparse.Namespace, context: ApplicationContext) -> CommandResult:
         focus_service = context.services.get(KEY.FOCUS_SERVICE)
         if not focus_service:
             return CommandResult(

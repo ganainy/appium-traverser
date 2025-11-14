@@ -362,7 +362,11 @@ class AgentAssistant:
             # Store dynamic parts in context for logging
             context['_dynamic_prompt_parts'] = "\n".join(dynamic_parts)
             
-            return "\n".join(prompt_parts)
+            # Store the full prompt in context for database storage
+            full_prompt = "\n".join(prompt_parts)
+            context['_full_ai_input_prompt'] = full_prompt
+            
+            return full_prompt
         
         # Create chain: format prompt -> LLM -> parse JSON
         def parse_json_output(llm_output: str) -> Dict[str, Any]:
@@ -829,7 +833,7 @@ class AgentAssistant:
         return system_prompt_template.format(json_schema=json_output_guidance, action_list=action_list_str)
 
 
-    def _get_next_action_langchain(self, screenshot_bytes: Optional[bytes], xml_context: str, previous_actions: List[str], current_screen_visit_count: int, current_composite_hash: str, last_action_feedback: Optional[str] = None) -> Optional[Tuple[Dict[str, Any], float, int]]:
+    def _get_next_action_langchain(self, screenshot_bytes: Optional[bytes], xml_context: str, previous_actions: List[str], current_screen_visit_count: int, current_composite_hash: str, last_action_feedback: Optional[str] = None) -> Optional[Tuple[Dict[str, Any], float, int, Optional[str]]]:
         """Get the next action using LangChain decision chain.
         
         Args:
@@ -841,7 +845,7 @@ class AgentAssistant:
             last_action_feedback: Feedback from last action execution
             
         Returns:
-            Tuple of (action_data dict, confidence float, token_count int) or None on error
+            Tuple of (action_data dict, confidence float, token_count int, ai_input_prompt str) or None on error
         """
         try:
             # Prepare context for the chain
@@ -918,6 +922,9 @@ class AgentAssistant:
             # Run the decision chain
             chain_result = self.action_decision_chain.run(context=context)
             
+            # Extract the AI input prompt from context (stored by format_prompt_with_context)
+            ai_input_prompt = context.get('_full_ai_input_prompt', None)
+            
             # Log the parsed result
             if self.ai_interaction_readable_logger:
                 timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -936,7 +943,8 @@ class AgentAssistant:
             validated_data = self._validate_and_clean_action_data(chain_result)
             
             # Return with metadata (confidence and token count are placeholders for now)
-            return validated_data, 0.0, 0
+            # Include the AI input prompt for database storage
+            return validated_data, 0.0, 0, ai_input_prompt
             
         except ValidationError as e:
             logging.error(f"Validation error in action data: {e}")

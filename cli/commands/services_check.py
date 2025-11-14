@@ -7,7 +7,7 @@ from typing import Any, Dict, List
 
 from cli.commands.base import CommandHandler, CommandResult, CommandGroup
 from core.health_check import ValidationService
-from cli.shared.context import CLIContext
+from cli.shared.context import ApplicationContext
 from cli.constants import messages as MSG
 from cli.constants import keys as KEYS
 from utils import LoadingIndicator
@@ -35,7 +35,7 @@ class PrecheckCommand(CommandHandler):
         parser.set_defaults(handler=self)
         return parser
     
-    def run(self, args: argparse.Namespace, context: CLIContext) -> CommandResult:
+    def run(self, args: argparse.Namespace, context: ApplicationContext) -> CommandResult:
         telemetry = context.services.get(KEYS.SERVICE_TELEMETRY)
 
         # Instantiate ValidationService with config

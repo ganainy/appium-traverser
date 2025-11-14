@@ -1,8 +1,8 @@
 """
-Shared utilities and context for CLI commands.
+Shared utilities and context for application commands.
 """
 
-from .context import CLIContext
+from .context import ApplicationContext
 from .serializers import JSONSerializer
 
-__all__ = ["CLIContext", "JSONSerializer"]
+__all__ = ["ApplicationContext", "JSONSerializer"]
