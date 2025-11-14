@@ -397,97 +397,97 @@ class AppiumHelper:
                     if strategy == 'id' and self._get_current_platform() == 'android':
                         # Primary strategy: Android UIAutomator (fastest for Android resource IDs)
                         strategy_start = time.time()
-                        logger.info(f'[Element Find] Attempting primary strategy: Android UIAutomator for "{selector}"')
+                        logger.debug(f'[Element Find] Attempting primary strategy: Android UIAutomator for "{selector}"')
                         try:
                             uiautomator_selector = f'new UiSelector().resourceId("{selector}")'
                             element = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR, uiautomator_selector)
                             if element.is_displayed():
                                 strategy_duration = (time.time() - strategy_start) * 1000
                                 total_duration = (time.time() - start_time) * 1000
-                                logger.info(f'[Element Find] ✓ Primary strategy (UIAutomator) SUCCESS in {strategy_duration:.0f}ms (total: {total_duration:.0f}ms)')
+                                logger.debug(f'[Element Find] ✓ Primary strategy (UIAutomator) SUCCESS in {strategy_duration:.0f}ms (total: {total_duration:.0f}ms)')
                                 return element
                         except (NoSuchElementException, TimeoutException) as e:
                             strategy_duration = (time.time() - strategy_start) * 1000
-                            logger.info(f'[Element Find] ✗ Primary strategy (UIAutomator) FAILED in {strategy_duration:.0f}ms')
+                            logger.debug(f'[Element Find] ✗ Primary strategy (UIAutomator) FAILED in {strategy_duration:.0f}ms')
                             last_error = e
                         
                         # Fallback 1: Standard ID with explicit wait (slower but more compatible)
                         by, value = self._get_locator(selector, strategy)
                         explicit_timeout = min(timeout_ms / 1000.0, 3.0)  # Reduced to 3 seconds for fallback
                         fallback_start = time.time()
-                        logger.info(f'[Element Find] Attempting fallback 1: ID (visibility) for "{selector}"')
+                        logger.debug(f'[Element Find] Attempting fallback 1: ID (visibility) for "{selector}"')
                         try:
                             wait = WebDriverWait(self.driver, explicit_timeout)
                             element = wait.until(EC.visibility_of_element_located((by, value)))
                             fallback_duration = (time.time() - fallback_start) * 1000
                             total_duration = (time.time() - start_time) * 1000
-                            logger.info(f'[Element Find] ✓ Fallback 1 (ID visibility) SUCCESS in {fallback_duration:.0f}ms (total: {total_duration:.0f}ms)')
+                            logger.debug(f'[Element Find] ✓ Fallback 1 (ID visibility) SUCCESS in {fallback_duration:.0f}ms (total: {total_duration:.0f}ms)')
                             return element
                         except (NoSuchElementException, TimeoutException) as e:
                             fallback_duration = (time.time() - fallback_start) * 1000
-                            logger.info(f'[Element Find] ✗ Fallback 1 (ID visibility) FAILED in {fallback_duration:.0f}ms')
+                            logger.debug(f'[Element Find] ✗ Fallback 1 (ID visibility) FAILED in {fallback_duration:.0f}ms')
                         
                         # Fallback 2: Accessibility ID
                         fallback_start = time.time()
-                        logger.info(f'[Element Find] Attempting fallback 2: Accessibility ID for "{selector}"')
+                        logger.debug(f'[Element Find] Attempting fallback 2: Accessibility ID for "{selector}"')
                         try:
                             element = self.driver.find_element(AppiumBy.ACCESSIBILITY_ID, selector)
                             if element.is_displayed():
                                 fallback_duration = (time.time() - fallback_start) * 1000
                                 total_duration = (time.time() - start_time) * 1000
-                                logger.info(f'[Element Find] ✓ Fallback 2 (Accessibility ID) SUCCESS in {fallback_duration:.0f}ms (total: {total_duration:.0f}ms)')
+                                logger.debug(f'[Element Find] ✓ Fallback 2 (Accessibility ID) SUCCESS in {fallback_duration:.0f}ms (total: {total_duration:.0f}ms)')
                                 return element
                         except (NoSuchElementException, TimeoutException) as e:
                             fallback_duration = (time.time() - fallback_start) * 1000
-                            logger.info(f'[Element Find] ✗ Fallback 2 (Accessibility ID) FAILED in {fallback_duration:.0f}ms')
+                            logger.debug(f'[Element Find] ✗ Fallback 2 (Accessibility ID) FAILED in {fallback_duration:.0f}ms')
                         
                         # Fallback 3: Package-prefixed ID (for traditional views)
                         if ':' not in selector and self.target_package:
                             package_prefixed = f'{self.target_package}:id/{selector}'
                             fallback_start = time.time()
-                            logger.info(f'[Element Find] Attempting fallback 3: Package-prefixed ID for "{package_prefixed}"')
+                            logger.debug(f'[Element Find] Attempting fallback 3: Package-prefixed ID for "{package_prefixed}"')
                             try:
                                 element = self.driver.find_element(by, package_prefixed)
                                 if element.is_displayed():
                                     fallback_duration = (time.time() - fallback_start) * 1000
                                     total_duration = (time.time() - start_time) * 1000
-                                    logger.info(f'[Element Find] ✓ Fallback 3 (Package-prefixed ID) SUCCESS in {fallback_duration:.0f}ms (total: {total_duration:.0f}ms)')
+                                    logger.debug(f'[Element Find] ✓ Fallback 3 (Package-prefixed ID) SUCCESS in {fallback_duration:.0f}ms (total: {total_duration:.0f}ms)')
                                     return element
                             except (NoSuchElementException, TimeoutException) as e:
                                 fallback_duration = (time.time() - fallback_start) * 1000
-                                logger.info(f'[Element Find] ✗ Fallback 3 (Package-prefixed ID) FAILED in {fallback_duration:.0f}ms')
+                                logger.debug(f'[Element Find] ✗ Fallback 3 (Package-prefixed ID) FAILED in {fallback_duration:.0f}ms')
                         
                         # Fallback 4: XPath by resource-id (slower, last resort)
                         fallback_start = time.time()
-                        logger.info(f'[Element Find] Attempting fallback 4: XPath (resource-id) for "{selector}"')
+                        logger.debug(f'[Element Find] Attempting fallback 4: XPath (resource-id) for "{selector}"')
                         try:
                             xpath_exact = f'//*[@resource-id="{selector}"]'
                             element = self.driver.find_element(AppiumBy.XPATH, xpath_exact)
                             if element.is_displayed():
                                 fallback_duration = (time.time() - fallback_start) * 1000
                                 total_duration = (time.time() - start_time) * 1000
-                                logger.info(f'[Element Find] ✓ Fallback 4 (XPath resource-id) SUCCESS in {fallback_duration:.0f}ms (total: {total_duration:.0f}ms)')
+                                logger.debug(f'[Element Find] ✓ Fallback 4 (XPath resource-id) SUCCESS in {fallback_duration:.0f}ms (total: {total_duration:.0f}ms)')
                                 return element
                         except (NoSuchElementException, TimeoutException) as e:
                             fallback_duration = (time.time() - fallback_start) * 1000
-                            logger.info(f'[Element Find] ✗ Fallback 4 (XPath resource-id) FAILED in {fallback_duration:.0f}ms')
+                            logger.debug(f'[Element Find] ✗ Fallback 4 (XPath resource-id) FAILED in {fallback_duration:.0f}ms')
                         
                         # Fallback 5: XPath with package prefix (last resort)
                         if ':' not in selector and self.target_package:
                             package_prefixed = f'{self.target_package}:id/{selector}'
                             fallback_start = time.time()
-                            logger.info(f'[Element Find] Attempting fallback 5: XPath (prefixed resource-id) for "{package_prefixed}"')
+                            logger.debug(f'[Element Find] Attempting fallback 5: XPath (prefixed resource-id) for "{package_prefixed}"')
                             try:
                                 xpath_prefixed = f'//*[@resource-id="{package_prefixed}"]'
                                 element = self.driver.find_element(AppiumBy.XPATH, xpath_prefixed)
                                 if element.is_displayed():
                                     fallback_duration = (time.time() - fallback_start) * 1000
                                     total_duration = (time.time() - start_time) * 1000
-                                    logger.info(f'[Element Find] ✓ Fallback 5 (XPath prefixed) SUCCESS in {fallback_duration:.0f}ms (total: {total_duration:.0f}ms)')
+                                    logger.debug(f'[Element Find] ✓ Fallback 5 (XPath prefixed) SUCCESS in {fallback_duration:.0f}ms (total: {total_duration:.0f}ms)')
                                     return element
                             except (NoSuchElementException, TimeoutException) as e:
                                 fallback_duration = (time.time() - fallback_start) * 1000
-                                logger.info(f'[Element Find] ✗ Fallback 5 (XPath prefixed) FAILED in {fallback_duration:.0f}ms')
+                                logger.debug(f'[Element Find] ✗ Fallback 5 (XPath prefixed) FAILED in {fallback_duration:.0f}ms')
                         
                         # If all strategies failed, raise the last error
                         if last_error:
@@ -500,7 +500,7 @@ class AppiumHelper:
                         
                         # Primary strategy timing
                         strategy_start = time.time()
-                        logger.info(f'[Element Find] Attempting primary strategy: {strategy} for "{selector}"')
+                        logger.debug(f'[Element Find] Attempting primary strategy: {strategy} for "{selector}"')
                         
                         # Use explicit WebDriverWait for more precise control
                         wait = WebDriverWait(self.driver, explicit_timeout)
@@ -509,7 +509,7 @@ class AppiumHelper:
                         
                         strategy_duration = (time.time() - strategy_start) * 1000
                         total_duration = (time.time() - start_time) * 1000
-                        logger.info(f'[Element Find] ✓ Primary strategy ({strategy}) SUCCESS in {strategy_duration:.0f}ms (total: {total_duration:.0f}ms)')
+                        logger.debug(f'[Element Find] ✓ Primary strategy ({strategy}) SUCCESS in {strategy_duration:.0f}ms (total: {total_duration:.0f}ms)')
                         
                         return element
                 except (NoSuchElementException, TimeoutException) as error:

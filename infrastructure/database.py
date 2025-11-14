@@ -3,7 +3,7 @@ import logging
 import os
 import sqlite3
 import threading  # Added for thread identification
-from typing import Any, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 try:
     # Import Config only when needed to avoid circular import
@@ -377,6 +377,133 @@ class DatabaseManager:
         """
         results = self._execute_sql(sql, (screen_id,), fetch_all=True, commit=False)
         return [row[0] for row in results] if isinstance(results, list) else []
+
+    def get_recent_steps_with_details(self, run_id: int, limit: int = 20) -> List[Dict[str, Any]]:
+        """
+        Get recent steps with detailed information including success/failure status.
+        
+        Args:
+            run_id: The run ID to query
+            limit: Maximum number of steps to return (default: 20)
+            
+        Returns:
+            List of dictionaries with step details:
+            - step_number: int
+            - action_description: str
+            - execution_success: bool
+            - error_message: Optional[str]
+            - from_screen_id: Optional[int]
+            - to_screen_id: Optional[int]
+        """
+        sql = """
+        SELECT step_number, action_description, execution_success, error_message,
+               from_screen_id, to_screen_id
+        FROM steps_log
+        WHERE run_id = ? AND action_description IS NOT NULL
+        ORDER BY step_number DESC
+        LIMIT ?
+        """
+        results = self._execute_sql(sql, (run_id, limit), fetch_all=True, commit=False)
+        if not isinstance(results, list):
+            return []
+        
+        steps = []
+        for row in results:
+            steps.append({
+                'step_number': row[0],
+                'action_description': row[1],
+                'execution_success': bool(row[2]) if row[2] is not None else False,
+                'error_message': row[3],
+                'from_screen_id': row[4],
+                'to_screen_id': row[5]
+            })
+        # Reverse to get chronological order (oldest first)
+        return list(reversed(steps))
+
+    def get_visited_screens_summary(self, run_id: int) -> List[Dict[str, Any]]:
+        """
+        Get summary of visited screens for a run.
+        
+        Args:
+            run_id: The run ID to query
+            
+        Returns:
+            List of dictionaries with screen information:
+            - screen_id: int
+            - composite_hash: str
+            - activity_name: Optional[str]
+            - visit_count: int (number of times this screen was visited as 'to_screen_id')
+        """
+        sql = """
+        SELECT s.screen_id, s.composite_hash, s.activity_name,
+               COUNT(DISTINCT sl.step_number) as visit_count
+        FROM screens s
+        INNER JOIN steps_log sl ON s.screen_id = sl.to_screen_id
+        WHERE sl.run_id = ? AND sl.to_screen_id IS NOT NULL
+        GROUP BY s.screen_id, s.composite_hash, s.activity_name
+        ORDER BY visit_count DESC, s.screen_id ASC
+        """
+        results = self._execute_sql(sql, (run_id,), fetch_all=True, commit=False)
+        if not isinstance(results, list):
+            return []
+        
+        screens = []
+        for row in results:
+            screens.append({
+                'screen_id': row[0],
+                'composite_hash': row[1],
+                'activity_name': row[2],
+                'visit_count': row[3]
+            })
+        return screens
+
+    def get_actions_for_screen_with_details(self, screen_id: int, run_id: Optional[int] = None) -> List[Dict[str, Any]]:
+        """
+        Get actions tried on a specific screen with success/failure details.
+        
+        Args:
+            screen_id: The screen ID to query
+            run_id: Optional run ID to filter by (if None, includes all runs)
+            
+        Returns:
+            List of dictionaries with action details:
+            - step_number: int
+            - action_description: str
+            - execution_success: bool
+            - error_message: Optional[str]
+            - to_screen_id: Optional[int]
+        """
+        if run_id is not None:
+            sql = """
+            SELECT step_number, action_description, execution_success, error_message, to_screen_id
+            FROM steps_log
+            WHERE from_screen_id = ? AND run_id = ? AND action_description IS NOT NULL
+            ORDER BY step_number ASC
+            """
+            params = (screen_id, run_id)
+        else:
+            sql = """
+            SELECT step_number, action_description, execution_success, error_message, to_screen_id
+            FROM steps_log
+            WHERE from_screen_id = ? AND action_description IS NOT NULL
+            ORDER BY step_number ASC
+            """
+            params = (screen_id,)
+        
+        results = self._execute_sql(sql, params, fetch_all=True, commit=False)
+        if not isinstance(results, list):
+            return []
+        
+        actions = []
+        for row in results:
+            actions.append({
+                'step_number': row[0],
+                'action_description': row[1],
+                'execution_success': bool(row[2]) if row[2] is not None else False,
+                'error_message': row[3],
+                'to_screen_id': row[4]
+            })
+        return actions
 
     def insert_simplified_transition(self, from_screen_id: int, action_description: str, to_screen_id: Optional[int]) -> Optional[int]:
         sql = f"""

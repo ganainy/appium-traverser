@@ -53,7 +53,6 @@ class CrawlerLoop:
             self.traffic_capture_manager: Optional[TrafficCaptureManager] = None
             self.video_recording_manager: Optional[VideoRecordingManager] = None
             self.step_count = 0
-            self.previous_actions: List[str] = []
             self.current_screen_visit_count = 0
             self.current_composite_hash = ""
             self.last_action_feedback: Optional[str] = None
@@ -408,8 +407,9 @@ class CrawlerLoop:
                 logger.error("Failed to get screen state")
                 return True  # Continue despite error
             
-            # Process current screen state to get screen ID
+            # Process current screen state to get screen ID and ensure it's recorded in database
             from_screen_id = None
+            current_screen_visit_count = 0
             if self.screen_state_manager and self.current_run_id:
                 try:
                     from domain.screen_state_manager import ScreenRepresentation
@@ -423,27 +423,214 @@ class CrawlerLoop:
                         xml_hash = utils.calculate_xml_hash(xml_str)
                         visual_hash = utils.calculate_visual_hash(screenshot_bytes)
                         composite_hash = f"{xml_hash}_{visual_hash}"
+                        self.current_composite_hash = composite_hash
                         
-                        # Get screen ID from database or create new one
-                        screen_data = self.db_manager.get_screen_by_composite_hash(composite_hash)
-                        if screen_data:
-                            from_screen_id = screen_data[0]  # screen_id is first column
-                        else:
-                            # Screen not in DB yet, will be created during process_and_record_state
-                            # For now, we'll get it after processing
-                            pass
+                        # Get activity name from driver if available
+                        activity_name = None
+                        try:
+                            if hasattr(self.agent_assistant, 'tools') and hasattr(self.agent_assistant.tools, 'driver'):
+                                current_activity = self.agent_assistant.tools.driver.get_current_activity()
+                                if current_activity:
+                                    activity_name = current_activity
+                        except Exception:
+                            pass  # Activity name is optional
+                        
+                        # Create screen representation
+                        candidate_screen = ScreenRepresentation(
+                            screen_id=-1,  # Temporary ID, will be set by process_and_record_state
+                            composite_hash=composite_hash,
+                            xml_hash=xml_hash,
+                            visual_hash=visual_hash,
+                            screenshot_path=None,  # Will be set by process_and_record_state
+                            activity_name=activity_name,
+                            xml_content=xml_str,
+                            screenshot_bytes=screenshot_bytes,
+                            first_seen_run_id=self.current_run_id,
+                            first_seen_step_number=self.step_count
+                        )
+                        
+                        # Process and record the screen state (this ensures it's in the database)
+                        # Don't increment visit count here - we'll do it after the action
+                        final_screen, visit_info = self.screen_state_manager.process_and_record_state(
+                            candidate_screen, self.current_run_id, self.step_count, increment_visit_count=False
+                        )
+                        from_screen_id = final_screen.id
+                        current_screen_visit_count = visit_info.get("visit_count_this_run", 0)
+                        self.current_screen_visit_count = current_screen_visit_count
+                        
+                        logger.debug(f"Processed screen state: ID={from_screen_id}, visit_count={current_screen_visit_count}")
                 except Exception as e:
-                    logger.warning(f"Error getting from_screen_id: {e}")
+                    logger.warning(f"Error processing screen state: {e}", exc_info=True)
+            
+            # Collect structured action history and context from database
+            action_history = []
+            visited_screens = []
+            current_screen_actions = []
+            
+            if self.db_manager and self.current_run_id:
+                try:
+                    # Get recent steps with details (last 20 steps)
+                    action_history = self.db_manager.get_recent_steps_with_details(
+                        self.current_run_id, limit=20
+                    )
+                    
+                    # Get visited screens summary (filter out system dialogs)
+                    all_visited_screens = self.db_manager.get_visited_screens_summary(
+                        self.current_run_id
+                    )
+                    # Filter out system dialogs/pickers
+                    visited_screens = []
+                    target_package = self.config.get('APP_PACKAGE', '')
+                    from config.package_constants import PackageConstants
+                    for screen in all_visited_screens:
+                        activity = screen.get('activity_name', '')
+                        # Skip system dialogs and file pickers
+                        if activity and (
+                            'documentsui' in activity.lower() or
+                            'picker' in activity.lower() or
+                            PackageConstants.is_system_package(activity.split('.')[0] if '.' in activity else activity)
+                        ):
+                            continue
+                        # Only include screens from target app or explicitly allowed packages
+                        if activity and target_package:
+                            activity_package = activity.split('.')[0] if '.' in activity else ''
+                            if activity_package and activity_package != target_package:
+                                # Check if it's in allowed external packages
+                                allowed_packages = self.config.get('ALLOWED_EXTERNAL_PACKAGES', [])
+                                if isinstance(allowed_packages, list) and activity_package not in allowed_packages:
+                                    continue
+                        visited_screens.append(screen)
+                    
+                    # Get actions already tried on current screen (if we know the screen ID)
+                    if from_screen_id is not None:
+                        current_screen_actions = self.db_manager.get_actions_for_screen_with_details(
+                            from_screen_id, run_id=self.current_run_id
+                        )
+                except Exception as e:
+                    logger.warning(f"Error collecting action history from database: {e}", exc_info=True)
+                    # If database query fails, action_history will remain empty
+                    action_history = []
+            
+            # Detect if stuck in a loop (same screen, multiple actions, no navigation)
+            is_stuck = False
+            stuck_reason = ""
+            
+            # First, check if the last action successfully navigated to a different screen
+            # If it did, we're NOT stuck (false positive prevention)
+            last_action_navigated_away = False
+            if action_history and len(action_history) > 0:
+                last_action = action_history[-1]
+                last_from_screen = last_action.get('from_screen_id')
+                last_to_screen = last_action.get('to_screen_id')
+                last_success = last_action.get('execution_success', False)
+                
+                # If last action successfully navigated to a different screen, we're not stuck
+                if last_success and last_to_screen is not None and last_from_screen is not None:
+                    if last_to_screen != last_from_screen:
+                        last_action_navigated_away = True
+                        logger.debug(f"Last action navigated from Screen #{last_from_screen} to Screen #{last_to_screen} - not stuck")
+            
+            # Only check for stuck if we didn't just navigate away AND we're on a known screen
+            if not last_action_navigated_away and from_screen_id is not None and current_screen_actions:
+                # Count successful actions that stayed on same screen (exclude actions that navigated away)
+                same_screen_actions = [a for a in current_screen_actions 
+                                     if a.get('execution_success') and 
+                                     (a.get('to_screen_id') == from_screen_id or a.get('to_screen_id') is None)]
+                
+                # Consider stuck if:
+                # 1. High visit count (>5) on same screen
+                # 2. Multiple successful actions that didn't navigate away (>=3)
+                # 3. All recent actions (last 5) stayed on same screen
+                if current_screen_visit_count > 5:
+                    is_stuck = True
+                    stuck_reason = f"High visit count ({current_screen_visit_count}) on same screen"
+                elif len(same_screen_actions) >= 3:
+                    is_stuck = True
+                    stuck_reason = f"Multiple actions ({len(same_screen_actions)}) returned to same screen"
+                elif len(current_screen_actions) >= 5:
+                    # Check if all recent actions stayed on same screen
+                    recent_actions = current_screen_actions[-5:]
+                    all_stayed = all(
+                        a.get('to_screen_id') == from_screen_id or a.get('to_screen_id') is None 
+                        for a in recent_actions if a.get('execution_success')
+                    )
+                    if all_stayed:
+                        is_stuck = True
+                        stuck_reason = "All recent actions stayed on same screen"
+            
+            # Log the context being sent to AI
+            logger.info("=" * 80)
+            logger.info(f"AI CONTEXT - Step {self.step_count}")
+            logger.info("=" * 80)
+            if is_stuck:
+                logger.info(f"⚠️ STUCK DETECTED: {stuck_reason}")
+                logger.info("=" * 80)
+            logger.info(f"Action History: {len(action_history)} entries")
+            for action in action_history[-10:]:  # Show last 10
+                step_num = action.get('step_number', '?')
+                action_desc = action.get('action_description', 'unknown')
+                success = action.get('execution_success', False)
+                status = "✓" if success else "✗"
+                from_screen = action.get('from_screen_id')
+                to_screen = action.get('to_screen_id')
+                error = action.get('error_message')
+                
+                # Better screen transition messaging
+                if to_screen:
+                    if from_screen == to_screen:
+                        screen_info = " → stayed on same screen"
+                    else:
+                        screen_info = f" → navigated to Screen #{to_screen}"
+                else:
+                    screen_info = " → no navigation"
+                
+                error_info = f" ({error})" if error else ""
+                logger.info(f"  [{status}] Step {step_num}: {action_desc}{screen_info}{error_info}")
+            
+            logger.info(f"Visited Screens: {len(visited_screens)} screens")
+            for screen in visited_screens[:10]:  # Show top 10
+                screen_id = screen.get('screen_id', '?')
+                activity = screen.get('activity_name', 'UnknownActivity')
+                visit_count = screen.get('visit_count', 0)
+                logger.info(f"  Screen #{screen_id} ({activity}): {visit_count} visit(s)")
+            
+            logger.info(f"Current Screen ID: {from_screen_id}")
+            logger.info(f"Current Screen Visit Count: {current_screen_visit_count}")
+            logger.info(f"Current Screen Actions: {len(current_screen_actions)} actions tried")
+            for action in current_screen_actions:
+                action_desc = action.get('action_description', 'unknown')
+                success = action.get('execution_success', False)
+                status = "✓" if success else "✗"
+                to_screen = action.get('to_screen_id')
+                error = action.get('error_message')
+                
+                # Better screen transition messaging
+                if to_screen:
+                    if to_screen == from_screen_id:
+                        screen_info = " → stayed on same screen"
+                    else:
+                        screen_info = f" → navigated to Screen #{to_screen}"
+                else:
+                    screen_info = " → no navigation"
+                
+                error_info = f" ({error})" if error else ""
+                logger.info(f"  [{status}] {action_desc}{screen_info}{error_info}")
+            logger.info("=" * 80)
             
             # Get next action from AI
             ai_decision_start = time.time()
             action_result = self.agent_assistant._get_next_action_langchain(
                 screenshot_bytes=screen_state.get("screenshot_bytes"),
                 xml_context=screen_state.get("xml_context", ""),
-                previous_actions=self.previous_actions,
-                current_screen_visit_count=self.current_screen_visit_count,
+                action_history=action_history,
+                visited_screens=visited_screens,
+                current_screen_actions=current_screen_actions,
+                current_screen_id=from_screen_id,
+                current_screen_visit_count=current_screen_visit_count,
                 current_composite_hash=self.current_composite_hash,
-                last_action_feedback=self.last_action_feedback
+                last_action_feedback=self.last_action_feedback,
+                is_stuck=is_stuck,
+                stuck_reason=stuck_reason if is_stuck else None
             )
             ai_decision_time = time.time() - ai_decision_start  # Time in seconds
             
@@ -495,7 +682,7 @@ class CrawlerLoop:
             print(f"ELEMENT_FIND_TIME: {element_find_time:.3f}s")
             logger.info(f"Element find and execution time: {element_find_time:.3f}s")
             
-            # Get to_screen_id after action execution
+            # Get to_screen_id after action execution (process the new screen state)
             to_screen_id = None
             if success and self.screen_state_manager and self.current_run_id:
                 try:
@@ -513,12 +700,40 @@ class CrawlerLoop:
                             visual_hash = utils.calculate_visual_hash(screenshot_bytes)
                             composite_hash = f"{xml_hash}_{visual_hash}"
                             
-                            # Get screen ID from database
-                            screen_data = self.db_manager.get_screen_by_composite_hash(composite_hash)
-                            if screen_data:
-                                to_screen_id = screen_data[0]
+                            # Get activity name from driver if available
+                            activity_name = None
+                            try:
+                                if hasattr(self.agent_assistant, 'tools') and hasattr(self.agent_assistant.tools, 'driver'):
+                                    current_activity = self.agent_assistant.tools.driver.get_current_activity()
+                                    if current_activity:
+                                        activity_name = current_activity
+                            except Exception:
+                                pass  # Activity name is optional
+                            
+                            # Create screen representation and process it
+                            candidate_screen = ScreenRepresentation(
+                                screen_id=-1,  # Temporary ID, will be set by process_and_record_state
+                                composite_hash=composite_hash,
+                                xml_hash=xml_hash,
+                                visual_hash=visual_hash,
+                                screenshot_path=None,  # Will be set by process_and_record_state
+                                activity_name=activity_name,
+                                xml_content=xml_str,
+                                screenshot_bytes=screenshot_bytes,
+                                first_seen_run_id=self.current_run_id,
+                                first_seen_step_number=self.step_count
+                            )
+                            
+                            # Process and record the new screen state (increment visit count here)
+                            final_screen, visit_info_after = self.screen_state_manager.process_and_record_state(
+                                candidate_screen, self.current_run_id, self.step_count, increment_visit_count=True
+                            )
+                            # Update current screen visit count after action
+                            if visit_info_after:
+                                self.current_screen_visit_count = visit_info_after.get("visit_count_this_run", 0)
+                            to_screen_id = final_screen.id
                 except Exception as e:
-                    logger.warning(f"Error getting to_screen_id: {e}")
+                    logger.warning(f"Error getting to_screen_id: {e}", exc_info=True)
             
             # Log step to database
             if self.db_manager and self.current_run_id:
@@ -550,10 +765,6 @@ class CrawlerLoop:
             
             if success:
                 self.last_action_feedback = "Action executed successfully"
-                self.previous_actions.append(action_str)
-                # Keep only last 20 actions
-                if len(self.previous_actions) > 20:
-                    self.previous_actions = self.previous_actions[-20:]
             else:
                 self.last_action_feedback = "Action execution failed"
                 logger.warning(f"Action execution failed: {action_str}")
@@ -651,7 +862,7 @@ class CrawlerLoop:
                     from datetime import datetime
                     end_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     self.db_manager.update_run_status(self.current_run_id, "COMPLETED", end_time)
-                    logger.info(f"Updated run {self.current_run_id} status to COMPLETED")
+                    logger.debug(f"Updated run {self.current_run_id} status to COMPLETED")
                 except Exception as e:
                     logger.error(f"Error updating run status: {e}")
             

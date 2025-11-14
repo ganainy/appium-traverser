@@ -340,10 +340,156 @@ class AgentAssistant:
                 prompt_parts.append(xml_part)
                 dynamic_parts.append(xml_part)
             
-            if context.get("previous_actions"):
-                actions_part = f"\n\nPrevious actions:\n{', '.join(context['previous_actions'][-5:])}"  # Last 5 actions
-                prompt_parts.append(actions_part)
-                dynamic_parts.append(actions_part)
+            # Add stuck detection warning if applicable
+            if context.get("is_stuck"):
+                stuck_reason = context.get("stuck_reason", "Multiple actions on same screen")
+                current_screen_id = context.get('current_screen_id')
+                current_screen_actions = context.get('current_screen_actions', [])
+                
+                # Extract forbidden actions (actions that stayed on same screen)
+                forbidden_actions = []
+                for action in current_screen_actions:
+                    action_desc = action.get('action_description', '')
+                    success = action.get('execution_success', False)
+                    to_screen_id = action.get('to_screen_id')
+                    
+                    # Include actions that either:
+                    # 1. Stayed on the same screen (to_screen_id == current_screen_id)
+                    # 2. Had no navigation (to_screen_id is None) and succeeded
+                    if success and (to_screen_id == current_screen_id or to_screen_id is None):
+                        # Extract the target identifier from action description
+                        # Format: "click on btn_scan_erx" -> "btn_scan_erx"
+                        # Format: "scroll_down on cl_home_no_receipts" -> "scroll_down on cl_home_no_receipts"
+                        forbidden_actions.append(action_desc)
+                
+                # Build forbidden actions list
+                forbidden_text = ""
+                if forbidden_actions:
+                    forbidden_lines = ["\n🚫 FORBIDDEN ACTIONS - DO NOT REPEAT THESE:"]
+                    for action in forbidden_actions:
+                        forbidden_lines.append(f"  - {action}")
+                    forbidden_text = "\n".join(forbidden_lines)
+                
+                # Common navigation resource IDs (can be extended)
+                # These are examples based on common patterns - the AI should look for similar patterns
+                navigation_hints = """
+Look for these navigation elements in the XML (HIGHEST PRIORITY):
+- Bottom navigation tabs: tv_home, tv_assortment, tv_cart, tv_account, tv_erx, or any element with "tv_" prefix in bottom navigation area
+- Navigation buttons: Any element with "nav", "menu", "tab", "bar" in resource-id
+- Back buttons: Elements with "back", "arrow", "up" in resource-id or content-desc, or use the "back" action
+- Menu items: Elements that clearly lead to different app sections
+- Tab indicators: Elements that switch between different views/screens
+"""
+                
+                stuck_warning = f"""
+⚠️ CRITICAL: STUCK DETECTION - {stuck_reason}
+
+You are stuck in a loop on the same screen. You MUST break out of this loop immediately.
+
+{forbidden_text}
+
+PRIORITY ORDER FOR YOUR NEXT ACTION (choose one):
+1. 🎯 NAVIGATION ACTIONS (HIGHEST PRIORITY) - Use bottom navigation or menu items:
+   - Click on navigation tabs (tv_home, tv_assortment, tv_cart, tv_account, etc.)
+   - These will take you to DIFFERENT screens and break the loop
+   {navigation_hints}
+
+2. ⬅️ BACK BUTTON (HIGH PRIORITY):
+   - Use the "back" action to exit this screen
+   - This will return you to a previous screen
+
+3. 📜 SCROLL ACTIONS (MEDIUM PRIORITY):
+   - Only if scrolling reveals NEW navigation elements you haven't tried
+   - Do NOT scroll if you've already scrolled on this screen
+
+4. 🚫 DO NOT:
+   - Repeat any of the forbidden actions listed above
+   - Click buttons you've already clicked on this screen
+   - Try variations of actions you've already attempted
+   - Stay on this screen - you MUST navigate away
+
+YOUR TASK: Choose an action that will take you to a DIFFERENT screen.
+In your reasoning, explicitly state: "I am navigating away from this screen to break the loop by..."
+"""
+                prompt_parts.append(stuck_warning)
+                dynamic_parts.append(stuck_warning)
+            
+            # Format action history with success/failure indicators
+            if context.get("action_history"):
+                action_history = context['action_history']
+                if action_history:
+                    history_lines = ["\n\nRecent Actions:"]
+                    for step in action_history[-10:]:  # Show last 10 actions
+                        step_num = step.get('step_number', '?')
+                        action_desc = step.get('action_description', 'unknown action')
+                        success = step.get('execution_success', False)
+                        error_msg = step.get('error_message')
+                        from_screen_id = step.get('from_screen_id')
+                        to_screen_id = step.get('to_screen_id')
+                        
+                        status = "SUCCESS" if success else "FAILED"
+                        details = []
+                        if to_screen_id:
+                            if from_screen_id == to_screen_id:
+                                details.append("stayed on same screen")
+                            else:
+                                details.append(f"navigated to screen #{to_screen_id}")
+                        elif success:
+                            details.append("no navigation occurred")
+                        if error_msg:
+                            details.append(f"error: {error_msg}")
+                        
+                        detail_str = f" ({', '.join(details)})" if details else ""
+                        history_lines.append(f"- Step {step_num}: {action_desc} → {status}{detail_str}")
+                    
+                    actions_part = "\n".join(history_lines)
+                    prompt_parts.append(actions_part)
+                    dynamic_parts.append(actions_part)
+            
+            # Format visited screens information
+            if context.get("visited_screens"):
+                visited_screens = context['visited_screens']
+                if visited_screens:
+                    screens_lines = ["\n\nVisited Screens (this run):"]
+                    for screen in visited_screens[:15]:  # Show top 15 most visited screens
+                        screen_id = screen.get('screen_id', '?')
+                        activity = screen.get('activity_name', 'UnknownActivity')
+                        visit_count = screen.get('visit_count', 0)
+                        screens_lines.append(f"- Screen #{screen_id} ({activity}): visited {visit_count} time{'s' if visit_count != 1 else ''}")
+                    
+                    screens_part = "\n".join(screens_lines)
+                    prompt_parts.append(screens_part)
+                    dynamic_parts.append(screens_part)
+            
+            # Format current screen actions (if revisiting)
+            if context.get("current_screen_actions") and len(context['current_screen_actions']) > 0:
+                current_screen_actions = context['current_screen_actions']
+                current_screen_id = context.get('current_screen_id')
+                actions_lines = [f"\n\nActions already tried on this screen (Screen #{current_screen_id}):"]
+                for action in current_screen_actions:
+                    action_desc = action.get('action_description', 'unknown action')
+                    success = action.get('execution_success', False)
+                    error_msg = action.get('error_message')
+                    to_screen_id = action.get('to_screen_id')
+                    
+                    status = "SUCCESS" if success else "FAILED"
+                    details = []
+                    if to_screen_id:
+                        if to_screen_id == current_screen_id:
+                            details.append("stayed on same screen")
+                        else:
+                            details.append(f"navigated to screen #{to_screen_id}")
+                    elif success:
+                        details.append("no navigation occurred")
+                    if error_msg:
+                        details.append(f"error: {error_msg}")
+                    
+                    detail_str = f" ({', '.join(details)})" if details else ""
+                    actions_lines.append(f"- {action_desc} → {status}{detail_str}")
+                
+                current_actions_part = "\n".join(actions_lines)
+                prompt_parts.append(current_actions_part)
+                dynamic_parts.append(current_actions_part)
             
             if context.get("last_action_feedback"):
                 feedback_part = f"\n\nLast action feedback: {context['last_action_feedback']}"
@@ -819,30 +965,30 @@ class AgentAssistant:
             logging.error(f"Failed to prepare image part for AI: {e}", exc_info=True)
             return None
 
-    def _build_system_prompt(self, xml_context: str, previous_actions: List[str], available_actions: List[str], 
-                            current_screen_visit_count: int, current_composite_hash: str, 
-                            last_action_feedback: Optional[str] = None) -> str:
-        # Get available actions from config property (reads from database or defaults)
-        available_actions_dict = get_available_actions(self.cfg)
-        action_list_str = "\n".join([f"- {action}: {desc}" for action, desc in available_actions_dict.items()])
-        json_output_guidance = JSON_OUTPUT_SCHEMA
-        # Use config property (reads from database or None)
-        system_prompt_template = self.cfg.CRAWLER_SYSTEM_PROMPT_TEMPLATE
-        if not system_prompt_template:
-            system_prompt_template = SYSTEM_PROMPT_TEMPLATE
-        return system_prompt_template.format(json_schema=json_output_guidance, action_list=action_list_str)
-
-
-    def _get_next_action_langchain(self, screenshot_bytes: Optional[bytes], xml_context: str, previous_actions: List[str], current_screen_visit_count: int, current_composite_hash: str, last_action_feedback: Optional[str] = None) -> Optional[Tuple[Dict[str, Any], float, int, Optional[str]]]:
+    def _get_next_action_langchain(self, screenshot_bytes: Optional[bytes], xml_context: str, 
+                                   action_history: Optional[List[Dict[str, Any]]] = None,
+                                   visited_screens: Optional[List[Dict[str, Any]]] = None,
+                                   current_screen_actions: Optional[List[Dict[str, Any]]] = None,
+                                   current_screen_id: Optional[int] = None,
+                                   current_screen_visit_count: int = 0, 
+                                   current_composite_hash: str = "", 
+                                   last_action_feedback: Optional[str] = None,
+                                   is_stuck: bool = False,
+                                   stuck_reason: Optional[str] = None) -> Optional[Tuple[Dict[str, Any], float, int, Optional[str]]]:
         """Get the next action using LangChain decision chain.
         
         Args:
             screenshot_bytes: Screenshot image bytes (optional, for future vision support)
             xml_context: XML representation of current screen
-            previous_actions: List of previous action strings
+            action_history: List of structured action history entries with success/failure info
+            visited_screens: List of visited screens with visit counts (filtered to exclude system dialogs)
+            current_screen_actions: List of actions already tried on current screen
+            current_screen_id: ID of current screen (if known)
             current_screen_visit_count: Number of times current screen has been visited
             current_composite_hash: Hash of current screen state
             last_action_feedback: Feedback from last action execution
+            is_stuck: Whether the crawler is detected to be stuck on the same screen
+            stuck_reason: Reason why the crawler is considered stuck
             
         Returns:
             Tuple of (action_data dict, confidence float, token_count int, ai_input_prompt str) or None on error
@@ -852,10 +998,15 @@ class AgentAssistant:
             context = {
                 "screenshot_bytes": screenshot_bytes,
                 "xml_context": xml_context or "",
-                "previous_actions": previous_actions or [],
+                "action_history": action_history or [],
+                "visited_screens": visited_screens or [],
+                "current_screen_actions": current_screen_actions or [],
+                "current_screen_id": current_screen_id,
                 "current_screen_visit_count": current_screen_visit_count or 0,
                 "current_composite_hash": current_composite_hash or "",
-                "last_action_feedback": last_action_feedback or ""
+                "last_action_feedback": last_action_feedback or "",
+                "is_stuck": is_stuck,
+                "stuck_reason": stuck_reason or ""
             }
 
             # Extract actual XML string and simplify it before sending to AI
@@ -905,7 +1056,13 @@ class AgentAssistant:
                 self.ai_interaction_readable_logger.info("=" * 80)
                 self.ai_interaction_readable_logger.info(f"DECISION REQUEST - {timestamp}")
                 self.ai_interaction_readable_logger.info("=" * 80)
-                self.ai_interaction_readable_logger.info(f"Previous actions: {previous_actions}")
+                if is_stuck:
+                    self.ai_interaction_readable_logger.info(f"⚠️ STUCK DETECTED: {stuck_reason}")
+                    self.ai_interaction_readable_logger.info("=" * 80)
+                self.ai_interaction_readable_logger.info(f"Action history entries: {len(action_history) if action_history else 0}")
+                self.ai_interaction_readable_logger.info(f"Visited screens: {len(visited_screens) if visited_screens else 0}")
+                self.ai_interaction_readable_logger.info(f"Current screen actions: {len(current_screen_actions) if current_screen_actions else 0}")
+                self.ai_interaction_readable_logger.info(f"Current screen ID: {current_screen_id}")
                 self.ai_interaction_readable_logger.info(f"Screen visit count: {current_screen_visit_count}")
                 self.ai_interaction_readable_logger.info(f"Last action feedback: {last_action_feedback}")
                 self.ai_interaction_readable_logger.info(f"XML context length (original): {len(xml_string_raw) if xml_string_raw else 0} chars")

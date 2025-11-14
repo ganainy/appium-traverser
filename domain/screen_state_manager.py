@@ -213,7 +213,7 @@ class ScreenStateManager:
             screenshot_bytes=screenshot_bytes, first_seen_run_id=run_id, first_seen_step_number=step_number
         )
 
-    def process_and_record_state(self, candidate_screen: ScreenRepresentation, run_id: int, step_number: int) -> Tuple[ScreenRepresentation, Dict[str, Any]]:
+    def process_and_record_state(self, candidate_screen: ScreenRepresentation, run_id: int, step_number: int, increment_visit_count: bool = True) -> Tuple[ScreenRepresentation, Dict[str, Any]]:
         final_screen_to_use: Optional[ScreenRepresentation] = None
         is_new_discovery_for_system = False
 
@@ -239,10 +239,13 @@ class ScreenStateManager:
                 candidate_screen.id = self._next_screen_db_id_counter
 
                 ss_filename = f"screen_{candidate_screen.id}_{candidate_screen.visual_hash[:8]}.png"
-                candidate_screen.screenshot_path = os.path.join(str(self.cfg.SCREENSHOTS_DIR), ss_filename)
+                screenshots_dir = str(self.cfg.SCREENSHOTS_DIR)
+                candidate_screen.screenshot_path = os.path.join(screenshots_dir, ss_filename)
 
                 try:
                     if candidate_screen.screenshot_bytes:
+                        # Ensure the screenshots directory exists
+                        os.makedirs(screenshots_dir, exist_ok=True)
                         with open(candidate_screen.screenshot_path, "wb") as f: f.write(candidate_screen.screenshot_bytes)
                         logging.debug(f"Saved new screen screenshot: {candidate_screen.screenshot_path}")
                     else: raise IOError("Screenshot bytes missing for new screen.")
@@ -277,14 +280,24 @@ class ScreenStateManager:
 
 
         hash_for_visit_count = final_screen_to_use.composite_hash
-        self.current_run_visit_counts[hash_for_visit_count] = self.current_run_visit_counts.get(hash_for_visit_count, 0) + 1
+        # Get current visit count before potentially incrementing
+        current_visit_count = self.current_run_visit_counts.get(hash_for_visit_count, 0)
+        
+        # Only increment visit count if requested (to avoid double-counting when called multiple times per step)
+        if increment_visit_count:
+            self.current_run_visit_counts[hash_for_visit_count] = current_visit_count + 1
+            # Use the incremented count for visit_info
+            visit_count_for_info = current_visit_count + 1
+        else:
+            # Use the current count (before incrementing) for visit_info
+            visit_count_for_info = current_visit_count
 
         historical_actions = self.db_manager.get_action_history_for_screen(final_screen_to_use.id)
 
         visit_info = {
             "screen_representation": final_screen_to_use,
             "is_new_discovery": is_new_discovery_for_system,
-            "visit_count_this_run": self.current_run_visit_counts[hash_for_visit_count],
+            "visit_count_this_run": visit_count_for_info,
             "previous_actions_on_this_state": historical_actions
         }
         logging.debug(f"Processed state for hash {hash_for_visit_count}: ID {final_screen_to_use.id}, NewSystemDiscovery={is_new_discovery_for_system}, RunVisits={visit_info['visit_count_this_run']}")
