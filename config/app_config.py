@@ -157,11 +157,29 @@ class Config:
         # Non-secrets: SQLite only
         user_value = self._user_store.get(key)
         if user_value is not None and user_value != "":
+            # Handle case where boolean values might be stored as strings
+            # (e.g., from old configs or if parsing failed)
+            if isinstance(user_value, str):
+                value_lower = user_value.strip().lower()
+                # Check if it looks like a boolean string
+                if value_lower in ('true', 'false', '1', '0', 'yes', 'no', 'on', 'off'):
+                    if value_lower in ('true', '1', 'yes', 'on'):
+                        return True
+                    elif value_lower in ('false', '0', 'no', 'off'):
+                        return False
             return user_value
         normalized_key = key.upper()
         if normalized_key != key:
             alt_user_value = self._user_store.get(normalized_key)
             if alt_user_value is not None and alt_user_value != "":
+                # Handle string boolean conversion for alternate key too
+                if isinstance(alt_user_value, str):
+                    value_lower = alt_user_value.strip().lower()
+                    if value_lower in ('true', 'false', '1', '0', 'yes', 'no', 'on', 'off'):
+                        if value_lower in ('true', '1', 'yes', 'on'):
+                            return True
+                        elif value_lower in ('false', '0', 'no', 'off'):
+                            return False
                 return alt_user_value
         
         return default
@@ -531,6 +549,16 @@ class Config:
         import json
         from typing import get_type_hints
         
+        # First, check if value looks like a boolean string (even without type hints)
+        # This handles cases where boolean configs are set via CLI
+        value_lower = value_str.strip().lower()
+        if value_lower in ('true', 'false', '1', '0', 'yes', 'no', 'on', 'off'):
+            # Try to parse as boolean first
+            if value_lower in ('true', '1', 'yes', 'on'):
+                return True
+            elif value_lower in ('false', '0', 'no', 'off'):
+                return False
+        
         # Default to string
         parsed_value = value_str
         
@@ -711,7 +739,12 @@ CRAWLER_AVAILABLE_ACTIONS = {
     "scroll_up": "Scroll the view upward to reveal more content above.",
     "swipe_left": "Swipe left to navigate or reveal content on the right.",
     "swipe_right": "Swipe right to navigate or reveal content on the left.",
-    "back": "Press the back button to return to the previous screen."
+    "back": "Press the back button to return to the previous screen.",
+    "double_tap": "Perform a double tap gesture on the target element (useful for zooming, image galleries).",
+    "clear_text": "Clear all text from the target input element.",
+    "replace_text": "Replace existing text in the target input element with new text.",
+    "flick": "Perform a fast flick gesture in the specified direction (faster than scroll for quick navigation).",
+    "reset_app": "Reset the app to its initial state (clears app data and restarts)."
 }
 
 CRAWL_MODE = "steps"

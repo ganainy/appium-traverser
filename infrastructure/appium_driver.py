@@ -656,6 +656,234 @@ class AppiumDriver:
             logger.error(f"Error starting activity: {e}")
             return False
     
+    def double_tap(
+        self,
+        target_identifier: Optional[str],
+        bbox: Optional[Dict[str, Any]] = None
+    ) -> bool:
+        """
+        Double tap element or coordinates.
+        
+        Args:
+            target_identifier: Element identifier (optional if bbox provided)
+            bbox: Bounding box with 'top_left' and 'bottom_right' (optional if target_identifier provided)
+            
+        Returns:
+            True if double tap successful
+        """
+        if not self._ensure_helper():
+            return False
+        
+        try:
+            # Get coordinates
+            x, y = None, None
+            
+            # Prefer coordinates (bbox) if available
+            if bbox and isinstance(bbox, dict):
+                top_left = bbox.get("top_left", [])
+                bottom_right = bbox.get("bottom_right", [])
+                if len(top_left) == 2 and len(bottom_right) == 2:
+                    x = (top_left[1] + bottom_right[1]) / 2
+                    y = (top_left[0] + bottom_right[0]) / 2
+                    
+                    # Get window size for coordinate validation
+                    window_size = self.helper.get_window_size()
+                    coords = validate_coordinates(
+                        x, y,
+                        window_size['width'],
+                        window_size['height']
+                    )
+                    x, y = coords['x'], coords['y']
+            
+            # Fall back to element lookup if no coordinates
+            if x is None or y is None:
+                if target_identifier:
+                    element = self.helper.find_element(target_identifier, strategy='id')
+                    x, y = self.helper._get_element_center(element)
+                else:
+                    logger.error("double_tap() called without target_identifier or bbox")
+                    return False
+            
+            # Perform double tap using W3C Actions (two quick taps)
+            driver = self.helper.get_driver()
+            if driver:
+                from selenium.webdriver.common.action_chains import ActionChains
+                from selenium.webdriver.common.actions import interaction
+                from selenium.webdriver.common.actions.action_builder import ActionBuilder
+                from selenium.webdriver.common.actions.pointer_input import PointerInput
+                
+                actions = ActionChains(driver)
+                actions.w3c_actions = ActionBuilder(
+                    driver, mouse=PointerInput(interaction.POINTER_TOUCH, "touch")
+                )
+                # First tap
+                actions.w3c_actions.pointer_action.move_to_location(x, y)
+                actions.w3c_actions.pointer_action.pointer_down()
+                actions.w3c_actions.pointer_action.pause(0.05)
+                actions.w3c_actions.pointer_action.pointer_up()
+                # Brief pause between taps
+                actions.w3c_actions.pointer_action.pause(0.05)
+                # Second tap
+                actions.w3c_actions.pointer_action.move_to_location(x, y)
+                actions.w3c_actions.pointer_action.pointer_down()
+                actions.w3c_actions.pointer_action.pause(0.05)
+                actions.w3c_actions.pointer_action.pointer_up()
+                actions.perform()
+                
+                logger.debug(f"Double tapped at coordinates ({x}, {y})")
+                return True
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error during double_tap: {e}")
+            return False
+    
+    def clear_text(self, target_identifier: str) -> bool:
+        """
+        Clear text from input element.
+        
+        Args:
+            target_identifier: Element identifier
+            
+        Returns:
+            True if clear successful
+        """
+        if not self._ensure_helper():
+            return False
+        
+        try:
+            element = self.helper.find_element(target_identifier, strategy='id')
+            
+            # Try element.clear() first
+            try:
+                element.clear()
+                logger.debug(f"Cleared text from element {target_identifier}")
+                return True
+            except Exception:
+                # Fallback: send empty string
+                try:
+                    element.send_keys("")
+                    logger.debug(f"Cleared text from element {target_identifier} (using send_keys)")
+                    return True
+                except Exception as e:
+                    logger.error(f"Failed to clear text from element {target_identifier}: {e}")
+                    return False
+            
+        except Exception as e:
+            logger.error(f"Error during clear_text: {e}")
+            return False
+    
+    def replace_text(self, target_identifier: str, text: str) -> bool:
+        """
+        Replace existing text in input element.
+        
+        Args:
+            target_identifier: Element identifier
+            text: New text to set
+            
+        Returns:
+            True if replace successful
+        """
+        if not self._ensure_helper():
+            return False
+        
+        try:
+            # Clear first, then send new text
+            if self.clear_text(target_identifier):
+                return self.helper.send_keys(target_identifier, text, strategy='id', clear_first=False)
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error during replace_text: {e}")
+            return False
+    
+    def flick(self, direction: str) -> bool:
+        """
+        Perform a fast flick gesture in specified direction.
+        
+        Args:
+            direction: Flick direction ('up', 'down', 'left', 'right')
+            
+        Returns:
+            True if flick successful
+        """
+        if not self._ensure_helper():
+            return False
+        
+        try:
+            # Get window size
+            window_size = self.helper.get_window_size()
+            width = window_size['width']
+            height = window_size['height']
+            
+            # Calculate flick coordinates based on direction
+            direction_lower = direction.lower()
+            if direction_lower == 'up':
+                start_x, start_y = width / 2, height * 0.7
+                end_x, end_y = width / 2, height * 0.1
+            elif direction_lower == 'down':
+                start_x, start_y = width / 2, height * 0.3
+                end_x, end_y = width / 2, height * 0.9
+            elif direction_lower == 'left':
+                start_x, start_y = width * 0.7, height / 2
+                end_x, end_y = width * 0.1, height / 2
+            elif direction_lower == 'right':
+                start_x, start_y = width * 0.3, height / 2
+                end_x, end_y = width * 0.9, height / 2
+            else:
+                logger.error(f"Invalid flick direction: {direction}")
+                return False
+            
+            # Perform fast swipe for flicking (shorter duration than scroll)
+            driver = self.helper.get_driver()
+            if driver:
+                from selenium.webdriver.common.action_chains import ActionChains
+                from selenium.webdriver.common.actions import interaction
+                from selenium.webdriver.common.actions.action_builder import ActionBuilder
+                from selenium.webdriver.common.actions.pointer_input import PointerInput
+                
+                actions = ActionChains(driver)
+                actions.w3c_actions = ActionBuilder(
+                    driver, mouse=PointerInput(interaction.POINTER_TOUCH, "touch")
+                )
+                actions.w3c_actions.pointer_action.move_to_location(start_x, start_y)
+                actions.w3c_actions.pointer_action.pointer_down()
+                actions.w3c_actions.pointer_action.move_to_location(end_x, end_y)
+                actions.w3c_actions.pointer_action.pause(0.2)  # Faster than scroll (0.8s)
+                actions.w3c_actions.pointer_action.pointer_up()
+                actions.perform()
+                
+                logger.debug(f"Flicked {direction} from ({start_x}, {start_y}) to ({end_x}, {end_y})")
+                return True
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error during flick: {e}")
+            return False
+    
+    def reset_app(self) -> bool:
+        """
+        Reset app to initial state.
+        
+        Returns:
+            True if reset successful
+        """
+        if not self._ensure_helper():
+            return False
+        
+        try:
+            driver = self.helper.get_driver()
+            if driver:
+                driver.reset()
+                logger.debug("App reset to initial state")
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"Error during reset_app: {e}")
+            return False
+    
     def press_back_button(self) -> bool:
         """Press back button (alias for press_back)."""
         return self.press_back()

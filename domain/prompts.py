@@ -30,7 +30,12 @@ _DEFAULT_AVAILABLE_ACTIONS = {
     "scroll_up": "Scroll the view upward to reveal more content above.",
     "swipe_left": "Swipe left to navigate or reveal content on the right.",
     "swipe_right": "Swipe right to navigate or reveal content on the left.",
-    "back": "Press the back button to return to the previous screen."
+    "back": "Press the back button to return to the previous screen.",
+    "double_tap": "Perform a double tap gesture on the target element (useful for zooming, image galleries).",
+    "clear_text": "Clear all text from the target input element.",
+    "replace_text": "Replace existing text in the target input element with new text.",
+    "flick": "Perform a fast flick gesture in the specified direction (faster than scroll for quick navigation).",
+    "reset_app": "Reset the app to its initial state (clears app data and restarts)."
 }
 
 def get_available_actions(config: Optional[Any] = None) -> Dict[str, str]:

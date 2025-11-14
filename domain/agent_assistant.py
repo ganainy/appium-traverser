@@ -247,10 +247,38 @@ class AgentAssistant:
                     self.ai_interaction_readable_logger.info(prompt_text)
                 self.ai_interaction_readable_logger.info("")
 
+            # Determine if we should include image context
+            prepared_image = None
+            enable_image_context = self.cfg.get('ENABLE_IMAGE_CONTEXT', False)
+            
+            if enable_image_context and hasattr(self, '_current_prepared_image'):
+                # Check if provider/model supports image context
+                try:
+                    from domain.providers.registry import ProviderRegistry
+                    provider_strategy = ProviderRegistry.get_by_name(self.ai_provider)
+                    if provider_strategy:
+                        model_name = self.actual_model_name if hasattr(self, 'actual_model_name') else self.model_alias
+                        if provider_strategy.supports_image_context(self.cfg, model_name):
+                            prepared_image = getattr(self, '_current_prepared_image', None)
+                            if prepared_image:
+                                logging.info(f"🖼️  SENDING IMAGE TO AI: Yes (size: {prepared_image.size[0]}x{prepared_image.size[1]})")
+                            else:
+                                logging.warning(f"🖼️  SENDING IMAGE TO AI: No (prepared image is None)")
+                        else:
+                            logging.info(f"🖼️  SENDING IMAGE TO AI: No (model '{model_name}' does not support image context)")
+                    else:
+                        logging.warning(f"🖼️  SENDING IMAGE TO AI: No (could not get provider strategy)")
+                except Exception as e:
+                    logging.warning(f"🖼️  SENDING IMAGE TO AI: No (error checking support: {e})", exc_info=True)
+            elif enable_image_context:
+                logging.info(f"🖼️  SENDING IMAGE TO AI: No (ENABLE_IMAGE_CONTEXT=True but no prepared image available)")
+            else:
+                logging.debug(f"🖼️  SENDING IMAGE TO AI: No (ENABLE_IMAGE_CONTEXT=False)")
+
             try:
                 response_text, metadata = self.model_adapter.generate_response(
                     prompt=prompt_text,
-                    image=None,
+                    image=prepared_image,
                     image_format=self.cfg.get('IMAGE_FORMAT', None),
                     image_quality=self.cfg.get('IMAGE_QUALITY', None)
                 )
@@ -626,6 +654,63 @@ In your reasoning, explicitly state: "I am navigating away from this screen to b
         else:
             # Prefer element-based long press via driver
             return self.tools.driver.long_press(target_id or "", duration_ms)
+    
+    def _execute_double_tap_action(self, action_data: Dict[str, Any]) -> bool:
+        """Execute double tap action with proper argument handling."""
+        target_id = action_data.get("target_identifier")
+        bbox = action_data.get("target_bounding_box")
+        
+        # Pass both target_identifier and bbox to driver.double_tap()
+        return self.tools.driver.double_tap(target_id, bbox)
+    
+    def _execute_clear_text_action(self, action_data: Dict[str, Any]) -> bool:
+        """Execute clear text action with proper argument handling."""
+        target_id = action_data.get("target_identifier")
+        if not target_id:
+            logging.error("Cannot execute clear_text: No target identifier provided")
+            return False
+        return self.tools.driver.clear_text(target_id)
+    
+    def _execute_replace_text_action(self, action_data: Dict[str, Any]) -> bool:
+        """Execute replace text action with proper argument handling."""
+        target_id = action_data.get("target_identifier")
+        input_text = action_data.get("input_text")
+        if not target_id:
+            logging.error("Cannot execute replace_text: No target identifier provided")
+            return False
+        if input_text is None:
+            logging.error("Cannot execute replace_text: No input_text provided")
+            return False
+        return self.tools.driver.replace_text(target_id, input_text)
+    
+    def _execute_flick_action(self, action_data: Dict[str, Any]) -> bool:
+        """Execute flick action with proper argument handling."""
+        # Try to get direction from action_data or infer from reasoning/target
+        direction = action_data.get("direction")
+        if not direction:
+            # Try to infer from reasoning or target_identifier
+            reasoning = action_data.get("reasoning", "").lower()
+            target_id = action_data.get("target_identifier", "").lower()
+            
+            if "up" in reasoning or "up" in target_id:
+                direction = "up"
+            elif "down" in reasoning or "down" in target_id:
+                direction = "down"
+            elif "left" in reasoning or "left" in target_id:
+                direction = "left"
+            elif "right" in reasoning or "right" in target_id:
+                direction = "right"
+            else:
+                # Default to down
+                direction = "down"
+                logging.debug("No direction specified for flick, defaulting to 'down'")
+        
+        return self.tools.driver.flick(direction.lower())
+    
+    def _execute_reset_app_action(self, action_data: Dict[str, Any]) -> bool:
+        """Execute reset app action."""
+        # reset_app doesn't need any parameters
+        return self.tools.driver.reset_app()
 
     def _init_action_dispatch_map(self):
         """Initialize the action dispatch map for efficient action execution."""
@@ -637,7 +722,12 @@ In your reasoning, explicitly state: "I am navigating away from this screen to b
             "swipe_left": lambda action_data: self.tools.driver.scroll("left"),
             "swipe_right": lambda action_data: self.tools.driver.scroll("right"),
             "back": self.tools.driver.press_back,
-            "long_press": self._execute_long_press_action
+            "long_press": self._execute_long_press_action,
+            "double_tap": self._execute_double_tap_action,
+            "clear_text": self._execute_clear_text_action,
+            "replace_text": self._execute_replace_text_action,
+            "flick": self._execute_flick_action,
+            "reset_app": self._execute_reset_app_action
         }
     
     def _normalize_action_type(self, action_type: str, action_data: Dict[str, Any]) -> str:
@@ -719,8 +809,8 @@ In your reasoning, explicitly state: "I am navigating away from this screen to b
             # Execute the handler
             try:
                 logging.debug(f"Executing action: {action_type}")
-                # Some handlers expect action_data, others don't (like press_back)
-                if action_type == "back":
+                # Some handlers expect action_data, others don't (like press_back, reset_app)
+                if action_type in ["back", "reset_app"]:
                     result = handler()
                 else:
                     result = handler(action_data)
@@ -1050,6 +1140,41 @@ In your reasoning, explicitly state: "I am navigating away from this screen to b
             context['xml_context'] = xml_string_simplified
             context['_full_xml_context'] = xml_string_raw  # Store original for reference
             
+            # Prepare image if ENABLE_IMAGE_CONTEXT is enabled
+            # Store it in self so the LLM wrapper can access it
+            self._current_prepared_image = None
+            enable_image_context = self.cfg.get('ENABLE_IMAGE_CONTEXT', False)
+            
+            # Log image context status
+            if enable_image_context:
+                logging.info(f"🖼️  IMAGE CONTEXT: Enabled (ENABLE_IMAGE_CONTEXT=True)")
+            else:
+                logging.info(f"🖼️  IMAGE CONTEXT: Disabled (ENABLE_IMAGE_CONTEXT=False)")
+            
+            if enable_image_context and screenshot_bytes:
+                try:
+                    # Check if provider/model supports image context before preparing
+                    from domain.providers.registry import ProviderRegistry
+                    provider_strategy = ProviderRegistry.get_by_name(self.ai_provider)
+                    if provider_strategy:
+                        model_name = self.actual_model_name if hasattr(self, 'actual_model_name') else self.model_alias
+                        if provider_strategy.supports_image_context(self.cfg, model_name):
+                            # Prepare the image using existing method
+                            prepared_image = self._prepare_image_part(screenshot_bytes)
+                            if prepared_image:
+                                self._current_prepared_image = prepared_image
+                                logging.debug(f"🖼️  IMAGE CONTEXT: Prepared screenshot (size: {prepared_image.size[0]}x{prepared_image.size[1]}) - will be sent to AI model")
+                            else:
+                                logging.debug(f"🖼️  IMAGE CONTEXT: Image preparation returned None - image will NOT be sent")
+                        else:
+                            logging.debug(f"🖼️  IMAGE CONTEXT: Model '{model_name}' does not support image context - image will NOT be sent")
+                    else:
+                        logging.debug(f"🖼️  IMAGE CONTEXT: Could not get provider strategy for {self.ai_provider} - image will NOT be sent")
+                except Exception as e:
+                    logging.debug(f"🖼️  IMAGE CONTEXT: Error preparing image: {e} - image will NOT be sent", exc_info=True)
+            elif enable_image_context and not screenshot_bytes:
+                logging.debug(f"🖼️  IMAGE CONTEXT: Enabled but no screenshot bytes available - image will NOT be sent")
+            
             # Log the decision request context
             if self.ai_interaction_readable_logger:
                 timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -1077,7 +1202,11 @@ In your reasoning, explicitly state: "I am navigating away from this screen to b
                 self.ai_interaction_readable_logger.info("")
 
             # Run the decision chain
-            chain_result = self.action_decision_chain.run(context=context)
+            try:
+                chain_result = self.action_decision_chain.run(context=context)
+            finally:
+                # Clear the prepared image after use to avoid memory leaks
+                self._current_prepared_image = None
             
             # Extract the AI input prompt from context (stored by format_prompt_with_context)
             ai_input_prompt = context.get('_full_ai_input_prompt', None)
@@ -1104,6 +1233,8 @@ In your reasoning, explicitly state: "I am navigating away from this screen to b
             return validated_data, 0.0, 0, ai_input_prompt
             
         except ValidationError as e:
+            # Clear prepared image on error
+            self._current_prepared_image = None
             logging.error(f"Validation error in action data: {e}")
             if self.ai_interaction_readable_logger:
                 self.ai_interaction_readable_logger.info("=" * 80)
@@ -1114,6 +1245,8 @@ In your reasoning, explicitly state: "I am navigating away from this screen to b
                 self.ai_interaction_readable_logger.info("")
             return None
         except Exception as e:
+            # Clear prepared image on error
+            self._current_prepared_image = None
             logging.error(f"Error getting next action from LangChain: {e}", exc_info=True)
             if self.ai_interaction_readable_logger:
                 self.ai_interaction_readable_logger.info("=" * 80)

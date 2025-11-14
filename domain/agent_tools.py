@@ -370,3 +370,199 @@ class AgentTools:
                 "success": False,
                 "message": f"Exception checking app context: {str(e)}"
             }
+    
+    def double_tap(self, element_identifier: Optional[str] = None, target_bounding_box: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """
+        Perform a double tap on an element or at specified coordinates.
+        
+        Args:
+            element_identifier: Optional identifier of the element to double tap.
+            target_bounding_box: Optional bbox to compute coordinates if element is not found.
+            
+        Returns:
+            A dictionary containing the result of the action.
+        """
+        try:
+            logging.debug(f"Agent tool: double_tap(identifier={element_identifier}, has_bbox={bool(target_bounding_box)})")
+            
+            # Call driver double_tap method
+            success = self.driver.double_tap(element_identifier, target_bounding_box)
+            result = {
+                "success": success,
+                "message": "Double tap executed successfully" if success else "Double tap failed"
+            }
+            
+            # Save to action history
+            self.action_history.append({
+                "action": "double_tap",
+                "target": element_identifier or "coords",
+                "success": success,
+                "timestamp": time.time()
+            })
+            
+            self.last_action_result = result
+            return result
+        except Exception as e:
+            error_result = {
+                "success": False,
+                "message": f"Exception during double_tap: {str(e)}"
+            }
+            self.last_action_result = error_result
+            return error_result
+    
+    def clear_text(self, element_identifier: str) -> Dict[str, Any]:
+        """
+        Clear text from an input element.
+        
+        Args:
+            element_identifier: The identifier of the element to clear.
+            
+        Returns:
+            A dictionary containing the result of the action.
+        """
+        try:
+            logging.debug(f"Agent tool: clear_text({element_identifier})")
+            
+            # Call driver clear_text method
+            success = self.driver.clear_text(element_identifier)
+            result = {
+                "success": success,
+                "message": "Text cleared successfully" if success else "Clear text failed"
+            }
+            
+            # Save to action history
+            self.action_history.append({
+                "action": "clear_text",
+                "target": element_identifier,
+                "success": success,
+                "timestamp": time.time()
+            })
+            
+            self.last_action_result = result
+            return result
+        except Exception as e:
+            error_result = {
+                "success": False,
+                "message": f"Exception during clear_text: {str(e)}"
+            }
+            self.last_action_result = error_result
+            return error_result
+    
+    def replace_text(self, element_identifier: str, text: str) -> Dict[str, Any]:
+        """
+        Replace existing text in an input element.
+        
+        Args:
+            element_identifier: The identifier of the element to replace text in.
+            text: The new text to set.
+            
+        Returns:
+            A dictionary containing the result of the action.
+        """
+        try:
+            logging.debug(f"Agent tool: replace_text({element_identifier}, {text})")
+            
+            # Call driver replace_text method
+            success = self.driver.replace_text(element_identifier, text)
+            result = {
+                "success": success,
+                "message": f"Text replaced with '{text}' successfully" if success else "Replace text failed"
+            }
+            
+            # Save to action history
+            self.action_history.append({
+                "action": "replace_text",
+                "target": element_identifier,
+                "text": text,
+                "success": success,
+                "timestamp": time.time()
+            })
+            
+            self.last_action_result = result
+            return result
+        except Exception as e:
+            error_result = {
+                "success": False,
+                "message": f"Exception during replace_text: {str(e)}"
+            }
+            self.last_action_result = error_result
+            return error_result
+    
+    def flick(self, direction: str) -> Dict[str, Any]:
+        """
+        Perform a fast flick gesture in the specified direction.
+        
+        Args:
+            direction: The direction to flick. One of: "up", "down", "left", "right".
+            
+        Returns:
+            A dictionary containing the result of the action.
+        """
+        try:
+            logging.debug(f"Agent tool: flick({direction})")
+            
+            # Validate direction
+            valid_directions = ["up", "down", "left", "right"]
+            if direction not in valid_directions:
+                return {
+                    "success": False,
+                    "message": f"Invalid direction: {direction}. Must be one of: {', '.join(valid_directions)}"
+                }
+            
+            # Call driver flick method
+            success = self.driver.flick(direction)
+            result = {
+                "success": success,
+                "message": f"Flick {direction} executed successfully" if success else "Flick failed"
+            }
+            
+            # Save to action history
+            self.action_history.append({
+                "action": f"flick_{direction}",
+                "success": success,
+                "timestamp": time.time()
+            })
+            
+            self.last_action_result = result
+            return result
+        except Exception as e:
+            error_result = {
+                "success": False,
+                "message": f"Exception during flick: {str(e)}"
+            }
+            self.last_action_result = error_result
+            return error_result
+    
+    def reset_app(self) -> Dict[str, Any]:
+        """
+        Reset the app to its initial state.
+        
+        Returns:
+            A dictionary containing the result of the action.
+        """
+        try:
+            logging.debug("Agent tool: reset_app()")
+            
+            # Call driver reset_app method
+            success = self.driver.reset_app()
+            result = {
+                "success": success,
+                "message": "App reset successfully" if success else "Reset app failed"
+            }
+            
+            # Save to action history
+            self.action_history.append({
+                "action": "reset_app",
+                "success": success,
+                "timestamp": time.time()
+            })
+            
+            self.last_action_result = result
+            return result
+        except Exception as e:
+            error_result = {
+                "success": False,
+                "message": f"Exception during reset_app: {str(e)}"
+            }
+            self.last_action_result = error_result
+            return error_result
