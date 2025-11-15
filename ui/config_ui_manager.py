@@ -521,34 +521,69 @@ class ConfigManager(QObject):
             return
         
         widget = self.main_controller.config_widgets['CRAWLER_AVAILABLE_ACTIONS']
-        if not isinstance(widget, QTextEdit):
+        
+        # Check if it's the new AvailableActionsWidget
+        from ui.available_actions_widget import AvailableActionsWidget
+        if isinstance(widget, AvailableActionsWidget):
+            service = self._get_actions_service()
+            if not service:
+                # Fall back to config property - convert to list format
+                actions_dict = self.config.CRAWLER_AVAILABLE_ACTIONS
+                if actions_dict:
+                    # Convert dict to list format for widget
+                    actions_list = [
+                        {'name': name, 'description': desc, 'enabled': True, 'id': None}
+                        for name, desc in actions_dict.items()
+                    ]
+                    widget.load_actions(actions_list, actions_service=service)
+                return
+            
+            try:
+                # Always load from database - actions should be initialized on first launch
+                actions = service.get_actions()
+                
+                if actions:
+                    widget.load_actions(actions, actions_service=service)
+                else:
+                    # Database is empty - this shouldn't happen after initialization
+                    # Log error but don't crash - widget will show empty list
+                    logging.error(
+                        "No actions found in database. Actions should have been initialized on first launch. "
+                        "Please restart the application to trigger initialization."
+                    )
+            except Exception as e:
+                logging.error(f"Failed to load actions from service: {e}")
+                # Don't fall back to config defaults - actions should be in database
+                # Widget will show empty list if database is corrupted
             return
         
-        service = self._get_actions_service()
-        if not service:
-            # Fall back to config property
-            actions_dict = self.config.CRAWLER_AVAILABLE_ACTIONS
-            if actions_dict:
-                widget.setPlainText(json.dumps(actions_dict, indent=2))
-            return
-        
-        try:
-            actions = service.get_actions()
-            if actions:
-                # Convert to dict format
-                actions_dict = {action['name']: action['description'] for action in actions}
-                widget.setPlainText(json.dumps(actions_dict, indent=2))
-            else:
-                # Fall back to config defaults
+        # Legacy support for QTextEdit (should not be needed after migration)
+        if isinstance(widget, QTextEdit):
+            service = self._get_actions_service()
+            if not service:
+                # Fall back to config property
                 actions_dict = self.config.CRAWLER_AVAILABLE_ACTIONS
                 if actions_dict:
                     widget.setPlainText(json.dumps(actions_dict, indent=2))
-        except Exception as e:
-            logging.error(f"Failed to load actions from service: {e}")
-            # Fall back to config
-            actions_dict = self.config.CRAWLER_AVAILABLE_ACTIONS
-            if actions_dict:
-                widget.setPlainText(json.dumps(actions_dict, indent=2))
+                return
+            
+            try:
+                actions = service.get_actions()
+                if actions:
+                    # Convert to dict format
+                    actions_dict = {action['name']: action['description'] for action in actions}
+                    widget.setPlainText(json.dumps(actions_dict, indent=2))
+                else:
+                    # Fall back to config defaults
+                    actions_dict = self.config.CRAWLER_AVAILABLE_ACTIONS
+                    if actions_dict:
+                        widget.setPlainText(json.dumps(actions_dict, indent=2))
+            except Exception as e:
+                logging.error(f"Failed to load actions from service: {e}")
+                # Fall back to config
+                actions_dict = self.config.CRAWLER_AVAILABLE_ACTIONS
+                if actions_dict:
+                    widget.setPlainText(json.dumps(actions_dict, indent=2))
     
     def _load_prompts_from_service(self):
         """Load prompts from service and display in widgets."""

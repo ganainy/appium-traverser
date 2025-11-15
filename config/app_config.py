@@ -71,6 +71,12 @@ class Config:
         self._default_snapshot = self._collect_default_settings()
         # Initialize SQLite with simple defaults on first launch
         self._user_store.initialize_simple_defaults(self._default_snapshot)
+        # Initialize default crawler actions on first launch
+        module_globals = globals()
+        if 'CRAWLER_AVAILABLE_ACTIONS' in module_globals:
+            default_actions = module_globals['CRAWLER_AVAILABLE_ACTIONS']
+            if isinstance(default_actions, dict):
+                self._user_store.initialize_default_actions(default_actions)
         # Initialize ALLOWED_EXTERNAL_PACKAGES separately (it's a list, not a simple type)
         # Check if it's already in the database, and if not, initialize it
         # This handles both first launch and existing databases that don't have this key

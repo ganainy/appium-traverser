@@ -426,8 +426,42 @@ class UserConfigStore:
         conn.commit()
     
     # Crawler actions CRUD methods
+    def initialize_default_actions(self, default_actions: Dict[str, str]) -> None:
+        """Initialize default actions in the database on first launch.
+        
+        Args:
+            default_actions: Dictionary mapping action names to descriptions
+        """
+        conn = self._ensure_conn()
+        
+        # Check if any actions exist
+        cur = conn.execute("SELECT COUNT(*) FROM crawler_actions")
+        count = cur.fetchone()[0]
+        
+        # Only initialize if table is empty (first launch)
+        if count == 0:
+            logging.info(f"Initializing {len(default_actions)} default actions in database...")
+            from datetime import datetime
+            now = datetime.now().isoformat()
+            
+            for name, description in default_actions.items():
+                try:
+                    conn.execute("""
+                        INSERT INTO crawler_actions (name, description, created_at, updated_at, enabled, sort_order)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    """, (name, description, now, now, True, 0))
+                    logging.debug(f"Initialized default action: {name}")
+                except sqlite3.IntegrityError:
+                    # Action already exists (shouldn't happen on first launch, but handle gracefully)
+                    logging.debug(f"Action '{name}' already exists, skipping")
+                except Exception as e:
+                    logging.error(f"Failed to initialize action '{name}': {e}")
+            
+            conn.commit()
+            logging.info("Default actions initialization complete")
+    
     def get_crawler_actions_full(self) -> List[Dict[str, Any]]:
-        """Get all crawler actions with full model.
+        """Get all crawler actions with full model (enabled and disabled).
         
         Returns:
             List of action dictionaries with full model
@@ -436,7 +470,6 @@ class UserConfigStore:
         cur = conn.execute("""
             SELECT id, name, description, created_at, updated_at, enabled, sort_order 
             FROM crawler_actions 
-            WHERE enabled = 1
             ORDER BY sort_order ASC, id ASC
         """)
         return [

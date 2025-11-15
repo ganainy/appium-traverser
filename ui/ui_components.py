@@ -869,17 +869,26 @@ class UIComponents:
             label_xml_snippet_max_len, config_widgets["XML_SNIPPET_MAX_LEN"]
         )
 
-        # Crawler Available Actions (read-only, managed via CLI: actions list/add/edit/remove)
-        config_widgets["CRAWLER_AVAILABLE_ACTIONS"] = QTextEdit()
-        config_widgets["CRAWLER_AVAILABLE_ACTIONS"].setMinimumHeight(120)
-        config_widgets["CRAWLER_AVAILABLE_ACTIONS"].setMaximumHeight(180)
-        config_widgets["CRAWLER_AVAILABLE_ACTIONS"].setReadOnly(True)  # Read-only, managed via CLI
+        # Crawler Available Actions (checkable list, managed via CLI: actions list/add/edit/remove)
+        from ui.available_actions_widget import AvailableActionsWidget
+        # Get actions service for the widget
+        actions_service = None
+        if config_handler:
+            try:
+                actions_service = config_handler._get_actions_service()
+            except Exception as e:
+                logging.debug(f"Could not get actions service for widget: {e}")
+        
+        config_widgets["CRAWLER_AVAILABLE_ACTIONS"] = AvailableActionsWidget(
+            actions_service=actions_service,
+            parent=ai_group
+        )
         label_available_actions = QLabel("Available Actions: ")
         available_actions_tooltip = (
-            "JSON dict defining which actions the crawler can use (read-only). "
-            "Manage via CLI: 'python run_cli.py actions list/add/edit/remove'. "
-            "Format: {\"action_name\": \"description\", ...}. "
-            "Example: {\"click\": \"Click the element\", \"scroll_down\": \"Scroll down\"}"
+            "Select which actions the crawler can use. "
+            "Unchecked actions will be disabled for the AI model. "
+            "Manage actions via CLI: 'python run_cli.py actions list/add/edit/remove'. "
+            "Only enabled actions will be shown to the AI model."
         )
         label_available_actions.setToolTip(available_actions_tooltip)
         config_widgets["CRAWLER_AVAILABLE_ACTIONS"].setToolTip(available_actions_tooltip)
