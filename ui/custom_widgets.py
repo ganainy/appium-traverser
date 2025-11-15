@@ -5,6 +5,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QLabel,
     QProgressBar,
+    QSplashScreen,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -33,6 +34,69 @@ class NoScrollComboBox(QComboBox):
             super().wheelEvent(event)
         else:
             event.ignore()
+
+
+class LoadingSplashScreen(QSplashScreen):
+    """Splash screen shown during UI initialization."""
+    
+    def __init__(self, pixmap=None, parent=None):
+        """Initialize the splash screen.
+        
+        Args:
+            pixmap: Optional pixmap for the splash screen. If None, creates a simple text-based splash.
+            parent: Parent widget (usually None for splash screens).
+        """
+        if pixmap is None:
+            # Create a simple pixmap with text
+            from PySide6.QtGui import QPixmap, QPainter, QFont, QColor
+            
+            # Create a pixmap for the splash
+            pixmap = QPixmap(600, 300)
+            # Use opaque background instead of transparent for better visibility
+            pixmap.fill(QColor("#1f2937"))
+            
+            painter = QPainter(pixmap)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            
+            # Draw background with rounded corners effect
+            painter.fillRect(pixmap.rect(), QColor("#1f2937"))
+            
+            # Draw text
+            painter.setPen(QColor("#FFFFFF"))
+            font = QFont()
+            font.setPointSize(24)
+            font.setBold(True)
+            painter.setFont(font)
+            painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, "Appium Traverser")
+            
+            # Draw subtitle
+            font.setPointSize(12)
+            font.setBold(False)
+            painter.setFont(font)
+            painter.setPen(QColor("#9CA3AF"))
+            subtitle_rect = pixmap.rect()
+            subtitle_rect.setTop(subtitle_rect.top() + 60)
+            painter.drawText(subtitle_rect, Qt.AlignmentFlag.AlignCenter, "Loading interface...")
+            
+            painter.end()
+        
+        super().__init__(pixmap, Qt.WindowType.WindowStaysOnTopHint)
+        self.setWindowFlags(
+            Qt.WindowType.WindowStaysOnTopHint 
+            | Qt.WindowType.SplashScreen
+            | Qt.WindowType.FramelessWindowHint
+        )
+        # Ensure splash is always on top and visible
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, False)
+        
+    def show_message(self, message: str):
+        """Show a message on the splash screen."""
+        from PySide6.QtGui import QColor
+        self.showMessage(
+            message,
+            Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom,
+            QColor("#FFFFFF")
+        )
 
 
 class BusyDialog(QDialog):

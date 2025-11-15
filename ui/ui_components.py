@@ -40,7 +40,6 @@ class UIComponents:
     # These will be hidden in basic mode
     ADVANCED_GROUPS = [
         "appium_settings_group",
-        "error_handling_group",
         "focus_areas_group",  # Focus areas can be advanced for basic users
         "image_preprocessing_group",  # Image preprocessing controls are advanced
     ]
@@ -219,11 +218,15 @@ class UIComponents:
             return
 
         # Get models using provider strategy
-        # Check free-only filter state from UI checkbox and update config if needed
+        # Check free-only filter state from the config object (reliable source of truth)
+        # Reading from config instead of UI prevents race conditions during load_config
         free_only = False
         if "OPENROUTER_SHOW_FREE_ONLY" in config_widgets:
-            free_only = config_widgets["OPENROUTER_SHOW_FREE_ONLY"].isChecked()
+            # Read from the temporary config object, which loaded from DB
+            free_only = config.get("OPENROUTER_SHOW_FREE_ONLY", False)
             # Update config to reflect checkbox state (for OpenRouter's get_models to use)
+            # This is technically redundant if config.get worked, but ensures
+            # the in-memory config object has the value set for get_models()
             if provider_enum == AIProvider.OPENROUTER:
                 config.set("OPENROUTER_SHOW_FREE_ONLY", free_only)
         
@@ -306,11 +309,9 @@ class UIComponents:
         "ALLOWED_EXTERNAL_PACKAGES": True,
         "MAX_CONSECUTIVE_AI_FAILURES": True,
         "MAX_CONSECUTIVE_MAP_FAILURES": True,
-        "MAX_CONSECUTIVE_EXEC_FAILURES": True,
         "ENABLE_IMAGE_CONTEXT": False,
         "ENABLE_TRAFFIC_CAPTURE": False,
         "CLEANUP_DEVICE_PCAP_FILE": True,
-        "CONTINUE_EXISTING_RUN": False,
         "MOBSF_API_URL": True,
         "MOBSF_API_KEY": True,
         "OPENROUTER_SHOW_FREE_ONLY": False,
@@ -439,11 +440,6 @@ class UIComponents:
         )
         crawler_group.setObjectName("crawler_settings_group")
 
-        error_handling_group = UIComponents._create_error_handling_group(
-            scroll_layout, config_widgets, tooltips
-        )
-        error_handling_group.setObjectName("error_handling_group")
-
         # Privacy & Network settings (traffic capture)
         privacy_network_group = UIComponents._create_privacy_network_group(
             scroll_layout, config_widgets, tooltips
@@ -455,12 +451,7 @@ class UIComponents:
         )
         mobsf_group.setObjectName("mobsf_settings_group")
 
-        # Run Control and Recording groups (split from previous combined group)
-        run_control_group = UIComponents._create_run_control_group(
-            scroll_layout, config_widgets, tooltips
-        )
-        run_control_group.setObjectName("run_control_group")
-
+        # Recording group
         recording_group = UIComponents._create_recording_group(
             scroll_layout, config_widgets, tooltips
         )
@@ -478,10 +469,8 @@ class UIComponents:
             "image_preprocessing_group": image_prep_group,
             "focus_areas_group": focus_areas_group,
             "crawler_settings_group": crawler_group,
-            "error_handling_group": error_handling_group,
             "privacy_network_group": privacy_network_group,
             "mobsf_settings_group": mobsf_group,
-            "run_control_group": run_control_group,
             "recording_group": recording_group,
         }
 
@@ -599,73 +588,22 @@ class UIComponents:
             QWidget containing the right panel
         """
         panel = QWidget()
-        layout = QVBoxLayout(panel)
+        main_layout = QVBoxLayout(panel)
 
-        # Step counter placed above the status text
-        step_layout = QHBoxLayout()
+        # Step counter and status at the top (small header)
+        header_layout = QHBoxLayout()
         controller.step_label = QLabel("Step: 0")
-        step_layout.addWidget(controller.step_label)
-
-        # Status section
-        status_layout = QHBoxLayout()
         controller.status_label = QLabel("Status: Idle")
         controller.progress_bar = QProgressBar()
-        status_layout.addWidget(controller.status_label)
-        status_layout.addWidget(controller.progress_bar)
+        header_layout.addWidget(controller.step_label)
+        header_layout.addWidget(controller.status_label)
+        header_layout.addWidget(controller.progress_bar)
+        main_layout.addLayout(header_layout)
 
-        # Create side-by-side layout for Action History and Screenshot
-        history_screenshot_layout = QHBoxLayout()
-        
-        # Action history (left side)
-        action_history_group = QGroupBox("Action History")
-        action_history_layout = QVBoxLayout(action_history_group)
-        controller.action_history = QTextEdit()
-        controller.action_history.setReadOnly(True)
-        # Improve visibility and usability
-        try:
-            from ui.strings import ACTION_HISTORY_PLACEHOLDER
-            controller.action_history.setPlaceholderText(ACTION_HISTORY_PLACEHOLDER)
-        except Exception:
-            pass
-        controller.action_history.setStyleSheet("""
-            background-color: #333333; 
-            color: #FFFFFF; 
-            font-size: 11px; 
-            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-            border: 1px solid #555555;
-        """)
-        try:
-            from PySide6.QtWidgets import QTextEdit as _QTextEdit
-            controller.action_history.setLineWrapMode(_QTextEdit.LineWrapMode.WidgetWidth)
-        except Exception:
-            pass
-        # Significantly increase minimum height and make it expandable
-        controller.action_history.setMinimumHeight(400)
-        controller.action_history.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
-        )
-        action_history_layout.addWidget(controller.action_history)
+        # Main content area: Logs on left (2/3), Screenshot + Action History stacked on right (1/3)
+        content_layout = QHBoxLayout()
 
-        # Screenshot display (right side)
-        screenshot_group = QGroupBox("Current Screenshot")
-        screenshot_layout = QVBoxLayout(screenshot_group)
-        controller.screenshot_label = QLabel()
-        controller.screenshot_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        controller.screenshot_label.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
-        )
-        controller.screenshot_label.setMinimumHeight(400)
-        controller.screenshot_label.setStyleSheet("""
-            border: 1px solid #555555;
-            background-color: #2a2a2a;
-        """)
-        screenshot_layout.addWidget(controller.screenshot_label)
-        
-        # Add both to the horizontal layout with equal space allocation
-        history_screenshot_layout.addWidget(action_history_group, 1)
-        history_screenshot_layout.addWidget(screenshot_group, 1)
-
-        # Log output section
+        # Logs section - takes 2/3 of width and most of vertical space
         log_group = QGroupBox("Logs")
         log_layout = QVBoxLayout(log_group)
 
@@ -683,13 +621,64 @@ class UIComponents:
         log_layout.addLayout(log_header_layout)
         log_layout.addWidget(controller.log_output)
 
-        # Add all sections to the layout
-        # Add step counter first, then status underneath
-        layout.addLayout(step_layout)
-        layout.addLayout(status_layout)
-        # Add the side-by-side action history and screenshot layout with more space
-        layout.addLayout(history_screenshot_layout, 2)  # Give more space to this section
-        layout.addWidget(log_group, 1)  # Logs get less space
+        # Right side: Screenshot and Action History stacked vertically
+        right_side_layout = QVBoxLayout()
+
+        # Screenshot display (top right) - wider than tall
+        screenshot_group = QGroupBox("Current Screenshot")
+        screenshot_layout = QVBoxLayout(screenshot_group)
+        controller.screenshot_label = QLabel()
+        controller.screenshot_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        controller.screenshot_label.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
+        controller.screenshot_label.setMinimumHeight(300)
+        controller.screenshot_label.setMinimumWidth(300)
+        controller.screenshot_label.setStyleSheet("""
+            border: 1px solid #555555;
+            background-color: #2a2a2a;
+        """)
+        screenshot_layout.addWidget(controller.screenshot_label)
+
+        # Action history (bottom right) - small, square or slightly taller
+        action_history_group = QGroupBox("Action History")
+        action_history_layout = QVBoxLayout(action_history_group)
+        controller.action_history = QTextEdit()
+        controller.action_history.setReadOnly(True)
+        try:
+            from ui.strings import ACTION_HISTORY_PLACEHOLDER
+            controller.action_history.setPlaceholderText(ACTION_HISTORY_PLACEHOLDER)
+        except Exception:
+            pass
+        controller.action_history.setStyleSheet("""
+            background-color: #333333; 
+            color: #FFFFFF; 
+            font-size: 11px; 
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+            border: 1px solid #555555;
+        """)
+        try:
+            from PySide6.QtWidgets import QTextEdit as _QTextEdit
+            controller.action_history.setLineWrapMode(_QTextEdit.LineWrapMode.WidgetWidth)
+        except Exception:
+            pass
+        # Action history - small size
+        controller.action_history.setMinimumHeight(150)
+        controller.action_history.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
+        action_history_layout.addWidget(controller.action_history)
+
+        # Add screenshot and action history to right side layout
+        right_side_layout.addWidget(screenshot_group, 2)  # Screenshot gets more space
+        right_side_layout.addWidget(action_history_group, 1)  # Action history gets less space
+
+        # Add logs (left, 2/3) and right side (1/3) to content layout
+        content_layout.addWidget(log_group, 2)  # Logs take 2/3 of width
+        content_layout.addLayout(right_side_layout, 1)  # Right side takes 1/3 of width
+
+        # Add content layout to main layout
+        main_layout.addLayout(content_layout, 1)  # Content takes all remaining vertical space
 
         return panel
 
@@ -859,6 +848,11 @@ class UIComponents:
         # Wire up free-only filter to re-populate models (works for all providers)
         def _on_free_only_changed(_state: int):
             try:
+                # Save the preference first
+                free_only = config_widgets["OPENROUTER_SHOW_FREE_ONLY"].isChecked()
+                config_handler.config.set("OPENROUTER_SHOW_FREE_ONLY", free_only)
+                
+                # Then update the model list
                 current_provider = config_widgets["AI_PROVIDER"].currentText()
                 UIComponents._update_model_types(current_provider, config_widgets, config_handler)
             except Exception as e:
@@ -1384,25 +1378,28 @@ class UIComponents:
         config_widgets["ALLOWED_EXTERNAL_PACKAGES_WIDGET"] = AllowedPackagesWidget(config)
         # Store a reference to the widget for compatibility with config manager
         config_widgets["ALLOWED_EXTERNAL_PACKAGES"] = config_widgets["ALLOWED_EXTERNAL_PACKAGES_WIDGET"]
-        crawler_layout.addRow(config_widgets["ALLOWED_EXTERNAL_PACKAGES_WIDGET"])
+        label_allowed_packages = QLabel("Allowed External Packages: ")
+        label_allowed_packages.setToolTip(tooltips["ALLOWED_EXTERNAL_PACKAGES"])
+        config_widgets["ALLOWED_EXTERNAL_PACKAGES_WIDGET"].setToolTip(tooltips["ALLOWED_EXTERNAL_PACKAGES"])
+        crawler_layout.addRow(label_allowed_packages, config_widgets["ALLOWED_EXTERNAL_PACKAGES_WIDGET"])
 
-        layout.addRow(crawler_group)
-        return crawler_group
+        # Add a visual separator before error handling settings
+        separator_label = QLabel("")
+        separator_label.setMinimumHeight(10)
+        crawler_layout.addRow(separator_label)
 
-    @staticmethod
-    def _create_error_handling_group(
-        layout: QFormLayout, config_widgets: Dict[str, Any], tooltips: Dict[str, str]
-    ) -> QGroupBox:
-        """Create the Error Handling settings group."""
-        error_handling_group = QGroupBox("Error Handling Settings")
-        error_handling_layout = QFormLayout(error_handling_group)
+        # Error Handling Settings (Advanced - shown in Expert mode only)
+        error_handling_label = QLabel("Error Handling:")
+        error_handling_label.setStyleSheet("font-weight: bold; margin-top: 5px;")
+        # Add label spanning both columns by using addRow with just the label
+        crawler_layout.addRow(error_handling_label)
 
         from config.numeric_constants import MAX_CONSECUTIVE_FAILURES_MIN, MAX_CONSECUTIVE_FAILURES_MAX
         config_widgets["MAX_CONSECUTIVE_AI_FAILURES"] = QSpinBox()
         config_widgets["MAX_CONSECUTIVE_AI_FAILURES"].setRange(MAX_CONSECUTIVE_FAILURES_MIN, MAX_CONSECUTIVE_FAILURES_MAX)
         label_max_ai_failures = QLabel("Max Consecutive AI Failures: ")
         label_max_ai_failures.setToolTip(tooltips["MAX_CONSECUTIVE_AI_FAILURES"])
-        error_handling_layout.addRow(
+        crawler_layout.addRow(
             label_max_ai_failures, config_widgets["MAX_CONSECUTIVE_AI_FAILURES"]
         )
 
@@ -1410,38 +1407,13 @@ class UIComponents:
         config_widgets["MAX_CONSECUTIVE_MAP_FAILURES"].setRange(MAX_CONSECUTIVE_FAILURES_MIN, MAX_CONSECUTIVE_FAILURES_MAX)
         label_max_map_failures = QLabel("Max Consecutive Map Failures: ")
         label_max_map_failures.setToolTip(tooltips["MAX_CONSECUTIVE_MAP_FAILURES"])
-        error_handling_layout.addRow(
+        crawler_layout.addRow(
             label_max_map_failures, config_widgets["MAX_CONSECUTIVE_MAP_FAILURES"]
         )
 
-        config_widgets["MAX_CONSECUTIVE_EXEC_FAILURES"] = QSpinBox()
-        config_widgets["MAX_CONSECUTIVE_EXEC_FAILURES"].setRange(MAX_CONSECUTIVE_FAILURES_MIN, MAX_CONSECUTIVE_FAILURES_MAX)
-        label_max_exec_failures = QLabel("Max Consecutive Exec Failures: ")
-        label_max_exec_failures.setToolTip(tooltips["MAX_CONSECUTIVE_EXEC_FAILURES"])
-        error_handling_layout.addRow(
-            label_max_exec_failures, config_widgets["MAX_CONSECUTIVE_EXEC_FAILURES"]
-        )
+        layout.addRow(crawler_group)
+        return crawler_group
 
-        layout.addRow(error_handling_group)
-        return error_handling_group
-
-    @staticmethod
-    def _create_run_control_group(
-        layout: QFormLayout, config_widgets: Dict[str, Any], tooltips: Dict[str, str]
-    ) -> QGroupBox:
-        """Create the Run Control group for session-related controls."""
-        run_control_group = QGroupBox("Run Control")
-        run_control_layout = QFormLayout(run_control_group)
-
-        config_widgets["CONTINUE_EXISTING_RUN"] = QCheckBox()
-        label_continue_run = QLabel("Continue Existing Run: ")
-        label_continue_run.setToolTip(tooltips["CONTINUE_EXISTING_RUN"])
-        run_control_layout.addRow(
-            label_continue_run, config_widgets["CONTINUE_EXISTING_RUN"]
-        )
-
-        layout.addRow(run_control_group)
-        return run_control_group
 
     @staticmethod
     def _create_recording_group(
@@ -1515,6 +1487,9 @@ class UIComponents:
         config_widgets["MOBSF_API_URL"] = QLineEdit()
         from ui.strings import MOBSF_API_URL_PLACEHOLDER
         config_widgets["MOBSF_API_URL"].setPlaceholderText(MOBSF_API_URL_PLACEHOLDER)
+        # Get current API URL from config (default to ServiceURLs.MOBSF if not set)
+        mobsf_api_url = config_handler.config.CONFIG_MOBSF_API_URL
+        config_widgets["MOBSF_API_URL"].setText(mobsf_api_url)
         label_mobsf_api_url = QLabel("MobSF API URL: ")
         label_mobsf_api_url.setToolTip(tooltips["MOBSF_API_URL"])
         mobsf_layout.addRow(label_mobsf_api_url, config_widgets["MOBSF_API_URL"])

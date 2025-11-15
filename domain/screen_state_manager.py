@@ -82,7 +82,7 @@ class ScreenStateManager:
         self._next_screen_db_id_counter: int = 1
         logging.debug("ScreenStateManager initialized.")
 
-    def initialize_for_run(self, run_id: int, app_package: str, start_activity: str, is_continuation: bool):
+    def initialize_for_run(self, run_id: int, app_package: str, start_activity: str):
         self.current_run_id = run_id
         self.current_app_package = app_package
         self.current_start_activity = start_activity
@@ -91,11 +91,7 @@ class ScreenStateManager:
         self.current_run_latest_step_number = 0 # Reset for the run
 
         self._load_all_known_screens_from_db()
-        if is_continuation:
-            self._populate_run_specific_history(run_id) # This will set current_run_latest_step_number
-            logging.debug(f"ScreenStateManager initialized for CONTINUED Run ID: {run_id}. Known screens: {len(self.known_screens_cache)}. Latest step from history: {self.current_run_latest_step_number}. History for this run populated.")
-        else:
-            logging.debug(f"ScreenStateManager initialized for NEW Run ID: {run_id}. Known screens: {len(self.known_screens_cache)}. Visit counts/history reset for this run. Latest step set to 0.")
+        logging.debug(f"ScreenStateManager initialized for Run ID: {run_id}. Known screens: {len(self.known_screens_cache)}. Visit counts/history reset for this run. Latest step set to 0.")
 
     def _load_all_known_screens_from_db(self):
         self.known_screens_cache.clear()
@@ -138,41 +134,6 @@ class ScreenStateManager:
 
         self._next_screen_db_id_counter = max_db_id + 1
         logging.debug(f"Loaded {len(self.known_screens_cache)} known screens. Next screen DB ID: {self._next_screen_db_id_counter}")
-
-    def _populate_run_specific_history(self, run_id: int):
-        self.current_run_visit_counts.clear()
-        self.current_run_action_history.clear()
-        steps = self.db_manager.get_steps_for_run(run_id) # Assumes get_steps_for_run exists
-        
-        max_step_num_for_run = 0
-        for step_data in steps:
-            # Assuming step_data format from DatabaseManager includes:
-            # (step_log_id, run_id, step_number, from_screen_id, to_screen_id, action_description, ...)
-            try:
-                current_step_number_from_db = step_data[2] if len(step_data) > 2 and step_data[2] is not None else 0
-                if current_step_number_from_db > max_step_num_for_run:
-                    max_step_num_for_run = current_step_number_from_db
-
-                from_screen_id = step_data[3] if len(step_data) > 3 and step_data[3] is not None else None
-                action_desc = step_data[5] if len(step_data) > 5 and step_data[5] is not None else None
-
-                if from_screen_id is not None:
-                    from_screen_repr = self.get_screen_by_db_id(from_screen_id)
-                    if from_screen_repr and from_screen_repr.composite_hash:
-                        from_hash = from_screen_repr.composite_hash
-                        self.current_run_visit_counts[from_hash] = self.current_run_visit_counts.get(from_hash, 0) + 1
-                        if action_desc:
-                            if from_hash not in self.current_run_action_history:
-                                self.current_run_action_history[from_hash] = []
-                            if action_desc not in self.current_run_action_history[from_hash]:
-                                self.current_run_action_history[from_hash].append(action_desc)
-            except IndexError as e:
-                logging.warning(f"Error processing step data for run history (IndexError): {step_data}. Error: {e}")
-            except Exception as e:
-                logging.warning(f"Unexpected error processing step data for run history: {step_data}. Error: {e}", exc_info=True)
-        
-        self.current_run_latest_step_number = max_step_num_for_run # Set the latest step number
-        logging.debug(f"Populated visit counts ({len(self.current_run_visit_counts)}) and action history ({len(self.current_run_action_history)}) for Run ID {run_id}. Max step number found: {max_step_num_for_run}.")
 
 
     def _get_current_raw_state_from_driver(self) -> Optional[Tuple[bytes, str, str, str]]:

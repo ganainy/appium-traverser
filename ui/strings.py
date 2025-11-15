@@ -79,7 +79,6 @@ ALLOWED_EXTERNAL_PACKAGES_LABEL = "Allowed External Packages: "
 ERROR_HANDLING_GROUP = "Error Handling Settings"
 MAX_CONSECUTIVE_AI_FAILURES_LABEL = "Max Consecutive AI Failures: "
 MAX_CONSECUTIVE_MAP_FAILURES_LABEL = "Max Consecutive Map Failures: "
-MAX_CONSECUTIVE_EXEC_FAILURES_LABEL = "Max Consecutive Exec Failures: "
 
 # ========== MobSF Settings ==========
 MOBSF_API_URL_PLACEHOLDER = "Your MobSF API URL"
@@ -125,11 +124,9 @@ TOOLTIP_VISUAL_SIMILARITY_THRESHOLD = "Perceptual hash distance threshold for co
 TOOLTIP_ALLOWED_EXTERNAL_PACKAGES = "List of package names (one per line) that the crawler can interact with outside the main target app (e.g., for logins, webviews)."
 TOOLTIP_MAX_CONSECUTIVE_AI_FAILURES = "Maximum number of consecutive times the AI can fail to provide a valid action before stopping."
 TOOLTIP_MAX_CONSECUTIVE_MAP_FAILURES = "Maximum number of consecutive times the AI action cannot be mapped to a UI element before stopping."
-TOOLTIP_MAX_CONSECUTIVE_EXEC_FAILURES = "Maximum number of consecutive times an action execution can fail before stopping."
 TOOLTIP_ENABLE_IMAGE_CONTEXT = "Enable to send screenshots to the AI for visual analysis. Disable for text-only analysis using XML only. The image preprocessing options below only apply when this option is enabled."
 TOOLTIP_ENABLE_TRAFFIC_CAPTURE = "Enable to capture network traffic (PCAP) during the crawl using PCAPdroid (requires PCAPdroid to be installed and configured on the device)."
 TOOLTIP_CLEANUP_DEVICE_PCAP_FILE = "If traffic capture is enabled, delete the PCAP file from the device after successfully pulling it to the computer."
-TOOLTIP_CONTINUE_EXISTING_RUN = "Enable to resume a previous crawl session, using its existing database and screenshots. Disable to start a fresh run."
 TOOLTIP_ENABLE_MOBSF_ANALYSIS = "Enable to perform static analysis of the app using MobSF."
 TOOLTIP_MOBSF_API_URL = "URL of the MobSF API (e.g., http://localhost:8000/api/v1)"
 TOOLTIP_MOBSF_API_KEY = "API Key for authenticating with MobSF. This can be found in the MobSF web interface or in the config file."
@@ -169,11 +166,9 @@ def get_tooltips_dict() -> Dict[str, str]:
         "ALLOWED_EXTERNAL_PACKAGES": TOOLTIP_ALLOWED_EXTERNAL_PACKAGES,
         "MAX_CONSECUTIVE_AI_FAILURES": TOOLTIP_MAX_CONSECUTIVE_AI_FAILURES,
         "MAX_CONSECUTIVE_MAP_FAILURES": TOOLTIP_MAX_CONSECUTIVE_MAP_FAILURES,
-        "MAX_CONSECUTIVE_EXEC_FAILURES": TOOLTIP_MAX_CONSECUTIVE_EXEC_FAILURES,
         "ENABLE_IMAGE_CONTEXT": TOOLTIP_ENABLE_IMAGE_CONTEXT,
         "ENABLE_TRAFFIC_CAPTURE": TOOLTIP_ENABLE_TRAFFIC_CAPTURE,
         "CLEANUP_DEVICE_PCAP_FILE": TOOLTIP_CLEANUP_DEVICE_PCAP_FILE,
-        "CONTINUE_EXISTING_RUN": TOOLTIP_CONTINUE_EXISTING_RUN,
         "ENABLE_MOBSF_ANALYSIS": TOOLTIP_ENABLE_MOBSF_ANALYSIS,
         "MOBSF_API_URL": TOOLTIP_MOBSF_API_URL,
         "MOBSF_API_KEY": TOOLTIP_MOBSF_API_KEY,

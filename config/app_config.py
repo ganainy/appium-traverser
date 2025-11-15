@@ -252,10 +252,6 @@ class Config:
         return self.get("LOG_FILE_NAME")
 
     @property
-    def CONTINUE_EXISTING_RUN(self):
-        return self.get("CONTINUE_EXISTING_RUN")
-
-    @property
     def DB_NAME(self):
         """Returns the absolute path to the database file."""
         return str(self._path_manager.get_db_path())
@@ -776,7 +772,6 @@ CRAWLER_AVAILABLE_ACTIONS = {
 CRAWL_MODE = "steps"
 MAX_CRAWL_STEPS = 10
 MAX_CRAWL_DURATION_SECONDS = 600
-CONTINUE_EXISTING_RUN = False
 VISUAL_SIMILARITY_THRESHOLD = 5
 
 LONG_PRESS_MIN_DURATION_MS = 600

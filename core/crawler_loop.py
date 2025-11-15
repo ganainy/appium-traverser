@@ -259,8 +259,7 @@ class CrawlerLoop:
                             self.screen_state_manager.initialize_for_run(
                                 self.current_run_id,
                                 app_package,
-                                app_activity,
-                                is_continuation=False
+                                app_activity
                             )
                             logger.info(f"Initialized run ID: {self.current_run_id} for {app_package}")
                         else:

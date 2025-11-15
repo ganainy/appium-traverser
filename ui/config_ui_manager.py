@@ -4,22 +4,27 @@
 import json
 import logging
 import os
-
-
+import subprocess
+import sys
+from pathlib import Path
 
 from typing import Any, Dict, Optional
 
-from PySide6.QtCore import QObject, QTimer, Slot
+from PySide6.QtCore import QObject, QTimer, Qt, Slot
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QDialog,
+    QDialogButtonBox,
     QGroupBox,
     QLabel,
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QTextEdit,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -219,33 +224,290 @@ class ConfigManager(QObject):
 
     @Slot()
     def reset_settings(self) -> None:
-        """Reset persisted configuration to defaults via Config service."""
-        parent_widget = getattr(self.main_controller, 'window', self.main_controller)
-        confirmation = QMessageBox.question(
-            parent_widget,
-            "Reset Settings",
-            "Reset all configuration settings to their default values?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
+        """Reset persisted configuration to defaults via CLI command."""
+        logging.info("Reset Settings button clicked - method called")
+        self.main_controller.log_message("Reset Settings button clicked...", 'blue')
+        
+        # Get parent widget - main_controller is a QMainWindow, so it can be used directly
+        parent_widget = self.main_controller if isinstance(self.main_controller, QWidget) else None
+        
+        # Get list of settings that will be reset
+        try:
+            default_snapshot = self.config._default_snapshot
+            current_settings = {}
+            settings_to_reset = []
+            
+            # Collect current values and identify what will change
+            for key in sorted(default_snapshot.keys()):
+                try:
+                    current_value = self.config.get(key)
+                    default_value = default_snapshot[key]
+                    current_settings[key] = current_value
+                    
+                    # Only show settings that differ from defaults
+                    if current_value != default_value:
+                        settings_to_reset.append({
+                            'key': key,
+                            'current': current_value,
+                            'default': default_value
+                        })
+                except Exception:
+                    pass
+            
+            # Build confirmation message with details
+            if settings_to_reset:
+                reset_details = "The following settings will be reset to defaults:\n\n"
+                for item in settings_to_reset:
+                    current_str = str(item['current'])[:60]  # Truncate long values
+                    default_str = str(item['default'])[:60]
+                    reset_details += f"• {item['key']}:\n"
+                    reset_details += f"  Current: {current_str}\n"
+                    reset_details += f"  → Default: {default_str}\n\n"
+                
+                reset_details += "\nAlso reset:\n"
+                reset_details += "• ALLOWED_EXTERNAL_PACKAGES (to default list)\n"
+                reset_details += "• Focus Areas (all cleared)\n"
+                reset_details += "• Crawler Actions (to defaults)\n"
+                reset_details += "• Crawler Prompts (to defaults)\n"
+            else:
+                reset_details = "All settings are already at default values.\n\n"
+                reset_details += "This will still reset:\n"
+                reset_details += "• ALLOWED_EXTERNAL_PACKAGES\n"
+                reset_details += "• Focus Areas\n"
+                reset_details += "• Crawler Actions\n"
+                reset_details += "• Crawler Prompts\n"
+            
+            # Create custom dialog with better formatting
+            dialog = QDialog(parent_widget)
+            dialog.setWindowTitle("Reset Settings - Confirmation")
+            dialog.setMinimumWidth(600)
+            dialog.setMinimumHeight(400)
+            dialog.setMaximumWidth(800)
+            dialog.setMaximumHeight(600)
+            
+            layout = QVBoxLayout(dialog)
+            
+            # Title label
+            title_label = QLabel("The following will be reset to defaults:")
+            title_label.setStyleSheet("font-weight: bold; font-size: 12pt; margin-bottom: 10px;")
+            layout.addWidget(title_label)
+            
+            # Scrollable text area for details
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setMinimumHeight(300)
+            
+            text_widget = QTextEdit()
+            text_widget.setReadOnly(True)
+            text_widget.setPlainText(reset_details)
+            text_widget.setStyleSheet("font-family: monospace; font-size: 9pt;")
+            scroll.setWidget(text_widget)
+            layout.addWidget(scroll)
+            
+            # Question label
+            question_label = QLabel("Continue with reset?")
+            question_label.setStyleSheet("font-weight: bold; margin-top: 10px; margin-bottom: 10px;")
+            layout.addWidget(question_label)
+            
+            # Buttons
+            button_box = QDialogButtonBox(
+                QDialogButtonBox.StandardButton.Yes | QDialogButtonBox.StandardButton.No,
+                Qt.Orientation.Horizontal
+            )
+            button_box.button(QDialogButtonBox.StandardButton.Yes).setText("Yes")
+            button_box.button(QDialogButtonBox.StandardButton.No).setText("No")
+            button_box.button(QDialogButtonBox.StandardButton.No).setDefault(True)
+            button_box.accepted.connect(dialog.accept)
+            button_box.rejected.connect(dialog.reject)
+            layout.addWidget(button_box)
+            
+            # Show dialog and get result
+            confirmation = dialog.exec()
+            confirmed = (confirmation == QDialog.DialogCode.Accepted)
+        except Exception as e:
+            logging.warning(f"Could not collect reset details: {e}")
+            # Fallback to simple confirmation
+            confirmation = QMessageBox.question(
+                parent_widget,
+                "Reset Settings",
+                "Reset all configuration settings to their default values?",
+                buttons=QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                defaultButton=QMessageBox.StandardButton.No,
+            )
+            confirmed = (confirmation == QMessageBox.StandardButton.Yes)
+            settings_to_reset = []
 
-        if confirmation != QMessageBox.StandardButton.Yes:
+        if not confirmed:
+            logging.info("Reset Settings cancelled by user")
+            self.main_controller.log_message("Reset Settings cancelled.", 'orange')
             return
 
+        # Log what will be reset
+        if settings_to_reset:
+            logging.info(f"Resetting {len(settings_to_reset)} settings to defaults")
+            self.main_controller.log_message(f"Resetting {len(settings_to_reset)} settings to defaults...", 'blue')
+            for item in settings_to_reset[:10]:  # Log first 10
+                log_msg = f"  {item['key']}: {item['current']} → {item['default']}"
+                logging.info(log_msg)
+                self.main_controller.log_message(log_msg, 'blue')
+            if len(settings_to_reset) > 10:
+                self.main_controller.log_message(f"  ... and {len(settings_to_reset) - 10} more", 'blue')
+        
+        logging.info("User confirmed reset - proceeding with CLI command")
+        self.main_controller.log_message("Executing reset via CLI...", 'blue')
+        
         try:
-            self.config.reset_settings()
+            # Find project root and run_cli.py path
+            from utils.paths import find_project_root
+            logging.debug(f"Finding project root from BASE_DIR: {self.config.BASE_DIR}")
+            project_root = find_project_root(Path(self.config.BASE_DIR))
+            run_cli_path = project_root / "run_cli.py"
+            
+            logging.info(f"Project root: {project_root}")
+            logging.info(f"run_cli.py path: {run_cli_path}")
+            self.main_controller.log_message(f"Using CLI: {run_cli_path}", 'blue')
+            
+            if not run_cli_path.exists():
+                error_msg = f"Could not find run_cli.py at {run_cli_path}"
+                logging.error(error_msg)
+                self.main_controller.log_message(error_msg, 'red')
+                raise FileNotFoundError(error_msg)
+            
+            # Execute CLI command: python run_cli.py config reset --yes
+            python_exe = sys.executable
+            cmd = [python_exe, str(run_cli_path), "config", "reset", "--yes"]
+            logging.info(f"Executing CLI command: {' '.join(cmd)}")
+            self.main_controller.log_message(f"Executing: python run_cli.py config reset --yes", 'blue')
+            
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                cwd=str(project_root)
+            )
+            
+            logging.info(f"CLI command completed with return code: {result.returncode}")
+            if result.stdout:
+                logging.info(f"CLI stdout: {result.stdout}")
+                self.main_controller.log_message(f"CLI output: {result.stdout.strip()}", 'blue')
+            if result.stderr:
+                logging.warning(f"CLI stderr: {result.stderr}")
+                self.main_controller.log_message(f"CLI warnings: {result.stderr.strip()}", 'orange')
+            
+            if result.returncode != 0:
+                error_msg = result.stderr if result.stderr else result.stdout
+                full_error = f"CLI command failed with return code {result.returncode}:\n{error_msg}"
+                logging.error(full_error)
+                self.main_controller.log_message(f"CLI command failed: {error_msg}", 'red')
+                raise RuntimeError(full_error)
+            
+            # Reload configuration after reset
+            logging.info("Reloading configuration after reset")
+            self.main_controller.log_message("Reloading configuration...", 'blue')
+            
+            # Force reload all configuration
             self.load_config()
+            
+            # Force reload actions widget
+            try:
+                if 'CRAWLER_AVAILABLE_ACTIONS' in self.main_controller.config_widgets:
+                    logging.info("Reloading actions widget after reset")
+                    self._load_actions_from_service()
+                    # Force widget update
+                    actions_widget = self.main_controller.config_widgets['CRAWLER_AVAILABLE_ACTIONS']
+                    if hasattr(actions_widget, 'update'):
+                        actions_widget.update()
+                    if hasattr(actions_widget, 'repaint'):
+                        actions_widget.repaint()
+            except Exception as e:
+                logging.exception(f"Failed to reload actions widget: {e}")
+            
+            # Force reload prompts widget
+            try:
+                if 'CRAWLER_ACTION_DECISION_PROMPT' in self.main_controller.config_widgets:
+                    logging.info("Reloading prompts widget after reset")
+                    self._load_prompts_from_service()
+                    # Force widget update
+                    prompt_widget = self.main_controller.config_widgets['CRAWLER_ACTION_DECISION_PROMPT']
+                    if hasattr(prompt_widget, 'update'):
+                        prompt_widget.update()
+                    if hasattr(prompt_widget, 'repaint'):
+                        prompt_widget.repaint()
+            except Exception as e:
+                logging.exception(f"Failed to reload prompts widget: {e}")
+            
+            # Force reload allowed packages widget
+            try:
+                if 'ALLOWED_EXTERNAL_PACKAGES_WIDGET' in self.main_controller.config_widgets:
+                    logging.info("Reloading allowed packages widget after reset")
+                    packages_widget = self.main_controller.config_widgets['ALLOWED_EXTERNAL_PACKAGES_WIDGET']
+                    from ui.allowed_packages_widget import AllowedPackagesWidget
+                    if isinstance(packages_widget, AllowedPackagesWidget):
+                        # Get default packages from config
+                        default_packages = self.config.get('ALLOWED_EXTERNAL_PACKAGES', [])
+                        packages_widget.set_packages(default_packages if default_packages else [])
+                        if hasattr(packages_widget, 'update'):
+                            packages_widget.update()
+                        if hasattr(packages_widget, 'repaint'):
+                            packages_widget.repaint()
+            except Exception as e:
+                logging.exception(f"Failed to reload allowed packages widget: {e}")
+            
+            # Force reload focus areas widget
             if hasattr(self, 'focus_areas_widget') and self.focus_areas_widget:
                 try:
+                    logging.info("Reloading focus areas widget after reset")
                     self.focus_areas_widget.reload_focus_areas()
+                    if hasattr(self.focus_areas_widget, 'update'):
+                        self.focus_areas_widget.update()
+                    if hasattr(self.focus_areas_widget, 'repaint'):
+                        self.focus_areas_widget.repaint()
                 except Exception:
                     logging.exception("Failed to reload focus areas after reset; clearing locally.")
                     self.focus_areas_widget.focus_areas = []
                     self.focus_areas_widget.create_focus_items()
-            self.main_controller.log_message("Configuration reset to defaults.", 'green')
+            
+            # Force update all other widgets
+            try:
+                from PySide6.QtWidgets import QApplication
+                QApplication.processEvents()  # Process pending events to update UI
+            except Exception:
+                pass
+            
+            # Show summary of what was reset
+            success_msg = "Configuration reset to defaults successfully!"
+            logging.info(success_msg)
+            self.main_controller.log_message(success_msg, 'green')
+            
+            # Log summary of reset
+            if settings_to_reset:
+                summary_msg = f"\nReset Summary: {len(settings_to_reset)} settings restored to defaults"
+                logging.info(summary_msg)
+                self.main_controller.log_message(summary_msg, 'green')
+                
+                # Show key settings that were reset
+                key_settings = [s['key'] for s in settings_to_reset if s['key'] in [
+                    'AI_PROVIDER', 'DEFAULT_MODEL_TYPE', 'APPIUM_SERVER_URL', 
+                    'TARGET_DEVICE_UDID', 'APP_PACKAGE', 'CRAWL_MODE',
+                    'MAX_CRAWL_STEPS', 'ENABLE_IMAGE_CONTEXT', 'ENABLE_MOBSF_ANALYSIS'
+                ]]
+                if key_settings:
+                    key_msg = f"Key settings reset: {', '.join(key_settings)}"
+                    logging.info(key_msg)
+                    self.main_controller.log_message(key_msg, 'green')
+            
+            self.main_controller.log_message("Also reset: Focus Areas, Crawler Actions, Crawler Prompts, Allowed Packages", 'green')
+            
         except Exception as exc:
-            logging.exception("Failed to reset configuration from UI.")
-            QMessageBox.critical(parent_widget, "Reset Failed", f"Could not reset configuration:\n{exc}")
+            error_msg = f"Failed to reset configuration: {exc}"
+            logging.exception(error_msg)
+            self.main_controller.log_message(error_msg, 'red')
+            QMessageBox.critical(
+                parent_widget, 
+                "Reset Failed", 
+                f"Could not reset configuration:\n{exc}\n\nCheck the log output for details."
+            )
 
     def _get_widget_value(self, key: str, widget: QWidget) -> Any:
         """Extracts the value from a given widget."""
@@ -294,6 +556,26 @@ class ConfigManager(QObject):
             # Skip service-managed keys - they're loaded separately
             if key in ['CRAWLER_AVAILABLE_ACTIONS', 'CRAWLER_ACTION_DECISION_PROMPT']:
                 continue
+            # For checkboxes, we need to handle False values explicitly
+            # because config.get(key, None) returns None if key doesn't exist,
+            # but we want to load False values too
+            if isinstance(widget, QCheckBox):
+                value = self.config.get(key, False)  # Default to False for checkboxes
+                if value is not None:
+                    loaded_any = True
+                    try:
+                        # Block signals to prevent triggering save during load
+                        widget.blockSignals(True)
+                        widget.setChecked(bool(value))
+                        widget.blockSignals(False)
+                        if key == 'ENABLE_MOBSF_ANALYSIS':
+                            logging.debug(f"Set ENABLE_MOBSF_ANALYSIS checkbox to: {bool(value)}")
+                        elif key == 'OPENROUTER_SHOW_FREE_ONLY':
+                            logging.debug(f"Set OPENROUTER_SHOW_FREE_ONLY checkbox to: {bool(value)}")
+                    except (ValueError, TypeError) as e:
+                        logging.warning(f"Error loading config for '{key}': {e}")
+                continue
+            
             value = self.config.get(key, None)
             if value is not None:
                 loaded_any = True
@@ -321,10 +603,6 @@ class ConfigManager(QObject):
                             logging.warning(f"Skipping non-numeric value for spinbox '{key}': {value}")
                             continue
                         widget.setValue(int(value))
-                    elif isinstance(widget, QCheckBox):
-                        widget.setChecked(bool(value))
-                        if key == 'ENABLE_MOBSF_ANALYSIS':
-                            logging.debug(f"Set ENABLE_MOBSF_ANALYSIS checkbox to: {bool(value)}")
                     elif isinstance(widget, QComboBox):
                         if key == 'DEFAULT_MODEL_TYPE':
                             # Handle None/empty model selection - set to "No model selected"
@@ -341,8 +619,9 @@ class ConfigManager(QObject):
                             index = widget.findText(value)
                             if index >= 0:
                                 widget.setCurrentIndex(index)
-                                if key == 'AI_PROVIDER':
-                                    UIComponents._update_model_types(value, self.main_controller.config_widgets, self)
+                                # Note: _update_model_types is called at the end of load_config
+                                # after all widgets (including OPENROUTER_SHOW_FREE_ONLY) are loaded
+                                # to avoid race conditions
                     elif isinstance(widget, QTextEdit):
                         if isinstance(value, list):
                             widget.setPlainText('\n'.join(value))
