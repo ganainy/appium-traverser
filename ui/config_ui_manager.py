@@ -28,14 +28,14 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-# Import UIComponents 
-from ui.ui_components import UIComponents
+# Import constants
+from ui.constants import UI_MODE_CONFIG_KEY
 
 
 class ConfigManager(QObject):
     """Manages configuration for the Appium Crawler Controller UI."""
     
-    # These attributes are dynamically added by UIComponents class
+    # These attributes are dynamically added by ComponentFactory and CrawlerControllerWindow
     health_app_dropdown: QComboBox
     refresh_apps_btn: QPushButton
     app_scan_status_label: QLabel
@@ -170,8 +170,11 @@ class ConfigManager(QObject):
         Save the current configuration to the user config file.
         If a key is provided, only that key's widget value is saved.
         Otherwise, all widget values are saved.
+        
+        API keys are saved to .env file, other settings to SQLite.
         """
         config_data = {}
+        api_keys_to_save = {}  # Track API keys separately for .env file
 
         if key and key in self.main_controller.config_widgets:
             # Skip service-managed keys - they're handled separately
@@ -182,7 +185,11 @@ class ConfigManager(QObject):
             widget = self.main_controller.config_widgets[key]
             value = self._get_widget_value(key, widget)
             if value is not None:  # Skip None values (e.g., read-only QLabel widgets)
-                config_data[key] = value
+                # Check if this is an API key (secret)
+                if self._is_api_key(key):
+                    api_keys_to_save[key] = value
+                else:
+                    config_data[key] = value
         else:
             # Fallback to saving all widgets if no key is provided
             for k, widget in self.main_controller.config_widgets.items():
@@ -194,7 +201,11 @@ class ConfigManager(QObject):
                     continue
                 value = self._get_widget_value(k, widget)
                 if value is not None:  # Skip None values (e.g., read-only QLabel widgets)
-                    config_data[k] = value
+                    # Check if this is an API key (secret)
+                    if self._is_api_key(k):
+                        api_keys_to_save[k] = value
+                    else:
+                        config_data[k] = value
 
         # --- Always save these non-widget settings ---
         # Save UI mode setting
@@ -216,11 +227,111 @@ class ConfigManager(QObject):
                     'app_name': selected_data.get('app_name', '')
                 }
         
-        # Update the config object and persist to SQLite
+        # Save API keys to .env file
+        if api_keys_to_save:
+            self._save_api_keys_to_env(api_keys_to_save)
+        
+        # Update the config object and persist to SQLite (non-secrets only)
         for k, value in config_data.items():
             self.config.set(k, value)
 
-        self.main_controller.log_message("Configuration auto-saved to SQLite successfully.", 'green')
+        # Also update environment variables for API keys (Config.set() handles this)
+        for k, value in api_keys_to_save.items():
+            self.config.set(k, value)
+
+        # Provide user feedback
+        if api_keys_to_save and config_data:
+            self.main_controller.log_message(
+                f"Configuration saved: {len(config_data)} settings to SQLite, {len(api_keys_to_save)} API key(s) to .env file.", 
+                'green'
+            )
+            # Play success sound
+            if hasattr(self.main_controller, '_audio_alert'):
+                self.main_controller._audio_alert('finish')
+        elif api_keys_to_save:
+            self.main_controller.log_message(
+                f"API key(s) saved to .env file: {', '.join(api_keys_to_save.keys())}.", 
+                'green'
+            )
+            # Play success sound
+            if hasattr(self.main_controller, '_audio_alert'):
+                self.main_controller._audio_alert('finish')
+        else:
+            self.main_controller.log_message("Configuration auto-saved to SQLite successfully.", 'green')
+            # Play success sound for auto-save
+            if hasattr(self.main_controller, '_audio_alert'):
+                self.main_controller._audio_alert('finish')
+
+    def _is_api_key(self, key: str) -> bool:
+        """
+        Check if a configuration key is an API key (secret).
+        
+        Args:
+            key: Configuration key name
+            
+        Returns:
+            True if the key is an API key, False otherwise
+        """
+        # Use the same logic as Config._is_secret()
+        api_key_names = {"OPENROUTER_API_KEY", "GEMINI_API_KEY", "MOBSF_API_KEY", "OLLAMA_BASE_URL", "PCAPDROID_API_KEY"}
+        upper_key = key.upper()
+        if upper_key in api_key_names:
+            return True
+        # Also check if key ends with "_KEY" (pattern matching)
+        return key == upper_key and upper_key.endswith("_KEY")
+
+    def _save_api_keys_to_env(self, api_keys: Dict[str, str]) -> None:
+        """
+        Save API keys to the .env file using python-dotenv.
+        
+        Args:
+            api_keys: Dictionary mapping API key names to their values
+        """
+        try:
+            from dotenv import set_key, load_dotenv
+        except ImportError:
+            error_msg = "python-dotenv not available. Cannot save API keys to .env file. Please install it with: pip install python-dotenv"
+            logging.error(error_msg)
+            self.main_controller.log_message(error_msg, 'red')
+            return
+        
+        try:
+            # Get project root directory
+            from utils.paths import find_project_root
+            project_root = find_project_root(Path(self.config.BASE_DIR))
+            env_file_path = project_root / '.env'
+            
+            # Ensure .env file exists (create if it doesn't)
+            if not env_file_path.exists():
+                env_file_path.touch()
+                logging.info(f"Created .env file at {env_file_path}")
+            
+            # Load existing .env file to preserve other variables
+            load_dotenv(env_file_path, override=False)
+            
+            # Save each API key to .env file
+            saved_keys = []
+            for key, value in api_keys.items():
+                # Normalize key to uppercase (standard for .env files)
+                normalized_key = key.upper()
+                
+                # Only save non-empty values
+                if value and value.strip():
+                    set_key(str(env_file_path), normalized_key, value.strip())
+                    saved_keys.append(normalized_key)
+                    logging.debug(f"Saved {normalized_key} to .env file")
+                else:
+                    # If value is empty, remove the key from .env
+                    set_key(str(env_file_path), normalized_key, "")
+                    logging.debug(f"Removed {normalized_key} from .env file (empty value)")
+            
+            if saved_keys:
+                logging.info(f"Successfully saved {len(saved_keys)} API key(s) to .env file: {', '.join(saved_keys)}")
+            
+        except Exception as e:
+            error_msg = f"Failed to save API keys to .env file: {e}"
+            logging.exception(error_msg)
+            self.main_controller.log_message(error_msg, 'red')
 
     @Slot()
     def reset_settings(self) -> None:
@@ -479,6 +590,9 @@ class ConfigManager(QObject):
             success_msg = "Configuration reset to defaults successfully!"
             logging.info(success_msg)
             self.main_controller.log_message(success_msg, 'green')
+            # Play success sound
+            if hasattr(self.main_controller, '_audio_alert'):
+                self.main_controller._audio_alert('finish')
             
             # Log summary of reset
             if settings_to_reset:
@@ -640,16 +754,20 @@ class ConfigManager(QObject):
         if last_selected_app is not None:
             self.main_controller.last_selected_app = last_selected_app or {}
         # UI_MODE
-        ui_mode = self.config.get(UIComponents.UI_MODE_CONFIG_KEY, None)
+        ui_mode = self.config.get(UI_MODE_CONFIG_KEY, None)
         if ui_mode and hasattr(self, 'ui_mode_dropdown'):
             index = self.ui_mode_dropdown.findText(ui_mode)
             if index >= 0:
                 self.ui_mode_dropdown.setCurrentIndex(index)
-                UIComponents.toggle_ui_complexity(ui_mode, self)
+                # UI complexity will be handled by UIStateHandler in CrawlerControllerWindow
+                if hasattr(self.main_controller, 'ui_state_handler'):
+                    self.main_controller.ui_state_handler.toggle_ui_complexity(ui_mode)
         # AI_PROVIDER
         ai_provider = self.config.get('AI_PROVIDER', None)
         if ai_provider:
-            UIComponents._update_model_types(ai_provider, self.main_controller.config_widgets, self)
+            # Model types will be updated by UIStateHandler
+            if hasattr(self.main_controller, 'ui_state_handler'):
+                self.main_controller.ui_state_handler._update_model_types(ai_provider)
             # After updating model types, ensure model dropdown shows correct selection
             model_type = self.config.get('DEFAULT_MODEL_TYPE', None)
             model_dropdown = self.main_controller.config_widgets.get('DEFAULT_MODEL_TYPE')
@@ -683,16 +801,27 @@ class ConfigManager(QObject):
             is_enabled = bool(state)
             logging.debug(f"MobSF enabled state changed: {is_enabled}")
             
-            # Update button states - checking both hasattr and that the button is not None
+            # Update visibility and enabled state of API URL field and label
+            if 'MOBSF_API_URL' in self.main_controller.config_widgets:
+                self.main_controller.config_widgets['MOBSF_API_URL'].setVisible(is_enabled)
+            if 'MOBSF_API_URL_LABEL' in self.main_controller.config_widgets:
+                self.main_controller.config_widgets['MOBSF_API_URL_LABEL'].setVisible(is_enabled)
+            
+            # Note: MobSF API Key is now in API Keys group and should always be visible
+            # (not controlled by MobSF enable checkbox)
+            
+            # Update button visibility and enabled state - checking both hasattr and that the button is not None
             if hasattr(self.main_controller, 'run_mobsf_analysis_btn') and self.main_controller.run_mobsf_analysis_btn is not None:
+                self.main_controller.run_mobsf_analysis_btn.setVisible(is_enabled)
                 self.main_controller.run_mobsf_analysis_btn.setEnabled(is_enabled)
-                logging.debug(f"Set run_mobsf_analysis_btn enabled: {is_enabled}")
+                logging.debug(f"Set run_mobsf_analysis_btn visible and enabled: {is_enabled}")
             else:
                 logging.warning("run_mobsf_analysis_btn is not available")
                 
             if hasattr(self.main_controller, 'test_mobsf_conn_btn') and self.main_controller.test_mobsf_conn_btn is not None:
+                self.main_controller.test_mobsf_conn_btn.setVisible(is_enabled)
                 self.main_controller.test_mobsf_conn_btn.setEnabled(is_enabled)
-                logging.debug(f"Set test_mobsf_conn_btn enabled: {is_enabled}")
+                logging.debug(f"Set test_mobsf_conn_btn visible and enabled: {is_enabled}")
             else:
                 logging.warning("test_mobsf_conn_btn is not available")
                 
@@ -719,18 +848,33 @@ class ConfigManager(QObject):
             if selected_data and isinstance(selected_data, dict):
                 package_name = selected_data.get('package_name', '')
                 activity_name = selected_data.get('activity_name', '')
+                
+                # Update widgets if they exist
                 if 'APP_PACKAGE' in self.main_controller.config_widgets:
                     self.main_controller.config_widgets['APP_PACKAGE'].setText(package_name)
                 if 'APP_ACTIVITY' in self.main_controller.config_widgets:
                     self.main_controller.config_widgets['APP_ACTIVITY'].setText(activity_name)
                 
-                # Save the selected app information to config
+                # Directly save APP_PACKAGE and APP_ACTIVITY to config
+                # This ensures they are saved even if widgets don't exist
+                self.config.set('APP_PACKAGE', package_name)
+                self.config.set('APP_ACTIVITY', activity_name)
+                
+                # Save the selected app information to config (includes LAST_SELECTED_APP)
                 self.save_config()
             else:
+                # Clear the selection
                 if 'APP_PACKAGE' in self.main_controller.config_widgets:
                     self.main_controller.config_widgets['APP_PACKAGE'].setText("")
                 if 'APP_ACTIVITY' in self.main_controller.config_widgets:
                     self.main_controller.config_widgets['APP_ACTIVITY'].setText("")
+                
+                # Clear from config as well
+                self.config.set('APP_PACKAGE', None)
+                self.config.set('APP_ACTIVITY', None)
+                
+                # Save the cleared state
+                self.save_config()
         except Exception as e:
             logging.error(f"Error handling health app selection: {e}")
     
@@ -798,13 +942,11 @@ class ConfigManager(QObject):
             enabled: Whether image context is enabled
         """
         try:
-            # Get the image preprocessing group from ui_groups
-            if hasattr(self, 'ui_groups') and 'image_preprocessing_group' in self.ui_groups:
-                image_prep_group = self.ui_groups['image_preprocessing_group']
-                from ui.ui_components import UIComponents
-                UIComponents._update_image_preprocessing_visibility(image_prep_group, enabled)
+            # Delegate to UIStateHandler if available
+            if hasattr(self.main_controller, 'ui_state_handler'):
+                self.main_controller.ui_state_handler._update_image_preprocessing_visibility(enabled)
             else:
-                logging.warning("Image preprocessing group not found in ui_groups")
+                logging.warning("UIStateHandler not available for updating image preprocessing visibility")
         except Exception as e:
             logging.error(f"Error updating image preprocessing visibility: {e}", exc_info=True)
     

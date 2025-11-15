@@ -199,10 +199,13 @@ class CrawlerLoop:
                     logger.warning(f"Failed to initialize VideoRecordingManager: {e}. Video recording will be disabled.")
                     self.video_recording_manager = None
             
-            # Ensure we're in the correct app before starting
-            logger.debug("Ensuring we're in the correct app context...")
-            if not self.app_context_manager.ensure_in_app():
-                logger.warning("Not in correct app context after initialization, but continuing...")
+            # Launch the app at the start of crawl loop
+            logger.debug("Launching app at crawl loop start...")
+            if self.app_context_manager:
+                if not self.app_context_manager.launch_and_verify_app():
+                    logger.warning("Failed to launch app at start, but continuing...")
+            else:
+                logger.warning("AppContextManager not initialized - cannot launch app")
             
             # Initialize database to ensure it exists even if no screens are saved
             # This is important for post-run tasks like PDF generation
@@ -974,6 +977,17 @@ class CrawlerLoop:
                         logger.warning("APP_PACKAGE not configured, skipping MobSF analysis")
                 except Exception as e:
                     logger.error(f"Error running MobSF analysis: {e}", exc_info=True)
+            
+            # Close the app when crawl loop is done
+            if self.app_context_manager:
+                try:
+                    target_pkg = self.config.get('APP_PACKAGE')
+                    if target_pkg and self.agent_assistant and self.agent_assistant.tools.driver:
+                        logger.debug(f"Terminating app {target_pkg} at crawl loop end...")
+                        self.agent_assistant.tools.driver.terminate_app(target_pkg)
+                        logger.info(f"App {target_pkg} terminated successfully")
+                except Exception as e:
+                    logger.warning(f"Error terminating app at crawl loop end: {e}")
             
             # Disconnect driver
             if self.agent_assistant and self.agent_assistant.tools.driver:

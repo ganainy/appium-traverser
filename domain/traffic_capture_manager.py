@@ -41,7 +41,7 @@ class TrafficCaptureManager:
                 'PCAPDROID_PACKAGE', 'DEVICE_PCAP_DIR' 
                 # PCAPDROID_ACTIVITY is optional - will be constructed if not provided
                 # PCAPDROID_API_KEY is optional but recommended
-                # CLEANUP_DEVICE_PCAP_FILE is optional
+                # Device PCAP cleanup is always enabled by default
             ]
             for cfg_key in required_pcap_configs:
                 if self.cfg.get(cfg_key) is None:
@@ -290,14 +290,13 @@ class TrafficCaptureManager:
         if os.path.exists(self.local_pcap_file_path):
             if os.path.getsize(self.local_pcap_file_path) > 0:
                 logging.debug(f"PCAP file pulled successfully: {os.path.abspath(self.local_pcap_file_path)}")
-                if bool(self.cfg.get('CLEANUP_DEVICE_PCAP_FILE')):
-                    await self._cleanup_device_pcap_file_async(device_pcap_full_path)
+                # Always cleanup device PCAP file after successful pull
+                await self._cleanup_device_pcap_file_async(device_pcap_full_path)
                 return os.path.abspath(self.local_pcap_file_path)
             else:
                 logging.warning(f"PCAP file pulled to '{self.local_pcap_file_path}' but it is EMPTY.")
-                # Still try cleanup if configured, as an empty file might have been created
-                if bool(self.cfg.get('CLEANUP_DEVICE_PCAP_FILE')):
-                    await self._cleanup_device_pcap_file_async(device_pcap_full_path)
+                # Always cleanup device PCAP file even if empty
+                await self._cleanup_device_pcap_file_async(device_pcap_full_path)
                 return os.path.abspath(self.local_pcap_file_path) # Return path even if empty
         else:
             logging.error(f"ADB pull command for '{device_pcap_full_path}' seemed to succeed, but local file '{self.local_pcap_file_path}' not found.")

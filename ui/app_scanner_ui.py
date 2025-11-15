@@ -449,6 +449,9 @@ class HealthAppScanner(QObject):
             self.main_controller.app_scan_status_label.setText(
                 f"App Scan: Failed (code {exit_code})"
             )
+            # Play error sound
+            if hasattr(self.main_controller, '_audio_alert'):
+                self.main_controller._audio_alert('error')
             return
 
         try:
@@ -776,6 +779,9 @@ class HealthAppScanner(QObject):
                 self.main_controller.app_scan_status_label.setText(
                     f"App Scan: Found {len(self.health_apps_data)} apps"
                 )
+                # Play success sound
+                if hasattr(self.main_controller, '_audio_alert'):
+                    self.main_controller._audio_alert('finish')
             else:
                 # Look for any cached device-specific file as a last resort
                 app_info_dir = os.path.join(
@@ -831,6 +837,9 @@ class HealthAppScanner(QObject):
                             self.main_controller.app_scan_status_label.setText(
                                 f"App Scan: Found {len(self.health_apps_data)} apps"
                             )
+                            # Play success sound
+                            if hasattr(self.main_controller, '_audio_alert'):
+                                self.main_controller._audio_alert('finish')
                             return
                     except Exception as cached_error:
                         self.main_controller.log_message(
@@ -861,6 +870,9 @@ class HealthAppScanner(QObject):
                     self.main_controller.app_scan_status_label.setText(
                         "App Scan: Device/ADB Error"
                     )
+                    # Play error sound
+                    if hasattr(self.main_controller, '_audio_alert'):
+                        self.main_controller._audio_alert('error')
                 else:
                     self.main_controller.log_message(
                         "Could not find valid health app data in scan output.", "red"
@@ -875,12 +887,18 @@ class HealthAppScanner(QObject):
                     self.main_controller.app_scan_status_label.setText(
                         "App Scan: Error parsing results"
                     )
+                    # Play error sound
+                    if hasattr(self.main_controller, '_audio_alert'):
+                        self.main_controller._audio_alert('error')
         except Exception as e:
             self.main_controller.log_message(
                 f"Unexpected error processing app scan results: {e}", "red"
             )
             logging.error(f"Exception in _on_find_apps_finished: {e}", exc_info=True)
             self.main_controller.app_scan_status_label.setText("App Scan: Error")
+            # Play error sound
+            if hasattr(self.main_controller, '_audio_alert'):
+                self.main_controller._audio_alert('error')
 
     def _load_health_apps_from_file(self, file_path: str, filter_health_only: Optional[bool] = None):
         """Load apps data from a JSON file (unified format only).

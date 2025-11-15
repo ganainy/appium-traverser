@@ -114,52 +114,130 @@ class GeminiAdapter(ModelAdapter):
         try:
             import google.generativeai as genai
             from google.generativeai.generative_models import GenerativeModel
-            from google.generativeai.types import GenerationConfig, SafetySetting, HarmCategory, HarmBlockThreshold
+            
+            # Try to import types - handle different API versions
+            try:
+                from google.generativeai.types import GenerationConfig, HarmCategory, HarmBlockThreshold
+                # Try to import SafetySetting - may not exist in newer versions
+                try:
+                    from google.generativeai.types import SafetySetting
+                    USE_SAFETY_SETTING_CLASS = True
+                except ImportError:
+                    USE_SAFETY_SETTING_CLASS = False
+            except ImportError:
+                # Fallback: try importing from different locations
+                try:
+                    from google.generativeai import types
+                    GenerationConfig = types.GenerationConfig
+                    HarmCategory = types.HarmCategory
+                    HarmBlockThreshold = types.HarmBlockThreshold
+                    USE_SAFETY_SETTING_CLASS = hasattr(types, 'SafetySetting')
+                    if USE_SAFETY_SETTING_CLASS:
+                        SafetySetting = types.SafetySetting
+                except (ImportError, AttributeError):
+                    # If we can't import, we'll use dict format
+                    try:
+                        # Try to import just the enums we need
+                        import google.generativeai as genai
+                        HarmCategory = genai.types.HarmCategory
+                        HarmBlockThreshold = genai.types.HarmBlockThreshold
+                        GenerationConfig = genai.types.GenerationConfig
+                        USE_SAFETY_SETTING_CLASS = False
+                    except (ImportError, AttributeError):
+                        GenerationConfig = None
+                        HarmCategory = None
+                        HarmBlockThreshold = None
+                        USE_SAFETY_SETTING_CLASS = False
 
             # Set API key
             os.environ["GOOGLE_API_KEY"] = self.api_key
             
             # Create generation config
             generation_config_dict = model_config.get('generation_config', {})
-            generation_config = GenerationConfig(
-                temperature=generation_config_dict.get('temperature', 0.7),
-                top_p=generation_config_dict.get('top_p', 0.95),
-                top_k=generation_config_dict.get('top_k', 40),
-                max_output_tokens=generation_config_dict.get('max_output_tokens', 1024)
-            )
+            if GenerationConfig:
+                generation_config = GenerationConfig(
+                    temperature=generation_config_dict.get('temperature', 0.7),
+                    top_p=generation_config_dict.get('top_p', 0.95),
+                    top_k=generation_config_dict.get('top_k', 40),
+                    max_output_tokens=generation_config_dict.get('max_output_tokens', 1024)
+                )
+            else:
+                # Fallback to dict format
+                generation_config = {
+                    'temperature': generation_config_dict.get('temperature', 0.7),
+                    'top_p': generation_config_dict.get('top_p', 0.95),
+                    'top_k': generation_config_dict.get('top_k', 40),
+                    'max_output_tokens': generation_config_dict.get('max_output_tokens', 1024)
+                }
             
             # Convert safety settings from config format to Gemini API format
             converted_safety_settings = None
             if safety_settings:
                 if isinstance(safety_settings, list):
-                    # Convert list of dicts with string values to SafetySetting objects
-                    converted_safety_settings = []
-                    category_map = {
-                        "HARM_CATEGORY_HARASSMENT": HarmCategory.HARM_CATEGORY_HARASSMENT,
-                        "HARM_CATEGORY_HATE_SPEECH": HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-                        "HARM_CATEGORY_SEXUALLY_EXPLICIT": HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-                        "HARM_CATEGORY_DANGEROUS_CONTENT": HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-                    }
-                    threshold_map = {
-                        "BLOCK_NONE": HarmBlockThreshold.BLOCK_NONE,
-                        "BLOCK_ONLY_HIGH": HarmBlockThreshold.BLOCK_ONLY_HIGH,
-                        "BLOCK_MEDIUM_AND_ABOVE": HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
-                        "BLOCK_LOW_AND_ABOVE": HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
-                    }
-                    for setting in safety_settings:
-                        if isinstance(setting, dict):
-                            category_str = setting.get("category", "")
-                            threshold_str = setting.get("threshold", "")
-                            category = category_map.get(category_str)
-                            threshold = threshold_map.get(threshold_str)
-                            if category and threshold:
-                                converted_safety_settings.append(
-                                    SafetySetting(category=category, threshold=threshold)
-                                )
-                            else:
-                                logging.warning(f"Invalid safety setting: {setting}")
-                    if not converted_safety_settings:
-                        converted_safety_settings = None
+                    if USE_SAFETY_SETTING_CLASS:
+                        # Convert list of dicts with string values to SafetySetting objects
+                        converted_safety_settings = []
+                        category_map = {
+                            "HARM_CATEGORY_HARASSMENT": HarmCategory.HARM_CATEGORY_HARASSMENT,
+                            "HARM_CATEGORY_HATE_SPEECH": HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                            "HARM_CATEGORY_SEXUALLY_EXPLICIT": HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+                            "HARM_CATEGORY_DANGEROUS_CONTENT": HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                        }
+                        threshold_map = {
+                            "BLOCK_NONE": HarmBlockThreshold.BLOCK_NONE,
+                            "BLOCK_ONLY_HIGH": HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                            "BLOCK_MEDIUM_AND_ABOVE": HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
+                            "BLOCK_LOW_AND_ABOVE": HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
+                        }
+                        for setting in safety_settings:
+                            if isinstance(setting, dict):
+                                category_str = setting.get("category", "")
+                                threshold_str = setting.get("threshold", "")
+                                category = category_map.get(category_str)
+                                threshold = threshold_map.get(threshold_str)
+                                if category and threshold:
+                                    converted_safety_settings.append(
+                                        SafetySetting(category=category, threshold=threshold)
+                                    )
+                                else:
+                                    logging.warning(f"Invalid safety setting: {setting}")
+                        if not converted_safety_settings:
+                            converted_safety_settings = None
+                    else:
+                        # Use dict format for newer API versions (pass enum values directly)
+                        converted_safety_settings = []
+                        if HarmCategory and HarmBlockThreshold:
+                            category_map = {
+                                "HARM_CATEGORY_HARASSMENT": HarmCategory.HARM_CATEGORY_HARASSMENT,
+                                "HARM_CATEGORY_HATE_SPEECH": HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                                "HARM_CATEGORY_SEXUALLY_EXPLICIT": HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+                                "HARM_CATEGORY_DANGEROUS_CONTENT": HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                            }
+                            threshold_map = {
+                                "BLOCK_NONE": HarmBlockThreshold.BLOCK_NONE,
+                                "BLOCK_ONLY_HIGH": HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                                "BLOCK_MEDIUM_AND_ABOVE": HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
+                                "BLOCK_LOW_AND_ABOVE": HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
+                            }
+                            for setting in safety_settings:
+                                if isinstance(setting, dict):
+                                    category_str = setting.get("category", "")
+                                    threshold_str = setting.get("threshold", "")
+                                    category = category_map.get(category_str)
+                                    threshold = threshold_map.get(threshold_str)
+                                    if category and threshold:
+                                        converted_safety_settings.append({
+                                            "category": category,
+                                            "threshold": threshold
+                                        })
+                                    else:
+                                        logging.warning(f"Invalid safety setting: {setting}")
+                            if not converted_safety_settings:
+                                converted_safety_settings = None
+                        else:
+                            # If we can't import enums, log a warning and skip safety settings
+                            logging.warning("Could not import HarmCategory/HarmBlockThreshold. Safety settings will be skipped.")
+                            converted_safety_settings = None
                 elif isinstance(safety_settings, (list, dict)):
                     # Already in correct format or pass through
                     converted_safety_settings = safety_settings

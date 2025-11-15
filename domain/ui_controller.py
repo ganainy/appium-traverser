@@ -8,7 +8,7 @@ import sys
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 
-from PySide6.QtCore import QProcess, Qt, QThread, QTimer, Signal
+from PySide6.QtCore import QProcess, Qt, QThread, QTimer, Signal, QUrl
 from PySide6.QtCore import Slot as slot
 from PySide6.QtGui import QColor, QIcon, QPixmap
 from PySide6.QtWidgets import (
@@ -36,7 +36,9 @@ try:
 except Exception:
     RunAnalyzer = None
     XHTML2PDF_AVAILABLE = False
-from ui.ui_components import UIComponents
+from ui.component_factory import ComponentFactory
+from ui.ui_state_handler import UIStateHandler
+from ui.constants import UI_MODE_BASIC, UI_MODE_EXPERT, UI_MODE_DEFAULT, UI_MODE_CONFIG_KEY
 from ui.config_ui_manager import ConfigManager
 from ui.crawler_ui_manager import CrawlerManager
 from ui.custom_widgets import BusyDialog
@@ -71,10 +73,10 @@ class CrawlerControllerWindow(QMainWindow):
             api_dir = str(find_project_root(Path(__file__).resolve().parent))
         self.api_dir = api_dir
         
-        # Initialize empty config_widgets dict - will be populated by UIComponents
+        # Initialize empty config_widgets dict - will be populated by ComponentFactory
         self.config_widgets = {}
         
-        # These will be created by UIComponents.create_left_panel and create_right_panel
+        # These will be created by _setup_ui method
         # Initialize as None for now - they'll be set by the UI creation methods
         self.start_btn = None
         self.stop_btn = None
@@ -109,36 +111,8 @@ class CrawlerControllerWindow(QMainWindow):
         # Define tooltips
         self.tooltips = self._create_tooltips()
 
-        # Create left (config) and right (output) panels
-
-        left_panel = UIComponents.create_left_panel(
-            self.config_widgets, self.tooltips, self.config_manager, self
-        )
-
-        # Assign refresh_devices_btn if set by UIComponents (it assigns to controls_handler, which is self)
-        if hasattr(self, "refresh_devices_btn"):
-            pass  # Already set by UIComponents
-        else:
-            self.refresh_devices_btn = None
-
-        # Copy UI references from config_manager to self for direct access
-        if hasattr(self.config_manager, "health_app_dropdown"):
-            self.health_app_dropdown = self.config_manager.health_app_dropdown
-
-        if hasattr(self.config_manager, "refresh_apps_btn"):
-            self.refresh_apps_btn = self.config_manager.refresh_apps_btn
-
-        if hasattr(self.config_manager, "app_scan_status_label"):
-            self.app_scan_status_label = self.config_manager.app_scan_status_label
-
-        # Note: MobSF buttons are set directly on this controller in the components class
-
-        # Create right panel without logo
-        right_panel = UIComponents.create_right_panel(self)
-
-        # Add panels to main layout with stretch factors
-        main_layout.addWidget(left_panel, 1)
-        main_layout.addWidget(right_panel, 2)
+        # Setup UI panels
+        self._setup_ui(main_layout)
 
         # Load configuration
         self.config_manager.load_config()
@@ -158,6 +132,311 @@ class CrawlerControllerWindow(QMainWindow):
 
         # Populate device dropdown on startup
         self._populate_device_dropdown()
+
+    def _setup_ui(self, main_layout: QHBoxLayout):
+        """Setup the UI panels and initialize UIStateHandler."""
+        # Create left panel
+        left_panel = QWidget()
+        left_layout = QVBoxLayout(left_panel)
+
+        # Create UI mode switch (Basic/Expert)
+        mode_layout = QHBoxLayout()
+        mode_label = QLabel("UI Mode:")
+        self.config_manager.ui_mode_dropdown = QComboBox()
+        self.config_manager.ui_mode_dropdown.addItems([
+            UI_MODE_BASIC,
+            UI_MODE_EXPERT
+        ])
+
+        # Get the UI mode from config
+        initial_mode = UI_MODE_DEFAULT  # Default if not found
+
+        # Try to get UI_MODE from the Config object's SQLite store
+        try:
+            stored_mode = self.config.get(UI_MODE_CONFIG_KEY)
+            if stored_mode:
+                initial_mode = stored_mode
+                logging.debug(f"Setting initial UI mode from SQLite config store: {initial_mode}")
+        except Exception as e:
+            logging.warning(f"Error retrieving {UI_MODE_CONFIG_KEY} from config store: {e}")
+
+        logging.debug(f"Initial UI mode determined as: {initial_mode}")
+
+        # Set the dropdown to the initial mode
+        mode_index = self.config_manager.ui_mode_dropdown.findText(initial_mode)
+        if mode_index >= 0:
+            self.config_manager.ui_mode_dropdown.setCurrentIndex(mode_index)
+        else:
+            self.config_manager.ui_mode_dropdown.setCurrentIndex(0)  # Default to Basic if not found
+
+        from ui.strings import UI_MODE_TOOLTIP
+        self.config_manager.ui_mode_dropdown.setToolTip(UI_MODE_TOOLTIP)
+        mode_layout.addWidget(mode_label)
+        mode_layout.addWidget(self.config_manager.ui_mode_dropdown)
+
+        from ui.strings import RESET_TO_DEFAULTS_TOOLTIP
+        reset_button = QPushButton("Reset Settings")
+        reset_button.setToolTip(RESET_TO_DEFAULTS_TOOLTIP)
+        reset_button.clicked.connect(self.config_manager.reset_settings)
+        mode_layout.addWidget(reset_button)
+        left_layout.addLayout(mode_layout)
+
+        # Create scrollable area for config inputs
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll_content = QWidget()
+        scroll_layout = QFormLayout(scroll_content)
+
+        # Store scroll_content in config_manager for later reference
+        self.config_manager.scroll_content = scroll_content
+
+        # Create the config inputs sections
+        appium_group = ComponentFactory.create_appium_settings_group(
+            scroll_layout, self.config_widgets, self.tooltips, self
+        )
+        appium_group.setObjectName("appium_settings_group")
+
+        app_group = ComponentFactory.create_app_settings_group(
+            scroll_layout, self.config_widgets, self.tooltips, self.config_manager
+        )
+        app_group.setObjectName("app_settings_group")
+
+        ai_group = ComponentFactory.create_ai_settings_group(
+            scroll_layout, self.config_widgets, self.tooltips, self.config_manager
+        )
+        ai_group.setObjectName("ai_settings_group")
+
+        # Image Preprocessing placed directly after AI for clearer perception grouping
+        image_prep_group = ComponentFactory.create_image_preprocessing_group(
+            scroll_layout, self.config_widgets, self.tooltips
+        )
+        image_prep_group.setObjectName("image_preprocessing_group")
+
+        focus_areas_group = ComponentFactory.create_focus_areas_group(
+            scroll_layout, self.config_widgets, self.tooltips, self.config_manager
+        )
+        focus_areas_group.setObjectName("focus_areas_group")
+
+        crawler_group = ComponentFactory.create_crawler_settings_group(
+            scroll_layout, self.config_widgets, self.tooltips
+        )
+        crawler_group.setObjectName("crawler_settings_group")
+
+        # Privacy & Network settings (traffic capture)
+        privacy_network_group = ComponentFactory.create_privacy_network_group(
+            scroll_layout, self.config_widgets, self.tooltips
+        )
+        privacy_network_group.setObjectName("privacy_network_group")
+
+        # API Keys group (must be created before MobSF group for visibility control)
+        api_keys_group = ComponentFactory.create_api_keys_group(
+            scroll_layout, self.config_widgets, self.tooltips, self.config_manager
+        )
+        api_keys_group.setObjectName("api_keys_group")
+
+        mobsf_group = ComponentFactory.create_mobsf_settings_group(
+            scroll_layout, self.config_widgets, self.tooltips, self.config_manager
+        )
+        mobsf_group.setObjectName("mobsf_settings_group")
+
+        # Recording group
+        recording_group = ComponentFactory.create_recording_group(
+            scroll_layout, self.config_widgets, self.tooltips
+        )
+        recording_group.setObjectName("recording_group")
+
+        # Apply default values
+        self.config_manager._apply_defaults_from_config_to_widgets()
+        self.config_manager._update_crawl_mode_inputs_state()
+
+        # Store the group widgets for mode switching
+        self.ui_groups = {
+            "appium_settings_group": appium_group,
+            "app_settings_group": app_group,
+            "ai_settings_group": ai_group,
+            "image_preprocessing_group": image_prep_group,
+            "focus_areas_group": focus_areas_group,
+            "crawler_settings_group": crawler_group,
+            "privacy_network_group": privacy_network_group,
+            "api_keys_group": api_keys_group,
+            "mobsf_settings_group": mobsf_group,
+            "recording_group": recording_group,
+        }
+        # Also store in config_manager for backward compatibility
+        self.config_manager.ui_groups = self.ui_groups
+
+        scroll.setWidget(scroll_content)
+        left_layout.addWidget(scroll)
+
+        # Add control buttons
+        controls_group = ComponentFactory.create_control_buttons(self)
+        left_layout.addWidget(controls_group)
+
+        # Assign refresh_devices_btn if set by ComponentFactory
+        if hasattr(self, "refresh_devices_btn"):
+            pass  # Already set by ComponentFactory
+        else:
+            self.refresh_devices_btn = None
+
+        # Copy UI references from config_manager to self for direct access
+        if hasattr(self.config_manager, "health_app_dropdown"):
+            self.health_app_dropdown = self.config_manager.health_app_dropdown
+
+        if hasattr(self.config_manager, "refresh_apps_btn"):
+            self.refresh_apps_btn = self.config_manager.refresh_apps_btn
+
+        if hasattr(self.config_manager, "app_scan_status_label"):
+            self.app_scan_status_label = self.config_manager.app_scan_status_label
+
+        # Create UIStateHandler
+        self.ui_state_handler = UIStateHandler(
+            main_controller=self,
+            config_handler=self.config_manager,
+            config_widgets=self.config_widgets,
+            ui_groups=self.ui_groups
+        )
+
+        # Connect UI mode dropdown to toggle UI complexity
+        self.config_manager.ui_mode_dropdown.currentTextChanged.connect(
+            self.ui_state_handler.toggle_ui_complexity
+        )
+
+        # Connect AI provider selection to update model types
+        def _on_provider_changed(provider: str):
+            self.ui_state_handler._update_model_types(provider)
+
+        self.config_widgets["AI_PROVIDER"].currentTextChanged.connect(_on_provider_changed)
+
+        # Wire up refresh button
+        def _on_refresh_clicked():
+            try:
+                self.ui_state_handler._refresh_models()
+            except Exception as e:
+                logging.warning(f"Failed to refresh models: {e}")
+
+        self.config_widgets["OPENROUTER_REFRESH_BTN"].clicked.connect(_on_refresh_clicked)
+
+        # Wire up free-only filter to re-populate models
+        def _on_free_only_changed(_state: int):
+            try:
+                # Save the preference first
+                free_only = self.config_widgets["OPENROUTER_SHOW_FREE_ONLY"].isChecked()
+                self.config_manager.config.set("OPENROUTER_SHOW_FREE_ONLY", free_only)
+                
+                # Then update the model list
+                current_provider = self.config_widgets["AI_PROVIDER"].currentText()
+                self.ui_state_handler._update_model_types(current_provider)
+            except Exception as e:
+                logging.debug(f"Failed to apply free-only filter: {e}")
+
+        self.config_widgets["OPENROUTER_SHOW_FREE_ONLY"].stateChanged.connect(
+            _on_free_only_changed
+        )
+
+        # Connect all widgets to auto-save
+        self.config_manager.connect_widgets_for_auto_save()
+
+        # Initialize the UI complexity based on the mode we determined
+        self.ui_state_handler.toggle_ui_complexity(initial_mode)
+
+        # Create right panel
+        right_panel = QWidget()
+        right_main_layout = QVBoxLayout(right_panel)
+
+        # Step counter and status at the top (small header)
+        header_layout = QHBoxLayout()
+        self.step_label = QLabel("Step: 0")
+        self.status_label = QLabel("Status: Idle")
+        self.progress_bar = QProgressBar()
+        header_layout.addWidget(self.step_label)
+        header_layout.addWidget(self.status_label)
+        header_layout.addWidget(self.progress_bar)
+        right_main_layout.addLayout(header_layout)
+
+        # Main content area: Logs on left (2/3), Screenshot + Action History stacked on right (1/3)
+        content_layout = QHBoxLayout()
+
+        # Logs section - takes 2/3 of width and most of vertical space
+        log_group = QGroupBox("Logs")
+        log_layout = QVBoxLayout(log_group)
+
+        # Add a clear button
+        self.clear_logs_btn = QPushButton("Clear Logs")
+
+        log_header_layout = QHBoxLayout()
+        log_header_layout.addStretch()
+        log_header_layout.addWidget(self.clear_logs_btn)
+
+        self.log_output = QTextEdit()
+        self.log_output.setReadOnly(True)
+        self.log_output.setStyleSheet("background-color: #333333;")
+
+        log_layout.addLayout(log_header_layout)
+        log_layout.addWidget(self.log_output)
+
+        # Right side: Screenshot and Action History stacked vertically
+        right_side_layout = QVBoxLayout()
+
+        # Screenshot display (top right) - wider than tall
+        screenshot_group = QGroupBox("Current Screenshot")
+        screenshot_layout = QVBoxLayout(screenshot_group)
+        self.screenshot_label = QLabel()
+        self.screenshot_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.screenshot_label.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
+        self.screenshot_label.setMinimumHeight(300)
+        self.screenshot_label.setMinimumWidth(300)
+        self.screenshot_label.setStyleSheet("""
+            border: 1px solid #555555;
+            background-color: #2a2a2a;
+        """)
+        screenshot_layout.addWidget(self.screenshot_label)
+
+        # Action history (bottom right) - small, square or slightly taller
+        action_history_group = QGroupBox("Action History")
+        action_history_layout = QVBoxLayout(action_history_group)
+        self.action_history = QTextEdit()
+        self.action_history.setReadOnly(True)
+        try:
+            from ui.strings import ACTION_HISTORY_PLACEHOLDER
+            self.action_history.setPlaceholderText(ACTION_HISTORY_PLACEHOLDER)
+        except Exception:
+            pass
+        self.action_history.setStyleSheet("""
+            background-color: #333333; 
+            color: #FFFFFF; 
+            font-size: 11px; 
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+            border: 1px solid #555555;
+        """)
+        try:
+            from PySide6.QtWidgets import QTextEdit as _QTextEdit
+            self.action_history.setLineWrapMode(_QTextEdit.LineWrapMode.WidgetWidth)
+        except Exception:
+            pass
+        # Action history - small size
+        self.action_history.setMinimumHeight(150)
+        self.action_history.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
+        action_history_layout.addWidget(self.action_history)
+
+        # Add screenshot and action history to right side layout
+        right_side_layout.addWidget(screenshot_group, 2)  # Screenshot gets more space
+        right_side_layout.addWidget(action_history_group, 1)  # Action history gets less space
+
+        # Add logs (left, 2/3) and right side (1/3) to content layout
+        content_layout.addWidget(log_group, 2)  # Logs take 2/3 of width
+        content_layout.addLayout(right_side_layout, 1)  # Right side takes 1/3 of width
+
+        # Add content layout to main layout
+        right_main_layout.addLayout(content_layout, 1)  # Content takes all remaining vertical space
+
+        # Add panels to main layout with stretch factors
+        main_layout.addWidget(left_panel, 1)
+        main_layout.addWidget(right_panel, 2)
 
         # Shutdown flag path for crawler process
         self._shutdown_flag_file_path = self.config.SHUTDOWN_FLAG_PATH
@@ -219,49 +498,61 @@ class CrawlerControllerWindow(QMainWindow):
             logging.debug(f"Failed to hide busy overlay: {e}")
 
     def _audio_alert(self, kind: str = "finish") -> None:
-        """Play an audible alert.
+        """Play an audible alert using MP3 sound files.
 
         kind:
-        - 'finish' -> single tone
-        - 'error'  -> double tone
+        - 'finish' -> done-soundeffect.mp3
+        - 'error'  -> error-soundeffect.mp3
 
-        Uses platform-specific methods on Windows for reliability, falls back to
-        Qt's QGuiApplication.beep elsewhere.
+        Falls back to system beep if MP3 files are not available.
         """
-        # Prefer native Windows sounds if available for more reliable playback
         try:
-            import sys
-            if sys.platform.startswith("win"):
-                try:
-                    import winsound
-                    if kind == "error":
-                        # Two short tones with slight pitch difference
-                        winsound.Beep(900, 150)
-                        QTimer.singleShot(220, lambda: winsound.Beep(700, 150))
-                    else:
-                        # Use system default notification sound when possible
-                        try:
-                            winsound.MessageBeep(winsound.MB_OK)
-                        except Exception:
-                            winsound.Beep(800, 200)
-                    return  # Already played via winsound
-                except Exception as e:
-                    logging.debug(f"winsound not available or failed: {e}")
-        except Exception:
-            # Ignore sys import/platform issues
-            pass
+            from PySide6.QtMultimedia import QMediaPlayer
+            from pathlib import Path
+            from utils.paths import find_project_root
+            
+            # Find project root to locate sound files
+            try:
+                project_root = find_project_root(Path(__file__))
+            except Exception:
+                # Fallback: try to find from current working directory
+                project_root = Path.cwd()
+            
+            # Determine which sound file to play
+            if kind == "error":
+                sound_file = project_root / "error-soundeffect.mp3"
+            else:  # finish or default
+                sound_file = project_root / "done-soundeffect.mp3"
+            
+            # Check if sound file exists
+            if sound_file.exists():
+                # Create a media player instance
+                player = QMediaPlayer()
+                # Convert path to QUrl for cross-platform compatibility
+                sound_url = QUrl.fromLocalFile(str(sound_file.absolute()))
+                player.setSource(sound_url)
+                player.play()
+                # Note: QMediaPlayer will be garbage collected after play() completes
+                # For longer sounds, you might want to keep a reference
+                return  # Successfully played MP3
+            else:
+                logging.debug(f"Sound file not found: {sound_file}")
+        except ImportError:
+            logging.debug("QMediaPlayer not available, falling back to system beep")
+        except Exception as e:
+            logging.debug(f"MP3 playback failed: {e}, falling back to system beep")
 
-        # Fallback: use Qt beep
+        # Fallback: use system beep
         try:
             from PySide6.QtWidgets import QApplication
             if kind == "error":
                 QApplication.beep()
-                # Schedule a second beep shortly after; use lambda to ensure call
+                # Schedule a second beep shortly after
                 QTimer.singleShot(250, lambda: QApplication.beep())
             else:
                 QApplication.beep()
         except Exception as e:
-            logging.debug(f"Audio alert failed: {e}")
+            logging.debug(f"Audio alert fallback failed: {e}")
 
     def _create_tooltips(self) -> Dict[str, str]:
         """Create tooltips for UI elements."""
@@ -314,7 +605,7 @@ class CrawlerControllerWindow(QMainWindow):
                 )
                 logging.error("refresh_apps_btn not available for connection")
 
-            # Note: start_btn and stop_btn are already connected in UIComponents._create_control_buttons
+            # Note: start_btn and stop_btn are already connected in ComponentFactory.create_control_buttons
             # They connect to self.start_crawler and self.stop_crawler (delegate methods)
 
             # Connect MobSF buttons
@@ -920,8 +1211,14 @@ class CrawlerControllerWindow(QMainWindow):
 
         if ok:
             self.log_message(f"✅ Report generated: {final_pdf_path}", "green")
+            # Play success sound
+            if hasattr(self, '_audio_alert'):
+                self._audio_alert('finish')
         else:
             self.log_message("Error: Failed to generate report.", "red")
+            # Play error sound
+            if hasattr(self, '_audio_alert'):
+                self._audio_alert('error')
 
     def _get_connected_devices(self) -> List[str]:
         """Get a list of connected ADB devices."""

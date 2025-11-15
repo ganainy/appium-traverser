@@ -8,7 +8,7 @@ import sys
 from typing import Any, Dict, List, Optional, Tuple
 
 from PySide6.QtCore import QObject, QProcess, QRunnable, QThread, QThreadPool, QTimer, Signal, Slot
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QCheckBox
 
 # Import shared orchestrator components
 from core import get_process_backend, get_validation_service
@@ -277,9 +277,19 @@ class CrawlerManager(QObject):
             self.main_controller.log_message("", 'white')  # Empty line
             self.main_controller.log_message("⚠️ Some requirements are not met.", 'orange')
             self.main_controller.log_message("💡 You can still start the crawler, but it may fail if services are not available.", 'blue')
+            # Play error sound for blocking issues
+            if hasattr(self.main_controller, '_audio_alert'):
+                self.main_controller._audio_alert('error')
         elif warnings:
             self.main_controller.log_message("", 'white')  # Empty line
             self.main_controller.log_message("✅ Core requirements met. Warnings shown above.", 'green')
+            # Play success sound (warnings are non-blocking)
+            if hasattr(self.main_controller, '_audio_alert'):
+                self.main_controller._audio_alert('finish')
+        else:
+            # No issues at all - play success sound
+            if hasattr(self.main_controller, '_audio_alert'):
+                self.main_controller._audio_alert('finish')
 
         # Show detailed status
         self._display_validation_details(status_details)
@@ -292,6 +302,9 @@ class CrawlerManager(QObject):
         
         self.main_controller.log_message(f"❌ Validation error: {error_message}", 'red')
         logging.error(f"Validation error: {error_message}")
+        # Play error sound
+        if hasattr(self.main_controller, '_audio_alert'):
+            self.main_controller._audio_alert('error')
     
     def _display_validation_details(self, status_details: Dict[str, Any]):
         """Display detailed validation status."""
@@ -469,16 +482,38 @@ class CrawlerManager(QObject):
                         script_to_run = p
                         break
             
+            # Build command arguments
+            cmd_args = ["-u"]
+            
+            # Check if traffic capture is enabled
+            enable_traffic_capture = False
+            if "ENABLE_TRAFFIC_CAPTURE" in self.main_controller.config_widgets:
+                checkbox = self.main_controller.config_widgets["ENABLE_TRAFFIC_CAPTURE"]
+                if isinstance(checkbox, QCheckBox):
+                    enable_traffic_capture = checkbox.isChecked()
+            
             if module_to_run:
-                self.main_controller.log_message(f"Starting crawler with: {python_exe} -m {module_to_run} crawler start", 'blue')
+                cmd_args.extend(["-m", module_to_run, "crawler", "start"])
+                if enable_traffic_capture:
+                    cmd_args.append("--enable-traffic-capture")
+                cmd_str = f"{python_exe} -m {module_to_run} crawler start"
+                if enable_traffic_capture:
+                    cmd_str += " --enable-traffic-capture"
+                self.main_controller.log_message(f"Starting crawler with: {cmd_str}", 'blue')
                 # Start Python in unbuffered mode to stream stdout in real-time
                 # Add 'crawler start' command to launch the crawler
-                self.crawler_process.start(python_exe, ["-u", "-m", module_to_run, "crawler", "start"])
+                self.crawler_process.start(python_exe, cmd_args)
             elif script_to_run:
-                self.main_controller.log_message(f"Starting crawler with: {python_exe} {script_to_run} crawler start", 'blue')
+                cmd_args.extend([script_to_run, "crawler", "start"])
+                if enable_traffic_capture:
+                    cmd_args.append("--enable-traffic-capture")
+                cmd_str = f"{python_exe} {script_to_run} crawler start"
+                if enable_traffic_capture:
+                    cmd_str += " --enable-traffic-capture"
+                self.main_controller.log_message(f"Starting crawler with: {cmd_str}", 'blue')
                 # Run the script directly if module import is not available
                 # Add 'crawler start' command to launch the crawler
-                self.crawler_process.start(python_exe, ["-u", script_to_run, "crawler", "start"])
+                self.crawler_process.start(python_exe, cmd_args)
             else:
                 self.main_controller.log_message(
                     "ERROR: Could not locate crawler entrypoint (traverser_ai_api.main or run_cli.py).",

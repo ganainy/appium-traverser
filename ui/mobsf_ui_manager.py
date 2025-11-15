@@ -56,11 +56,20 @@ class MobSFUIManager(QObject):
             if response.status_code == 200:
                 self.main_controller.log_message("MobSF connection successful!", 'green')
                 self.main_controller.log_message(f"Server response: {response.json()}", 'blue')
+                # Play success sound
+                if hasattr(self.main_controller, '_audio_alert'):
+                    self.main_controller._audio_alert('finish')
             else:
                 self.main_controller.log_message(f"MobSF connection failed with status code: {response.status_code}", 'red')
                 self.main_controller.log_message(f"Response: {response.text}", 'red')
+                # Play error sound
+                if hasattr(self.main_controller, '_audio_alert'):
+                    self.main_controller._audio_alert('error')
         except requests.RequestException as e:
             self.main_controller.log_message(f"MobSF connection error: {e}", 'red')
+            # Play error sound
+            if hasattr(self.main_controller, '_audio_alert'):
+                self.main_controller._audio_alert('error')
 
         self.main_controller.log_message(f"\nAPI URL used: {test_url}", 'blue')
         self.main_controller.log_message("Important Tips:", 'blue')
@@ -202,8 +211,14 @@ except Exception as e:
                 
         if exit_code == 0 and exit_status == QProcess.ExitStatus.NormalExit:
             self.main_controller.log_message("MobSF analysis process completed.", 'green')
+            # Play success sound
+            if hasattr(self.main_controller, '_audio_alert'):
+                self.main_controller._audio_alert('finish')
         else:
             self.main_controller.log_message(f"MobSF analysis process failed with exit code: {exit_code}", 'red')
+            # Play error sound
+            if hasattr(self.main_controller, '_audio_alert'):
+                self.main_controller._audio_alert('error')
             
         self.main_controller.run_mobsf_analysis_btn.setEnabled(True)
         # Hide busy overlay

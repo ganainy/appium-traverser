@@ -80,9 +80,13 @@ ERROR_HANDLING_GROUP = "Error Handling Settings"
 MAX_CONSECUTIVE_AI_FAILURES_LABEL = "Max Consecutive AI Failures: "
 MAX_CONSECUTIVE_MAP_FAILURES_LABEL = "Max Consecutive Map Failures: "
 
+# ========== API Keys Settings ==========
+OPENROUTER_API_KEY_PLACEHOLDER = "Your OpenRouter API Key"
+GEMINI_API_KEY_PLACEHOLDER = "Your Gemini API Key"
+MOBSF_API_KEY_PLACEHOLDER = "Your MobSF API Key"
+
 # ========== MobSF Settings ==========
 MOBSF_API_URL_PLACEHOLDER = "Your MobSF API URL"
-MOBSF_API_KEY_PLACEHOLDER = "Your MobSF API Key"
 
 # ========== Buttons ==========
 PRE_CHECK_TOOLTIP = "Run pre-crawl validation checks for services and configuration"
@@ -105,6 +109,7 @@ CRAWLER_SETTINGS_GROUP = "Crawler Settings"
 FOCUS_AREAS_GROUP = "Focus Areas"
 TRAFFIC_CAPTURE_GROUP = "Traffic Capture"
 MOBSF_SETTINGS_GROUP = "MobSF Settings"
+API_KEYS_GROUP = "API Keys"
 VIDEO_RECORDING_GROUP = "Video Recording"
 
 # ========== Configuration Tooltips ==========
@@ -126,10 +131,11 @@ TOOLTIP_MAX_CONSECUTIVE_AI_FAILURES = "Maximum number of consecutive times the A
 TOOLTIP_MAX_CONSECUTIVE_MAP_FAILURES = "Maximum number of consecutive times the AI action cannot be mapped to a UI element before stopping."
 TOOLTIP_ENABLE_IMAGE_CONTEXT = "Enable to send screenshots to the AI for visual analysis. Disable for text-only analysis using XML only. The image preprocessing options below only apply when this option is enabled."
 TOOLTIP_ENABLE_TRAFFIC_CAPTURE = "Enable to capture network traffic (PCAP) during the crawl using PCAPdroid (requires PCAPdroid to be installed and configured on the device)."
-TOOLTIP_CLEANUP_DEVICE_PCAP_FILE = "If traffic capture is enabled, delete the PCAP file from the device after successfully pulling it to the computer."
+TOOLTIP_OPENROUTER_API_KEY = "API Key for OpenRouter. Get your key from https://openrouter.ai/keys. Keys are stored in .env file and never committed to version control."
+TOOLTIP_GEMINI_API_KEY = "API Key for Google Gemini. Get your key from https://makersuite.google.com/app/apikey. Keys are stored in .env file and never committed to version control."
+TOOLTIP_MOBSF_API_KEY = "API Key for authenticating with MobSF. This can be found in the MobSF web interface or in the config file. Keys are stored in .env file and never committed to version control."
 TOOLTIP_ENABLE_MOBSF_ANALYSIS = "Enable to perform static analysis of the app using MobSF."
 TOOLTIP_MOBSF_API_URL = "URL of the MobSF API (e.g., http://localhost:8000/api/v1)"
-TOOLTIP_MOBSF_API_KEY = "API Key for authenticating with MobSF. This can be found in the MobSF web interface or in the config file."
 TOOLTIP_ENABLE_VIDEO_RECORDING = "Enable to record the entire crawl session as an MP4 video."
 
 # Image preprocessing tooltips
@@ -168,10 +174,11 @@ def get_tooltips_dict() -> Dict[str, str]:
         "MAX_CONSECUTIVE_MAP_FAILURES": TOOLTIP_MAX_CONSECUTIVE_MAP_FAILURES,
         "ENABLE_IMAGE_CONTEXT": TOOLTIP_ENABLE_IMAGE_CONTEXT,
         "ENABLE_TRAFFIC_CAPTURE": TOOLTIP_ENABLE_TRAFFIC_CAPTURE,
-        "CLEANUP_DEVICE_PCAP_FILE": TOOLTIP_CLEANUP_DEVICE_PCAP_FILE,
         "ENABLE_MOBSF_ANALYSIS": TOOLTIP_ENABLE_MOBSF_ANALYSIS,
         "MOBSF_API_URL": TOOLTIP_MOBSF_API_URL,
         "MOBSF_API_KEY": TOOLTIP_MOBSF_API_KEY,
+        "OPENROUTER_API_KEY": TOOLTIP_OPENROUTER_API_KEY,
+        "GEMINI_API_KEY": TOOLTIP_GEMINI_API_KEY,
         "ENABLE_VIDEO_RECORDING": TOOLTIP_ENABLE_VIDEO_RECORDING,
         "IMAGE_MAX_WIDTH": TOOLTIP_IMAGE_MAX_WIDTH,
         "IMAGE_FORMAT": TOOLTIP_IMAGE_FORMAT,

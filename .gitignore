@@ -85,6 +85,7 @@ Thumbs.db
 
 # Cursor IDE configuration
 .cursor/
+.cursorrules
 
 # Taskmaster project management
 .taskmaster/
