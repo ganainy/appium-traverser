@@ -37,7 +37,7 @@ from config.numeric_constants import (
     AI_LOG_FILENAME,
 )
 from config.urls import ServiceURLs
-from domain.prompts import JSON_OUTPUT_SCHEMA, get_available_actions, ACTION_DECISION_SYSTEM_PROMPT, CONTEXT_ANALYSIS_PROMPT, SYSTEM_PROMPT_TEMPLATE
+from domain.prompts import JSON_OUTPUT_SCHEMA, get_available_actions, ACTION_DECISION_SYSTEM_PROMPT, build_action_decision_prompt
 
 # Update AgentAssistant to initialize AppiumDriver with a valid Config instance
 from config.app_config import Config
@@ -573,16 +573,12 @@ In your reasoning, explicitly state: "I am navigating away from this screen to b
             self.langchain_llm = self._create_langchain_llm_wrapper()
 
             # Create the action decision chain with proper Runnable chain
-            # Use config property (reads from database or None)
-            action_decision_prompt = self.cfg.CRAWLER_ACTION_DECISION_PROMPT
-            if not action_decision_prompt:
-                action_decision_prompt = ACTION_DECISION_SYSTEM_PROMPT
+            # Use config property (reads from database or None) - this is the editable part only
+            custom_prompt_part = self.cfg.CRAWLER_ACTION_DECISION_PROMPT
+            # Build full prompt by combining custom part with fixed part (schema/actions)
+            action_decision_prompt = build_action_decision_prompt(custom_prompt_part)
             action_chain = self._create_prompt_chain(action_decision_prompt, self.langchain_llm)
             self.action_decision_chain = ActionDecisionChain(chain=action_chain)
-
-            # Create the context analysis chain with proper Runnable chain
-            context_chain = self._create_prompt_chain(CONTEXT_ANALYSIS_PROMPT, self.langchain_llm)
-            self.context_analysis_chain = ActionDecisionChain(chain=context_chain)
 
             # Initialize memory checkpointer for cross-request context
             self.langchain_memory = MemorySaver()

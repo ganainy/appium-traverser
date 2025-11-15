@@ -323,14 +323,12 @@ class Config:
     
     @property
     def CRAWLER_ACTION_DECISION_PROMPT(self):
-        """Return action decision prompt from user store, or None."""
+        """Return action decision prompt from SQLite (single source of truth), or None.
+        
+        SQLite is the only source of truth. Defaults are initialized on first launch.
+        No fallback to prompts.py after initialization.
+        """
         prompt = self._user_store.get_crawler_prompt_by_name("ACTION_DECISION_PROMPT")
-        return prompt["template"] if prompt else None
-    
-    @property
-    def CRAWLER_SYSTEM_PROMPT_TEMPLATE(self):
-        """Return system prompt template from user store, or None."""
-        prompt = self._user_store.get_crawler_prompt_by_name("SYSTEM_PROMPT_TEMPLATE")
         return prompt["template"] if prompt else None
 
     @property

@@ -392,11 +392,10 @@ python run_cli.py actions remove "swipe_up"                       # Remove an ac
 
 ### Prompts
 
-Prompt templates control how the AI agent makes decisions during crawling. You can customize the prompts used for action decisions and system instructions to fine-tune the crawler's behavior.
+Prompt templates control how the AI agent makes decisions during crawling. You can customize the prompts used for action decisions to fine-tune the crawler's behavior. The default prompt is automatically initialized on first launch.
 
 ```powershell
 python run_cli.py prompts list                                                           # List all configured prompt templates
-python run_cli.py prompts add "ACTION_DECISION_PROMPT" --template "Your prompt template here"  # Add a new prompt template
 python run_cli.py prompts edit "ACTION_DECISION_PROMPT" --template "Updated template"          # Edit a prompt template
 python run_cli.py prompts remove "ACTION_DECISION_PROMPT"                                     # Remove a prompt template
 ```

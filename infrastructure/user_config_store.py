@@ -67,6 +67,9 @@ class UserConfigStore:
                 sort_order INTEGER
             );
         """)
+        
+        # Initialize default prompts on first launch
+        self.initialize_default_prompts_if_empty()
 
     def get(self, key: str, default: Any = None) -> Any:
         conn = self._ensure_conn()
@@ -656,7 +659,7 @@ class UserConfigStore:
         """Get a crawler prompt by name.
         
         Args:
-            name: Prompt name (e.g., "ACTION_DECISION_PROMPT", "SYSTEM_PROMPT_TEMPLATE")
+            name: Prompt name (e.g., "ACTION_DECISION_PROMPT")
             
         Returns:
             Dict representing the prompt or None if not found
@@ -819,5 +822,46 @@ class UserConfigStore:
         
         conn.execute("DELETE FROM crawler_prompts WHERE id = ?", (prompt_id,))
         conn.commit()
+    
+    def initialize_default_prompts_if_empty(self) -> None:
+        """Initialize default prompts from domain.prompts on first launch.
+        
+        Checks if crawler_prompts table is empty, and if so, populates it
+        with default prompts from domain.prompts module. This makes SQLite
+        the single source of truth after initialization.
+        """
+        conn = self._ensure_conn()
+        
+        # Check if any prompts exist
+        cur = conn.execute("SELECT COUNT(*) FROM crawler_prompts")
+        count = cur.fetchone()[0]
+        
+        # Only initialize if table is empty (first launch)
+        if count == 0:
+            try:
+                # Import default prompts from domain.prompts
+                from domain import prompts
+                
+                default_prompts = {
+                    "ACTION_DECISION_PROMPT": prompts.ACTION_DECISION_SYSTEM_PROMPT,
+                }
+                
+                logging.info(f"Initializing {len(default_prompts)} default prompts in database...")
+                
+                for name, template in default_prompts.items():
+                    try:
+                        self.add_crawler_prompt_full(name, template)
+                        logging.debug(f"Initialized default prompt: {name}")
+                    except sqlite3.IntegrityError:
+                        # Prompt already exists (shouldn't happen on first launch, but handle gracefully)
+                        logging.debug(f"Prompt '{name}' already exists, skipping")
+                    except Exception as e:
+                        logging.error(f"Failed to initialize prompt '{name}': {e}")
+                
+                logging.info("Default prompts initialization complete")
+            except ImportError as e:
+                logging.error(f"Failed to import domain.prompts: {e}")
+            except Exception as e:
+                logging.error(f"Failed to initialize default prompts: {e}")
     
     

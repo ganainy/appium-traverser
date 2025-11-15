@@ -39,7 +39,7 @@ class CrawlerPromptsService:
         """Get a prompt template by name.
         
         Args:
-            name: Prompt name (e.g., "ACTION_DECISION_PROMPT", "SYSTEM_PROMPT_TEMPLATE")
+            name: Prompt name (e.g., "ACTION_DECISION_PROMPT")
             
         Returns:
             Prompt template string or None if not found

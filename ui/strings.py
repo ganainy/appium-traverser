@@ -11,12 +11,12 @@ from typing import Dict
 NO_MODEL_SELECTED = "No model selected"
 SELECT_MODEL_TO_CONFIGURE = "Select a model to configure image inputs."
 MODEL_SUPPORTS_IMAGE_INPUTS = "This model supports image inputs."
-MODEL_DOES_NOT_SUPPORT_IMAGE_INPUTS = "This model does not support image inputs."
-WARNING_MODEL_NO_IMAGE_SUPPORT = "⚠️ This model does not support image inputs."
+MODEL_DOES_NOT_SUPPORT_IMAGE_INPUTS = "Selected AI model does not support image inputs."
+WARNING_MODEL_NO_IMAGE_SUPPORT = "⚠️ Selected AI model does not support image inputs."
 
 # ========== Image Context Tooltips ==========
 IMAGE_CONTEXT_DISABLED_PAYLOAD_LIMIT = "Image context disabled due to provider payload limits (max {max_kb} KB)."
-IMAGE_CONTEXT_ENABLED_TOOLTIP = "Enable sending screenshots to AI for visual analysis. Disable for text-only analysis."
+IMAGE_CONTEXT_ENABLED_TOOLTIP = "Enable sending screenshots to AI for visual analysis. Disable for text-only analysis using XML only. The options below only apply when this option is enabled."
 
 # ========== Model Selection Messages ==========
 NO_OLLAMA_MODELS_AVAILABLE = "No Ollama models available - run 'ollama pull <model>'"
@@ -126,7 +126,7 @@ TOOLTIP_ALLOWED_EXTERNAL_PACKAGES = "List of package names (one per line) that t
 TOOLTIP_MAX_CONSECUTIVE_AI_FAILURES = "Maximum number of consecutive times the AI can fail to provide a valid action before stopping."
 TOOLTIP_MAX_CONSECUTIVE_MAP_FAILURES = "Maximum number of consecutive times the AI action cannot be mapped to a UI element before stopping."
 TOOLTIP_MAX_CONSECUTIVE_EXEC_FAILURES = "Maximum number of consecutive times an action execution can fail before stopping."
-TOOLTIP_ENABLE_IMAGE_CONTEXT = "Enable to send screenshots to the AI for visual analysis. Disable for text-only analysis using XML only."
+TOOLTIP_ENABLE_IMAGE_CONTEXT = "Enable to send screenshots to the AI for visual analysis. Disable for text-only analysis using XML only. The image preprocessing options below only apply when this option is enabled."
 TOOLTIP_ENABLE_TRAFFIC_CAPTURE = "Enable to capture network traffic (PCAP) during the crawl using PCAPdroid (requires PCAPdroid to be installed and configured on the device)."
 TOOLTIP_CLEANUP_DEVICE_PCAP_FILE = "If traffic capture is enabled, delete the PCAP file from the device after successfully pulling it to the computer."
 TOOLTIP_CONTINUE_EXISTING_RUN = "Enable to resume a previous crawl session, using its existing database and screenshots. Disable to start a fresh run."

@@ -9,7 +9,7 @@ import os
 
 from typing import Any, Dict, Optional
 
-from PySide6.QtCore import QObject, Slot
+from PySide6.QtCore import QObject, QTimer, Slot
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -50,6 +50,8 @@ class ConfigManager(QObject):
         super().__init__()
         self.config = config
         self.main_controller = main_controller  # This is a reference to CrawlerControllerWindow
+        # Debounce timers for prompt fields (save after user stops typing)
+        self._prompt_save_timers: Dict[str, QTimer] = {}
     # self.user_config = {}  # Removed: not needed
     logging.debug("ConfigManager initialized with new Config interface (SQLite-backed)")
     
@@ -168,7 +170,7 @@ class ConfigManager(QObject):
 
         if key and key in self.main_controller.config_widgets:
             # Skip service-managed keys - they're handled separately
-            if key in ['CRAWLER_AVAILABLE_ACTIONS', 'CRAWLER_ACTION_DECISION_PROMPT', 'CRAWLER_SYSTEM_PROMPT_TEMPLATE']:
+            if key in ['CRAWLER_AVAILABLE_ACTIONS', 'CRAWLER_ACTION_DECISION_PROMPT']:
                 return  # These are managed via services, not config
             
             # Save only the specific key that triggered the change
@@ -183,7 +185,7 @@ class ConfigManager(QObject):
                 if k in ['IMAGE_CONTEXT_WARNING']:
                     continue
                 # Skip service-managed keys - they're handled separately
-                if k in ['CRAWLER_AVAILABLE_ACTIONS', 'CRAWLER_ACTION_DECISION_PROMPT', 'CRAWLER_SYSTEM_PROMPT_TEMPLATE']:
+                if k in ['CRAWLER_AVAILABLE_ACTIONS', 'CRAWLER_ACTION_DECISION_PROMPT']:
                     continue
                 value = self._get_widget_value(k, widget)
                 if value is not None:  # Skip None values (e.g., read-only QLabel widgets)
@@ -290,7 +292,7 @@ class ConfigManager(QObject):
             if key in ['IMAGE_CONTEXT_WARNING', 'ALLOWED_EXTERNAL_PACKAGES_WIDGET']:
                 continue
             # Skip service-managed keys - they're loaded separately
-            if key in ['CRAWLER_AVAILABLE_ACTIONS', 'CRAWLER_ACTION_DECISION_PROMPT', 'CRAWLER_SYSTEM_PROMPT_TEMPLATE']:
+            if key in ['CRAWLER_AVAILABLE_ACTIONS', 'CRAWLER_ACTION_DECISION_PROMPT']:
                 continue
             value = self.config.get(key, None)
             if value is not None:
@@ -383,6 +385,12 @@ class ConfigManager(QObject):
                     if index >= 0:
                         model_dropdown.setCurrentIndex(index)
         self._update_crawl_mode_inputs_state()
+        
+        # Update image preprocessing visibility based on ENABLE_IMAGE_CONTEXT state
+        if 'ENABLE_IMAGE_CONTEXT' in self.main_controller.config_widgets:
+            enable_image_context = self.config.get('ENABLE_IMAGE_CONTEXT', False)
+            self._update_image_preprocessing_visibility(bool(enable_image_context))
+        
         if loaded_any:
             self.main_controller.log_message("Configuration loaded from SQLite successfully.", 'green')
         else:
@@ -482,16 +490,44 @@ class ConfigManager(QObject):
                             logging.debug("Connected USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY checkbox to cache-first load-or-scan.")
                     except Exception as e:
                         logging.warning(f"Could not connect AI filter checkbox to rescan: {e}")
+                # If Enable Image Context checkbox changes, update visibility of preprocessing options
+                elif key == 'ENABLE_IMAGE_CONTEXT':
+                    def update_preprocessing_visibility(state: int):
+                        enabled = bool(state)
+                        self._update_image_preprocessing_visibility(enabled)
+                    widget.stateChanged.connect(update_preprocessing_visibility)
+                    logging.debug("Connected ENABLE_IMAGE_CONTEXT checkbox to update preprocessing visibility.")
             elif isinstance(widget, QComboBox):
                 widget.currentIndexChanged.connect(save_lambda)
             elif isinstance(widget, QTextEdit):
-                # QTextEdit doesn't have a simple 'editingFinished' signal.
-                # We can connect to textChanged, but it fires on every keystroke.
-                # A better approach is to handle it when the widget loses focus,
-                # but that requires event filtering. For now, we'll omit auto-save
-                # on QTextEdit to avoid excessive saving.
-                pass
+                # Handle prompt fields specially - they use the prompts service
+                if key == 'CRAWLER_ACTION_DECISION_PROMPT':
+                    # Save to SQLite via prompts service with debounce (save 1 second after user stops typing)
+                    def on_text_changed():
+                        self._debounce_prompt_save(key, 'ACTION_DECISION_PROMPT', widget)
+                    widget.textChanged.connect(on_text_changed)
+                else:
+                    # Other QTextEdit widgets - omit auto-save to avoid excessive saving
+                    pass
         logging.debug("Connected widgets for auto-saving.")
+    
+    def _update_image_preprocessing_visibility(self, enabled: bool):
+        """
+        Update visibility of image preprocessing options based on Enable Image Context state.
+        
+        Args:
+            enabled: Whether image context is enabled
+        """
+        try:
+            # Get the image preprocessing group from ui_groups
+            if hasattr(self, 'ui_groups') and 'image_preprocessing_group' in self.ui_groups:
+                image_prep_group = self.ui_groups['image_preprocessing_group']
+                from ui.ui_components import UIComponents
+                UIComponents._update_image_preprocessing_visibility(image_prep_group, enabled)
+            else:
+                logging.warning("Image preprocessing group not found in ui_groups")
+        except Exception as e:
+            logging.error(f"Error updating image preprocessing visibility: {e}", exc_info=True)
     
     def _get_actions_service(self):
         """Get CrawlerActionsService instance."""
@@ -514,6 +550,75 @@ class ConfigManager(QObject):
         except Exception as e:
             logging.error(f"Failed to get prompts service: {e}")
             return None
+    
+    def _debounce_prompt_save(self, widget_key: str, prompt_name: str, widget: QTextEdit):
+        """Debounce prompt saving - wait 1 second after user stops typing before saving.
+        
+        Args:
+            widget_key: Widget key in config_widgets
+            prompt_name: Prompt name for database
+            widget: The QTextEdit widget
+        """
+        # Cancel existing timer if any
+        if widget_key in self._prompt_save_timers:
+            self._prompt_save_timers[widget_key].stop()
+        
+        # Create new timer
+        timer = QTimer()
+        timer.setSingleShot(True)
+        timer.timeout.connect(lambda: self._save_prompt_from_ui(prompt_name, widget.toPlainText()))
+        timer.start(1000)  # 1 second delay
+        
+        # Store timer for cancellation
+        self._prompt_save_timers[widget_key] = timer
+    
+    def _save_prompt_from_ui(self, prompt_name: str, template: str):
+        """Save a prompt from UI to SQLite via service.
+        
+        Args:
+            prompt_name: Prompt name (e.g., "ACTION_DECISION_PROMPT")
+            template: Prompt template text
+        """
+        prompts_service = self._get_prompts_service()
+        if not prompts_service:
+            logging.error("Prompts service not available, cannot save prompt")
+            return
+        
+        try:
+            # Check if prompt exists
+            existing_prompt = prompts_service.get_prompt_by_name(prompt_name)
+            
+            if existing_prompt:
+                # Update existing prompt
+                success, message = prompts_service.edit_prompt(
+                    prompt_name,
+                    template=template
+                )
+                if success:
+                    logging.debug(f"Updated prompt '{prompt_name}' from UI")
+                else:
+                    logging.error(f"Failed to update prompt '{prompt_name}': {message}")
+                    self.main_controller.log_message(
+                        f"Failed to save prompt '{prompt_name}': {message}", "orange"
+                    )
+            else:
+                # Add new prompt
+                success, message = prompts_service.add_prompt(
+                    prompt_name,
+                    template
+                )
+                if success:
+                    logging.debug(f"Added prompt '{prompt_name}' from UI")
+                else:
+                    logging.error(f"Failed to add prompt '{prompt_name}': {message}")
+                    self.main_controller.log_message(
+                        f"Failed to save prompt '{prompt_name}': {message}", "orange"
+                    )
+        except Exception as e:
+            logging.error(f"Error saving prompt '{prompt_name}' from UI: {e}")
+            self.main_controller.log_message(
+                f"Error saving prompt '{prompt_name}': {e}", "red"
+            )
     
     def _load_actions_from_service(self):
         """Load actions from service and display in widget."""
@@ -585,13 +690,71 @@ class ConfigManager(QObject):
                 if actions_dict:
                     widget.setPlainText(json.dumps(actions_dict, indent=2))
     
+    def _extract_editable_prompt_part(self, full_prompt: str) -> str:
+        """Extract the editable part from a prompt that may contain the fixed part.
+        
+        If the prompt contains the fixed part (schema/actions), extract only the custom part.
+        This handles migration from old prompts that stored the full text.
+        
+        Args:
+            full_prompt: The prompt text (may be full or just editable part)
+        
+        Returns:
+            The editable part only
+        """
+        if not full_prompt:
+            return full_prompt
+        
+        # Check if prompt contains the fixed part markers
+        fixed_markers = [
+            "Use the following JSON schema",
+            "{json_schema}",
+            "Available actions:",
+            "{action_list}"
+        ]
+        
+        # If any fixed marker is found, extract the editable part
+        for marker in fixed_markers:
+            if marker in full_prompt:
+                # Find where the fixed part starts
+                # The fixed part typically starts with "Use the following JSON schema"
+                fixed_start = full_prompt.find("Use the following JSON schema")
+                if fixed_start > 0:
+                    # Extract everything before the fixed part
+                    editable_part = full_prompt[:fixed_start].strip()
+                    # If we extracted something, return it (and migrate it)
+                    if editable_part:
+                        logging.info("Migrating prompt: extracting editable part from full prompt")
+                        return editable_part
+                break
+        
+        # If no fixed markers found, assume it's already just the editable part
+        return full_prompt
+    
     def _load_prompts_from_service(self):
-        """Load prompts from service and display in widgets."""
+        """Load prompts from SQLite (single source of truth) and display in widgets."""
         prompts_service = self._get_prompts_service()
         if not prompts_service:
+            # If service unavailable, try reading directly from config (which reads from SQLite)
+            try:
+                if 'CRAWLER_ACTION_DECISION_PROMPT' in self.main_controller.config_widgets:
+                    widget = self.main_controller.config_widgets['CRAWLER_ACTION_DECISION_PROMPT']
+                    if isinstance(widget, QTextEdit):
+                        prompt_text = self.config.CRAWLER_ACTION_DECISION_PROMPT
+                        if prompt_text:
+                            # Extract editable part if needed (migration)
+                            editable_part = self._extract_editable_prompt_part(prompt_text)
+                            widget.setPlainText(editable_part)
+                            # If migration happened, save the extracted part
+                            if editable_part != prompt_text:
+                                self._save_prompt_from_ui('ACTION_DECISION_PROMPT', editable_part)
+                
+            except Exception as e:
+                logging.error(f"Failed to load prompts from config: {e}")
             return
         
         try:
+            # Read from SQLite via service (single source of truth)
             prompts = prompts_service.get_prompts()
             prompts_by_name = {p['name']: p['template'] for p in prompts}
             
@@ -599,17 +762,15 @@ class ConfigManager(QObject):
             if 'CRAWLER_ACTION_DECISION_PROMPT' in self.main_controller.config_widgets:
                 widget = self.main_controller.config_widgets['CRAWLER_ACTION_DECISION_PROMPT']
                 if isinstance(widget, QTextEdit):
-                    prompt_text = prompts_by_name.get('ACTION_DECISION_PROMPT') or self.config.CRAWLER_ACTION_DECISION_PROMPT
+                    prompt_text = prompts_by_name.get('ACTION_DECISION_PROMPT')
                     if prompt_text:
-                        widget.setPlainText(prompt_text)
-            
-            # Load SYSTEM_PROMPT_TEMPLATE
-            if 'CRAWLER_SYSTEM_PROMPT_TEMPLATE' in self.main_controller.config_widgets:
-                widget = self.main_controller.config_widgets['CRAWLER_SYSTEM_PROMPT_TEMPLATE']
-                if isinstance(widget, QTextEdit):
-                    prompt_text = prompts_by_name.get('SYSTEM_PROMPT_TEMPLATE') or self.config.CRAWLER_SYSTEM_PROMPT_TEMPLATE
-                    if prompt_text:
-                        widget.setPlainText(prompt_text)
+                        # Extract editable part if needed (migration)
+                        editable_part = self._extract_editable_prompt_part(prompt_text)
+                        widget.setPlainText(editable_part)
+                        # If migration happened, save the extracted part back to database
+                        if editable_part != prompt_text:
+                            logging.info("Migrating ACTION_DECISION_PROMPT: removing fixed part")
+                            self._save_prompt_from_ui('ACTION_DECISION_PROMPT', editable_part)
         except Exception as e:
             logging.error(f"Failed to load prompts from service: {e}")
     

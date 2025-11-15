@@ -4,12 +4,12 @@ Crawler prompt template management commands.
 
 This module provides CLI commands for managing crawler prompt templates:
 - list: Display all configured prompt templates
-- add: Create a new prompt template
 - edit: Modify an existing prompt template
 - remove: Delete a prompt template
 
 Prompt templates are stored in the database and used by the AI agent
-to make decisions during app crawling.
+to make decisions during app crawling. The default prompt is automatically
+initialized on first launch.
 """
 
 
@@ -87,73 +87,6 @@ class ListCrawlerPromptsCommand(CommandHandler):
             success=True,
             message=MSG.FOUND_PROMPTS.format(count=prompt_count)
         )
-
-
-class AddCrawlerPromptCommand(CommandHandler):
-    """Add a new crawler prompt template."""
-    
-    @property
-    def name(self) -> str:
-        return MSG.ADD_PROMPTS_CMD_NAME
-
-    @property
-    def description(self) -> str:
-        return MSG.ADD_PROMPTS_CMD_DESC
-    
-    def register(self, subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
-        parser = subparsers.add_parser(
-            self.name,
-            help=self.description,
-            description=self.description
-        )
-        parser.add_argument(
-            MSG.ADD_PROMPTS_ARG_NAME,
-            metavar=MSG.ADD_PROMPTS_ARG_NAME_METAVAR,
-            type=str,
-            help=MSG.ADD_PROMPTS_ARG_NAME_HELP
-        )
-        parser.add_argument(
-            f"--{MSG.ADD_PROMPTS_ARG_TEMPLATE}",
-            metavar=MSG.ADD_PROMPTS_ARG_TEMPLATE_METAVAR,
-            type=str,
-            required=True,
-            help=MSG.ADD_PROMPTS_ARG_TEMPLATE_HELP
-        )
-        self.add_common_arguments(parser)
-        parser.set_defaults(handler=self)
-        return parser
-    
-    def run(self, args: argparse.Namespace, context: ApplicationContext) -> CommandResult:
-        """Execute the add command."""
-        prompts_service: Optional[Any] = context.services.get(KEY.PROMPTS_SERVICE)
-        if prompts_service is None:
-            return CommandResult(
-                success=False,
-                message=MSG.PROMPTS_SERVICE_NOT_AVAILABLE,
-                exit_code=1
-            )
-
-        prompt_name: str = getattr(args, MSG.ADD_PROMPTS_ARG_NAME)
-        prompt_template: str = getattr(args, MSG.ADD_PROMPTS_ARG_TEMPLATE)
-        
-        operation_success: bool
-        operation_message: Optional[str]
-        operation_success, operation_message = prompts_service.add_prompt(
-            name=prompt_name,
-            template=prompt_template,
-        )
-
-        if operation_success:
-            return CommandResult(
-                success=True,
-                message=MSG.ADD_PROMPTS_SUCCESS.format(name=prompt_name)
-            )
-        else:
-            return CommandResult(
-                success=False,
-                message=MSG.ADD_PROMPTS_FAIL.format(name=prompt_name),
-                exit_code=1
-            )
 
 
 class EditCrawlerPromptCommand(CommandHandler):
@@ -329,7 +262,6 @@ class CrawlerPromptsCommandGroup(CommandGroup):
         """Return a list of CommandHandler instances for this group."""
         return [
             ListCrawlerPromptsCommand(),
-            AddCrawlerPromptCommand(),
             EditCrawlerPromptCommand(),
             RemoveCrawlerPromptCommand()
         ]

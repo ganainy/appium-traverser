@@ -63,26 +63,29 @@ def get_available_actions(config: Optional[Any] = None) -> Dict[str, str]:
 AVAILABLE_ACTIONS = _DEFAULT_AVAILABLE_ACTIONS
 
 # Define prompt templates as string constants
-ACTION_DECISION_SYSTEM_PROMPT = """
-You are an AI agent tasked with deciding the next action for mobile app testing. Use the following JSON schema to structure your output:
+# Editable part - users can customize this in the UI
+ACTION_DECISION_SYSTEM_PROMPT = "You are an AI agent tasked with deciding the next action for mobile app testing."
+
+# Fixed part - automatically appended by code, not editable by users
+ACTION_DECISION_FIXED_PART = """
+Use the following JSON schema to structure your output:
 {json_schema}
 
 Available actions:
 {action_list}
 """
 
-CONTEXT_ANALYSIS_PROMPT = """
-Analyze the given context and provide insights. Use the JSON schema below for your output:
-{json_schema}
-
-Available actions:
-{action_list}
-"""
-
-SYSTEM_PROMPT_TEMPLATE = """
-System prompt for building actions. JSON schema:
-{json_schema}
-
-Actions:
-{action_list}
-"""
+def build_action_decision_prompt(custom_part: Optional[str] = None) -> str:
+    """Build the full action decision prompt by combining custom and fixed parts.
+    
+    Args:
+        custom_part: Custom prompt text from user (editable part). If None, uses default.
+    
+    Returns:
+        Complete prompt string with both custom and fixed parts
+    """
+    if custom_part is None:
+        custom_part = ACTION_DECISION_SYSTEM_PROMPT
+    
+    # Combine custom part with fixed part
+    return f"{custom_part}{ACTION_DECISION_FIXED_PART}"

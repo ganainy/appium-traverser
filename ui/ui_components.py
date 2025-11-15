@@ -47,7 +47,7 @@ class UIComponents:
 
     @staticmethod
     def _configure_image_context_for_provider(
-        strategy, config, config_widgets, capabilities, model_dropdown, no_selection_label
+        strategy, config, config_widgets, capabilities, model_dropdown, no_selection_label, config_handler=None
     ):
         """Configure image context UI based on provider strategy and capabilities."""
         from domain.providers.enums import AIProvider
@@ -63,24 +63,39 @@ class UIComponents:
             if "IMAGE_CONTEXT_WARNING" in config_widgets:
                 config_widgets["IMAGE_CONTEXT_WARNING"].setVisible(True)
             UIComponents._add_image_context_warning(strategy.name, capabilities)
+            # Update preprocessing visibility (disabled)
+            if config_handler:
+                try:
+                    config_handler._update_image_preprocessing_visibility(False)
+                except Exception as e:
+                    logging.debug(f"Could not update preprocessing visibility: {e}")
         else:
             # Enable image context - provider supports it
             from ui.strings import IMAGE_CONTEXT_ENABLED_TOOLTIP
             config_widgets["ENABLE_IMAGE_CONTEXT"].setEnabled(True)
+            # Get current checked state to determine visibility
+            current_checked = config_widgets["ENABLE_IMAGE_CONTEXT"].isChecked()
             config_widgets["ENABLE_IMAGE_CONTEXT"].setToolTip(IMAGE_CONTEXT_ENABLED_TOOLTIP)
             config_widgets["ENABLE_IMAGE_CONTEXT"].setStyleSheet("")
             if "IMAGE_CONTEXT_WARNING" in config_widgets:
                 config_widgets["IMAGE_CONTEXT_WARNING"].setVisible(False)
             
+            # Update preprocessing visibility based on current checked state
+            if config_handler:
+                try:
+                    config_handler._update_image_preprocessing_visibility(current_checked)
+                except Exception as e:
+                    logging.debug(f"Could not update preprocessing visibility: {e}")
+            
             # For OpenRouter, handle model-specific image support
             if strategy.provider == AIProvider.OPENROUTER:
                 UIComponents._setup_openrouter_image_context_handler(
-                    strategy, config, config_widgets, model_dropdown, no_selection_label
+                    strategy, config, config_widgets, model_dropdown, no_selection_label, config_handler
                 )
 
     @staticmethod
     def _setup_openrouter_image_context_handler(
-        strategy, config, config_widgets, model_dropdown, no_selection_label
+        strategy, config, config_widgets, model_dropdown, no_selection_label, config_handler=None
     ):
         """Set up OpenRouter-specific image context handling with model change listener."""
         def _on_openrouter_model_changed(name: str):
@@ -97,6 +112,12 @@ class UIComponents:
                         config_widgets["IMAGE_CONTEXT_WARNING"].setVisible(False)
                     if "OPENROUTER_NON_FREE_WARNING" in config_widgets:
                         config_widgets["OPENROUTER_NON_FREE_WARNING"].setVisible(False)
+                    # Update preprocessing visibility (disabled)
+                    if config_handler:
+                        try:
+                            config_handler._update_image_preprocessing_visibility(False)
+                        except Exception as e:
+                            logging.debug(f"Could not update preprocessing visibility: {e}")
                     return
                 
                 # Check model-specific image support
@@ -108,6 +129,12 @@ class UIComponents:
                     config_widgets["ENABLE_IMAGE_CONTEXT"].setToolTip(MODEL_SUPPORTS_IMAGE_INPUTS)
                     if "IMAGE_CONTEXT_WARNING" in config_widgets:
                         config_widgets["IMAGE_CONTEXT_WARNING"].setVisible(False)
+                    # Update preprocessing visibility (enabled)
+                    if config_handler:
+                        try:
+                            config_handler._update_image_preprocessing_visibility(True)
+                        except Exception as e:
+                            logging.debug(f"Could not update preprocessing visibility: {e}")
                 else:
                     config_widgets["ENABLE_IMAGE_CONTEXT"].setEnabled(False)
                     config_widgets["ENABLE_IMAGE_CONTEXT"].setChecked(False)
@@ -119,6 +146,12 @@ class UIComponents:
                         except Exception:
                             pass
                         config_widgets["IMAGE_CONTEXT_WARNING"].setVisible(True)
+                    # Update preprocessing visibility (disabled)
+                    if config_handler:
+                        try:
+                            config_handler._update_image_preprocessing_visibility(False)
+                        except Exception as e:
+                            logging.debug(f"Could not update preprocessing visibility: {e}")
                 
                 # Show/hide non-free warning
                 try:
@@ -221,7 +254,7 @@ class UIComponents:
         # Configure image context based on provider capabilities
         if "ENABLE_IMAGE_CONTEXT" in config_widgets:
             UIComponents._configure_image_context_for_provider(
-                strategy, config, config_widgets, capabilities, model_dropdown, NO_SELECTION_LABEL
+                strategy, config, config_widgets, capabilities, model_dropdown, NO_SELECTION_LABEL, config_handler
             )
 
         # Provider-specific UI updates
@@ -290,7 +323,6 @@ class UIComponents:
         "IMAGE_CROP_BOTTOM_PERCENT": True,
         # Crawler prompt templates
         "CRAWLER_ACTION_DECISION_PROMPT": True,
-        "CRAWLER_SYSTEM_PROMPT_TEMPLATE": True,
         "CRAWLER_AVAILABLE_ACTIONS": True,
     }
 
@@ -838,27 +870,7 @@ class UIComponents:
 
         # Advanced manual model id entry removed; use dropdown-only selection
 
-        # Enable Image Context moved here from Feature Toggles
-        config_widgets["ENABLE_IMAGE_CONTEXT"] = QCheckBox()
-        label_enable_image_context = QLabel("Enable Image Context: ")
-        label_enable_image_context.setToolTip(
-            "Enable sending screenshots to AI for visual analysis. Disable for text-only analysis."
-        )
-
-        # Warning label (used when auto-disabled by provider capabilities)
-        config_widgets["IMAGE_CONTEXT_WARNING"] = QLabel("⚠️ Auto-disabled")
-        config_widgets["IMAGE_CONTEXT_WARNING"].setStyleSheet(
-            "color: #ff6b35; font-weight: bold;"
-        )
-        config_widgets["IMAGE_CONTEXT_WARNING"].setVisible(False)
-
-        # Horizontal layout for checkbox and warning
-        image_context_layout = QHBoxLayout()
-        image_context_layout.addWidget(label_enable_image_context)
-        image_context_layout.addWidget(config_widgets["ENABLE_IMAGE_CONTEXT"])
-        image_context_layout.addWidget(config_widgets["IMAGE_CONTEXT_WARNING"])
-        image_context_layout.addStretch()
-        ai_layout.addRow(image_context_layout)
+        # Enable Image Context has been moved to Image Preprocessing section
 
         from config.numeric_constants import XML_SNIPPET_MAX_LEN_MIN, XML_SNIPPET_MAX_LEN_MAX
         config_widgets["XML_SNIPPET_MAX_LEN"] = QSpinBox()
@@ -894,35 +906,21 @@ class UIComponents:
         config_widgets["CRAWLER_AVAILABLE_ACTIONS"].setToolTip(available_actions_tooltip)
         ai_layout.addRow(label_available_actions, config_widgets["CRAWLER_AVAILABLE_ACTIONS"])
         
-        # Crawler Action Decision Prompt (read-only, managed via CLI: prompts list/add/edit/remove)
+        # Crawler Action Decision Prompt (editable, saved to SQLite)
         config_widgets["CRAWLER_ACTION_DECISION_PROMPT"] = QTextEdit()
         config_widgets["CRAWLER_ACTION_DECISION_PROMPT"].setMinimumHeight(120)
         config_widgets["CRAWLER_ACTION_DECISION_PROMPT"].setMaximumHeight(180)
-        config_widgets["CRAWLER_ACTION_DECISION_PROMPT"].setReadOnly(True)  # Read-only, managed via CLI
+        config_widgets["CRAWLER_ACTION_DECISION_PROMPT"].setReadOnly(False)  # Editable, saved to SQLite
         label_action_prompt = QLabel("Action Decision Prompt: ")
         action_prompt_tooltip = (
-            "Prompt template for action decisions (read-only). "
-            "Manage via CLI: 'python run_cli.py prompts list/add/edit/remove'. "
-            "Name: ACTION_DECISION_PROMPT"
+            "Custom instructions for the AI agent (editable). "
+            "The JSON schema and available actions list are automatically appended by the system. "
+            "Editable in UI or via CLI: 'python run_cli.py prompts list/add/edit/remove'. "
+            "Name: ACTION_DECISION_PROMPT. Changes are saved to SQLite database."
         )
         label_action_prompt.setToolTip(action_prompt_tooltip)
         config_widgets["CRAWLER_ACTION_DECISION_PROMPT"].setToolTip(action_prompt_tooltip)
         ai_layout.addRow(label_action_prompt, config_widgets["CRAWLER_ACTION_DECISION_PROMPT"])
-        
-        # Crawler System Prompt Template (read-only, managed via CLI: prompts list/add/edit/remove)
-        config_widgets["CRAWLER_SYSTEM_PROMPT_TEMPLATE"] = QTextEdit()
-        config_widgets["CRAWLER_SYSTEM_PROMPT_TEMPLATE"].setMinimumHeight(120)
-        config_widgets["CRAWLER_SYSTEM_PROMPT_TEMPLATE"].setMaximumHeight(180)
-        config_widgets["CRAWLER_SYSTEM_PROMPT_TEMPLATE"].setReadOnly(True)  # Read-only, managed via CLI
-        label_system_prompt = QLabel("System Prompt Template: ")
-        system_prompt_tooltip = (
-            "System prompt template for the AI agent (read-only). "
-            "Manage via CLI: 'python run_cli.py prompts list/add/edit/remove'. "
-            "Name: SYSTEM_PROMPT_TEMPLATE"
-        )
-        label_system_prompt.setToolTip(system_prompt_tooltip)
-        config_widgets["CRAWLER_SYSTEM_PROMPT_TEMPLATE"].setToolTip(system_prompt_tooltip)
-        ai_layout.addRow(label_system_prompt, config_widgets["CRAWLER_SYSTEM_PROMPT_TEMPLATE"])
 
         layout.addRow(ai_group)
         return ai_group
@@ -934,8 +932,42 @@ class UIComponents:
         tooltips: Dict[str, str],
     ) -> QGroupBox:
         """Create the Image Preprocessing settings group."""
+        from PySide6.QtWidgets import QHBoxLayout
+        from ui.strings import IMAGE_CONTEXT_ENABLED_TOOLTIP
+        
         group = QGroupBox("Image Preprocessing")
         form = QFormLayout(group)
+
+        # Enable Image Context checkbox - placed at the top as the main control
+        config_widgets["ENABLE_IMAGE_CONTEXT"] = QCheckBox()
+        label_enable_image_context = QLabel("Enable Image Context: ")
+        # Use enhanced tooltip that explains the relationship with other options
+        enhanced_tooltip = (
+            "Enable sending screenshots to the AI for visual analysis. "
+            "Disable for text-only analysis using XML only. "
+            "The options below only apply when this option is enabled."
+        )
+        label_enable_image_context.setToolTip(enhanced_tooltip)
+        config_widgets["ENABLE_IMAGE_CONTEXT"].setToolTip(enhanced_tooltip)
+
+        # Warning label (used when auto-disabled by provider capabilities)
+        config_widgets["IMAGE_CONTEXT_WARNING"] = QLabel("⚠️ Auto-disabled")
+        config_widgets["IMAGE_CONTEXT_WARNING"].setStyleSheet(
+            "color: #ff6b35; font-weight: bold;"
+        )
+        config_widgets["IMAGE_CONTEXT_WARNING"].setVisible(False)
+
+        # Horizontal layout for checkbox and warning
+        image_context_layout = QHBoxLayout()
+        image_context_layout.addWidget(label_enable_image_context)
+        image_context_layout.addWidget(config_widgets["ENABLE_IMAGE_CONTEXT"])
+        image_context_layout.addWidget(config_widgets["IMAGE_CONTEXT_WARNING"])
+        image_context_layout.addStretch()
+        form.addRow(image_context_layout)
+
+        # Store references to preprocessing option widgets and labels for visibility control
+        preprocessing_widgets = []
+        preprocessing_labels = []
 
         # Max width
         from config.numeric_constants import IMAGE_MAX_WIDTH_MIN, IMAGE_MAX_WIDTH_MAX
@@ -945,6 +977,8 @@ class UIComponents:
         from ui.strings import MAX_SCREENSHOT_WIDTH_TOOLTIP
         label_max_width.setToolTip(tooltips.get("IMAGE_MAX_WIDTH", MAX_SCREENSHOT_WIDTH_TOOLTIP))
         form.addRow(label_max_width, config_widgets["IMAGE_MAX_WIDTH"])
+        preprocessing_widgets.append(config_widgets["IMAGE_MAX_WIDTH"])
+        preprocessing_labels.append(label_max_width)
 
         # Format
         config_widgets["IMAGE_FORMAT"] = QComboBox()
@@ -953,6 +987,8 @@ class UIComponents:
         from ui.strings import IMAGE_FORMAT_TOOLTIP
         label_format.setToolTip(tooltips.get("IMAGE_FORMAT", IMAGE_FORMAT_TOOLTIP))
         form.addRow(label_format, config_widgets["IMAGE_FORMAT"])
+        preprocessing_widgets.append(config_widgets["IMAGE_FORMAT"])
+        preprocessing_labels.append(label_format)
 
         # Quality
         from config.numeric_constants import IMAGE_QUALITY_MIN, IMAGE_QUALITY_MAX
@@ -962,6 +998,8 @@ class UIComponents:
         from ui.strings import IMAGE_QUALITY_TOOLTIP
         label_quality.setToolTip(tooltips.get("IMAGE_QUALITY", IMAGE_QUALITY_TOOLTIP))
         form.addRow(label_quality, config_widgets["IMAGE_QUALITY"])
+        preprocessing_widgets.append(config_widgets["IMAGE_QUALITY"])
+        preprocessing_labels.append(label_quality)
 
         # Crop bars toggle
         config_widgets["IMAGE_CROP_BARS"] = QCheckBox()
@@ -969,6 +1007,8 @@ class UIComponents:
         from ui.strings import CROP_BARS_TOOLTIP
         label_crop_bars.setToolTip(tooltips.get("IMAGE_CROP_BARS", CROP_BARS_TOOLTIP))
         form.addRow(label_crop_bars, config_widgets["IMAGE_CROP_BARS"])
+        preprocessing_widgets.append(config_widgets["IMAGE_CROP_BARS"])
+        preprocessing_labels.append(label_crop_bars)
 
         # Top crop percent
         from config.numeric_constants import CROP_PERCENT_MIN, CROP_PERCENT_MAX
@@ -978,6 +1018,8 @@ class UIComponents:
         from ui.strings import CROP_TOP_PERCENT_TOOLTIP
         label_crop_top.setToolTip(tooltips.get("IMAGE_CROP_TOP_PERCENT", CROP_TOP_PERCENT_TOOLTIP))
         form.addRow(label_crop_top, config_widgets["IMAGE_CROP_TOP_PERCENT"])
+        preprocessing_widgets.append(config_widgets["IMAGE_CROP_TOP_PERCENT"])
+        preprocessing_labels.append(label_crop_top)
 
         # Bottom crop percent
         config_widgets["IMAGE_CROP_BOTTOM_PERCENT"] = QSpinBox()
@@ -986,9 +1028,36 @@ class UIComponents:
         from ui.strings import CROP_BOTTOM_PERCENT_TOOLTIP
         label_crop_bottom.setToolTip(tooltips.get("IMAGE_CROP_BOTTOM_PERCENT", CROP_BOTTOM_PERCENT_TOOLTIP))
         form.addRow(label_crop_bottom, config_widgets["IMAGE_CROP_BOTTOM_PERCENT"])
+        preprocessing_widgets.append(config_widgets["IMAGE_CROP_BOTTOM_PERCENT"])
+        preprocessing_labels.append(label_crop_bottom)
+
+        # Store references for visibility control (attached to group as custom property)
+        group.preprocessing_widgets = preprocessing_widgets
+        group.preprocessing_labels = preprocessing_labels
 
         layout.addRow(group)
         return group
+
+    @staticmethod
+    def _update_image_preprocessing_visibility(image_prep_group: QGroupBox, enabled: bool):
+        """
+        Update visibility of image preprocessing options based on Enable Image Context state.
+        
+        Args:
+            image_prep_group: The Image Preprocessing QGroupBox
+            enabled: Whether image context is enabled
+        """
+        if not hasattr(image_prep_group, 'preprocessing_widgets') or not hasattr(image_prep_group, 'preprocessing_labels'):
+            return
+        
+        # Update visibility of all preprocessing widgets and labels
+        for widget in image_prep_group.preprocessing_widgets:
+            if widget:
+                widget.setVisible(enabled)
+        
+        for label in image_prep_group.preprocessing_labels:
+            if label:
+                label.setVisible(enabled)
 
     @staticmethod
     def _get_openrouter_cache_path() -> str:
