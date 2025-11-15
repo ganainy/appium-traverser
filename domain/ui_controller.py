@@ -83,8 +83,6 @@ class CrawlerControllerWindow(QMainWindow):
         self.log_output = None
         self.action_history = None
         self.screenshot_label = None
-        self.test_mobsf_conn_btn = None
-        self.run_mobsf_analysis_btn = None
         self.clear_logs_btn = None
         self.current_health_app_list_file = None
         self.health_apps_data = None
@@ -102,6 +100,9 @@ class CrawlerControllerWindow(QMainWindow):
         self.crawler_manager = CrawlerManager(self)
         self.health_app_scanner = HealthAppScanner(self)
         self.mobsf_ui_manager = MobSFUIManager(self)
+        
+        # Media player for audio alerts (kept as instance variable to prevent garbage collection)
+        self._media_player = None
 
         # Create central widget and main layout
         central_widget = QWidget()
@@ -192,6 +193,12 @@ class CrawlerControllerWindow(QMainWindow):
         self.config_manager.scroll_content = scroll_content
 
         # Create the config inputs sections
+        # API Keys group (moved to top - required before AI/MobSF configuration)
+        api_keys_group = ComponentFactory.create_api_keys_group(
+            scroll_layout, self.config_widgets, self.tooltips, self.config_manager
+        )
+        api_keys_group.setObjectName("api_keys_group")
+
         appium_group = ComponentFactory.create_appium_settings_group(
             scroll_layout, self.config_widgets, self.tooltips, self
         )
@@ -213,11 +220,6 @@ class CrawlerControllerWindow(QMainWindow):
         )
         image_prep_group.setObjectName("image_preprocessing_group")
 
-        focus_areas_group = ComponentFactory.create_focus_areas_group(
-            scroll_layout, self.config_widgets, self.tooltips, self.config_manager
-        )
-        focus_areas_group.setObjectName("focus_areas_group")
-
         crawler_group = ComponentFactory.create_crawler_settings_group(
             scroll_layout, self.config_widgets, self.tooltips
         )
@@ -228,12 +230,6 @@ class CrawlerControllerWindow(QMainWindow):
             scroll_layout, self.config_widgets, self.tooltips
         )
         privacy_network_group.setObjectName("privacy_network_group")
-
-        # API Keys group (must be created before MobSF group for visibility control)
-        api_keys_group = ComponentFactory.create_api_keys_group(
-            scroll_layout, self.config_widgets, self.tooltips, self.config_manager
-        )
-        api_keys_group.setObjectName("api_keys_group")
 
         mobsf_group = ComponentFactory.create_mobsf_settings_group(
             scroll_layout, self.config_widgets, self.tooltips, self.config_manager
@@ -252,14 +248,13 @@ class CrawlerControllerWindow(QMainWindow):
 
         # Store the group widgets for mode switching
         self.ui_groups = {
+            "api_keys_group": api_keys_group,
             "appium_settings_group": appium_group,
             "app_settings_group": app_group,
             "ai_settings_group": ai_group,
             "image_preprocessing_group": image_prep_group,
-            "focus_areas_group": focus_areas_group,
             "crawler_settings_group": crawler_group,
             "privacy_network_group": privacy_network_group,
-            "api_keys_group": api_keys_group,
             "mobsf_settings_group": mobsf_group,
             "recording_group": recording_group,
         }
@@ -526,15 +521,47 @@ class CrawlerControllerWindow(QMainWindow):
             
             # Check if sound file exists
             if sound_file.exists():
-                # Create a media player instance
-                player = QMediaPlayer()
+                # Clean up previous player if it exists
+                if self._media_player is not None:
+                    try:
+                        self._media_player.stop()
+                        self._media_player.deleteLater()
+                    except Exception:
+                        pass
+                    self._media_player = None
+                
+                # Create a new media player instance and keep it as instance variable
+                # This prevents garbage collection and FFmpeg "Immediate exit requested" errors
+                self._media_player = QMediaPlayer()
+                
                 # Convert path to QUrl for cross-platform compatibility
                 sound_url = QUrl.fromLocalFile(str(sound_file.absolute()))
-                player.setSource(sound_url)
-                player.play()
-                # Note: QMediaPlayer will be garbage collected after play() completes
-                # For longer sounds, you might want to keep a reference
-                return  # Successfully played MP3
+                self._media_player.setSource(sound_url)
+                
+                # Connect to error signal to handle playback errors gracefully
+                def handle_error(error, error_string):
+                    logging.debug(f"Media player error: {error_string}")
+                    # Clean up on error
+                    if self._media_player is not None:
+                        try:
+                            self._media_player.stop()
+                            self._media_player.deleteLater()
+                        except Exception:
+                            pass
+                        self._media_player = None
+                
+                self._media_player.errorOccurred.connect(handle_error)
+                
+                # Use QTimer to clean up after playback completes (with a reasonable delay)
+                # This ensures the player stays alive during playback
+                def schedule_cleanup():
+                    # Clean up after a delay to ensure playback has time to complete
+                    QTimer.singleShot(5000, lambda: self._cleanup_media_player())
+                
+                # Start playback
+                self._media_player.play()
+                schedule_cleanup()
+                return  # Successfully started MP3 playback
             else:
                 logging.debug(f"Sound file not found: {sound_file}")
         except ImportError:
@@ -553,6 +580,16 @@ class CrawlerControllerWindow(QMainWindow):
                 QApplication.beep()
         except Exception as e:
             logging.debug(f"Audio alert fallback failed: {e}")
+
+    def _cleanup_media_player(self) -> None:
+        """Clean up the media player instance."""
+        if self._media_player is not None:
+            try:
+                self._media_player.stop()
+                self._media_player.deleteLater()
+            except Exception:
+                pass
+            self._media_player = None
 
     def _create_tooltips(self) -> Dict[str, str]:
         """Create tooltips for UI elements."""
@@ -607,21 +644,6 @@ class CrawlerControllerWindow(QMainWindow):
 
             # Note: start_btn and stop_btn are already connected in ComponentFactory.create_control_buttons
             # They connect to self.start_crawler and self.stop_crawler (delegate methods)
-
-            # Connect MobSF buttons
-            if self.test_mobsf_conn_btn and hasattr(
-                self.test_mobsf_conn_btn, "clicked"
-            ):
-                self.test_mobsf_conn_btn.clicked.connect(
-                    self.mobsf_ui_manager.test_mobsf_connection
-                )
-
-            if self.run_mobsf_analysis_btn and hasattr(
-                self.run_mobsf_analysis_btn, "clicked"
-            ):
-                self.run_mobsf_analysis_btn.clicked.connect(
-                    self.mobsf_ui_manager.run_mobsf_analysis
-                )
 
             if self.clear_logs_btn and hasattr(self.clear_logs_btn, "clicked"):
                 self.clear_logs_btn.clicked.connect(self.clear_logs)
@@ -1055,20 +1077,20 @@ class CrawlerControllerWindow(QMainWindow):
                     )
                     find_apps_process.kill()
 
-        # Stop MobSF analysis process if running
-        if hasattr(self.mobsf_ui_manager, "mobsf_analysis_process"):
-            mobsf_process = self.mobsf_ui_manager.mobsf_analysis_process
+        # Stop MobSF test process if running
+        if hasattr(self.mobsf_ui_manager, "mobsf_test_process"):
+            mobsf_process = self.mobsf_ui_manager.mobsf_test_process
             if (
                 mobsf_process
                 and mobsf_process.state() != QProcess.ProcessState.NotRunning
             ):
                 self.log_message(
-                    "Closing UI: Terminating MobSF analysis process...", "orange"
+                    "Closing UI: Terminating MobSF test process...", "orange"
                 )
                 mobsf_process.terminate()
                 if not mobsf_process.waitForFinished(5000):
                     self.log_message(
-                        "MobSF analysis process did not terminate gracefully. Killing...",
+                        "MobSF test process did not terminate gracefully. Killing...",
                         "red",
                     )
                     mobsf_process.kill()

@@ -11,7 +11,6 @@ UI_MODE_CONFIG_KEY = "UI_MODE"
 # These will be hidden in basic mode
 ADVANCED_GROUPS = [
     "appium_settings_group",
-    "focus_areas_group",  # Focus areas can be advanced for basic users
     "image_preprocessing_group",  # Image preprocessing controls are advanced
 ]
 

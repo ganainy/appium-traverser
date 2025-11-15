@@ -70,6 +70,9 @@ class UserConfigStore:
         
         # Initialize default prompts on first launch
         self.initialize_default_prompts_if_empty()
+        
+        # Initialize default focus areas on first launch
+        self.initialize_default_focus_areas_if_empty()
 
     def get(self, key: str, default: Any = None) -> Any:
         conn = self._ensure_conn()
@@ -863,5 +866,47 @@ class UserConfigStore:
                 logging.error(f"Failed to import domain.prompts: {e}")
             except Exception as e:
                 logging.error(f"Failed to initialize default prompts: {e}")
+    
+    def initialize_default_focus_areas_if_empty(self) -> None:
+        """Initialize default focus area on first launch.
+        
+        Checks if focus_areas table is empty, and if so, creates a default
+        focus area for privacy policies and personally identifiable data.
+        """
+        conn = self._ensure_conn()
+        
+        # Check if any focus areas exist
+        cur = conn.execute("SELECT COUNT(*) FROM focus_areas")
+        count = cur.fetchone()[0]
+        
+        # Only initialize if table is empty (first launch)
+        if count == 0:
+            try:
+                default_name = "Privacy Policies & Personal Data"
+                default_description = (
+                    "Focus on privacy policies, terms of service, and areas of code "
+                    "that interact with personally identifiable data (personen bezogene Daten). "
+                    "This includes data collection notices, consent toggles, permission requests, "
+                    "privacy settings, account settings, data usage information, and any UI elements "
+                    "related to user data handling, storage, or sharing."
+                )
+                
+                logging.info("Initializing default focus area in database...")
+                
+                try:
+                    self.add_focus_area_full(
+                        name=default_name,
+                        description=default_description
+                    )
+                    logging.info(f"Initialized default focus area: {default_name}")
+                except sqlite3.IntegrityError:
+                    # Focus area already exists (shouldn't happen on first launch, but handle gracefully)
+                    logging.debug(f"Focus area '{default_name}' already exists, skipping")
+                except Exception as e:
+                    logging.error(f"Failed to initialize default focus area: {e}")
+                
+                logging.info("Default focus area initialization complete")
+            except Exception as e:
+                logging.error(f"Failed to initialize default focus areas: {e}")
     
     

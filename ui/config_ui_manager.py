@@ -797,7 +797,6 @@ class ConfigManager(QObject):
     def _on_mobsf_enabled_state_changed(self, state: int):
         """Handle the MobSF enabled checkbox state change."""
         try:
-            # Update the run_mobsf_analysis_btn and test_mobsf_conn_btn state
             is_enabled = bool(state)
             logging.debug(f"MobSF enabled state changed: {is_enabled}")
             
@@ -809,21 +808,6 @@ class ConfigManager(QObject):
             
             # Note: MobSF API Key is now in API Keys group and should always be visible
             # (not controlled by MobSF enable checkbox)
-            
-            # Update button visibility and enabled state - checking both hasattr and that the button is not None
-            if hasattr(self.main_controller, 'run_mobsf_analysis_btn') and self.main_controller.run_mobsf_analysis_btn is not None:
-                self.main_controller.run_mobsf_analysis_btn.setVisible(is_enabled)
-                self.main_controller.run_mobsf_analysis_btn.setEnabled(is_enabled)
-                logging.debug(f"Set run_mobsf_analysis_btn visible and enabled: {is_enabled}")
-            else:
-                logging.warning("run_mobsf_analysis_btn is not available")
-                
-            if hasattr(self.main_controller, 'test_mobsf_conn_btn') and self.main_controller.test_mobsf_conn_btn is not None:
-                self.main_controller.test_mobsf_conn_btn.setVisible(is_enabled)
-                self.main_controller.test_mobsf_conn_btn.setEnabled(is_enabled)
-                logging.debug(f"Set test_mobsf_conn_btn visible and enabled: {is_enabled}")
-            else:
-                logging.warning("test_mobsf_conn_btn is not available")
                 
             # Save the state to config immediately
             if hasattr(self.config, 'ENABLE_MOBSF_ANALYSIS'):
@@ -926,9 +910,13 @@ class ConfigManager(QObject):
                 # Handle prompt fields specially - they use the prompts service
                 if key == 'CRAWLER_ACTION_DECISION_PROMPT':
                     # Save to SQLite via prompts service with debounce (save 1 second after user stops typing)
-                    def on_text_changed():
-                        self._debounce_prompt_save(key, 'ACTION_DECISION_PROMPT', widget)
-                    widget.textChanged.connect(on_text_changed)
+                    # Double-check widget type before connecting
+                    if isinstance(widget, QTextEdit):
+                        def on_text_changed():
+                            self._debounce_prompt_save(key, 'ACTION_DECISION_PROMPT', widget)
+                        widget.textChanged.connect(on_text_changed)
+                    else:
+                        logging.warning(f"Widget for key '{key}' is not a QTextEdit, skipping prompt auto-save connection")
                 else:
                     # Other QTextEdit widgets - omit auto-save to avoid excessive saving
                     pass
@@ -980,6 +968,11 @@ class ConfigManager(QObject):
             prompt_name: Prompt name for database
             widget: The QTextEdit widget
         """
+        # Validate widget type
+        if not isinstance(widget, QTextEdit):
+            logging.warning(f"Widget for key '{widget_key}' is not a QTextEdit (got {type(widget).__name__}), skipping prompt save")
+            return
+        
         # Cancel existing timer if any
         if widget_key in self._prompt_save_timers:
             self._prompt_save_timers[widget_key].stop()

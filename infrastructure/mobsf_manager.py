@@ -8,7 +8,7 @@ import os
 import re
 import subprocess
 import time
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Union
 
 import requests
 
@@ -413,7 +413,7 @@ class MobSFManager:
         data = {'hash': file_hash}
         return self._make_api_request('scorecard', 'POST', data=data)
 
-    def perform_complete_scan(self, package_name: str) -> Tuple[bool, Dict[str, Any]]:
+    def perform_complete_scan(self, package_name: str, log_callback: Optional[Callable[[str, Optional[str]], None]] = None) -> Tuple[bool, Dict[str, Any]]:
         """
         Perform a complete scan workflow:
         1. Extract APK from device
@@ -423,10 +423,19 @@ class MobSFManager:
         
         Args:
             package_name: The package name to scan
+            log_callback: Optional callback function to display logs. 
+                         Should accept (message: str, color: Optional[str] = None)
             
         Returns:
             Tuple of (success, scan_summary)
         """
+        def _log(message: str, color: Optional[str] = None):
+            """Helper to log messages via callback or standard logging."""
+            if log_callback:
+                log_callback(message, color)
+            else:
+                logging.info(message)
+        
         # Double-check that MobSF is enabled before proceeding
         # (This is the check I mentioned - it is correct in your original file)
         if not self.cfg.get('ENABLE_MOBSF_ANALYSIS', False):
@@ -434,11 +443,14 @@ class MobSFManager:
             return False, {"error": "MobSF analysis is disabled"}
         
         # Extract APK from device
+        _log("Extracting APK from device...", 'blue')
         apk_path = self.extract_apk_from_device(package_name)
         if not apk_path:
             return False, {"error": "Failed to extract APK from device"}
+        _log(f"APK extracted to: {apk_path}", 'green')
         
         # Upload APK to MobSF
+        _log("Uploading APK to MobSF...", 'blue')
         upload_success, upload_result = self.upload_apk(apk_path)
         if not upload_success:
             return False, {"error": f"Failed to upload APK: {upload_result}"}
@@ -446,28 +458,87 @@ class MobSFManager:
         file_hash = upload_result.get('hash')
         if not file_hash:
             return False, {"error": "No file hash in upload response"}
+        _log(f"APK uploaded successfully. Hash: {file_hash}", 'green')
         
         # Scan the APK
+        _log("Starting MobSF static analysis...", 'blue')
         scan_success, scan_result = self.scan_apk(file_hash)
         if not scan_success:
             return False, {"error": f"Failed to scan APK: {scan_result}"}
         
-        # Wait for scan to complete
-        max_retries = 30
-        for _ in range(max_retries):
+        # Wait for scan to complete and display logs
+        max_retries = 60  # Increased for longer scans
+        last_log_count = 0
+        seen_logs = set()  # Track which logs we've already displayed
+        
+        for attempt in range(max_retries):
             logs_success, logs = self.get_scan_logs(file_hash)
             if logs_success and 'logs' in logs:
-                latest_log = logs['logs'][-1] if logs['logs'] else {}
-                status = latest_log.get('status', '')
-                if 'Completed' in status or 'Error' in status:
-                    break
+                log_entries = logs.get('logs', [])
+                
+                # Display new log entries
+                if log_entries:
+                    for log_entry in log_entries[last_log_count:]:
+                        # Create a unique identifier for this log entry
+                        log_id = f"{log_entry.get('timestamp', '')}-{log_entry.get('status', '')}-{log_entry.get('message', '')}"
+                        if log_id not in seen_logs:
+                            seen_logs.add(log_id)
+                            status = log_entry.get('status', '')
+                            message = log_entry.get('message', '')
+                            timestamp = log_entry.get('timestamp', '')
+                            
+                            # Format the log message
+                            if message:
+                                log_message = f"[MobSF] {message}"
+                                if timestamp:
+                                    log_message = f"[{timestamp}] {log_message}"
+                                
+                                # Determine color based on status
+                                if 'Error' in status or 'Failed' in status:
+                                    color = 'red'
+                                elif 'Completed' in status or 'Success' in status:
+                                    color = 'green'
+                                elif 'Warning' in status:
+                                    color = 'orange'
+                                else:
+                                    color = 'blue'
+                                
+                                _log(log_message, color)
+                            
+                            # Also show status if different from message
+                            if status and status not in message:
+                                _log(f"[MobSF] Status: {status}", 'blue')
+                    
+                    last_log_count = len(log_entries)
+                    
+                    # Check if scan is complete
+                    latest_log = log_entries[-1] if log_entries else {}
+                    status = latest_log.get('status', '')
+                    if 'Completed' in status or 'Error' in status or 'Failed' in status:
+                        _log(f"Scan completed with status: {status}", 'green' if 'Completed' in status else 'red')
+                        break
+            else:
+                # If we can't get logs, just wait
+                if attempt == 0:
+                    _log("Waiting for scan to start...", 'blue')
+            
             time.sleep(2)
         
+        if attempt >= max_retries - 1:
+            _log("Warning: Scan may still be in progress. Max retries reached.", 'orange')
+        
         # Save reports
+        _log("Generating reports...", 'blue')
         pdf_path = self.save_pdf_report(file_hash)
         json_path = self.save_json_report(file_hash)
         
+        if pdf_path:
+            _log(f"PDF report saved: {pdf_path}", 'green')
+        if json_path:
+            _log(f"JSON report saved: {json_path}", 'green')
+        
         # Get security score
+        _log("Retrieving security score...", 'blue')
         score_success, scorecard = self.get_security_score(file_hash)
         
         # Prepare summary
@@ -480,5 +551,10 @@ class MobSFManager:
             "security_score": scorecard if score_success else "Unknown"
         }
         
+        if score_success and isinstance(scorecard, dict):
+            score_value = scorecard.get('score', 'N/A')
+            _log(f"Security Score: {score_value}", 'green')
+        
+        _log("MobSF analysis completed successfully!", 'green')
         logging.debug(f"Completed MobSF scan for {package_name}")
         return True, summary

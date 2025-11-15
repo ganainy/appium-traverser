@@ -227,6 +227,13 @@ class ComponentFactory:
         config_widgets["CRAWLER_ACTION_DECISION_PROMPT"].setMinimumHeight(120)
         config_widgets["CRAWLER_ACTION_DECISION_PROMPT"].setMaximumHeight(180)
         config_widgets["CRAWLER_ACTION_DECISION_PROMPT"].setReadOnly(False)  # Editable, saved to SQLite
+        config_widgets["CRAWLER_ACTION_DECISION_PROMPT"].setStyleSheet("""
+            QTextEdit {
+                background-color: #333333;
+                color: #FFFFFF;
+                border: 1px solid #555555;
+            }
+        """)
         label_action_prompt = QLabel("Action Decision Prompt: ")
         action_prompt_tooltip = (
             "Custom instructions for the AI agent (editable). "
@@ -237,6 +244,18 @@ class ComponentFactory:
         label_action_prompt.setToolTip(action_prompt_tooltip)
         config_widgets["CRAWLER_ACTION_DECISION_PROMPT"].setToolTip(action_prompt_tooltip)
         ai_layout.addRow(label_action_prompt, config_widgets["CRAWLER_ACTION_DECISION_PROMPT"])
+
+        # Add Focus Areas as a subsection within AI Settings
+        focus_areas_widget = ComponentFactory._create_focus_areas_widget(
+            config_handler
+        )
+        label_focus_areas = QLabel("Privacy Focus Areas: ")
+        focus_areas_tooltip = (
+            "Configure what privacy aspects the AI agent should focus on during exploration. "
+            "Drag items to reorder priority, toggle checkboxes to enable/disable."
+        )
+        label_focus_areas.setToolTip(focus_areas_tooltip)
+        ai_layout.addRow(label_focus_areas, focus_areas_widget)
 
         layout.addRow(ai_group)
         return ai_group
@@ -359,16 +378,8 @@ class ComponentFactory:
 
 
     @staticmethod
-    def create_focus_areas_group(
-        layout: QFormLayout,
-        config_widgets: Dict[str, Any],
-        tooltips: Dict[str, str],
-        config_handler: Any,
-    ) -> QGroupBox:
-        """Create the Focus Areas group."""
-        focus_group = QGroupBox("AI Privacy Focus Areas")
-        focus_layout = QVBoxLayout(focus_group)
-
+    def _create_focus_areas_widget(config_handler: Any) -> QWidget:
+        """Create the Focus Areas widget (used as a subsection within AI Settings)."""
         # Import the focus areas widget
         try:
             from ui.focus_areas_widget import FocusAreasWidget
@@ -385,24 +396,38 @@ class ComponentFactory:
         except Exception as e:
             logging.warning(f"Could not get focus_service from main_controller: {e}")
 
-        # Load focus areas from config
-        focus_areas_data = config_handler.config.get("FOCUS_AREAS", None)
-
-        # Start with empty list - users must add focus areas through CRUD operations
-        # If config has saved focus areas, load them
-        if focus_areas_data:
-            # Convert to proper format if needed
-            pass
-        else:
+        # Load focus areas from user store (full data with id, name, description, etc.)
+        try:
+            focus_areas_data = config_handler.config._user_store.get_focus_areas_full()
+            if not focus_areas_data:
+                focus_areas_data = []
+        except Exception as e:
+            logging.warning(f"Could not load focus areas from user store: {e}")
             focus_areas_data = []
 
         # Create the focus areas widget
         focus_widget = FocusAreasWidget(focus_areas_data, parent=None, focus_service=focus_service)
-        focus_layout.addWidget(focus_widget)
 
         # Store reference for later access
         # Note: Focus areas are persisted directly through FocusAreaService when CRUD operations occur
         config_handler.focus_areas_widget = focus_widget
+
+        return focus_widget
+
+    @staticmethod
+    def create_focus_areas_group(
+        layout: QFormLayout,
+        config_widgets: Dict[str, Any],
+        tooltips: Dict[str, str],
+        config_handler: Any,
+    ) -> QGroupBox:
+        """Create the Focus Areas group (legacy method, kept for backward compatibility)."""
+        focus_group = QGroupBox("Privacy Focus Areas")
+        focus_layout = QVBoxLayout(focus_group)
+
+        # Use the internal widget creation method
+        focus_widget = ComponentFactory._create_focus_areas_widget(config_handler)
+        focus_layout.addWidget(focus_widget)
 
         layout.addRow(focus_group)
         return focus_group
@@ -482,34 +507,6 @@ class ComponentFactory:
         config_widgets["ALLOWED_EXTERNAL_PACKAGES_WIDGET"].setToolTip(tooltips["ALLOWED_EXTERNAL_PACKAGES"])
         crawler_layout.addRow(label_allowed_packages, config_widgets["ALLOWED_EXTERNAL_PACKAGES_WIDGET"])
 
-        # Add a visual separator before error handling settings
-        separator_label = QLabel("")
-        separator_label.setMinimumHeight(10)
-        crawler_layout.addRow(separator_label)
-
-        # Error Handling Settings (Advanced - shown in Expert mode only)
-        error_handling_label = QLabel("Error Handling:")
-        error_handling_label.setStyleSheet("font-weight: bold; margin-top: 5px;")
-        # Add label spanning both columns by using addRow with just the label
-        crawler_layout.addRow(error_handling_label)
-
-        from config.numeric_constants import MAX_CONSECUTIVE_FAILURES_MIN, MAX_CONSECUTIVE_FAILURES_MAX
-        config_widgets["MAX_CONSECUTIVE_AI_FAILURES"] = QSpinBox()
-        config_widgets["MAX_CONSECUTIVE_AI_FAILURES"].setRange(MAX_CONSECUTIVE_FAILURES_MIN, MAX_CONSECUTIVE_FAILURES_MAX)
-        label_max_ai_failures = QLabel("Max Consecutive AI Failures: ")
-        label_max_ai_failures.setToolTip(tooltips["MAX_CONSECUTIVE_AI_FAILURES"])
-        crawler_layout.addRow(
-            label_max_ai_failures, config_widgets["MAX_CONSECUTIVE_AI_FAILURES"]
-        )
-
-        config_widgets["MAX_CONSECUTIVE_MAP_FAILURES"] = QSpinBox()
-        config_widgets["MAX_CONSECUTIVE_MAP_FAILURES"].setRange(MAX_CONSECUTIVE_FAILURES_MIN, MAX_CONSECUTIVE_FAILURES_MAX)
-        label_max_map_failures = QLabel("Max Consecutive Map Failures: ")
-        label_max_map_failures.setToolTip(tooltips["MAX_CONSECUTIVE_MAP_FAILURES"])
-        crawler_layout.addRow(
-            label_max_map_failures, config_widgets["MAX_CONSECUTIVE_MAP_FAILURES"]
-        )
-
         layout.addRow(crawler_group)
         return crawler_group
 
@@ -524,12 +521,41 @@ class ComponentFactory:
 
         config_widgets["ENABLE_VIDEO_RECORDING"] = QCheckBox()
         label_enable_video = QLabel("Enable Video Recording: ")
+        label_enable_video.setToolTip(tooltips["ENABLE_VIDEO_RECORDING"])
         recording_layout.addRow(
             label_enable_video, config_widgets["ENABLE_VIDEO_RECORDING"]
         )
 
         layout.addRow(recording_group)
         return recording_group
+
+    @staticmethod
+    def create_error_handling_group(
+        layout: QFormLayout, config_widgets: Dict[str, Any], tooltips: Dict[str, str]
+    ) -> QGroupBox:
+        """Create the Error Handling group for failure threshold settings."""
+        error_handling_group = QGroupBox("Error Handling")
+        error_handling_layout = QFormLayout(error_handling_group)
+
+        from config.numeric_constants import MAX_CONSECUTIVE_FAILURES_MIN, MAX_CONSECUTIVE_FAILURES_MAX
+        config_widgets["MAX_CONSECUTIVE_AI_FAILURES"] = QSpinBox()
+        config_widgets["MAX_CONSECUTIVE_AI_FAILURES"].setRange(MAX_CONSECUTIVE_FAILURES_MIN, MAX_CONSECUTIVE_FAILURES_MAX)
+        label_max_ai_failures = QLabel("Max Consecutive AI Failures: ")
+        label_max_ai_failures.setToolTip(tooltips["MAX_CONSECUTIVE_AI_FAILURES"])
+        error_handling_layout.addRow(
+            label_max_ai_failures, config_widgets["MAX_CONSECUTIVE_AI_FAILURES"]
+        )
+
+        config_widgets["MAX_CONSECUTIVE_MAP_FAILURES"] = QSpinBox()
+        config_widgets["MAX_CONSECUTIVE_MAP_FAILURES"].setRange(MAX_CONSECUTIVE_FAILURES_MIN, MAX_CONSECUTIVE_FAILURES_MAX)
+        label_max_map_failures = QLabel("Max Consecutive Map Failures: ")
+        label_max_map_failures.setToolTip(tooltips["MAX_CONSECUTIVE_MAP_FAILURES"])
+        error_handling_layout.addRow(
+            label_max_map_failures, config_widgets["MAX_CONSECUTIVE_MAP_FAILURES"]
+        )
+
+        layout.addRow(error_handling_group)
+        return error_handling_group
 
     @staticmethod
     def create_privacy_network_group(
@@ -607,7 +633,7 @@ class ComponentFactory:
                 # Change to eye-slash icon when visible
                 eye_slash_icon = QIcon.fromTheme("view-visible", QIcon())
                 if eye_slash_icon.isNull():
-                    toggle_password_btn.setText("👁️")
+                    toggle_password_btn.setText("🙈")
                 else:
                     toggle_password_btn.setIcon(eye_slash_icon)
             else:

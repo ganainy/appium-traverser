@@ -541,7 +541,7 @@ class FocusAreasWidget(QWidget):
         # Header
         header_layout = QHBoxLayout()
 
-        title_label = QLabel("AI Privacy Focus Areas")
+        title_label = QLabel("Privacy Focus Areas")
         title_label.setStyleSheet("font-weight: 600; font-size: 14px; color: #e5e7eb;")
         header_layout.addWidget(title_label)
 
@@ -585,17 +585,18 @@ class FocusAreasWidget(QWidget):
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll_area.setMinimumHeight(300)  
+        scroll_area.setMinimumHeight(150)  
         scroll_area.setStyleSheet("""
             QScrollArea {
                 border: 1px solid #374151;
                 border-radius: 6px;
-                background-color: #1f2937;
+                background-color: #333333;
             }
         """)
 
         # Container for focus items - make it accept drops
         self.items_container = QWidget()
+        self.items_container.setStyleSheet("background-color: #333333;")
         self.items_layout = QVBoxLayout(self.items_container)
         self.items_layout.setSpacing(3)
         self.items_layout.setContentsMargins(5, 5, 5, 5)
@@ -719,7 +720,7 @@ class FocusAreasWidget(QWidget):
             self.stats_label.setStyleSheet("color: #dc3545; font-size: 10px; margin-top: 5px;")
         else:
             self.stats_label.setText(f"{enabled_count}/{total_count} focus areas enabled")
-            self.stats_label.setStyleSheet("color: #1e40af; font-size: 10px; margin-top: 5px;")
+            self.stats_label.setStyleSheet("color: #ffffff; font-size: 10px; margin-top: 5px;")
 
     def dragEnterEvent(self, event):
         """Handle drag enter event."""

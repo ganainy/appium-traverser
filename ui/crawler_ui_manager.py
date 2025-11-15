@@ -492,13 +492,35 @@ class CrawlerManager(QObject):
                 if isinstance(checkbox, QCheckBox):
                     enable_traffic_capture = checkbox.isChecked()
             
+            # Check if MobSF analysis is enabled
+            enable_mobsf_analysis = False
+            if "ENABLE_MOBSF_ANALYSIS" in self.main_controller.config_widgets:
+                checkbox = self.main_controller.config_widgets["ENABLE_MOBSF_ANALYSIS"]
+                if isinstance(checkbox, QCheckBox):
+                    enable_mobsf_analysis = checkbox.isChecked()
+            
+            # Check if video recording is enabled
+            enable_video_recording = False
+            if "ENABLE_VIDEO_RECORDING" in self.main_controller.config_widgets:
+                checkbox = self.main_controller.config_widgets["ENABLE_VIDEO_RECORDING"]
+                if isinstance(checkbox, QCheckBox):
+                    enable_video_recording = checkbox.isChecked()
+            
             if module_to_run:
                 cmd_args.extend(["-m", module_to_run, "crawler", "start"])
                 if enable_traffic_capture:
                     cmd_args.append("--enable-traffic-capture")
+                if enable_mobsf_analysis:
+                    cmd_args.append("--enable-mobsf-analysis")
+                if enable_video_recording:
+                    cmd_args.append("--enable-video-recording")
                 cmd_str = f"{python_exe} -m {module_to_run} crawler start"
                 if enable_traffic_capture:
                     cmd_str += " --enable-traffic-capture"
+                if enable_mobsf_analysis:
+                    cmd_str += " --enable-mobsf-analysis"
+                if enable_video_recording:
+                    cmd_str += " --enable-video-recording"
                 self.main_controller.log_message(f"Starting crawler with: {cmd_str}", 'blue')
                 # Start Python in unbuffered mode to stream stdout in real-time
                 # Add 'crawler start' command to launch the crawler
@@ -507,9 +529,17 @@ class CrawlerManager(QObject):
                 cmd_args.extend([script_to_run, "crawler", "start"])
                 if enable_traffic_capture:
                     cmd_args.append("--enable-traffic-capture")
+                if enable_mobsf_analysis:
+                    cmd_args.append("--enable-mobsf-analysis")
+                if enable_video_recording:
+                    cmd_args.append("--enable-video-recording")
                 cmd_str = f"{python_exe} {script_to_run} crawler start"
                 if enable_traffic_capture:
                     cmd_str += " --enable-traffic-capture"
+                if enable_mobsf_analysis:
+                    cmd_str += " --enable-mobsf-analysis"
+                if enable_video_recording:
+                    cmd_str += " --enable-video-recording"
                 self.main_controller.log_message(f"Starting crawler with: {cmd_str}", 'blue')
                 # Run the script directly if module import is not available
                 # Add 'crawler start' command to launch the crawler
