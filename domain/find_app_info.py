@@ -34,6 +34,36 @@ import sys
 import threading
 import time
 import traceback
+from pathlib import Path
+
+# Add project root to Python path before importing project modules
+# This is necessary when running the script directly
+CURRENT_SCRIPT_DIR = Path(__file__).resolve().parent
+
+# Find project root by looking for marker files (same logic as utils.paths.find_project_root)
+def _find_project_root(start_path: Path) -> Path:
+    """Find project root by looking for marker files."""
+    start_path = start_path.resolve()
+    markers = ["pyproject.toml", "setup.py", "setup.cfg", ".git", "README.md"]
+    
+    for parent in [start_path] + list(start_path.parents):
+        if any((parent / marker).exists() for marker in markers):
+            return parent
+    
+    raise FileNotFoundError(
+        f"Could not find project root. Searched from {start_path} "
+        f"looking for markers: {markers}"
+    )
+
+try:
+    PROJECT_ROOT = _find_project_root(CURRENT_SCRIPT_DIR)
+    if str(PROJECT_ROOT) not in sys.path:
+        sys.path.insert(0, str(PROJECT_ROOT))
+except Exception as e:
+    sys.stderr.write(
+        f"FATAL: Could not find project root. Error: {e}\n"
+    )
+    sys.exit(1)
 
 # Provider-agnostic model adapters
 try:
@@ -53,15 +83,6 @@ except ImportError as e:
         f"FATAL: Could not import app discovery utilities. Error: {e}\n"
     )
     sys.exit(1)
-
-
-from pathlib import Path
-
-from utils.paths import find_project_root
-
-CURRENT_SCRIPT_DIR = Path(__file__).resolve().parent
-# Note: When this file is in domain/, PROJECT_ROOT will be correctly calculated
-PROJECT_ROOT = str(find_project_root(CURRENT_SCRIPT_DIR))
 
 try:
     from config.app_config import Config
@@ -142,8 +163,10 @@ def _check_ai_filtering_prerequisites(config):
     result["model_name"] = model_type
     
     # Load safety settings if available (primarily for Gemini)
-    if hasattr(config, "AI_SAFETY_SETTINGS") and isinstance(config.get('AI_SAFETY_SETTINGS'), dict):
-        result["safety_settings"] = config.get('AI_SAFETY_SETTINGS')
+    # Accept both dict and list formats
+    safety_settings = config.get('AI_SAFETY_SETTINGS', None)
+    if safety_settings and (isinstance(safety_settings, (dict, list))):
+        result["safety_settings"] = safety_settings
     
     return result
 
@@ -555,18 +578,14 @@ Apps to classify:
 
 Return the complete JSON classification for all {num_apps} apps now:"""
             
-            # Show loading indicator while AI is processing
-            from utils import LoadingIndicator
-            
-            with LoadingIndicator("AI is processing"):
-                # Get AI classification for all apps in one call
-                try:
-                    response_text, metadata = model_adapter.generate_response(prompt)
-                    if not response_text or len(response_text.strip()) == 0:
-                        raise ValueError("AI model returned empty response. Check if the model is running and accessible.")
-                    response_text = response_text.strip()
-                except Exception as ai_error:
-                    raise  # Re-raise to be caught by outer exception handler
+            # Get AI classification for all apps in one call
+            try:
+                response_text, metadata = model_adapter.generate_response(prompt)
+                if not response_text or len(response_text.strip()) == 0:
+                    raise ValueError("AI model returned empty response. Check if the model is running and accessible.")
+                response_text = response_text.strip()
+            except Exception as ai_error:
+                raise  # Re-raise to be caught by outer exception handler
             
             # Try to extract JSON from the response
             # Sometimes the model wraps JSON in markdown code blocks
@@ -773,7 +792,19 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Android App Info Finder."
     )
-    parser.parse_args()
+    parser.add_argument(
+        "--mode",
+        type=str,
+        default="discover",
+        choices=["discover"],
+        help="Operation mode (currently only 'discover' is supported)"
+    )
+    parser.add_argument(
+        "--ai-filter",
+        action="store_true",
+        help="Enable AI filtering for health app classification (deprecated: AI filtering is always attempted if prerequisites are met)"
+    )
+    args = parser.parse_args()
     start_time = time.time()
 
     print(

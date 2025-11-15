@@ -43,18 +43,10 @@ class OllamaService:
             return False, None, error_msg
         
         try:
-            if wait_for_completion:
-                from utils import LoadingIndicator
-                with LoadingIndicator("Refreshing Ollama models"):
-                    success, cache_path = provider.refresh_models(
-                        self.context.config,
-                        wait_for_completion=wait_for_completion
-                    )
-            else:
-                success, cache_path = provider.refresh_models(
-                    self.context.config,
-                    wait_for_completion=wait_for_completion
-                )
+            success, cache_path = provider.refresh_models(
+                self.context.config,
+                wait_for_completion=wait_for_completion
+            )
             if success and cache_path:
                 self.logger.info(
                     MSG.SUCCESS_OLLAMA_MODELS_REFRESHED.format(cache_path=cache_path)

@@ -123,8 +123,14 @@ class HealthAppScanner(QObject):
         showing all apps vs health apps from the merged data file.
         """
         try:
+            # Check the current state of the filter checkbox
+            filter_enabled = bool(
+                self.config.get("USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY", False)
+            )
+            
+            filter_status = "enabled (showing health apps only)" if filter_enabled else "disabled (showing all apps)"
             self.main_controller.log_message(
-                "Discovery Filter toggled. Switching between all apps and health apps...",
+                f"Discovery Filter toggled. Filter is now {filter_status}...",
                 "blue",
             )
             # Get the merged file path and load appropriate data
@@ -132,7 +138,7 @@ class HealthAppScanner(QObject):
             device_file_path = self._get_device_health_app_file_path(device_id)
 
             if os.path.exists(device_file_path):
-                self._load_health_apps_from_file(device_file_path)
+                self._load_health_apps_from_file(device_file_path, filter_health_only=filter_enabled)
             else:
                 self.main_controller.log_message(
                     "No cached app data found. Please scan first.", "orange"
@@ -620,18 +626,20 @@ class HealthAppScanner(QObject):
                                 "green",
                             )
 
-                            # Check if it has health_apps data
-                            if "health_apps" in result_data and isinstance(
-                                result_data["health_apps"], list
-                            ):
+                            # Check if it has apps data (unified format only)
+                            if "apps" in result_data and isinstance(result_data["apps"], list):
                                 self.main_controller.log_message(
-                                    f"File contains valid health_apps data with {len(result_data['health_apps'])} apps",
+                                    f"File contains unified format with {len(result_data['apps'])} apps",
                                     "green",
                                 )
                                 break  # Found a good file, stop looking
                             else:
                                 self.main_controller.log_message(
-                                    f"File doesn't contain valid health_apps data: {file_path}",
+                                    f"File doesn't contain valid unified format (missing 'apps' key): {file_path}",
+                                    "orange",
+                                )
+                                self.main_controller.log_message(
+                                    "Expected format: {'apps': [{'package_name': '...', 'app_name': '...', 'is_health_app': true/false/null}, ...]}",
                                     "orange",
                                 )
                                 result_data = None  # Reset and try next file
@@ -647,11 +655,33 @@ class HealthAppScanner(QObject):
                     )
 
             # Process the result_data if we have it
-            if (
-                result_data
-                and "health_apps" in result_data
-                and isinstance(result_data["health_apps"], list)
-            ):
+            # Only support unified format (apps)
+            raw_apps = None
+            if result_data and "apps" in result_data and isinstance(result_data["apps"], list):
+                # Unified format: use apps list
+                raw_apps = result_data["apps"]
+                self.main_controller.log_message(
+                    f"Found unified format with {len(raw_apps)} apps",
+                    "green",
+                )
+            elif result_data:
+                # Reject legacy format
+                self.main_controller.log_message(
+                    "Legacy format detected. Only unified format is supported.",
+                    "red",
+                )
+                self.main_controller.log_message(
+                    "Expected format: {'apps': [{'package_name': '...', 'app_name': '...', 'is_health_app': true/false/null}, ...]}",
+                    "red",
+                )
+                if isinstance(result_data, dict):
+                    self.main_controller.log_message(
+                        f"Found keys: {list(result_data.keys())}",
+                        "red",
+                    )
+                raw_apps = None
+            
+            if raw_apps is not None:
                 # If AI filtering was requested but not effectively applied, warn user
                 use_ai_filter = bool(
                     getattr(
@@ -664,20 +694,44 @@ class HealthAppScanner(QObject):
                         "AI filter requested but unavailable; no health filtering applied.",
                         "orange",
                     )
+                
                 # Filter out any non-dict items to prevent errors
-                raw_apps = result_data["health_apps"]
                 if not isinstance(raw_apps, list):
                     self.main_controller.log_message(
-                        f"Warning: health_apps is not a list, type: {type(raw_apps)}. Clearing data.",
+                        f"Warning: apps data is not a list, type: {type(raw_apps)}. Clearing data.",
                         "red"
                     )
                     self.health_apps_data = []
                 else:
-                    self.health_apps_data = [app for app in raw_apps if isinstance(app, dict)]
-                    skipped_count = len(raw_apps) - len(self.health_apps_data)
+                    # Check filter state from checkbox
+                    filter_health_only = bool(
+                        self.config.get("USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY", False)
+                    )
+                    
+                    # Filter based on checkbox state (unified format only)
+                    if filter_health_only:
+                        self.health_apps_data = [
+                            app for app in raw_apps 
+                            if isinstance(app, dict) and app.get("is_health_app") is True
+                        ]
+                        self.main_controller.log_message(
+                            f"Filter enabled: Showing {len(self.health_apps_data)} health apps (filtered from {len(raw_apps)} total)", "green"
+                        )
+                        if len(self.health_apps_data) == 0:
+                            self.main_controller.log_message(
+                                "No health apps found. All apps have is_health_app=False or null. Try unchecking the filter to see all apps.", "orange"
+                            )
+                    else:
+                        # Show all apps
+                        self.health_apps_data = [app for app in raw_apps if isinstance(app, dict)]
+                        self.main_controller.log_message(
+                            f"Filter disabled: Showing all {len(self.health_apps_data)} apps", "green"
+                        )
+                    
+                    skipped_count = len(raw_apps) - len([app for app in raw_apps if isinstance(app, dict)])
                     if skipped_count > 0:
                         self.main_controller.log_message(
-                            f"Warning: Skipped {skipped_count} non-dict items in health_apps data.",
+                            f"Warning: Skipped {skipped_count} non-dict items in apps data.",
                             "orange"
                         )
 
@@ -828,8 +882,17 @@ class HealthAppScanner(QObject):
             logging.error(f"Exception in _on_find_apps_finished: {e}", exc_info=True)
             self.main_controller.app_scan_status_label.setText("App Scan: Error")
 
-    def _load_health_apps_from_file(self, file_path: str):
-        """Load health apps data from a JSON file with merged format support."""
+    def _load_health_apps_from_file(self, file_path: str, filter_health_only: Optional[bool] = None):
+        """Load apps data from a JSON file (unified format only).
+        
+        Args:
+            file_path: Path to the JSON file containing app data in unified format
+            filter_health_only: If True, only show health apps. If False, show all apps.
+                              If None, use the checkbox state from config.
+        
+        The file must be in unified format: {'apps': [{'package_name': '...', 'app_name': '...', 'is_health_app': true/false/null}, ...]}
+        Legacy format with 'health_apps' key is not supported.
+        """
         try:
             if not os.path.exists(file_path):
                 self.main_controller.log_message(
@@ -838,8 +901,14 @@ class HealthAppScanner(QObject):
                 return
 
             self.main_controller.log_message(
-                f"Attempting to load health apps from: {file_path}", "blue"
+                f"Attempting to load apps from: {file_path}", "blue"
             )
+
+            # Determine filter state - use parameter if provided, otherwise check config
+            if filter_health_only is None:
+                filter_health_only = bool(
+                    self.config.get("USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY", False)
+                )
 
             with open(file_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
@@ -852,12 +921,6 @@ class HealthAppScanner(QObject):
             ):
                 # Get all apps from the unified list
                 raw_apps = data["apps"]
-                
-                # Filter to only health apps (is_health_app == True)
-                self.health_apps_data = [
-                    app for app in raw_apps 
-                    if isinstance(app, dict) and app.get("is_health_app") is True
-                ]
                 
                 # Log raw data info
                 self.main_controller.log_message(
@@ -882,14 +945,34 @@ class HealthAppScanner(QObject):
                         "orange"
                     )
                 
-                self.main_controller.log_message(
-                    f"After filtering: {len(self.health_apps_data)} health apps (is_health_app=True)", "green"
-                )
+                # Filter based on checkbox state
+                if filter_health_only:
+                    # Filter to only health apps (is_health_app == True)
+                    self.health_apps_data = [
+                        app for app in raw_apps 
+                        if isinstance(app, dict) and app.get("is_health_app") is True
+                    ]
+                    self.main_controller.log_message(
+                        f"Filter enabled: Showing {len(self.health_apps_data)} health apps (filtered from {len(raw_apps)} total)", "green"
+                    )
+                    if len(self.health_apps_data) == 0:
+                        self.main_controller.log_message(
+                            "No health apps found. All apps have is_health_app=False or null. Try unchecking the filter to see all apps.", "orange"
+                        )
+                else:
+                    # Show all apps
+                    self.health_apps_data = [
+                        app for app in raw_apps 
+                        if isinstance(app, dict)
+                    ]
+                    self.main_controller.log_message(
+                        f"Filter disabled: Showing all {len(self.health_apps_data)} apps", "green"
+                    )
 
                 timestamp = data.get("timestamp", "unknown")
                 ai_filtered = data.get("ai_filtered", False)
                 self.main_controller.log_message(
-                    f"Loaded health apps data from timestamp: {timestamp} (AI filtered: {ai_filtered})", "blue"
+                    f"Loaded apps data from timestamp: {timestamp} (AI filtered during scan: {ai_filtered})", "blue"
                 )
             else:
                 self.main_controller.log_message(
@@ -915,9 +998,18 @@ class HealthAppScanner(QObject):
                 self._populate_app_dropdown()
 
                 if not self.health_apps_data:
-                    self.main_controller.log_message(
-                        "No apps found in the cached file.", "orange"
+                    # Check if filter is enabled to provide appropriate message
+                    filter_enabled = bool(
+                        self.config.get("USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY", False)
                     )
+                    if filter_enabled:
+                        self.main_controller.log_message(
+                            "No health apps found in the cached file. All apps have is_health_app=False or null. Try unchecking the filter to see all apps.", "orange"
+                        )
+                    else:
+                        self.main_controller.log_message(
+                            "No apps found in the cached file.", "orange"
+                        )
                     if (
                         hasattr(self.main_controller, "app_scan_status_label")
                         and self.main_controller.app_scan_status_label
@@ -1027,15 +1119,31 @@ class HealthAppScanner(QObject):
                 return
 
             self.main_controller.health_app_dropdown.clear()
+            
+            # Check if filter is enabled to provide appropriate message
+            filter_enabled = bool(
+                self.config.get("USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY", False)
+            )
+
+            if not self.health_apps_data:
+                if filter_enabled:
+                    # Add a helpful message item to the dropdown when filter is enabled but no health apps
+                    self.main_controller.health_app_dropdown.addItem(
+                        "No health apps found (uncheck filter to see all apps)", None
+                    )
+                else:
+                    self.main_controller.health_app_dropdown.addItem(
+                        "Select target app...", None
+                    )
+                    self.main_controller.log_message(
+                        "No apps available to populate dropdown.", "orange"
+                    )
+                return
+            
+            # Add default item when we have apps
             self.main_controller.health_app_dropdown.addItem(
                 "Select target app...", None
             )  # Default item
-
-            if not self.health_apps_data:
-                self.main_controller.log_message(
-                    "No health apps available to populate dropdown.", "orange"
-                )
-                return
 
             self.main_controller.log_message(
                 f"Starting dropdown population with {len(self.health_apps_data)} apps", "blue"

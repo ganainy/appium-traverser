@@ -95,7 +95,7 @@ CLI_SELECT_PROVIDER_PROMPT = "Select AI provider ({providers}): "
 CLI_INVALID_PROVIDER = "Invalid provider: {provider}"
 
 # ========== Run UI Messages ==========
-RUN_UI_ERROR_NEITHER_QT = "ERROR: Neither PyQt6 nor PySide6 is installed. Please install one of them."
+RUN_UI_ERROR_PYSIDE6 = "ERROR: PySide6 is not installed. Please install it with: pip install PySide6"
 
 # ========== Group Box Titles ==========
 APPIUM_SETTINGS_GROUP = "Appium Settings"

@@ -10,7 +10,6 @@ from core.health_check import ValidationService
 from cli.shared.context import ApplicationContext
 from cli.constants import messages as MSG
 from cli.constants import keys as KEYS
-from utils import LoadingIndicator
 
 
 class PrecheckCommand(CommandHandler):
@@ -41,10 +40,8 @@ class PrecheckCommand(CommandHandler):
         # Instantiate ValidationService with config
         health_service = ValidationService(context.config)
         
-        # Show loading indicator while checking services
-        with LoadingIndicator("Checking services"):
-            # Call services_status = health_service.check_all_services()
-            services_status = health_service.check_all_services()
+        # Check services
+        services_status = health_service.check_all_services()
         
         # Get the telemetry service and call telemetry.print_status_table(services_status)
         telemetry.print_status_table(services_status)

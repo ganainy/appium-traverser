@@ -498,8 +498,7 @@ class ConfigManager(QObject):
         try:
             from cli.services.crawler_actions_service import CrawlerActionsService
             from cli.shared.context import ApplicationContext
-            context = ApplicationContext()
-            context.config = self.config
+            context = ApplicationContext(config=self.config)
             return CrawlerActionsService(context)
         except Exception as e:
             logging.error(f"Failed to get actions service: {e}")
@@ -510,8 +509,7 @@ class ConfigManager(QObject):
         try:
             from cli.services.crawler_prompts_service import CrawlerPromptsService
             from cli.shared.context import ApplicationContext
-            context = ApplicationContext()
-            context.config = self.config
+            context = ApplicationContext(config=self.config)
             return CrawlerPromptsService(context)
         except Exception as e:
             logging.error(f"Failed to get prompts service: {e}")

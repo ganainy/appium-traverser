@@ -2,6 +2,7 @@
 Utils package for the appium-traverser project.
 """
 
-from utils.utils import LoadingIndicator
+# LoadingIndicator removed due to threading issues
+# It's still defined in utils.utils but should not be used
 
-__all__ = ['LoadingIndicator']
+__all__ = []

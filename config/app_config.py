@@ -725,7 +725,29 @@ from config.numeric_constants import (
     CACHE_MAX_SCREENS,
 )
 USE_AI_FILTER_FOR_TARGET_APP_DISCOVERY = True
-AI_SAFETY_SETTINGS = {}
+# AI Safety Settings for Gemini - Less restrictive configuration
+# Set to BLOCK_NONE for all categories to allow all content through
+# Categories: HARM_CATEGORY_HARASSMENT, HARM_CATEGORY_HATE_SPEECH, 
+# HARM_CATEGORY_SEXUALLY_EXPLICIT, HARM_CATEGORY_DANGEROUS_CONTENT
+# Threshold values: BLOCK_NONE=1, BLOCK_ONLY_HIGH=2, BLOCK_MEDIUM_AND_ABOVE=3, BLOCK_LOW_AND_ABOVE=4
+AI_SAFETY_SETTINGS = [
+    {
+        "category": "HARM_CATEGORY_HARASSMENT",
+        "threshold": "BLOCK_NONE"
+    },
+    {
+        "category": "HARM_CATEGORY_HATE_SPEECH",
+        "threshold": "BLOCK_NONE"
+    },
+    {
+        "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+        "threshold": "BLOCK_NONE"
+    },
+    {
+        "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
+        "threshold": "BLOCK_NONE"
+    }
+]
 # Prompt and XML compacting/caching for latency reduction
 PROMPT_COMPACT_MODE = True
 XML_INTERACTIVE_ONLY = True

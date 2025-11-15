@@ -293,7 +293,10 @@ class OpenRouterProvider(ProviderStrategy):
     # ========== ProviderStrategy Interface ==========
     
     def get_models(self, config: 'Config') -> List[str]:
-        """Get available OpenRouter models from cache, optionally filtered by free-only setting."""
+        """Get available OpenRouter models from cache, optionally filtered by free-only setting.
+        
+        Returns empty list if cache load fails (no fallback presets).
+        """
         models = []
         free_only = config.get("OPENROUTER_SHOW_FREE_ONLY", False)
         
@@ -314,12 +317,8 @@ class OpenRouterProvider(ProviderStrategy):
         except Exception:
             pass
         
-        # Always include presets as safe options
-        presets = ["openrouter-auto", "openrouter-auto-fast"]
-        for preset in presets:
-            if preset not in models:
-                models.insert(0, preset)  # Insert at beginning after placeholder
-        
+        # Only return models if we successfully loaded from cache
+        # No fallback presets - return empty list if cache load failed
         return models
     
     def get_api_key_name(self) -> str:
@@ -443,70 +442,42 @@ class OpenRouterProvider(ProviderStrategy):
         Returns:
             Tuple of (success, cache_path) where cache_path is the path to the saved cache file
         """
-        try:
-            completion_event = threading.Event()
-            success_flag = {"success": False}
-            cache_path_ref: Dict[str, Optional[str]] = {"cache_path": None}
-            error_ref: Dict[str, Optional[Exception]] = {"error": None}
+        def refresh_logic():
+            # Get API key from config or environment
+            api_key = None
+            if config:
+                api_key = self.get_api_key(config)
+            if not api_key:
+                api_key = os.environ.get("OPENROUTER_API_KEY")
             
-            def worker_with_event():
+            if not api_key:
+                raise RuntimeError("No OPENROUTER_API_KEY found for refresh")
+            
+            models = self._fetch_models(api_key)
+            
+            if not models:
+                logger.warning("No models received from OpenRouter API")
+                return None
+            
+            cache_path = self._get_cache_path()
+            self._save_models_to_cache(models)
+            return cache_path
+
+        if wait_for_completion:
+            try:
+                cache_path = refresh_logic()
+                return True, cache_path
+            except Exception as e:
+                logger.error(f"Failed to refresh OpenRouter models synchronously: {e}", exc_info=True)
+                raise  # Re-raise the exception to be handled by the caller
+        else:
+            # Run in a background thread for non-blocking refresh
+            def background_worker():
                 try:
-                    # Get API key from config or environment
-                    api_key = None
-                    if config:
-                        api_key = self.get_api_key(config)
-                    if not api_key:
-                        api_key = os.environ.get("OPENROUTER_API_KEY")
-                    
-                    if not api_key:
-                        logger.warning("No OPENROUTER_API_KEY found for background refresh")
-                        cache_path_ref["cache_path"] = None
-                        success_flag["success"] = False
-                        completion_event.set()
-                        return None
-                    
-                    models = self._fetch_models(api_key)
-                    
-                    if not models:
-                        logger.warning("No models received from OpenRouter API")
-                        cache_path_ref["cache_path"] = None
-                        success_flag["success"] = False
-                        completion_event.set()
-                        return None
-                    
-                    cache_path = self._get_cache_path()
-                    self._save_models_to_cache(models)
-                    success_flag["success"] = True
-                    cache_path_ref["cache_path"] = cache_path
-                    completion_event.set()
-                    return cache_path
+                    refresh_logic()
                 except Exception as e:
-                    logger.error(f"Background worker failed: {e}", exc_info=True)
-                    error_ref["error"] = e
-                    success_flag["success"] = False
-                    completion_event.set()
+                    logger.error(f"Background refresh for OpenRouter failed: {e}", exc_info=True)
             
-            thread = threading.Thread(target=worker_with_event, daemon=not wait_for_completion)
+            thread = threading.Thread(target=background_worker, daemon=True)
             thread.start()
-            
-            if wait_for_completion:
-                try:
-                    from utils import LoadingIndicator
-                    with LoadingIndicator("Refreshing OpenRouter models"):
-                        completion_event.wait(timeout=30)  # 30 second timeout
-                except ImportError:
-                    completion_event.wait(timeout=30)
-                
-                if completion_event.is_set():
-                    if not success_flag["success"] and error_ref["error"]:
-                        raise error_ref["error"]
-                    return success_flag["success"], cache_path_ref.get("cache_path")
-                else:
-                    logger.warning("Background refresh timed out after 30 seconds")
-                    return False, None
-            
             return True, None
-        
-        except Exception as e:
-            logger.error(f"Failed to start background refresh thread: {e}", exc_info=True)
-            return False, None

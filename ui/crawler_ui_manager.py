@@ -247,6 +247,9 @@ class CrawlerManager(QObject):
         self.main_controller.log_message("🔍 Performing pre-crawl validation checks...", 'blue')
         self.main_controller.log_message("⏳ Checking services (this may take a few seconds)...", 'blue')
         
+        # Show loading overlay
+        self.main_controller.show_busy("Validating services and requirements...")
+        
         # Create and start validation worker
         self.validation_worker = ValidationWorker(self)
         self.validation_worker.signals.validation_completed.connect(self._on_validation_completed)
@@ -258,6 +261,9 @@ class CrawlerManager(QObject):
     @Slot(bool, list, dict)
     def _on_validation_completed(self, is_valid: bool, messages: List[str], status_details: Dict[str, Any]):
         """Handle validation completion."""
+        # Hide loading overlay
+        self.main_controller.hide_busy()
+        
         # Separate blocking issues from warnings
         blocking_issues = [msg for msg in messages if msg.startswith("❌")]
         warnings = [msg for msg in messages if msg.startswith("⚠️")]
@@ -281,6 +287,9 @@ class CrawlerManager(QObject):
     @Slot(str)
     def _on_validation_error(self, error_message: str):
         """Handle validation error."""
+        # Hide loading overlay
+        self.main_controller.hide_busy()
+        
         self.main_controller.log_message(f"❌ Validation error: {error_message}", 'red')
         logging.error(f"Validation error: {error_message}")
     
@@ -461,13 +470,15 @@ class CrawlerManager(QObject):
                         break
             
             if module_to_run:
-                self.main_controller.log_message(f"Starting crawler with: {python_exe} -m {module_to_run}", 'blue')
+                self.main_controller.log_message(f"Starting crawler with: {python_exe} -m {module_to_run} crawler start", 'blue')
                 # Start Python in unbuffered mode to stream stdout in real-time
-                self.crawler_process.start(python_exe, ["-u", "-m", module_to_run])
+                # Add 'crawler start' command to launch the crawler
+                self.crawler_process.start(python_exe, ["-u", "-m", module_to_run, "crawler", "start"])
             elif script_to_run:
-                self.main_controller.log_message(f"Starting crawler with: {python_exe} {script_to_run}", 'blue')
+                self.main_controller.log_message(f"Starting crawler with: {python_exe} {script_to_run} crawler start", 'blue')
                 # Run the script directly if module import is not available
-                self.crawler_process.start(python_exe, ["-u", script_to_run])
+                # Add 'crawler start' command to launch the crawler
+                self.crawler_process.start(python_exe, ["-u", script_to_run, "crawler", "start"])
             else:
                 self.main_controller.log_message(
                     "ERROR: Could not locate crawler entrypoint (traverser_ai_api.main or run_cli.py).",
@@ -682,30 +693,34 @@ class CrawlerManager(QObject):
                 if not any(line.startswith(p) for p in ['UI_STEP:', 'UI_ACTION:', 'UI_SCREENSHOT:', 'UI_STATUS:', 'UI_FOCUS:', 'UI_END:']):
                     self.main_controller.log_message(message, color)
 
-            # Check for UI_STEP_PREFIX:step
-            step_match = re.search(r'UI_STEP:(\d+)', output)
-            if step_match:
-                self.step_count = int(step_match.group(1))
+            # Check for UI_STEP_PREFIX:step (use last match if multiple found)
+            step_matches = re.findall(r'UI_STEP:(\d+)', output)
+            if step_matches:
+                # Use the last step number in case of multiple matches
+                self.step_count = int(step_matches[-1])
                 self.main_controller.step_label.setText(f"Step: {self.step_count}")
                 self.update_progress()
             
-            # Check for UI_ACTION_PREFIX:action
-            action_match = re.search(r'UI_ACTION:(.*?)($|\n)', output)
-            if action_match:
-                self.last_action = action_match.group(1).strip()
-                self.main_controller.action_history.append(f"{self.last_action}")
-                try:
-                    sb = self.main_controller.action_history.verticalScrollBar()
-                    if sb:
-                        sb.setValue(sb.maximum())
-                except Exception:
-                    pass
+            # Check for UI_ACTION_PREFIX:action (handle multiple matches in case of buffered output)
+            action_matches = re.findall(r'UI_ACTION:(.*?)(?:\n|$)', output)
+            for action_text in action_matches:
+                action_text = action_text.strip()
+                if action_text:
+                    self.last_action = action_text
+                    self.main_controller.action_history.append(f"{action_text}")
+                    try:
+                        sb = self.main_controller.action_history.verticalScrollBar()
+                        if sb:
+                            sb.setValue(sb.maximum())
+                    except Exception:
+                        pass
             
-            # Check for UI_SCREENSHOT_PREFIX:path
-            screenshot_match = re.search(r'UI_SCREENSHOT:(.*?)($|\n)', output)
-            if screenshot_match:
-                screenshot_path = screenshot_match.group(1).strip()
-                if os.path.exists(screenshot_path):
+            # Check for UI_SCREENSHOT_PREFIX:path (use last match if multiple found)
+            screenshot_matches = re.findall(r'UI_SCREENSHOT:(.*?)(?:\n|$)', output)
+            if screenshot_matches:
+                # Use the last screenshot path in case of multiple matches
+                screenshot_path = screenshot_matches[-1].strip()
+                if screenshot_path and os.path.exists(screenshot_path):
                     self.current_screenshot = screenshot_path
                     self.main_controller.update_screenshot(screenshot_path)
                     

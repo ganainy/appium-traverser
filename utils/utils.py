@@ -171,16 +171,7 @@ class LoggerManager:
             "[%(levelname)s] (%(asctime)s) %(filename)s:%(lineno)d - %(message)s"
         )
 
-        try:
-            if not self.stdout_wrapper:
-                self.stdout_wrapper = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-            # Prepare stderr wrapper as well for any direct error prints
-            if not self.stderr_wrapper:
-                self.stderr_wrapper = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
-            console_handler = logging.StreamHandler(self.stdout_wrapper)
-        except Exception:
-            console_handler = logging.StreamHandler(sys.stdout)
-
+        console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setFormatter(log_formatter)
         logger.addHandler(console_handler)
         self.handlers.append(console_handler)
@@ -204,14 +195,8 @@ class LoggerManager:
                 logger.addHandler(file_handler)
                 self.handlers.append(file_handler)
             except Exception as e:
-                try:
-                    if self.stderr_wrapper:
-                        print(f"Error setting up file logger for {log_file}: {e}", file=self.stderr_wrapper)
-                    else:
-                        print(f"Error setting up file logger for {log_file}: {e}", file=sys.stderr)
-                except Exception:
-                    # Last resort if printing fails
-                    pass
+                print(f"Error setting up file logger for {log_file}: {e}", file=sys.stderr)
+
 
         if numeric_level > logging.DEBUG:
             for lib_name in ["appium.webdriver.webdriver", "urllib3.connectionpool", "selenium.webdriver.remote.remote_connection"]:

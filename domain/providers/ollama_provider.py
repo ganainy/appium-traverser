@@ -588,58 +588,32 @@ class OllamaProvider(ProviderStrategy):
         Returns:
             Tuple of (success, cache_path) where cache_path is the path to the saved cache file
         """
-        try:
-            completion_event = threading.Event()
-            success_flag = {"success": False}
-            cache_path_ref: Dict[str, Optional[str]] = {"cache_path": None}
-            error_ref: Dict[str, Optional[Exception]] = {"error": None}
+        def refresh_logic():
+            base_url = self.get_api_key(config, ServiceURLs.OLLAMA)
+            models = self._fetch_models(base_url)
             
-            def worker_with_event():
+            if not models:
+                logger.warning("No Ollama models found during refresh")
+                return None
+            
+            cache_path = self._get_cache_path()
+            self._save_models_to_cache(models)
+            return cache_path
+
+        if wait_for_completion:
+            try:
+                cache_path = refresh_logic()
+                return True, cache_path
+            except Exception as e:
+                logger.error(f"Failed to refresh Ollama models synchronously: {e}", exc_info=True)
+                raise
+        else:
+            def background_worker():
                 try:
-                    base_url = self.get_api_key(config, ServiceURLs.OLLAMA)
-                    models = self._fetch_models(base_url)
-                    
-                    if not models:
-                        logger.warning("No Ollama models found during refresh")
-                        cache_path_ref["cache_path"] = None
-                        success_flag["success"] = False
-                        completion_event.set()
-                        return None
-                    
-                    cache_path = self._get_cache_path()
-                    self._save_models_to_cache(models)
-                    success_flag["success"] = True
-                    cache_path_ref["cache_path"] = cache_path
-                    completion_event.set()
-                    return cache_path
+                    refresh_logic()
                 except Exception as e:
-                    error_ref["error"] = e
-                    success_flag["success"] = False
-                    completion_event.set()
-            
-            thread = threading.Thread(target=worker_with_event, daemon=not wait_for_completion)
+                    logger.error(f"Background refresh for Ollama failed: {e}", exc_info=True)
+
+            thread = threading.Thread(target=background_worker, daemon=True)
             thread.start()
-            
-            if wait_for_completion:
-                try:
-                    from utils import LoadingIndicator
-                    with LoadingIndicator("Refreshing Ollama models"):
-                        completion_event.wait(timeout=20)  # 20 second timeout
-                except ImportError:
-                    completion_event.wait(timeout=20)
-                
-                if completion_event.is_set():
-                    if not success_flag["success"] and error_ref["error"]:
-                        raise error_ref["error"]
-                    return success_flag["success"], cache_path_ref.get("cache_path")
-                else:
-                    raise RuntimeError(
-                        "Refresh timed out after 20 seconds. "
-                        "Please check that Ollama is running and accessible. "
-                        "https://ollama.com/download"
-                    )
-            
             return True, None
-        
-        except Exception as e:
-            raise

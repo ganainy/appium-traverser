@@ -3,8 +3,6 @@
 import json
 import logging
 import os
-import threading
-import time
 from typing import Any, Callable, Dict, List, Optional
 
 from PySide6.QtCore import Qt
@@ -170,25 +168,44 @@ class UIComponents:
             model_dropdown.blockSignals(False)
             return
         
+        # Get provider enum for type checking
+        provider_enum = AIProvider.from_string(provider) if AIProvider.is_valid(provider) else None
+        
         # Get provider capabilities
         capabilities = strategy.get_capabilities()
         
         # Get config for provider methods
-        config = config_handler.config if config_handler and hasattr(config_handler, 'config') else None
-        if not config:
-            try:
-                from config.app_config import Config
-                config = Config()
-            except Exception:
-                logging.warning("Could not get config for provider strategy")
-                model_dropdown.blockSignals(False)
-                return
+        # Always create a fresh config object to avoid SQLite thread-safety issues
+        # The config object may have been accessed in a worker thread, making its SQLite connection thread-local
+        try:
+            from config.app_config import Config
+            config = Config()  # Create fresh config in current (main) thread
+        except Exception:
+            logging.warning("Could not create config for provider strategy")
+            model_dropdown.blockSignals(False)
+            return
 
         # Get models using provider strategy
+        # Check free-only filter state from UI checkbox and update config if needed
+        free_only = False
+        if "OPENROUTER_SHOW_FREE_ONLY" in config_widgets:
+            free_only = config_widgets["OPENROUTER_SHOW_FREE_ONLY"].isChecked()
+            # Update config to reflect checkbox state (for OpenRouter's get_models to use)
+            if provider_enum == AIProvider.OPENROUTER:
+                config.set("OPENROUTER_SHOW_FREE_ONLY", free_only)
+        
         try:
             models = strategy.get_models(config)
             if models:
-                model_dropdown.addItems(models)
+                # Process models in batches to avoid blocking UI thread
+                # Add items in chunks and process events between chunks
+                batch_size = 50
+                from PySide6.QtWidgets import QApplication
+                for i in range(0, len(models), batch_size):
+                    batch = models[i:i + batch_size]
+                    model_dropdown.addItems(batch)
+                    # Process events to keep UI responsive
+                    QApplication.processEvents()
         except Exception as e:
             logging.warning(f"Failed to get models from provider strategy: {e}")
         
@@ -207,24 +224,9 @@ class UIComponents:
                 strategy, config, config_widgets, capabilities, model_dropdown, NO_SELECTION_LABEL
             )
 
-        # Provider-specific UI updates (OpenRouter needs special handling for free-only filter)
-        provider_enum = AIProvider.from_string(provider) if AIProvider.is_valid(provider) else None
-        if provider_enum == AIProvider.OPENROUTER:
-            # OpenRouter-specific: Handle free-only filter and ensure presets are available
-            # Note: Models are already populated by strategy.get_models() above
-            # This section only handles the free-only filter UI logic
-            try:
-                if "OPENROUTER_SHOW_FREE_ONLY" in config_widgets:
-                    # Wire up free-only filter to re-populate models when toggled
-                    def _on_free_only_changed(_state: int):
-                        try:
-                            UIComponents._update_model_types(provider, config_widgets, config_handler)
-                        except Exception as e:
-                            logging.debug(f"Failed to apply free-only filter: {e}")
-                    
-                    config_widgets["OPENROUTER_SHOW_FREE_ONLY"].stateChanged.connect(_on_free_only_changed)
-            except Exception:
-                pass
+        # Provider-specific UI updates
+        # Note: Free-only filter is now handled generically above for all providers
+        # The checkbox change handler is already connected in _create_ai_settings_group
 
         # Unblock signals after updating
         model_dropdown.blockSignals(False)
@@ -765,12 +767,12 @@ class UIComponents:
         )
         ai_layout.addRow(label_ai_provider, config_widgets["AI_PROVIDER"])
 
-        # Create refresh button for OpenRouter models (hidden by default)
+        # Create refresh button for models (visible for all providers)
         config_widgets["OPENROUTER_REFRESH_BTN"] = QPushButton("Refresh models")
         config_widgets["OPENROUTER_REFRESH_BTN"].setToolTip(
-            "Fetch latest models from OpenRouter API"
+            "Fetch latest models from the selected AI provider"
         )
-        config_widgets["OPENROUTER_REFRESH_BTN"].setVisible(False)
+        config_widgets["OPENROUTER_REFRESH_BTN"].setVisible(True)
 
         config_widgets["DEFAULT_MODEL_TYPE"] = QComboBox()
         # Start with explicit no-selection placeholder; provider change will populate
@@ -786,12 +788,12 @@ class UIComponents:
         _model_row_layout = QHBoxLayout()
         _model_row_layout.addWidget(config_widgets["DEFAULT_MODEL_TYPE"])
         _model_row_layout.addWidget(config_widgets["OPENROUTER_REFRESH_BTN"])
-        # Free-only filter (hidden by default; shown for OpenRouter)
+        # Free-only filter (visible for all providers)
         config_widgets["OPENROUTER_SHOW_FREE_ONLY"] = QCheckBox("Free only")
         config_widgets["OPENROUTER_SHOW_FREE_ONLY"].setToolTip(
             "Show only models with free pricing (0 cost)."
         )
-        config_widgets["OPENROUTER_SHOW_FREE_ONLY"].setVisible(False)
+        config_widgets["OPENROUTER_SHOW_FREE_ONLY"].setVisible(True)
         _model_row_layout.addWidget(config_widgets["OPENROUTER_SHOW_FREE_ONLY"])
 
         # Add a warning label for non-free models
@@ -806,33 +808,27 @@ class UIComponents:
         ai_layout.addRow(label_model_type, _model_row_layout)
         ai_layout.addRow(warning_layout)
 
-        # Connect the AI provider selection to update model types and toggle refresh visibility
+        # Connect the AI provider selection to update model types
         def _on_provider_changed(provider: str):
             UIComponents._update_model_types(provider, config_widgets, config_handler)
-            from domain.providers.enums import AIProvider
-            is_or = AIProvider.is_valid(provider) and AIProvider.from_string(provider) == AIProvider.OPENROUTER
-            # Show OpenRouter controls only when OpenRouter is selected
-            config_widgets["OPENROUTER_REFRESH_BTN"].setVisible(is_or)
-            config_widgets["OPENROUTER_SHOW_FREE_ONLY"].setVisible(is_or)
+            # Refresh button and free-only checkbox are now always visible for all providers
 
         config_widgets["AI_PROVIDER"].currentTextChanged.connect(_on_provider_changed)
 
-        # Wire up refresh button
+        # Wire up refresh button (works for all providers)
         def _on_refresh_clicked():
             try:
-                UIComponents._refresh_openrouter_models(config_handler, config_widgets)
+                UIComponents._refresh_models(config_handler, config_widgets)
             except Exception as e:
-                logging.warning(f"Failed to refresh OpenRouter models: {e}")
+                logging.warning(f"Failed to refresh models: {e}")
 
         config_widgets["OPENROUTER_REFRESH_BTN"].clicked.connect(_on_refresh_clicked)
 
-        # Wire up free-only filter to re-populate models
+        # Wire up free-only filter to re-populate models (works for all providers)
         def _on_free_only_changed(_state: int):
             try:
                 current_provider = config_widgets["AI_PROVIDER"].currentText()
-                from domain.providers.enums import AIProvider
-                if AIProvider.is_valid(current_provider) and AIProvider.from_string(current_provider) == AIProvider.OPENROUTER:
-                    UIComponents._update_model_types(current_provider, config_widgets, config_handler)
+                UIComponents._update_model_types(current_provider, config_widgets, config_handler)
             except Exception as e:
                 logging.debug(f"Failed to apply free-only filter: {e}")
 
@@ -1044,86 +1040,105 @@ class UIComponents:
             return False
 
     @staticmethod
-    def _refresh_openrouter_models(
+    def _refresh_models(
         config_handler: Any, config_widgets: Dict[str, Any]
     ) -> None:
-        # Disable refresh button and show busy overlay to indicate long-running operation
-        btn = config_widgets.get("OPENROUTER_REFRESH_BTN")
+        """Generic refresh function that works for all AI providers."""
         try:
-            if btn:
-                btn.setEnabled(False)
-        except Exception:
-            pass
-        try:
-            config_handler.main_controller.show_busy("Refreshing AI models...")
-        except Exception:
-            pass
-        try:
-            from domain.providers.registry import ProviderRegistry
-            from domain.providers.enums import AIProvider
-            
-            provider = ProviderRegistry.get(AIProvider.OPENROUTER)
-            if not provider:
-                logging.warning("OpenRouter provider not found")
-                return
-            
-            api_key = config_handler.config.get("OPENROUTER_API_KEY", None)
-            if not api_key:
-                logging.warning("OpenRouter refresh requested but API key is missing.")
-                config_handler.main_controller.log_message(
-                    "OpenRouter API key missing. Set OPENROUTER_API_KEY in .env.",
-                    "orange",
-                )
-                return
-
-            # Proactively delete any stale cache before fetching fresh data
-            try:
-                cache_path = UIComponents._get_openrouter_cache_path()
-                if os.path.exists(cache_path):
-                    os.remove(cache_path)
-                    logging.info("Deleted stale OpenRouter model cache before refresh.")
-                    try:
-                        config_handler.main_controller.log_message(
-                            "Deleted local OpenRouter cache.", "gray"
-                        )
-                    except Exception:
-                        pass
-            except Exception as cache_err:
-                logging.debug(f"Could not delete OpenRouter cache: {cache_err}")
-
-            # Use provider to fetch and normalize models
-            normalized = provider._fetch_models(api_key)
-            
-            if not normalized:
-                raise RuntimeError("No models returned from OpenRouter")
-            
-            UIComponents._save_openrouter_models_to_cache(normalized)
-            try:
-                logging.info(f"Fetched {len(normalized)} OpenRouter models from API.")
-            except Exception:
-                pass
+            current_provider_name = config_widgets["AI_PROVIDER"].currentText()
             config_handler.main_controller.log_message(
-                f"Fetched {len(normalized)} OpenRouter models.", "green"
+                f"Starting {current_provider_name} model refresh...", "blue"
             )
-            # Re-populate dropdown from cache
-            UIComponents._update_model_types("openrouter", config_widgets, config_handler)
-        except Exception as e:
-            logging.warning(f"OpenRouter model fetch failed: {e}")
+            
+            from domain.providers.registry import ProviderRegistry
+            
+            provider = ProviderRegistry.get_by_name(current_provider_name)
+            if not provider:
+                error_msg = f"Unknown provider: {current_provider_name}"
+                logging.error(error_msg)
+                config_handler.main_controller.log_message(error_msg, "red")
+                return
+            
+            # Refresh models synchronously
             try:
                 config_handler.main_controller.log_message(
-                    f"OpenRouter model fetch failed: {e}", "orange"
+                    f"Refreshing {current_provider_name} models...", "blue"
                 )
-            except Exception:
-                pass
-        finally:
-            # Ensure the overlay is hidden and button re-enabled regardless of success or failure
+                
+                success, cache_path = provider.refresh_models(
+                    config=config_handler.config,
+                    wait_for_completion=True
+                )
+                
+                if success:
+                    # Success means models were downloaded from API
+                    try:
+                        models = provider.get_models(config_handler.config)
+                        model_count = len(models) if models else 0
+                        source = "Downloaded from API"
+                        final_message = f"{current_provider_name} models refreshed successfully. Found {model_count} models. {source}"
+                    except Exception as e:
+                        logging.debug(f"Could not count models: {e}")
+                        source = "Downloaded from API"
+                        final_message = f"{current_provider_name} models refreshed successfully. {source}"
+                    
+                    config_handler.main_controller.log_message(final_message, "green")
+                    UIComponents._update_model_types(current_provider_name, config_widgets, config_handler)
+                else:
+                    error_message = f"{current_provider_name} refresh failed"
+                    if cache_path:
+                        error_message += f" (cache path: {cache_path})"
+                    else:
+                        error_message += ". Check network connection and API key."
+                    config_handler.main_controller.log_message(error_message, "orange")
+            
+            except RuntimeError as e:
+                error_str = str(e)
+                # Try to load from cache if refresh failed
+                try:
+                    models = provider.get_models(config_handler.config)
+                    if models:
+                        model_count = len(models) if models else 0
+                        source = "Loaded from cache"
+                        final_message = f"{current_provider_name} models loaded successfully. Found {model_count} models. {source}"
+                        config_handler.main_controller.log_message(final_message, "green")
+                        UIComponents._update_model_types(current_provider_name, config_widgets, config_handler)
+                        return
+                except Exception:
+                    pass
+                
+                # If we couldn't load from cache, show error
+                if "timed out" in error_str.lower():
+                    error_msg = f"{current_provider_name} model refresh timed out. {error_str}"
+                else:
+                    error_msg = f"{current_provider_name} model refresh failed: {error_str}"
+                logging.error(error_msg, exc_info=True)
+                config_handler.main_controller.log_message(error_msg, "orange")
+            except Exception as e:
+                # Try to load from cache if refresh failed
+                try:
+                    models = provider.get_models(config_handler.config)
+                    if models:
+                        model_count = len(models) if models else 0
+                        source = "Loaded from cache"
+                        final_message = f"{current_provider_name} models loaded successfully. Found {model_count} models. {source}"
+                        config_handler.main_controller.log_message(final_message, "green")
+                        UIComponents._update_model_types(current_provider_name, config_widgets, config_handler)
+                        return
+                except Exception:
+                    pass
+                
+                # If we couldn't load from cache, show error
+                error_msg = f"{current_provider_name} model refresh failed: {str(e)}"
+                logging.error(error_msg, exc_info=True)
+                config_handler.main_controller.log_message(error_msg, "orange")
+        
+        except Exception as e:
+            logging.error(f"Error starting refresh: {e}", exc_info=True)
             try:
-                config_handler.main_controller.hide_busy()
-            except Exception:
-                pass
-            try:
-                if btn:
-                    btn.setEnabled(True)
+                config_handler.main_controller.log_message(
+                    f"Failed to start refresh: {e}", "orange"
+                )
             except Exception:
                 pass
 

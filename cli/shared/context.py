@@ -15,11 +15,16 @@ if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
 try:
-    from config.app_config import Config
     from utils.utils import LoggerManager
 except ImportError as e:
     sys.stderr.write(f"FATAL: Could not import required modules: {e}\n")
     sys.exit(1)
+
+# Lazy import to avoid circular dependency
+# Config is imported inside _initialize_config() method
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from config.app_config import Config
 
 
 class ServiceRegistry:
@@ -49,19 +54,20 @@ class ApplicationContext:
     across all CLI commands, GUI components, and services.
     """
     
-    def __init__(self, verbose: bool = False):
+    def __init__(self, verbose: bool = False, config: Optional['Config'] = None):
         """
         Initialize application context.
         
         Args:
             verbose: Enable verbose logging
+            config: Optional Config instance. If None, creates a new one.
         """
         self.verbose = verbose
-        self._config: Optional[Config] = None
+        self._config: Optional['Config'] = None
         self._logger_manager: Optional[LoggerManager] = None
         self._services = ServiceRegistry()
         self._setup_logging(verbose)
-        self._initialize_config()
+        self._initialize_config(config)
     
     def _setup_logging(self, verbose: bool) -> None:
         """Setup logging configuration."""
@@ -82,14 +88,25 @@ class ApplicationContext:
         # Will be reconfigured after config is loaded
         self._log_level = log_level
     
-    def _initialize_config(self) -> None:
-        """Initialize configuration and final logging setup."""
+    def _initialize_config(self, config: Optional['Config'] = None) -> None:
+        """Initialize configuration and final logging setup.
+        
+        Args:
+            config: Optional Config instance. If None, creates a new one.
+        """
+        # Lazy import to avoid circular dependency
+        from config.app_config import Config
+        
         # Find project root using marker files
         api_dir = find_project_root(Path(__file__).resolve().parent)
         logging.debug(f"API directory: {api_dir}")
         
         try:
-            self._config = Config()
+            # Use provided config or create a new one
+            if config is not None:
+                self._config = config
+            else:
+                self._config = Config()
             
             # Setup final logging with file output
             self._setup_final_logging()
@@ -124,7 +141,7 @@ class ApplicationContext:
         logging.debug(f"Application Logging Initialized. Level: {self._log_level}. File: '{log_file_path}'")
     
     @property
-    def config(self) -> Config:
+    def config(self) -> 'Config':
         """Get the configuration instance."""
         if not self._config:
             raise RuntimeError("Configuration not initialized")

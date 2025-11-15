@@ -114,7 +114,7 @@ class GeminiAdapter(ModelAdapter):
         try:
             import google.generativeai as genai
             from google.generativeai.generative_models import GenerativeModel
-            from google.generativeai.types import GenerationConfig
+            from google.generativeai.types import GenerationConfig, SafetySetting, HarmCategory, HarmBlockThreshold
 
             # Set API key
             os.environ["GOOGLE_API_KEY"] = self.api_key
@@ -128,11 +128,47 @@ class GeminiAdapter(ModelAdapter):
                 max_output_tokens=generation_config_dict.get('max_output_tokens', 1024)
             )
             
+            # Convert safety settings from config format to Gemini API format
+            converted_safety_settings = None
+            if safety_settings:
+                if isinstance(safety_settings, list):
+                    # Convert list of dicts with string values to SafetySetting objects
+                    converted_safety_settings = []
+                    category_map = {
+                        "HARM_CATEGORY_HARASSMENT": HarmCategory.HARM_CATEGORY_HARASSMENT,
+                        "HARM_CATEGORY_HATE_SPEECH": HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                        "HARM_CATEGORY_SEXUALLY_EXPLICIT": HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+                        "HARM_CATEGORY_DANGEROUS_CONTENT": HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                    }
+                    threshold_map = {
+                        "BLOCK_NONE": HarmBlockThreshold.BLOCK_NONE,
+                        "BLOCK_ONLY_HIGH": HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                        "BLOCK_MEDIUM_AND_ABOVE": HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
+                        "BLOCK_LOW_AND_ABOVE": HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
+                    }
+                    for setting in safety_settings:
+                        if isinstance(setting, dict):
+                            category_str = setting.get("category", "")
+                            threshold_str = setting.get("threshold", "")
+                            category = category_map.get(category_str)
+                            threshold = threshold_map.get(threshold_str)
+                            if category and threshold:
+                                converted_safety_settings.append(
+                                    SafetySetting(category=category, threshold=threshold)
+                                )
+                            else:
+                                logging.warning(f"Invalid safety setting: {setting}")
+                    if not converted_safety_settings:
+                        converted_safety_settings = None
+                elif isinstance(safety_settings, (list, dict)):
+                    # Already in correct format or pass through
+                    converted_safety_settings = safety_settings
+            
             # Initialize the model with normalized name
             self.model = GenerativeModel(
                 model_name=self.model_name,
                 generation_config=generation_config,
-                safety_settings=safety_settings
+                safety_settings=converted_safety_settings
             )
             
             logging.debug(f"Gemini model initialized: {self.original_model_name} (normalized: {self.model_name})")

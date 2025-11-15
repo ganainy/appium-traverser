@@ -872,18 +872,48 @@ In your reasoning, explicitly state: "I am navigating away from this screen to b
         Args:
             force_recreate: If True, close existing handlers and recreate them.
         """
-        if self.ai_interaction_readable_logger and self.ai_interaction_readable_logger.handlers and not force_recreate:
+        # Get the logger instance (shared across all AgentAssistant instances)
+        logger = logging.getLogger('AIInteractionReadableLogger')
+        
+        # Set self.ai_interaction_readable_logger to the logger instance
+        self.ai_interaction_readable_logger = logger
+        
+        # Clean up any closed or invalid handlers before checking
+        if logger.handlers:
+            for handler in list(logger.handlers):
+                try:
+                    # Check if handler is closed or invalid
+                    if isinstance(handler, logging.FileHandler):
+                        # Try to access the stream to see if it's closed
+                        if hasattr(handler, 'stream') and handler.stream:
+                            try:
+                                # Check if stream is closed
+                                if handler.stream.closed:
+                                    logger.removeHandler(handler)
+                                    continue
+                            except (AttributeError, ValueError):
+                                # Stream might be invalid, remove handler
+                                logger.removeHandler(handler)
+                                continue
+                except Exception:
+                    # If we can't check the handler, remove it to be safe
+                    try:
+                        logger.removeHandler(handler)
+                    except Exception:
+                        pass
+        
+        if logger.handlers and not force_recreate:
             return  # Already configured
 
         # Close existing file handlers if recreating
-        if force_recreate and self.ai_interaction_readable_logger:
-            for handler in list(self.ai_interaction_readable_logger.handlers):
+        if force_recreate and logger.handlers:
+            for handler in list(logger.handlers):
                 if isinstance(handler, logging.FileHandler):
                     try:
                         handler.close()
                     except Exception:
                         pass
-                self.ai_interaction_readable_logger.removeHandler(handler)
+                logger.removeHandler(handler)
 
         # Use the LOG_DIR property which resolves the template properly
         try:
@@ -895,12 +925,10 @@ In your reasoning, explicitly state: "I am navigating away from this screen to b
         # Don't create directory here - it will be created when the file handler is created
         # This allows path regeneration to work without directory locks
         
-        # Human-readable logger
-        if not self.ai_interaction_readable_logger:
-            self.ai_interaction_readable_logger = logging.getLogger('AIInteractionReadableLogger')
-        self.ai_interaction_readable_logger.setLevel(logging.INFO)
-        self.ai_interaction_readable_logger.propagate = False
-        if self.ai_interaction_readable_logger.hasHandlers() and not force_recreate:
+        # Configure logger settings
+        logger.setLevel(logging.INFO)
+        logger.propagate = False
+        if logger.hasHandlers() and not force_recreate:
             return  # Already has handlers and not forcing recreate
 
         if target_log_dir:
@@ -924,22 +952,22 @@ In your reasoning, explicitly state: "I am navigating away from this screen to b
                     fh_readable = logging.FileHandler(readable_path, encoding='utf-8')
                     fh_readable.setLevel(logging.INFO)
                     fh_readable.setFormatter(logging.Formatter('%(message)s'))
-                    self.ai_interaction_readable_logger.addHandler(fh_readable)
+                    logger.addHandler(fh_readable)
                     logging.debug(f"AI interaction readable logger initialized at: {readable_path}")
                 except OSError as e:
                     logging.error(f"Could not create AI interactions readable log file: {e}")
-                    if not self.ai_interaction_readable_logger.handlers:
-                        self.ai_interaction_readable_logger.addHandler(logging.NullHandler())
+                    if not logger.handlers:
+                        logger.addHandler(logging.NullHandler())
             else:
                 # Delay file handler creation until device is initialized
                 # Use NullHandler for now to avoid creating directories
-                if not self.ai_interaction_readable_logger.handlers:
-                    self.ai_interaction_readable_logger.addHandler(logging.NullHandler())
+                if not logger.handlers:
+                    logger.addHandler(logging.NullHandler())
                 logging.debug("AI interaction logger delayed - waiting for device initialization")
         else:
             logging.warning("Log directory not available, AI interaction readable log will not be saved.")
-            if not self.ai_interaction_readable_logger.handlers:
-                self.ai_interaction_readable_logger.addHandler(logging.NullHandler())
+            if not logger.handlers:
+                logger.addHandler(logging.NullHandler())
 
 
     def _prepare_image_part(self, screenshot_bytes: Optional[bytes]) -> Optional[Image.Image]:

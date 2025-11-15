@@ -386,62 +386,35 @@ class GeminiProvider(ProviderStrategy):
         Returns:
             Tuple of (success, cache_path) where cache_path is the path to the saved cache file
         """
-        try:
-            completion_event = threading.Event()
-            success_flag = {"success": False}
-            cache_path_ref: Dict[str, Optional[str]] = {"cache_path": None}
-            error_ref: Dict[str, Optional[Exception]] = {"error": None}
+        def refresh_logic():
+            api_key = self.get_api_key(config) or os.environ.get("GEMINI_API_KEY")
+            if not api_key:
+                raise RuntimeError("GEMINI_API_KEY not found for refresh")
             
-            def worker_with_event():
+            models = self._fetch_models(api_key)
+            
+            if not models:
+                logger.warning("No Gemini models found during refresh")
+                return None
+            
+            cache_path = self._get_cache_path()
+            self._save_models_to_cache(models)
+            return cache_path
+
+        if wait_for_completion:
+            try:
+                cache_path = refresh_logic()
+                return True, cache_path
+            except Exception as e:
+                logger.error(f"Failed to refresh Gemini models synchronously: {e}", exc_info=True)
+                raise
+        else:
+            def background_worker():
                 try:
-                    api_key = self.get_api_key(config) or os.environ.get("GEMINI_API_KEY")
-                    models = self._fetch_models(api_key)
-                    
-                    if not models:
-                        logger.warning("No Gemini models found during refresh")
-                        cache_path_ref["cache_path"] = None
-                        success_flag["success"] = False
-                        completion_event.set()
-                        return None
-                    
-                    cache_path = self._get_cache_path()
-                    self._save_models_to_cache(models)
-                    success_flag["success"] = True
-                    cache_path_ref["cache_path"] = cache_path
-                    completion_event.set()
-                    return cache_path
+                    refresh_logic()
                 except Exception as e:
-                    error_ref["error"] = e
-                    success_flag["success"] = False
-                    completion_event.set()
-                    # Don't re-raise, just store the error
+                    logger.error(f"Background refresh for Gemini failed: {e}", exc_info=True)
             
-            thread = threading.Thread(target=worker_with_event, daemon=not wait_for_completion)
+            thread = threading.Thread(target=background_worker, daemon=True)
             thread.start()
-            
-            if wait_for_completion:
-                try:
-                    from utils import LoadingIndicator
-                    with LoadingIndicator("Refreshing Gemini models"):
-                        completion_event.wait(timeout=30)  # 30 second timeout
-                except ImportError:
-                    # LoadingIndicator not available, just wait
-                    completion_event.wait(timeout=30)
-                
-                if completion_event.is_set():
-                    if not success_flag["success"] and error_ref["error"]:
-                        # Re-raise the error so it can be caught by the service layer
-                        raise error_ref["error"]
-                    return success_flag["success"], cache_path_ref.get("cache_path")
-                else:
-                    # Timeout occurred - raise an error with clear message
-                    raise RuntimeError(
-                        "Refresh timed out after 30 seconds. "
-                        "Please check your internet connection and GEMINI_API_KEY."
-                    )
-            
             return True, None
-        
-        except Exception as e:
-            # Re-raise to be caught by service layer
-            raise

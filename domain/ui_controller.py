@@ -49,27 +49,51 @@ from ui.ui_utils import update_screenshot
 class CrawlerControllerWindow(QMainWindow):
     """Main window for the Appium Crawler Controller."""
 
-    def __init__(self, config, api_dir, config_widgets, start_btn, stop_btn, log_output, action_history, screenshot_label, test_mobsf_conn_btn, run_mobsf_analysis_btn, clear_logs_btn, current_health_app_list_file, health_apps_data):
-        """Initialize the main UI controller window."""
+    def __init__(self, config=None, api_dir=None):
+        """Initialize the main UI controller window.
+        
+        Args:
+            config: Optional Config instance. If None, creates a new one.
+            api_dir: Optional API directory path. If None, uses project root.
+        """
         super().__init__()
+        
+        # Initialize config if not provided
+        if config is None:
+            from config.app_config import Config
+            config = Config()
         self.config = config
+        
+        # Initialize api_dir if not provided
+        if api_dir is None:
+            from utils.paths import find_project_root
+            from pathlib import Path
+            api_dir = str(find_project_root(Path(__file__).resolve().parent))
         self.api_dir = api_dir
-        self.config_widgets = config_widgets
-        self.start_btn = start_btn
-        self.stop_btn = stop_btn
-        self.log_output = log_output
-        self.action_history = action_history
-        self.screenshot_label = screenshot_label
-        self.test_mobsf_conn_btn = test_mobsf_conn_btn
-        self.run_mobsf_analysis_btn = run_mobsf_analysis_btn
-        self.clear_logs_btn = clear_logs_btn
-        self.current_health_app_list_file = current_health_app_list_file
-        self.health_apps_data = health_apps_data
+        
+        # Initialize empty config_widgets dict - will be populated by UIComponents
+        self.config_widgets = {}
+        
+        # These will be created by UIComponents.create_left_panel and create_right_panel
+        # Initialize as None for now - they'll be set by the UI creation methods
+        self.start_btn = None
+        self.stop_btn = None
+        self.log_output = None
+        self.action_history = None
+        self.screenshot_label = None
+        self.test_mobsf_conn_btn = None
+        self.run_mobsf_analysis_btn = None
+        self.clear_logs_btn = None
+        self.current_health_app_list_file = None
+        self.health_apps_data = None
 
         self._ensure_output_directories_exist()
 
         # Set the application icon
         self._set_application_icon()
+        
+        # Set the window title
+        self.setWindowTitle("Appium Traverser")
 
         # Initialize managers
         self.config_manager = ConfigManager(self.config, self)
@@ -147,26 +171,50 @@ class CrawlerControllerWindow(QMainWindow):
         self._busy_dialog = None
 
     def show_busy(self, message: str = "Working...") -> None:
-        """Show a modal busy overlay with the given message."""
+        """Show a modal busy overlay with the given message.
+        
+        The overlay will:
+        - Cover the entire main window with a semi-transparent backdrop
+        - Display a centered loading dialog with the message
+        - Disable all interactive widgets in the UI
+        - Block all user interactions until hidden
+        """
         try:
             if self._busy_dialog is None:
                 self._busy_dialog = BusyDialog(self)
             self._busy_dialog.set_message(message)
-            # Cover the entire main window
+            # Cover the entire main window - ensure it's properly sized
             try:
-                self._busy_dialog.setGeometry(self.geometry())
+                # Use frameGeometry to get the full window including title bar
+                main_geometry = self.frameGeometry()
+                self._busy_dialog.setGeometry(main_geometry)
             except Exception:
-                pass
+                # Fallback: use the main window geometry
+                try:
+                    self._busy_dialog.setGeometry(self.geometry())
+                except Exception:
+                    pass
+            # Show and raise the dialog to ensure it's visible
             self._busy_dialog.show()
+            self._busy_dialog.raise_()
+            self._busy_dialog.activateWindow()
             QApplication.processEvents()
         except Exception as e:
             logging.debug(f"Failed to show busy overlay: {e}")
 
     def hide_busy(self) -> None:
-        """Hide the busy overlay if visible."""
+        """Hide the busy overlay if visible.
+        
+        This will re-enable all widgets that were disabled during loading.
+        """
         try:
             if self._busy_dialog:
-                self._busy_dialog.hide()
+                # Use close_dialog to properly reset state
+                if hasattr(self._busy_dialog, 'close_dialog'):
+                    self._busy_dialog.close_dialog()
+                else:
+                    self._busy_dialog.hide()
+                QApplication.processEvents()
         except Exception as e:
             logging.debug(f"Failed to hide busy overlay: {e}")
 
@@ -266,11 +314,8 @@ class CrawlerControllerWindow(QMainWindow):
                 )
                 logging.error("refresh_apps_btn not available for connection")
 
-            if self.start_btn and hasattr(self.start_btn, "clicked"):
-                self.start_btn.clicked.connect(self.crawler_manager.start_crawler)
-
-            if self.stop_btn and hasattr(self.stop_btn, "clicked"):
-                self.stop_btn.clicked.connect(self.crawler_manager.stop_crawler)
+            # Note: start_btn and stop_btn are already connected in UIComponents._create_control_buttons
+            # They connect to self.start_crawler and self.stop_crawler (delegate methods)
 
             # Connect MobSF buttons
             if self.test_mobsf_conn_btn and hasattr(
@@ -321,6 +366,25 @@ class CrawlerControllerWindow(QMainWindow):
         """(Re)initialize the AgentAssistant with current config and model."""
         try:
             from domain.agent_assistant import AgentAssistant
+            import logging
+            
+            # Clean up old logger handlers before creating new AgentAssistant
+            # This prevents "I/O operation on closed file" errors when switching AI settings
+            if hasattr(self, 'agent_assistant') and self.agent_assistant:
+                try:
+                    if hasattr(self.agent_assistant, 'ai_interaction_readable_logger'):
+                        logger = self.agent_assistant.ai_interaction_readable_logger
+                        if logger and logger.handlers:
+                            for handler in list(logger.handlers):
+                                try:
+                                    if isinstance(handler, logging.FileHandler):
+                                        handler.close()
+                                except Exception:
+                                    pass
+                                logger.removeHandler(handler)
+                except Exception as e:
+                    logging.debug(f"Error cleaning up old logger handlers: {e}")
+            
             provider = self.config.get("AI_PROVIDER", None)
             model = self.config.get("DEFAULT_MODEL_TYPE", None)
             if not provider or not model or str(model).strip() in ["", "No model selected"]:
@@ -433,7 +497,7 @@ class CrawlerControllerWindow(QMainWindow):
         """Set the application icon for window and taskbar."""
         try:
             # Get the application icon using LogoWidget
-            app_icon = LogoWidget.get_icon(os.path.dirname(self.api_dir))
+            app_icon = LogoWidget.get_icon(self.api_dir)
 
             if app_icon:
                 # Set window icon (appears in taskbar)
@@ -720,7 +784,43 @@ class CrawlerControllerWindow(QMainWindow):
 
         super().closeEvent(event)
 
+    # Configuration synchronization method
+    def _sync_user_config_files(self):
+        """Synchronize user configuration files.
+        
+        This method is used as a callback when configuration settings are updated.
+        Currently, synchronization is handled automatically by the config system,
+        so this is a no-op method maintained for API compatibility.
+        """
+        # Configuration synchronization is now handled automatically by the config system
+        # This method is kept for backward compatibility with existing callbacks
+        pass
+    
     # Delegate methods to appropriate managers
+    @slot()
+    def perform_pre_crawl_validation(self):
+        """Perform pre-crawl validation checks."""
+        if hasattr(self, 'crawler_manager') and self.crawler_manager:
+            self.crawler_manager.perform_pre_crawl_validation()
+        else:
+            self.log_message("ERROR: Crawler manager not initialized", "red")
+    
+    @slot()
+    def start_crawler(self):
+        """Start the crawler process."""
+        if hasattr(self, 'crawler_manager') and self.crawler_manager:
+            self.crawler_manager.start_crawler()
+        else:
+            self.log_message("ERROR: Crawler manager not initialized", "red")
+    
+    @slot()
+    def stop_crawler(self):
+        """Stop the crawler process."""
+        if hasattr(self, 'crawler_manager') and self.crawler_manager:
+            self.crawler_manager.stop_crawler()
+        else:
+            self.log_message("ERROR: Crawler manager not initialized", "red")
+    
     @slot()
     def generate_report(self):
         """Generate a PDF report for the latest crawl run."""

@@ -381,6 +381,7 @@ class CrawlerLoop:
             
             # Increment step count
             self.step_count += 1
+            print(f"UI_STEP:{self.step_count}", flush=True)
             print(f"STEP: {self.step_count}")
             logger.info(f"Starting step {self.step_count}")
             
@@ -457,6 +458,10 @@ class CrawlerLoop:
                         from_screen_id = final_screen.id
                         current_screen_visit_count = visit_info.get("visit_count_this_run", 0)
                         self.current_screen_visit_count = current_screen_visit_count
+                        
+                        # Emit UI_SCREENSHOT for UI to display the current screenshot being analyzed
+                        if final_screen.screenshot_path and os.path.exists(final_screen.screenshot_path):
+                            print(f"UI_SCREENSHOT:{final_screen.screenshot_path}", flush=True)
                         
                         logger.debug(f"Processed screen state: ID={from_screen_id}, visit_count={current_screen_visit_count}")
                 except Exception as e:
@@ -665,6 +670,8 @@ class CrawlerLoop:
             # Log the action
             action_str = f"{action_data.get('action', 'unknown')} on {action_data.get('target_identifier', 'unknown')}"
             reasoning = action_data.get('reasoning', '')
+            # Emit UI_ACTION for UI to capture (with flush to ensure immediate display)
+            print(f"UI_ACTION: {action_str}", flush=True)
             print(f"ACTION: {action_str}")
             if reasoning:
                 print(f"REASONING: {reasoning}")
@@ -728,6 +735,9 @@ class CrawlerLoop:
                             final_screen, visit_info_after = self.screen_state_manager.process_and_record_state(
                                 candidate_screen, self.current_run_id, self.step_count, increment_visit_count=True
                             )
+                            # Emit UI_SCREENSHOT for UI to display the new screen state after action
+                            if final_screen.screenshot_path and os.path.exists(final_screen.screenshot_path):
+                                print(f"UI_SCREENSHOT:{final_screen.screenshot_path}", flush=True)
                             # Update current screen visit count after action
                             if visit_info_after:
                                 self.current_screen_visit_count = visit_info_after.get("visit_count_this_run", 0)

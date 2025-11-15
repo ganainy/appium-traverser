@@ -14,19 +14,16 @@ import argparse
 import os
 from config.app_config import Config
 try:
-    from PyQt6.QtWidgets import QApplication
+    from PySide6.QtWidgets import QApplication
 except ImportError:
-    try:
-        from PySide6.QtWidgets import QApplication
-    except ImportError:
-        from ui.strings import RUN_UI_ERROR_NEITHER_QT
-        print(RUN_UI_ERROR_NEITHER_QT)
-        sys.exit(1)
+    from ui.strings import RUN_UI_ERROR_PYSIDE6
+    print(RUN_UI_ERROR_PYSIDE6)
+    sys.exit(1)
 from domain.ui_controller import CrawlerControllerWindow
 from utils.utils import LoggerManager
 
 def main():
-    parser = argparse.ArgumentParser(description="Appium Traverser UI")
+    parser = argparse.ArgumentParser(description="Appium Traverser")
     parser.add_argument("--provider", type=str, default=None, help="AI provider to use")
     parser.add_argument("--model", type=str, default=None, help="Model name/alias to use")
     args, unknown = parser.parse_known_args()
@@ -58,6 +55,8 @@ def main():
     # Launch UI (remaining args passed through)
     sys.argv = [sys.argv[0]] + unknown
     app = QApplication(sys.argv)
+    app.setApplicationName("Appium Traverser")
+    app.setApplicationDisplayName("Appium Traverser")
     window = CrawlerControllerWindow()
 
     # Set up logging with LoggerManager

@@ -6,7 +6,7 @@ This guide explains how to use the Graphical User Interface (GUI) for the Appium
 
 - Python 3.12 (use a virtual environment) - Download from [Python 3.12.0 release page](https://www.python.org/downloads/release/python-3120/)
 - Node.js & npm (required to install and run Appium and drivers)
-- PySide6 or PyQt6 (GUI runtime)
+- PySide6 (GUI runtime)
 - Appium installed and a compatible driver (e.g. uiautomator2)
 - Android SDK with ADB available on PATH (see [Installing ADB](#installing-adb) below)
 - Optional services depending on features:
@@ -64,9 +64,53 @@ pip install -r requirements.txt
      ```
 
 4. Launch the UI:
-```powershell
-python run_ui.py
-```
+   - **Option A - Command line:**
+     ```powershell
+     python run_ui.py
+     ```
+   - **Option B - Desktop shortcut (recommended for regular use):**
+     See [Creating a Desktop Shortcut](#creating-a-desktop-shortcut-windows) section below
+
+## Creating a Desktop Shortcut (Windows)
+
+For easier access, you can create a desktop shortcut that launches the UI with a single click. The shortcut will automatically activate your virtual environment and run the UI silently (no terminal window).
+
+### Prerequisites
+
+- Ensure you have `crawler_logo.ico` in the project root directory (for the shortcut icon)
+- The project should be set up with a virtual environment (`.venv`, `venv`, or `env`)
+
+### Creating the Shortcut
+
+1. **Run the shortcut creation script:**
+   - Double-click `create_desktop_shortcut.bat` in the project root, or
+   - Run in PowerShell:
+     ```powershell
+     .\create_desktop_shortcut.ps1
+     ```
+
+2. **The script will:**
+   - Create a desktop shortcut named "Appium Traverser"
+   - Set the icon from `crawler_logo.ico` (if available)
+   - Configure the shortcut to launch the UI silently
+
+3. **Launch the UI:**
+   - Double-click the "Appium Traverser" shortcut on your desktop
+   - The UI will launch automatically with your virtual environment activated
+   - No terminal window will appear (the UI runs silently)
+
+### Files Used
+
+- `create_desktop_shortcut.ps1` - PowerShell script that creates the shortcut
+- `create_desktop_shortcut.bat` - Batch file wrapper for easy execution
+- `run_ui.vbs` - VBScript that launches the UI silently (automatically detects and activates virtual environment)
+- `crawler_logo.ico` - Icon file for the shortcut (optional, but recommended)
+
+### Troubleshooting
+
+- **Icon not appearing:** Refresh your desktop (press F5) or right-click desktop → Refresh
+- **Shortcut not working:** Ensure your virtual environment exists and contains all required packages
+- **Need to see logs:** Run `python run_ui.py` directly from a terminal instead of using the shortcut
 
 ## Key UI areas
 
